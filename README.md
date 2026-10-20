@@ -82,11 +82,8 @@ The CLI still depends on [braces with an unpatched denial-of-service vulnerabili
 ### Linting
 
 ```sh
-cd daemon
-cargo make lint
-
-cd ../ui-web
-npm run lint
+(cd daemon && cargo make lint)
+(cd ui-web && npm run lint)
 ```
 
 ## Running in Docker
