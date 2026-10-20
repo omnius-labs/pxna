@@ -1,0 +1,4 @@
+buildServer.json
+.playwright-cli
+/.pxna
+/.env

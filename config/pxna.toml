@@ -1,0 +1,16 @@
+[core]
+listen_addr = "0.0.0.0:6050"
+state_dir = "/state"
+
+[logging]
+level = "info"
+json = true
+
+[web]
+dir = "/opt/pxna/web"
+
+[[libraries]]
+id = "library"
+name = "Library"
+path = "/libraries"
+readonly = false

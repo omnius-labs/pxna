@@ -1,0 +1,606 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "base_commit": "4987dd4f9d4f04ce6e04d20ede14312c88b37ba1",
+  "order": "ABBAABBAAB",
+  "builds": {
+    "daemon-B": {
+      "path": "<tmp>/pxna-browse-run/daemon-B",
+      "sha256": "3016f90c520bc3c9480f12c5f6e759cf53b776492e16e9fc82f6866d349c09cf"
+    },
+    "daemon-D": {
+      "path": "<tmp>/pxna-browse-run/daemon-D",
+      "sha256": "9d1a587ea61d66bd7e95fbb980cd19202126af6ecb47a208f89388c360b757a9"
+    },
+    "daemon-E": {
+      "path": "<tmp>/pxna-browse-run/daemon-E",
+      "sha256": "d69feb6bbdc91be14c522ce4dde92a82d187f69c0f3e8acf2cbae370e848b4f9"
+    }
+  },
+  "web": {
+    "favicon.ico": "2b8ad2d33455a8f736fc3a8ebf8f0bdea8848ad4c0db48a2833bd0f9cd775932",
+    "index.html": "e9a3fa23a1eaea8c77c85136a39a9db94a89a3a2243e59d36974349d3a4f8c99",
+    "assets/index-CscrwReL.js": "73b5a7a5040f1ea12d26f3960ca825bd6a45f2899ca8cc663544ec7450fbdc50",
+    "assets/geist-latin-ext-wght-normal-DC-KSUi6.woff2": "824f485b5d26e2f2da3c2b236132ece1bc8e4e43373452950bb0e40548b4313f",
+    "assets/geist-cyrillic-ext-wght-normal-DjL33-gN.woff2": "2317fa4bb293c9c0b110e18315d529235c47a0ddd3338cea3d8c7955e927899e",
+    "assets/geist-vietnamese-wght-normal-6IgcOCM7.woff2": "8fa40e5d248247735eb97a0bd593b8852440430600d6ba01364c31fe0abc1fe1",
+    "assets/hls-D9b4QHpD.js": "316cb8ab04d5f01ede3fdba11b360ec844c93de57bd217722dbaca0c63db162b",
+    "assets/geist-cyrillic-wght-normal-BEAKL7Jp.woff2": "6894439694946a589d157ece003086960a6a4013d74a813dab7602efdb3d8c09",
+    "assets/index-DkSJmmY0.css": "d74cc710a43e23006c29a97d46cad184385c45db86811445cc591fe67ccb5bba",
+    "assets/geist-latin-wght-normal-BgDaEnEv.woff2": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1"
+  },
+  "environment": {
+    "fixture": {
+      "schema": 1,
+      "folders": 22432,
+      "files": 1,
+      "entry_names_sha256": "d567f0d840598037d2bb8b0581c0e7a095d4ba63313dd2ddba584dca6f36c312",
+      "mtime_unix": 1700000000
+    },
+    "filesystem": "ext4",
+    "rust": "1.96.0",
+    "profile": "dev",
+    "cache_layers": "uncontrolled; no cache dropping",
+    "foreground": "existing detailed listing; direct/name/asc/foldersFirst=true/limit200; fresh process snapshot each run",
+    "background": "startup completed; active condition starts an explicit refresh then observes running=true and successful empty-folder EOF within request timestamps",
+    "external_load": "uncontrolled; no other intentional builds/tests/browser/measurements during suite"
+  },
+  "comparisons": {
+    "quiet": {
+      "runs": [
+        {
+          "order": 1,
+          "variant": "A",
+          "elapsed_sec": 1.2595647780690342,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-01-A.json"
+        },
+        {
+          "order": 2,
+          "variant": "B",
+          "elapsed_sec": 1.1364412771072239,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-02-B.json"
+        },
+        {
+          "order": 3,
+          "variant": "B",
+          "elapsed_sec": 1.0593054888304323,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-03-B.json"
+        },
+        {
+          "order": 4,
+          "variant": "A",
+          "elapsed_sec": 1.1008295931387693,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-04-A.json"
+        },
+        {
+          "order": 5,
+          "variant": "A",
+          "elapsed_sec": 1.124013208085671,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-05-A.json"
+        },
+        {
+          "order": 6,
+          "variant": "B",
+          "elapsed_sec": 1.0683558550663292,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-06-B.json"
+        },
+        {
+          "order": 7,
+          "variant": "B",
+          "elapsed_sec": 1.079408627934754,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-07-B.json"
+        },
+        {
+          "order": 8,
+          "variant": "A",
+          "elapsed_sec": 1.3513271000701934,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-08-A.json"
+        },
+        {
+          "order": 9,
+          "variant": "A",
+          "elapsed_sec": 1.1561710420064628,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-09-A.json"
+        },
+        {
+          "order": 10,
+          "variant": "B",
+          "elapsed_sec": 1.019641350954771,
+          "empty_eof": 0,
+          "source": "<tmp>/pxna-browse-run/background-final2-quiet-10-B.json"
+        }
+      ],
+      "median_sec": {
+        "A": 1.1561710420064628,
+        "B": 1.0683558550663292
+      },
+      "range_sec": {
+        "A": [
+          1.1008295931387693,
+          1.3513271000701934
+        ],
+        "B": [
+          1.019641350954771,
+          1.1364412771072239
+        ]
+      },
+      "delta_sec": -0.08781518694013357,
+      "limit_sec": 0.23123420840129258,
+      "pass": true
+    },
+    "active": {
+      "runs": [
+        {
+          "order": 1,
+          "variant": "A",
+          "elapsed_sec": 1.156287909951061,
+          "empty_eof": 2151,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-01-A.json"
+        },
+        {
+          "order": 2,
+          "variant": "B",
+          "elapsed_sec": 1.186909904005006,
+          "empty_eof": 1634,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-02-B.json"
+        },
+        {
+          "order": 3,
+          "variant": "B",
+          "elapsed_sec": 1.399799264036119,
+          "empty_eof": 1912,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-03-B.json"
+        },
+        {
+          "order": 4,
+          "variant": "A",
+          "elapsed_sec": 1.1627827729098499,
+          "empty_eof": 1786,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-04-A.json"
+        },
+        {
+          "order": 5,
+          "variant": "A",
+          "elapsed_sec": 1.1877734169829637,
+          "empty_eof": 2014,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-05-A.json"
+        },
+        {
+          "order": 6,
+          "variant": "B",
+          "elapsed_sec": 1.1637997440993786,
+          "empty_eof": 1519,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-06-B.json"
+        },
+        {
+          "order": 7,
+          "variant": "B",
+          "elapsed_sec": 1.2680658458266407,
+          "empty_eof": 1993,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-07-B.json"
+        },
+        {
+          "order": 8,
+          "variant": "A",
+          "elapsed_sec": 1.1394069460220635,
+          "empty_eof": 2414,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-08-A.json"
+        },
+        {
+          "order": 9,
+          "variant": "A",
+          "elapsed_sec": 1.2104282600339502,
+          "empty_eof": 2534,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-09-A.json"
+        },
+        {
+          "order": 10,
+          "variant": "B",
+          "elapsed_sec": 1.3838136079721153,
+          "empty_eof": 2213,
+          "source": "<tmp>/pxna-browse-run/background-final2-active-10-B.json"
+        }
+      ],
+      "median_sec": {
+        "A": 1.1627827729098499,
+        "B": 1.2680658458266407
+      },
+      "range_sec": {
+        "A": [
+          1.1394069460220635,
+          1.2104282600339502
+        ],
+        "B": [
+          1.1637997440993786,
+          1.399799264036119
+        ]
+      },
+      "delta_sec": 0.10528307291679084,
+      "limit_sec": 0.23255655458197,
+      "pass": true
+    },
+    "restart": {
+      "runs": [
+        {
+          "order": 1,
+          "variant": "A",
+          "elapsed_sec": 0.25402522389777005,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-01-A.json"
+        },
+        {
+          "order": 2,
+          "variant": "B",
+          "elapsed_sec": 0.2602665410377085,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-02-B.json"
+        },
+        {
+          "order": 3,
+          "variant": "B",
+          "elapsed_sec": 0.3151880339719355,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-03-B.json"
+        },
+        {
+          "order": 4,
+          "variant": "A",
+          "elapsed_sec": 0.2712177021894604,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-04-A.json"
+        },
+        {
+          "order": 5,
+          "variant": "A",
+          "elapsed_sec": 0.2551007510628551,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-05-A.json"
+        },
+        {
+          "order": 6,
+          "variant": "B",
+          "elapsed_sec": 0.26348140905611217,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-06-B.json"
+        },
+        {
+          "order": 7,
+          "variant": "B",
+          "elapsed_sec": 0.2721734771039337,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-07-B.json"
+        },
+        {
+          "order": 8,
+          "variant": "A",
+          "elapsed_sec": 0.25823178398422897,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-08-A.json"
+        },
+        {
+          "order": 9,
+          "variant": "A",
+          "elapsed_sec": 0.28116115811280906,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-09-A.json"
+        },
+        {
+          "order": 10,
+          "variant": "B",
+          "elapsed_sec": 0.27069497713819146,
+          "empty_eof": null,
+          "source": "<tmp>/pxna-browse-run/background-final2-restart-10-B.json"
+        }
+      ],
+      "median_sec": {
+        "A": 0.25823178398422897,
+        "B": 0.27069497713819146
+      },
+      "range_sec": {
+        "A": [
+          0.25402522389777005,
+          0.28116115811280906
+        ],
+        "B": [
+          0.2602665410377085,
+          0.3151880339719355
+        ]
+      },
+      "delta_sec": 0.012463193153962493,
+      "limit_sec": 0.051646356796845795,
+      "pass": true
+    }
+  },
+  "restart": {
+    "seed_snapshot": "2550583d-7d40-4c72-bbc9-42b4a0e365a9",
+    "all_10_reused_seed": true,
+    "summary_scan_22433_events": 0
+  },
+  "checks": {
+    "rust": {
+      "pass": 438,
+      "skipped": 6,
+      "lint": true
+    },
+    "web": {
+      "pass": 513,
+      "files": 66,
+      "maxWorkers": 4,
+      "testTimeout": 30000,
+      "typecheck": true,
+      "lint_errors": 0,
+      "lint_warnings": 245,
+      "build": true
+    },
+    "http": {
+      "checks": [
+        {
+          "check": "capabilities unauthenticated",
+          "status": 401
+        },
+        {
+          "check": "summary unauthenticated",
+          "status": 401
+        },
+        {
+          "check": "details unauthenticated",
+          "status": 401
+        },
+        {
+          "check": "probe unauthenticated",
+          "status": 401
+        },
+        {
+          "check": "capabilities flags",
+          "status": 200
+        },
+        {
+          "check": "missing library",
+          "status": 404
+        },
+        {
+          "check": "escape path",
+          "status": 400
+        },
+        {
+          "check": "summary metadata sort rejected",
+          "status": 400
+        },
+        {
+          "check": "empty detail batch",
+          "status": 400
+        },
+        {
+          "check": "duplicate normalized detail paths",
+          "status": 400
+        },
+        {
+          "check": "detail count limit",
+          "status": 400
+        },
+        {
+          "check": "folder probe present",
+          "status": 200
+        },
+        {
+          "check": "empty folder probe",
+          "status": 200
+        },
+        {
+          "check": "probe remaining TTL",
+          "status": 200
+        },
+        {
+          "check": "missing target is unknown",
+          "status": 200
+        },
+        {
+          "check": "probe invalid syntax",
+          "status": 400
+        },
+        {
+          "check": "probe missing library",
+          "status": 404
+        },
+        {
+          "check": "partial detail result",
+          "status": 200
+        }
+      ],
+      "flags": {
+        "summaryListing": true,
+        "entryDetails": true,
+        "childProbes": true
+      }
+    },
+    "content": {
+      "schema": 1,
+      "started_utc": "2026-10-15T22:30:41.592490+00:00",
+      "ended_utc": "2026-10-15T22:30:43.240550+00:00",
+      "entry_count": 6,
+      "image_count": 6,
+      "status": {
+        "running": false,
+        "processedFiles": 0,
+        "completedAt": "2026-10-15T22:30:42.896518860Z"
+      },
+      "manifest_sha256": "9f0991db50e3af5a4729f1e318e999b1cfa91f37461a0f890ca55202ad3a1e91",
+      "daemon_sha256": "d69feb6bbdc91be14c522ce4dde92a82d187f69c0f3e8acf2cbae370e848b4f9",
+      "purpose": "functional content-path check; not performance comparison"
+    },
+    "browser": {
+      "initial_unique_probe_targets": 11,
+      "end_unique_probe_targets": 12,
+      "manual_dom_rows": 16,
+      "end_offset": [
+        22400
+      ],
+      "empty_folder_opened": true,
+      "manual_environment": {
+        "width": 780,
+        "height": 437,
+        "dpr": 1,
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36"
+      },
+      "sanity": {
+        "max_rows": 30,
+        "response_to_dom_ms": 44.799999952316284,
+        "tree_requests": 1,
+        "repetitions": 1
+      }
+    }
+  },
+  "verification": {
+    "implementation": {
+      "agent": "6fcd2ccf-abda-4547-a9fb-a580037d7753",
+      "model": "Claude Sonnet 5.5",
+      "verdict": "pass",
+      "scope": "S1-S3 code/functions and final checks; not S4",
+      "before_tree": "849d133f9c6426767715620d2e8f6b8e9c5108cc",
+      "after_tree": "849d133f9c6426767715620d2e8f6b8e9c5108cc"
+    },
+    "measurements": {
+      "agent": "90541c69-4d58-4bb1-adf2-c3692518fd8b",
+      "model": "Claude Sonnet 5.5",
+      "verdict": "pass",
+      "before_tree": "5bf582c39030c76e6954b4bda17bb5a114dc4752",
+      "after_tree": "5bf582c39030c76e6954b4bda17bb5a114dc4752",
+      "scope": "All111 sources,30 requests, progress logs, seed reuse and adoption; metadata added after verdict; raw unchanged"
+    }
+  },
+  "limitations": [
+    "Empty-folder ext4 load does not reproduce original VirtioFS delay or heavy media workload.",
+    "Cache layers and external load uncontrolled; alternating order does not remove those effects.",
+    "Only bounded work classes are limited; not HTTP waiters/root stat/other I/O.",
+    "Background progress threshold is successful EOF count, not processedFiles or throughput improvement.",
+    "Foreground detailed API active median increased; adoption uses predeclared tolerance, not a claim that contention was eliminated.",
+    "Background archive singleflight can cause foreground to wait for shared background work; not isolated in empty fixture.",
+    "Manual browser small viewport and single UI sanity run are functional checks, not paired UI performance comparison.",
+    "Default 5s Timeline test limitation from stage1 remains; final web suite used planned 30s.",
+    "No production daemon6050 deployment or real-data writes.",
+    "Initial measurement script missing re import and content helper TimelineEntry lookup failed before JSON output; corrected reruns used, failed logs retained."
+  ],
+  "sources": {
+    "<tmp>/pxna-background-api-schema-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "<tmp>/pxna-background-browser-end.log": "8c2e631f16126ce95439015087893d21253ff1a107ccbeb233b13274a2b56fee",
+    "<tmp>/pxna-background-browser-open-last.log": "6036b7544b386460aceda43ee0c35e9da6402a9af94212c314379ed53522eadb",
+    "<tmp>/pxna-background-browser-ready.log": "dcecabe9316615fe2ed88edda2b4188f7f4f37246930f0ba0e9021f6181b9220",
+    "<tmp>/pxna-background-build.log": "3c9bf6c248fa85d8b711133c0eda81116bfc5de9b4dc1bbc3e7b868d068d84fb",
+    "<tmp>/pxna-background-content-check.log": "f7abc99a009fabb6959dbf4782f4b8eac34a4e630811758f584200a53beb1679",
+    "<tmp>/pxna-background-content-final-check.log": "8e6c7e989ab467dce9ed08a8694b4b2ab06b462f22facb783a28244d3471f762",
+    "<tmp>/pxna-background-content-fixture/manifest.json": "9f0991db50e3af5a4729f1e318e999b1cfa91f37461a0f890ca55202ad3a1e91",
+    "<tmp>/pxna-background-content-fixture/run2/daemon.log": "597bbdb0f378e066f94b29ac555299241da8ec0fc312b3028f9b7fc01b9815f7",
+    "<tmp>/pxna-background-dind-runner.log": "b0c944285b268a908bf5d8250cfd7c2e6ff50e7862076d1af75270e82b378a21",
+    "<tmp>/pxna-background-final-http-check.log": "1c461adae39773a07988cc7a91f2fe87cb3d22be1f65fe36ff45c5c4d95bdb35",
+    "<tmp>/pxna-background-final-http-check.py": "5c20530f57d82fde430b19e9bab0dafc13dfbf1324edcadcbd581404176aa6cd",
+    "<tmp>/pxna-background-final-suite.log": "39ed34ce49126a83e39c2f208ed2ea033b13589e9d1e0fa4cfebf1bd7e3713e4",
+    "<tmp>/pxna-background-final2-suite.log": "4a04eb9fec97fd5111ad565a395b70cb7f6d107140ce29d89d34784d555bbd10",
+    "<tmp>/pxna-background-fixture-final-verify.log": "b180021427b30d4335d2aedb1a8f642a3289e2d7a0d6e5d553450339729fa9bc",
+    "<tmp>/pxna-background-native-api-check.log": "f0311281e15cf02adf4a08e5ca1ae01da39aa81966b0d2b5568faea363526965",
+    "<tmp>/pxna-background-rust-tests.log": "cad9b82cff642be511a8843bff83f4766dbe0a2fa25559089dacafb3dc95103c",
+    "<tmp>/pxna-background-web-build.log": "12bb566958a268e42b7847505d9e10f90ccb6a67db58fa967f7266cdf12ec78f",
+    "<tmp>/pxna-background-web-final-lint.log": "f2e97e144defddb0ffc7ae507a865b5e64de7792fd9dcaac4ac73307573ba880",
+    "<tmp>/pxna-background-web-final-tests.log": "7cb5939ebf96604471e0719d18035608fae269df3577cef2dd53426e90f20a02",
+    "<tmp>/pxna-background-web-final-typecheck.log": "e18a527e8ef23412dabe1e56bf60169ad6ce8848324d9c5186809a4e2d7cc1e5",
+    "<tmp>/pxna-browse-run/background-E-build.json": "33886e3be2e01dbc37d9de73aad8edede75c3bd1c1427da21b6f086066a324eb",
+    "<tmp>/pxna-browse-run/background-E-ui-sanity.json": "4f2fdeb87762e62787249d9c78f6e5042d15e614c5862a5e7da0a0d22f0ee74f",
+    "<tmp>/pxna-browse-run/background-browser-end.json": "22e70f8c0a086fcb2a080ffb0b4c195c567ed0aae9e231c905da9808bdfbcf57",
+    "<tmp>/pxna-browse-run/background-browser-end.raw.log": "c2b5c3cbd96e90c5d6cc9f7ce93ad5aec530d272a21f21f59db018f6461f513d",
+    "<tmp>/pxna-browse-run/background-browser-environment.json": "1915a8fbc906234ece7b56372084dc39574889cebf3858f6259605d00dda44ec",
+    "<tmp>/pxna-browse-run/background-browser-environment.raw.log": "a86b6e942bfcfc51a20a19341f2141e6c6b4e410289f3ae8f0035054399472eb",
+    "<tmp>/pxna-browse-run/background-browser-initial.json": "306954e97e670802c6159d4e030a120c9c94b5fd34fe1fdfe28b59869ebec620",
+    "<tmp>/pxna-browse-run/background-browser-initial.raw.log": "b29e27256c48ded6320eb7b5655b46015fdcc269412fd94d004be2cd99db7f3d",
+    "<tmp>/pxna-browse-run/background-browser-open-last.json": "ad02fb92db28508cf6005ea4ef4b67b864699f1f26c9aea7bed05e565c522877",
+    "<tmp>/pxna-browse-run/background-browser-open-last.raw.log": "c4c22ad66bf2888857d8a0bfca0edac1cbf91229e9e49ef789f6af8ef56d19ff",
+    "<tmp>/pxna-browse-run/background-browser-open.json": "75e93204ff1b2c9d1572e1b54bb037245559c0f1f3c9919181394cb318ffbd02",
+    "<tmp>/pxna-browse-run/background-browser-open.raw.log": "a55c35dfc3ce8f0cec52f7e7c0a4ae8137dd8e93a6e4e5f3423676a0ca2c419a",
+    "<tmp>/pxna-browse-run/background-content-check.json": "d6e451356279129807fda0a9667cb72c1bf3145d9a91d32fbf15400d3718c3cc",
+    "<tmp>/pxna-browse-run/background-final-http-checks.json": "75a30a039af6256517bc032a42627f8b0eafc5a147052049d1d3b76ad176695d",
+    "<tmp>/pxna-browse-run/background-final-tools/api.py": "f235951c937ae9dc243eb43b56e227662989bc6b89999c9180eb04255e18a3dd",
+    "<tmp>/pxna-browse-run/background-final-tools/background.py": "db6ca74b4762b9654ba68b12642e644039b77c8b99ac498f8e365d9fff2ac176",
+    "<tmp>/pxna-browse-run/background-final-tools/browse-performance-protocol.md": "d9d47d438af43a9d13463b043ff37bc5905d5fb1b0e0a526827fe9e9814480a4",
+    "<tmp>/pxna-browse-run/background-final-tools/browse.mjs": "44283f174a8cd2297d2575cdae1323addcc3a043e8a73b915749a5bb1758e8a8",
+    "<tmp>/pxna-browse-run/background-final-tools/fixture-config.toml": "516fce47486606c36fc3fd6323bc4e7c42a6fb3058677fb3eb061a1fad48b48d",
+    "<tmp>/pxna-browse-run/background-final-tools/fixture.py": "83697f5dda0174a3373d864af52149095829902e25f268ab012c88da0ebcadd2",
+    "<tmp>/pxna-browse-run/background-final-tools/implementation.patch": "d98d043980c986b6692ad40b5e6b84ed104d8d12a99147fd86751079960d5b42",
+    "<tmp>/pxna-browse-run/background-final2-active-01-A.json": "7518c6558b7363ecc54f45c4c234ac5f8c692938071d2e3c53d3900e47967700",
+    "<tmp>/pxna-browse-run/background-final2-active-01-A.log": "f66f3a8e43af0ea4a725125ef27e4e8518a4402c62e097bd415d58cd5c299a2a",
+    "<tmp>/pxna-browse-run/background-final2-active-02-B.json": "8055b2dd401913e7a3d17c4daf94ca22051bc9fc16ececee91b230920ad51d3c",
+    "<tmp>/pxna-browse-run/background-final2-active-02-B.log": "2e343bc66c2a5b11c3141e342c6a452ad139839f5cc6a70ef449f13e936ca824",
+    "<tmp>/pxna-browse-run/background-final2-active-03-B.json": "899598672fffca3b7976bce756f5bc63c4688fa33c77df12069fc81dd6da0a71",
+    "<tmp>/pxna-browse-run/background-final2-active-03-B.log": "9c95cd66a9dfc733ad3d4035106cafdc6a11224fe9b832cb988c6f2b74941dbc",
+    "<tmp>/pxna-browse-run/background-final2-active-04-A.json": "90c0bc4279564fa6cf38b9bd2652544917c5e661610538cc79bc95de8e00ee69",
+    "<tmp>/pxna-browse-run/background-final2-active-04-A.log": "1a538219855e82b8de7ce43dd203c258d4d5170dfb929787a38f6d913bc3af75",
+    "<tmp>/pxna-browse-run/background-final2-active-05-A.json": "aa586acd17e82fc0e6d0df309b81d0714d110e20e755f2ae0efdf14687df99a6",
+    "<tmp>/pxna-browse-run/background-final2-active-05-A.log": "457d68f94f54fb7bc0ebb89a3b78597b3fd3d25f07c6b064d6f65e4e9aa228b8",
+    "<tmp>/pxna-browse-run/background-final2-active-06-B.json": "bdb3097e32268f9339ee37bd5a5ed3e971785ed7ecda8ab046d10e967c193638",
+    "<tmp>/pxna-browse-run/background-final2-active-06-B.log": "b09d6ec047f34ab64070469d96ff7f0ff4756b869ff413822b313f183addf529",
+    "<tmp>/pxna-browse-run/background-final2-active-07-B.json": "ffc54f554c88849273c88433a93c160d33e2f33bfac2b102f905670d1c6a2719",
+    "<tmp>/pxna-browse-run/background-final2-active-07-B.log": "f528becc121f9173fb49a3cabdeb927cb8709fab3f49da41b7b5045b4c64e131",
+    "<tmp>/pxna-browse-run/background-final2-active-08-A.json": "ca0315b6dd006656f19510d694ca312bf8797a3638eb1eb16a12adca0834c6f8",
+    "<tmp>/pxna-browse-run/background-final2-active-08-A.log": "7ff43e303c1ff8cc1e69e8e816cf371e3d7ef3b6ad91ab32b94bd17ba6831599",
+    "<tmp>/pxna-browse-run/background-final2-active-09-A.json": "87f9ed7908eb6edd0897eb59254eff6a7f195db38940e896c4d143e34401ae6e",
+    "<tmp>/pxna-browse-run/background-final2-active-09-A.log": "8be14869ab010da5c656601e1ca8f06e3e78a7d256f2833292a80d59f5a409a6",
+    "<tmp>/pxna-browse-run/background-final2-active-10-B.json": "2ce748c8e507a00870d0b70b3c4852edd16f2a302813b2292d29dbf32fc19431",
+    "<tmp>/pxna-browse-run/background-final2-active-10-B.log": "bd13e0142e24c0f82340a6cc8048d659ac33685a54996b3fba6b1e013f15e7a5",
+    "<tmp>/pxna-browse-run/background-final2-index-seed.db": "df72db8ac09b7954d61e083176b1bbd09bcc0dd56700378d0dd4ca3e435ec1ea",
+    "<tmp>/pxna-browse-run/background-final2-index-seed.json": "10b9713ce300d6096b982a0abb777585641ac95e7f0ee46a99da3297876f9513",
+    "<tmp>/pxna-browse-run/background-final2-index-seed.log": "23c5ed58294234feea9fc840d1904b8137063130df145390902bb25908aba076",
+    "<tmp>/pxna-browse-run/background-final2-quiet-01-A.json": "17f8d49298284395518a01b84ba402dcdd6eeacce79ee7aa42d52a910ea65e80",
+    "<tmp>/pxna-browse-run/background-final2-quiet-01-A.log": "548356e8a7cedcaaecb0fdacdb23701b48d0b44e9a5e142ecb39d33be26bb673",
+    "<tmp>/pxna-browse-run/background-final2-quiet-02-B.json": "aefee266e2c213a3bb356268b5ebfd2605ea35f4a325d573d95f4476245c229c",
+    "<tmp>/pxna-browse-run/background-final2-quiet-02-B.log": "dfcfc90493c62e9916163c3c445cc33b4f41d0e7a7188b000987367255cfeb91",
+    "<tmp>/pxna-browse-run/background-final2-quiet-03-B.json": "2577ba7516baa08c2b9d0787800f0986905563bfd41020e719da659ba9d383dc",
+    "<tmp>/pxna-browse-run/background-final2-quiet-03-B.log": "85b0866e2c0daf1eac7919f77a73de1a88e050cacb89f64184c5e611ed3cf37e",
+    "<tmp>/pxna-browse-run/background-final2-quiet-04-A.json": "0b81d2df4bcea67f079ca5d6f3fe83203edda65c675a63ecdb71ef5fac5232e5",
+    "<tmp>/pxna-browse-run/background-final2-quiet-04-A.log": "ea8806bf8789e4572705d9331d29c53d84c49b37c36bc231c5c735c8f0de2444",
+    "<tmp>/pxna-browse-run/background-final2-quiet-05-A.json": "93eaba6262124e53da20e3a2ba72d4bf677c5e26de191b3281703684aae27e94",
+    "<tmp>/pxna-browse-run/background-final2-quiet-05-A.log": "ed3f25af7818cbb9000e30492f3e800b39f1ed99e941c0eb08da84c84ccaf719",
+    "<tmp>/pxna-browse-run/background-final2-quiet-06-B.json": "806d05573d9bc7286d614904819f49ec1448c9ef93dd4a2a2ac011dee8fd78ad",
+    "<tmp>/pxna-browse-run/background-final2-quiet-06-B.log": "2a2a20346134fb446cb7b7b86843877939a75b51226e471a93c2196b6e5c5a2c",
+    "<tmp>/pxna-browse-run/background-final2-quiet-07-B.json": "e35bd9054512ff967d9a30b689c840f93bf1fbe9d798f4a4fe85d1c3db801f2b",
+    "<tmp>/pxna-browse-run/background-final2-quiet-07-B.log": "3c2d71180c53073470d18ec6a13a0cf984bf936c6e606f82e7726c3977a7471e",
+    "<tmp>/pxna-browse-run/background-final2-quiet-08-A.json": "9a5582adb1c09f2a7a1b3cc2948c7b9678ebe1dd4bda8d74ed8f700aa642e4bc",
+    "<tmp>/pxna-browse-run/background-final2-quiet-08-A.log": "cc26625896210eefff81599daafd449db83615e7046f25821a4f5f03749d2d1e",
+    "<tmp>/pxna-browse-run/background-final2-quiet-09-A.json": "875343e9dd92e74b07502435be4b3ec88750a463b4378863313e57b11ef88574",
+    "<tmp>/pxna-browse-run/background-final2-quiet-09-A.log": "1d644b348fce232c0ffaeccc59fa075746d3b99da6946de7f54e36e2cb28a337",
+    "<tmp>/pxna-browse-run/background-final2-quiet-10-B.json": "ebd2d71443fe5d53fcf2cab7e8811f004035c454b25c764052fed90961a7ceaa",
+    "<tmp>/pxna-browse-run/background-final2-quiet-10-B.log": "a63e239482d581a03d7a118e05e1b841eac400833af860ddc24678725a7a1c81",
+    "<tmp>/pxna-browse-run/background-final2-restart-01-A.json": "7dd55c17270403cb593930f08de787a1ef5da1ebd36e93a78a7aa2fa7752e5ca",
+    "<tmp>/pxna-browse-run/background-final2-restart-01-A.log": "36b978bdb893e128f4c45622ffe8ec40377a57a65440072e324b36027bb74dcc",
+    "<tmp>/pxna-browse-run/background-final2-restart-02-B.json": "1ec57a212debec7fcb5c096a4b81135f3a80d68d33a8d950edc3c501d398a7bc",
+    "<tmp>/pxna-browse-run/background-final2-restart-02-B.log": "9c4b583577a5461799b96a7ce32d00119da832f25a852c287086ee191a0e6acc",
+    "<tmp>/pxna-browse-run/background-final2-restart-03-B.json": "15e7ad685f68fe12409c3bd8b06c745d6597122ba476f9f48ddbcb0f34f0e756",
+    "<tmp>/pxna-browse-run/background-final2-restart-03-B.log": "597288e61a4d60499595fb39eda8ed6ef9a9033606a903f04c64c83b4200ea83",
+    "<tmp>/pxna-browse-run/background-final2-restart-04-A.json": "fc2fdaabaaaf71d0ed46e783d6ed4cab660c9ef043c7184f5355590e2891e38a",
+    "<tmp>/pxna-browse-run/background-final2-restart-04-A.log": "36123d6580d9c3f5dd5c47a7f2bf206030dd6a9ae33937a1468ba650ac36f983",
+    "<tmp>/pxna-browse-run/background-final2-restart-05-A.json": "13de255c26ef77e9b8843d7de2f0f1d7c93bfaddd96cd174172b85a96d00ff75",
+    "<tmp>/pxna-browse-run/background-final2-restart-05-A.log": "0aa2dddebc14ad2d1be9450fe6d6f8074406389ea42a65002d374b9451c648b9",
+    "<tmp>/pxna-browse-run/background-final2-restart-06-B.json": "e6a569ad31fe9c92d0c0c24092d37354d45a9a877a32bdaa78cb8904894076d5",
+    "<tmp>/pxna-browse-run/background-final2-restart-06-B.log": "0d76b596db00c7d8ed3d071cc73c284a3f5a8b9dcbe8274b743dd03a2e26e385",
+    "<tmp>/pxna-browse-run/background-final2-restart-07-B.json": "3894e943dab6d801b8c9e5f5e4e294bd2ef08b07d7937db1efb86ec13cbe8acc",
+    "<tmp>/pxna-browse-run/background-final2-restart-07-B.log": "615d4e5fda579e73eaf1a391680d8452afefb4f4fe0afcb193d32e624edb90f5",
+    "<tmp>/pxna-browse-run/background-final2-restart-08-A.json": "ac6dafae1bebb44f6157c4b9d3967f0965475b72e53413dfd4991ceda7b77f72",
+    "<tmp>/pxna-browse-run/background-final2-restart-08-A.log": "01dcc40cfb54554123d684d67b0d6c1d9afbc7cfef88e5bfe510ed6184c67a66",
+    "<tmp>/pxna-browse-run/background-final2-restart-09-A.json": "0f8689dcdadd6da09b1872f5e99528c35f371f6bc4021591d5e34e75bc4019c9",
+    "<tmp>/pxna-browse-run/background-final2-restart-09-A.log": "3e77d3e7b18e9a5159cc51e62b9b60c08594f7fa8da069960f0ab75931998bc5",
+    "<tmp>/pxna-browse-run/background-final2-restart-10-B.json": "cf1b771f9bc276b6bb675412db452c09e74bc55b88f0f64208704f50c25278e6",
+    "<tmp>/pxna-browse-run/background-final2-restart-10-B.log": "045e3fb581ca37ee0818e3e549417808072627e381f8f294ecc4271bb11aa4f6",
+    "<tmp>/pxna-check-background-content2.py": "72c2297fa0df345c7e5822b9cc64b90cf2a83f44923c6c49ad0721c2f7c31003",
+    "<tmp>/pxna-dind-background-test.py": "4cbb2b33bddd1eeb91f1b54517d8dadc6538dca5b7fe4beb6d21bdf3849b8fec",
+    "<tmp>/pxna-doc-verifier-background-code-recheck-after.json": "b63317aa67f12a75dc82ca17645942863bc6740cd08ff2913889f714f798a1bb",
+    "<tmp>/pxna-doc-verifier-background-code-recheck-before.json": "b63317aa67f12a75dc82ca17645942863bc6740cd08ff2913889f714f798a1bb",
+    "<tmp>/pxna-measure-background-suite2.py": "3bae12f4c6c9ce2d791954828c74dbb541aa66a94c1c4658e579c90c0f39d15f",
+    "<tmp>/pxna-prepare-background-content.py": "343e241d805f404e43aa36625d5ad2a78ab09c1c763d038c40ff25c616b3ed66",
+    "<tmp>/pxna-browse-run/background-completed-plan.md": "dd7ca84c711881659e26cb5f6405dd59971ad991d671b1f240e423d75a4bfcb0"
+  }
+}

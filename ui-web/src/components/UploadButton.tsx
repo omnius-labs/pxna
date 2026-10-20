@@ -1,0 +1,61 @@
+import { useRef } from "react";
+import { useEntryActions } from "../library/actionContext";
+import { useTransfer } from "../library/transfer";
+import { filesToInputs } from "../library/upload";
+export function UploadButton() {
+    const actions = useEntryActions();
+    const transfer = useTransfer();
+    const files = useRef<HTMLInputElement>(null);
+    const folders = useRef<HTMLInputElement>(null);
+    if (!actions || actions.narrow) return null;
+    const disabled = !actions.canCreate || !!transfer?.busy;
+    const selected = (input: HTMLInputElement) => {
+        const entries = Array.from(input.files ?? []);
+        input.value = "";
+        void transfer?.upload?.(filesToInputs(entries), {
+            libraryId: actions.libraryId,
+            path: actions.folderPath ?? "/",
+        });
+    };
+    return (
+        <div className="flex items-center gap-1">
+            <button
+                type="button"
+                aria-label="ファイルをアップロード"
+                disabled={disabled}
+                onClick={() => files.current?.click()}
+                className="rounded px-1.5 py-1 disabled:opacity-40"
+            >
+                アップロード
+            </button>
+            <button
+                type="button"
+                aria-label="フォルダをアップロード"
+                disabled={disabled}
+                onClick={() => folders.current?.click()}
+                className="rounded px-1.5 py-1 disabled:opacity-40"
+            >
+                フォルダ
+            </button>
+            <input
+                ref={files}
+                type="file"
+                aria-label="アップロードするファイル"
+                multiple
+                hidden
+                disabled={disabled}
+                onChange={(event) => selected(event.currentTarget)}
+            />
+            <input
+                ref={folders}
+                type="file"
+                aria-label="アップロードするフォルダ"
+                multiple
+                hidden
+                {...{ webkitdirectory: "" }}
+                disabled={disabled}
+                onChange={(event) => selected(event.currentTarget)}
+            />
+        </div>
+    );
+}

@@ -1,0 +1,587 @@
+# Thumbnail Design
+
+## 1. About This Document
+
+This document covers the mechanism that generates and caches thumbnails, sprite sheets, and display images from Entries, and defines responsibility boundaries, the order of generation, cache rules, and the reasons for adoption.
+The intended readers are developers and AI agents who implement or review this concern.
+It assumes the vocabulary of [terms.md](../terms.md).
+The definitions of words are not in this document.
+
+### 1.1 Division of Responsibility Between Documents
+
+| Document | What it covers |
+| --- | --- |
+| This document | Generating thumbnails, sprite sheets, and display images, determining targets, the order and concurrency of generation, caches, reasons for adoption, deferred items |
+| [design.md](../design.md) | Pxna's overall scope, overall structure, boundaries between concerns, and cross-cutting design decisions |
+| [Client Design](./client.md) | Which tile's thumbnail to request and when, and when to cancel |
+| [Video Playback Design](./video.md) | Media info and conversion for playing videos in the viewer |
+| [Storage Layer Design](./storage.md) | Resolving `NestedPath`, materializing entries in archives, the definition of `EntryCacheKey` |
+| [terms.md](../terms.md) | Definitions of terms |
+| [issues.md](../issues.md) | Clear defects confirmed in code and handling policies |
+| [daemon/openapi.yaml](../../daemon/openapi.yaml) | The authoritative thumbnail API paths, parameters, and status codes |
+
+The entry point of the design document family is [design.md](../design.md).
+
+### 1.2 Tense of This Document
+
+§1 through §10 describe the completed form in the present tense.
+The gap between the current code and the completed form, and the remaining work in dependency order, are gathered in §11.
+If you want to know what works now, read §11 first.
+
+## 2. Responsibilities and Boundaries
+
+This document covers the span from receiving a checked `NestedPath` to returning the converted image as a response.
+Images, videos, folders, and archives are all requested from the client through the same thumbnail API, and `ThumbnailGenerator` chooses the generation method according to the kind of target.
+
+Pxna's purpose is to quickly browse files on a home server from a phone or a browser ([design.md §2](../design.md#2-what-pxna-is)).
+If the server shrinks before sending, the client can draw a listing without reading the original files.
+The design of this document is to satisfy this one point, and assumes requests arrive at the same time for as many items as are in the listing.
+
+The boundaries with other concerns are as follows.
+
+| Matter | Authoritative source |
+| --- | --- |
+| The procedure for building a `NestedPath` from a Library-relative path and checking the boundary | [design.md §4.3](../design.md#43-resolving-library-and-archive-boundaries) |
+| How to turn an entry in an archive into a readable file, and its cache | [Storage Layer Design §5.2](./storage.md#52-default-implementations-centered-on-materialize) |
+| Which tiles to request first, and when to cancel requests for tiles that left the screen | [Client Design §4](./client.md#4-thumbnail-requests) |
+| How name order is compared | [design.md §11.1](../design.md#compare-name-order-in-natural-order) |
+| The mapping from the engine's error kinds to HTTP status | [design.md §4.4](../design.md#44-error-model-and-http-mapping) |
+
+### 2.1 What Is Not Built
+
+- The whole Library is not scanned in the background to generate thumbnails in advance.
+  This avoids having to follow changes and generating files nobody looks at.
+- Compatibility with Susie plugins (loading Windows DLLs) is not provided.
+  This avoids having a per-OS plugin mechanism.
+  Formats the `image` crate cannot read are left to ffmpeg (§3).
+- For animated GIFs and animated WebPs, only the first still frame becomes the thumbnail.
+  This avoids having a path that extracts a frame sequence per image format.
+- Delivering the original image for the viewer is not covered.
+  The original image the viewer swaps in from the display image is returned by the content API.
+
+## 3. Determining the Target
+
+The kind of target is decided by extension.
+For the same reason that archives are determined by extension alone, each entry does not need to be opened every time the inside of an archive is listed ([design.md §11.1](../design.md#represent-is-an-archive-in-file-detail-not-in-the-kind)).
+The set of supported extensions is a property of the server, and the client is not made to hold the same set.
+
+| Kind | Determination | Generation method |
+| --- | --- | --- |
+| Image | An extension the `image` crate can read | Shrunk with `ImageConverter` |
+| Other images | Extensions such as HEIC and AVIF that are not read by the `image` crate but are decided to be read with ffmpeg | Extract the first frame with ffmpeg and then shrink |
+| Video | Video extensions decided to be read with ffmpeg | Extract the frame sequence with ffmpeg (§6) |
+| Folders and archives | The Entry's kind and the archive flag | Return the representative thumbnail (§5) |
+
+A file that matches none of these is `UnsupportedType`.
+A file whose extension matches but whose contents cannot be read is also `UnsupportedType`.
+
+The listing response puts the MIME type decided from the extension in the `metadata.contentType` of files that match this determination.
+The client decides image and video tiles and the viewer from the `image/` and `video/` prefixes (the reason is in §10.1).
+It is not put on files that match none of them.
+
+ffmpeg is started by the daemon as an external process.
+The path of a physical file is passed to ffmpeg.
+For an entry in an archive, it is made a physical file with `materialize_file` and then passed, and the lease is held until generation finishes.
+If the lease were released, a file ffmpeg is reading could be deleted by the extraction cache's LRU.
+
+## 4. Size and Shape
+
+### 4.1 Size Steps
+
+The server rounds the requested `width` and `height` up, each to the smallest value in the size steps that is at least the request, before generating.
+A request beyond the largest step is rounded to the largest step.
+The default size steps are 128, 256, 512, and 1024 for thumbnails and 2048 and 4096 for display images.
+The 4096 step of display images is used when the viewer shows the display image filling a high-pixel-density screen without swapping to the original image ([Client Design §3.4](./client.md#34-viewer)).
+Whether a thumbnail or a display image is wanted is specified by the request, and the server rounds up within the respective steps.
+
+We round up to keep the kinds of cache entries down to the number of steps.
+If values computed by the client from the screen width or the device's pixel density were accepted as they are, nearly the same sized conversion results would line up in the cache as many times as there are values.
+We round up rather than down because if the client shrinks when displaying, image quality is not lost.
+
+The step values can be changed by configuration (§9).
+The step values are included in the cache key, so requests after a change are regenerated with the new steps.
+
+### 4.2 Shape and Output Format
+
+The shape is specified by the API's `resize` and `anchor`.
+
+| `resize` | Shape |
+| --- | --- |
+| `crop` | Scale until it covers the frame, and cut out to the frame's size at the position of `anchor` |
+| `pad` | Scale until it fits in the frame, and fill the frame with a transparent margin |
+| `manual` | Ignore the aspect ratio and make it the frame's size |
+| `fit` | Fit in the frame preserving the aspect ratio, with no margin added. Never made larger than the original |
+
+`fit` is used for display images and for thumbnails that fit the whole in a tile ([Client Design §3.2](./client.md#32-tiles)).
+The other three return an image of the frame's size, so they have no means of obtaining an image of the same aspect ratio as the original.
+
+The output format is chosen from WebP, JPEG, and PNG.
+If the request does not specify a format, the configuration `[thumbnail] format` is used, and its default is WebP.
+WebP and JPEG are compressed lossily, and for quality, `quality` is used for thumbnails and sprite sheets and `display_quality` for display images.
+Display images are shown filling the screen in the viewer, so the coarseness of compression is more noticeable than for thumbnails seen at tile size.
+For that reason the quality values are separated.
+PNG is compressed losslessly and does not use a quality value.
+
+libwebp is used for lossy WebP encoding.
+This is because the image crate's WebP encoder has only lossless compression ([The image crate's WebP encoder](../knowledges/image-webp-encoder.md) in [knowledges.md](../knowledges.md)).
+JPEG cannot represent transparency, so the combination of `pad` and JPEG is `InvalidRequest`.
+WebP and PNG can represent transparency, so they can be combined with `pad`.
+
+Input images are shrunk after applying the EXIF orientation.
+Without applying the orientation, a photo taken vertically on a phone would line up sideways on the tile.
+
+A display image is an image shrunk to the display steps with `fit`.
+It goes through the same conversion path as thumbnails, but the cache capacity budget is separate (§8.2).
+
+## 5. Representative Thumbnails
+
+When the path of a folder or archive is requested, the server compares its direct children Entries in natural order of names and returns the thumbnail of the first image or video that appears.
+No distinction is made between images and videos.
+Hidden Entries whose names start with `.` and symbolic links are not chosen.
+This is because ZIPs created on macOS contain working entries starting with `._`, which come first in natural order and cannot be read as images.
+If there are no images or videos among the direct children, it is `NotFound` and the client shows an icon.
+
+It does not descend into subfolders.
+Descending would make the number of Entries traversed for one tile grow without limit.
+With direct children only, one listing per tile suffices.
+It does not need to sort all the direct children, and the smallest name can be chosen in one scan.
+
+The selection of the representative is reused after checking the target's version and a short expiry ([design decision](#representative-selection-cache)).
+The chosen Entry's attributes are checked on every request, and the cache key of the image itself and the cache key of the representative selection are kept separate.
+The direct children of an archive can be looked up from the index cache, so each file is not extracted to make the selection.
+
+## 6. Video Frame Sequence
+
+### 6.1 Positions to Extract
+
+From a video, frames at multiple positions decided as ratios of the duration are extracted.
+The duration is read from the media info obtained with ffprobe ([Video Playback Design §3](./video.md#3-media-info)).
+By default, 8 points are taken at even intervals from 10% to 90% of the duration.
+We avoid the 0% at the start because the beginning of a video can be a black screen or a logo, and the contents cannot be told apart.
+
+The first of the extracted frames is the video's thumbnail.
+All the frames are lined up in one row to make one sprite sheet.
+The client switches the display position to do flipbook playback ([Client Design §3.3](./client.md#33-flipbook-playback)).
+
+The number of frames, the start point, and the end point are held as arguments to the generation process and passed from defaults in code.
+Whether to make them specifiable from the configuration file is recorded as a deferred item in §10.2.
+The three values are included in the cache key (§8.3).
+
+### 6.2 Generate Together
+
+Whether a thumbnail or a sprite sheet is requested, one run of ffmpeg extracts all the frames and puts both in the cache.
+Generating them separately would pay twice for starting ffmpeg and for materializing a video in an archive.
+Done once, these costs are paid only once.
+If both are in place at the moment a tile becomes visible, flipbook playback can start at the instant of mouse-over or long press.
+
+Both are in place only when the thumbnail and the sprite sheet are requested with the same width, height, shape, and output format.
+The key includes the conversion conditions (§8.3), so a request with different conditions does not hit the other request's cache and becomes a separate run.
+
+Each position is reached at keyframe granularity, allowing a deviation from the specified time.
+Frames for browsing in a listing do not need an exact time, and the less is decoded, the faster it is.
+
+The response returning a sprite sheet includes the number of frames.
+The client divides the sprite sheet equally by this value.
+
+A video's display image is made from just one frame at the first position of the frame sequence, and a sprite sheet is not made.
+A display image is a single still image preserving the aspect ratio, and does not need a frame sequence.
+The position depends on the ratio of the start point, so the key includes the number of frames and the position even for the display image.
+
+### 6.3 Failure and Timeout
+
+If ffmpeg could not read it as a video, it is `UnsupportedType`.
+Each run has a deadline of `video_timeout_secs`, and when it passes the process is killed and it is `Timeout`.
+`Timeout` is returned as 504 in the API ([design.md §11.1](../design.md#return-extraction-and-generation-deadline-expiry-as-504)).
+
+## 7. Order and Concurrency of Generation
+
+Generation is done when a request is received.
+Which Entry is generated when is decided only by the order of the client's requests.
+
+**It is the client that has priority, and the server processes in arrival order.**
+The server does not know, at the time it receives a request, whether that tile is still on screen.
+Only the client that has the screen knows that.
+The client requests only the tiles in the visible range and the prefetch margin, limits the number it sends at the same time, and cancels requests for tiles that left the screen ([Client Design §4](./client.md#4-thumbnail-requests)).
+
+The server-side rules are the following three.
+
+- Upper limits on concurrency are set for image conversion and for ffmpeg runs respectively. Requests that reach the limit wait in arrival order
+- Concurrent requests for the same cache key are merged into one generation by single-flight
+- A request whose connection was cut while waiting is discarded without starting generation. A request cut after generation started is generated to the end and put in the cache
+
+A local file whose modification time cannot be obtained cannot be put in the cache and cannot be merged by single-flight.
+That request generates directly within the request, so if it is cut, the generation also stops.
+
+We do not stop a generation once started because, in scrolling back and forth through a listing, a tile that once left the screen may come back.
+If the conversion spent so far were discarded, the same cost would be paid again on return.
+Image conversion runs on a blocking worker and there is no means of stopping it midway either.
+
+## 8. Cache
+
+### 8.1 Placement
+
+The cache is held as a SQLite index plus real files.
+The placement matches the archive's extraction cache ([Storage Layer Design §7.4](./storage.md#74-placement-of-the-extraction-cache)).
+
+```text
+state_dir/thumbnail/
+├── cache.sqlite3
+├── files/
+│   └── ab/
+│       └── ab...<key>
+└── staging/
+```
+
+The directory is separate from `state_dir/sqlite.db`, which holds users and sessions, so what is to be preserved and the regenerable cache can be excluded from backups by directory.
+
+Initialization failures, corruption while running, and publishing and reconciling generated results are handled by the same rules as the extraction cache ([Storage Layer Design §7.4](./storage.md#74-placement-of-the-extraction-cache), [§7.6](./storage.md#76-publishing-and-reconciliation)).
+The contents are regenerable, so if initialization fails, `thumbnail/` is recreated and retried once.
+
+### 8.2 Capacity Budgets and LRU
+
+The cache is an LRU that deletes starting from the oldest `last_accessed`, and has no TTL.
+The `last_accessed` of reads is accumulated in memory and reflected together after 500 ms or before the next write's eviction. There was a case where a SQLite write stretched to 0.8 seconds (diagnosis F3), and this is so that responses do not wait for its completion. If restarted before it is reflected, that usage order is lost.
+The capacity limit is split into a budget for thumbnails and sprite sheets and a budget for display images.
+
+We split the budgets because the sizes differ by an order of magnitude.
+If put in the same budget, merely flipping through a few dozen photos in the viewer would evict the listing's thumbnails, and they would have to be regenerated on returning to the listing.
+
+### 8.3 Keys
+
+The key is a SHA3-256 value combining a value that points to the original Entry and the conversion conditions.
+
+```text
+SourceKey(local)   = H(THUMBNAIL_FORMAT_VERSION, "local", abs_path, size, mtime_s, mtime_ns)
+SourceKey(archive) = H(THUMBNAIL_FORMAT_VERSION, "archive", EntryCacheKey)
+ThumbnailKey       = H(THUMBNAIL_FORMAT_VERSION, SourceKey, kind, resize, anchor, resampler, format, quality, width step, height step, frame count, start, end)
+```
+
+`kind` is the distinction among thumbnail, sprite sheet, and display image.
+`quality` is the quality value used for that kind and format, and is not included for PNG.
+The three frame values are included only for videos.
+If the format or quality is changed by configuration, requests after the change are regenerated with new keys, and old conversion results are no longer referenced and disappear by LRU.
+
+For a local file, if the size or modification time changes it becomes a different key, so the old thumbnail of a replaced file is no longer referenced and eventually disappears by LRU.
+A local file whose modification time cannot be obtained is not cached.
+
+An entry in an archive may not have a modification time depending on the format ([Storage Layer Design §4.5](./storage.md#45-fsentry-and-metadata)).
+For that reason the storage layer's `EntryCacheKey` is used as the value for the original Entry.
+`EntryCacheKey` is derived from the outermost file's fingerprint, so if the outer archive changes, all the inner thumbnails miss ([Storage Layer Design §7.3](./storage.md#73-cache-identity)).
+
+A representative thumbnail uses the chosen Entry's `ThumbnailKey` as it is.
+The cache is one whether the same image is requested as a file or as a folder's representative.
+
+If the conversion implementation, the encoder's quality, or the way frames are extracted is changed, raise `THUMBNAIL_FORMAT_VERSION`.
+
+## 9. Configuration
+
+### 9.1 Where the Configuration Belongs
+
+The thumbnail configuration goes in the top-level `[thumbnail]`, and the locations of the ffmpeg and ffprobe executables go in `[media]`, shared with video playback.
+Byte sizes, counts, times, and parallelism allow only positive values and are validated at daemon startup.
+
+| key | Default | Applies to |
+| --- | ---: | --- |
+| `[thumbnail] sizes` | `[128, 256, 512, 1024]` | Size steps of thumbnails and sprite sheets |
+| `[thumbnail] display_sizes` | `[2048, 4096]` | Size steps of display images |
+| `[thumbnail] format` | `"webp"` | Output format when the request does not specify one (`webp`, `jpeg`, `png`) |
+| `[thumbnail] quality` | 80 | Quality of lossy compression for thumbnails and sprite sheets (1 to 100) |
+| `[thumbnail] display_quality` | 90 | Quality of lossy compression for display images (1 to 100) |
+| `[thumbnail] cache_capacity_bytes` | 2 GiB | Capacity budget for thumbnails and sprite sheets |
+| `[thumbnail] display_cache_capacity_bytes` | 2 GiB | Capacity budget for display images |
+| `[thumbnail] max_concurrent_images` | 4 | Number of image conversions running at the same time |
+| `[thumbnail] max_concurrent_videos` | 2 | Number of ffmpeg runs for frame extraction at the same time |
+| `[thumbnail] video_timeout_secs` | 60 | Deadline for one frame extraction |
+| `[media] ffmpeg_path` | `ffmpeg` | The ffmpeg executable |
+| `[media] ffprobe_path` | `ffprobe` | The ffprobe executable |
+
+The defaults of `[media]` are names searched from `PATH`.
+The Docker image for distribution bundles both ([design.md §9.3](../design.md#93-distribution)).
+
+## 10. Design Decisions
+
+### 10.1 Decided
+
+#### Generate When a Request Is Received
+
+**Decision**
+Thumbnails are generated when a client request is received, and there is no bulk generation in the background.
+
+**Reason**
+The folders being browsed are a small part of the Library, and converting files nobody sees only costs.
+With generation on request, there is also no need for a mechanism to track files changing externally.
+If the key includes size and modification time, the file will be generated as a new Entry the next time it is requested.
+
+**Rejected alternative**
+A method that scans the whole Library in the background and generates thumbnails in advance.
+Even a folder opened for the first time would not need to be waited on, but it would generate even files nobody looks at, and need a mechanism to keep tracking additions and changes of files, so we rejected it.
+
+#### Let the Client Hold the Priority of Generation
+
+**Decision**
+Which tile to generate first is decided by the client through the order of requests and cancellation, and the server processes in arrival order (§7).
+
+**Reason**
+Only the client knows which part of the screen is visible.
+If the client controls the number of requests and cancellation, the server can follow the priorities using only HTTP requests and connection cuts.
+
+**Rejected alternative**
+A method in which the client sends the set of visible paths to the server and the server holds a prioritized queue.
+It would need a dedicated API and per-client state on the server, so we rejected it.
+
+#### Generate Video Frames Together When the Tile Becomes Visible
+
+**Decision**
+For a video's thumbnail and sprite sheet, whichever is requested, both are made in one run of ffmpeg (§6.2).
+
+**Reason**
+Starting ffmpeg and materializing a video in an archive are done only once.
+If the sprite sheet is already in the cache at the time of the operation that starts flipbook playback, playback starts without waiting.
+
+**Rejected alternative**
+A method that makes only one frame when the tile becomes visible and makes the rest at the time of mouse-over or long press.
+It reduces the conversion volume for videos that are only looked at, but every time flipbook playback starts for the first time there would be a wait to reopen the video, so we rejected it.
+
+#### Return the Frame Sequence as a Sprite Sheet
+
+**Decision**
+A video's frame sequence is returned in one response as a single image laid out horizontally.
+
+**Reason**
+With many videos in a listing, per-frame requests would be the product of the number of tiles and the number of frames.
+Combined into one, a frame sequence needs only one request.
+
+**Rejected alternative**
+A method that fetches one at a time by specifying the `frame` number.
+The cache and the API would be simpler, but the number of requests would grow by the number of frames, so we rejected it.
+
+#### Call ffmpeg as an External Process
+
+**Decision**
+Videos, and images the `image` crate cannot read, are read by starting ffmpeg as an external process.
+
+**Reason**
+ffmpeg is not linked into the daemon, so the build does not need ffmpeg's development libraries.
+If ffmpeg terminates abnormally on a broken video, the daemon is not affected, and a process past its deadline can be stopped by killing it.
+The cost of needing ffmpeg in the execution environment is paid by making the Docker image bundling ffmpeg the basis of distribution ([design.md §11.1](../design.md#make-the-docker-image-the-basis-of-distribution)).
+
+**Rejected alternative**
+A method that links ffmpeg as a library with bindings such as `ffmpeg-next`.
+The dependency on the execution environment goes away, but the 3-OS CI would have to prepare ffmpeg's development libraries, and decoder anomalies would spread to the daemon's process, so we rejected it.
+
+#### Announce Images and Videos with the Listing's contentType
+
+**Decision**
+The listing's `metadata.contentType` carries the MIME type of files that match the determination in §3.
+The client decides the kind of tile from the `image/` and `video/` prefixes and does not hold a set of extensions.
+
+**Reason**
+For the client to decide the kind of tile and viewer, whether something is an image or a video must be known from the listing response alone.
+The determination is by extension alone, so files do not need to be opened on every listing.
+The set of supported extensions is drawn from the same table as the thumbnail generation determination, so files that can be generated and files announced as images or videos do not disagree.
+Because it is decided by extension alone, extensions shared with other uses, such as `ts`, are also treated as videos.
+
+**Rejected alternative 1**
+A method in which the client holds the set of extensions.
+Every time the server's support grows, all clients would need updating, and the determination of whether generation is possible would disagree, so we rejected it.
+
+**Rejected alternative 2**
+A method that requests thumbnails for all files and returns files that failed with `UnsupportedType` to icons.
+The kind of video sprite sheet and viewer would also be decided from the result of the request, and there would be as many failing requests as files that are neither images nor videos, so we rejected it.
+
+#### Round Sizes Up to Steps
+
+**Decision**
+`width` and `height` are accepted without changing the API's shape, and the server rounds them up to size steps (§4.1).
+
+**Reason**
+The client can send values matched to the display as they are, and the kinds of cache entries stay within the number of steps.
+Even if the step values are changed by configuration, the API and the clients do not change.
+
+**Rejected alternative 1**
+A method that makes values other than the steps `InvalidRequest`.
+Every change of the steps would need changes to the API and clients, so we rejected it.
+
+**Rejected alternative 2**
+A method that drops `width` and `height` and has the size specified by an enumeration `size`.
+It could no longer express frames other than squares, so we rejected it.
+
+#### Let the Server Choose the Representative Thumbnail
+
+**Decision**
+When the thumbnail API is given the path of a folder or archive, the server chooses a representative from the direct children and returns it (§5).
+
+**Reason**
+One request per tile suffices, and requesting and canceling can follow the same rules as file tiles.
+The selection rules are in one place only, on the server, so clients do not disagree.
+
+**Rejected alternative**
+A method in which the client lists the folder and then requests the thumbnail of the first file.
+The API would not change, but there would be two round trips per tile, and the same rule would be implemented in two clients, so we rejected it.
+
+#### Choose the Output Format and Quality by Configuration, Defaulting to WebP
+
+**Decision**
+The output format of thumbnails, sprite sheets, and display images can be chosen from WebP, JPEG, and PNG, and the format used when the request does not specify one, and the quality of lossy compression, are decided by the server's configuration (§4.2).
+The default format is lossy WebP.
+Encoding calls libwebp-sys directly and fixes the compression effort (`method`) at 2.
+
+**Reason**
+By Google's comparison, lossy WebP is 25% to 34% smaller than JPEG at the same SSIM ([The size of lossy WebP](../knowledges/webp-lossy-size.md) in [knowledges.md](../knowledges.md)).
+The main subjects are photos and video frames, so the transfer volume of listings and the viewer is expected to decrease.
+The libwebp used for lossy encoding is built by libwebp-sys from its bundled C source, so no system libraries need to be added to the 3-OS CI and the container images ([Building libwebp-sys](../knowledges/libwebp-sys-build.md) in [knowledges.md](../knowledges.md)).
+The cost is that the build needs a C compiler and there is one more dependency on a C library.
+libwebp-sys calls C functions, so the calls need unsafe.
+We close creating the configuration, importing pixels, encoding, and freeing the allocated output into one function, and confine unsafe to inside that function.
+We lower the compression effort from the default 4 to 2 because WebP encoding accounted for about half of the conversion in the first generation of a display image. For an image shrunk to a long side of 4096 at quality 90, 2 took 40% to 60% of the time of 4, with a PSNR difference within 0.2 dB and a size difference within ±4% ([measurement record](../measurements/2026-10-16-webp-method.md)). 1 and below are larger at the same quality, and 3 and above were slower than 2 without becoming smaller.
+If the format and quality are put in the server's configuration, every client requests with the same values, so conversion results of the same image do not line up in the cache by the number of format and quality pairs.
+
+**Rejected alternative 1**
+A method with JPEG as the default, encoding with the `image` crate alone.
+The previous conversion took this form, and it does not depend on a C library, but at the same quality the transfer volume is larger than WebP, so we removed it from the default.
+
+**Rejected alternative 2**
+A method that outputs only PNG.
+The conversion before the change took this form, but the transfer volume is large for photo thumbnails, so we removed it from the default.
+
+**Rejected alternative 3**
+A method that adds lossless WebP.
+It can be encoded with the `image` crate alone, but lossless compression does not discard photo detail, so it does not become as small as lossy compression, and we rejected it.
+
+**Rejected alternative 4**
+A method that adds AVIF.
+A pure Rust encoder is available as a feature of the `image` crate, but we have not confirmed the encoding speed on a NAS CPU, and it could slow the display of listings of folders opened for the first time, so we rejected it.
+
+**Rejected alternative 5**
+A method in which the format and quality are chosen on the web client's settings screen and carried in the request.
+It makes it easy to try and compare formats, but if each browser requested with different values, conversion results of the same image would line up in the cache by the number of value pairs, so we rejected it.
+
+**Rejected alternative 6**
+A method that uses the `webp` crate, which has a safe API.
+It avoids writing unsafe, but the libwebp-sys that `webp` crate 0.3.1 depends on is the 0.9 series, different from the version whose build method we confirmed (0.14.4), so we rejected it ([The webp crate's dependency](../knowledges/webp-crate-libwebp-sys-version.md) in [knowledges.md](../knowledges.md)).
+
+#### Keep the Thumbnail Cache as an LRU of a SQLite Index and Real Files
+
+**Decision**
+The thumbnail cache is held as a SQLite index plus real files, and the capacity limit is managed by an LRU divided into two budgets (§8).
+
+**Reason**
+The capacity limit and eviction rules can be held by the same mechanism as the extraction cache.
+Because the key includes the modification time, old entries merely become unreferenced and remain, but with an LRU they disappear within the capacity.
+By separating the placement into `state_dir/thumbnail/`, the units of backup for user information and the cache are also separated.
+
+**Rejected alternative**
+A method that stores values and metadata serialized with RocketPack in RocksDB.
+The `ThumbnailCache` before the change took this form.
+Capacity management would have to be made separately, and it would sit directly under `state_dir` next to user information, so we rejected it.
+
+#### Use EntryCacheKey for the Keys of Entries in Archives
+
+**Decision**
+The thumbnail of an entry in an archive builds its key from the `EntryCacheKey` and the conversion conditions (§8.3).
+
+**Reason**
+Browsing inside archives is a main use, and entries of formats without a modification time also need thumbnails.
+`EntryCacheKey` always changes when the outer archive changes, so a stale thumbnail is never returned.
+
+**Rejected alternative**
+A method that does not make thumbnails of entries without a modification time.
+There would be one key rule, but the contents of such archives would be only icons in listings, so we rejected it.
+
+<a id="representative-selection-cache"></a>
+#### Reuse the Representative Selection with a Version and Expiry
+
+**Decision**
+The selection of representative candidates is held per folder namespace and path, and per local folder modification time or archive identity. At most 4096 targets, an expiry of 30 seconds, and discarded in order of oldest use.
+The selected path and the no-candidate case are held distinctly. Cases with an unknown version and local updates within the last 2 seconds are not reused, and concurrent selections for the same target and version are merged into one.
+Only the representative's position is held, and the target's metadata and image are checked on every request by the existing rules. If fetching the candidate gives NotFound, the selection is discarded and selected again once.
+When reflecting our own changes, the representative selection is also invalidated. External changes are detected by version and expiry, and the limits of the existing file system attribute cache carry over.
+The rule of the first image or video in natural order is maintained, and neither recursive probing of subfolders nor following symlinks is added.
+
+**Reason**
+It omits the full scan of direct children that was repeated even for requests that hit the image cache. The no-candidate case is also reused briefly, so the same full scan is not done for every 404 of an empty folder.
+
+**Rejected alternative**
+The previous method of selecting again every time is simple, but repeats enumeration and attribute fetching even after caching, so it is replaced. Holding forever hides external changes, so we do not adopt it.
+
+<a id="folder-thumbnail-delay"></a>
+#### Request Folder Thumbnails After the Listing Is Displayed
+
+**Decision**
+The web client delays thumbnails of folders and archives by at least 200 ms after the listing's row appears, and requests only the visible range. The existing prefetch of images and videos is maintained.
+The delay for the same visible Entry is not restarted on every redraw, and unsent timers and requests of Entries that moved away are canceled. An Entry that returns is treated as a new display.
+The delay and priority are held by the client, and the server does not guess the visible range. The existing limits and single-flight of the generation semaphore and the image cache are maintained.
+
+**Reason**
+The time at which the listing becomes operable is not delayed by the scan and conversion of folder representative selection. Contributions are measured separately for listing display, representative selection, and generation.
+
+### 10.2 Deferred
+
+#### Settings for the Number and Positions of Frames
+
+**Current state**
+The number of frames, the start point, and the end point are arguments to the generation process, but cannot be specified from the configuration file and are fixed to the defaults in code (8 frames, 10% to 90%).
+
+**Why not decide now**
+Whether the defaults are easy to browse with on real videos cannot be known until flipbook playback has been run.
+Even if the shape of the configuration keys is decided after knowing which value to change, no migration cost arises because the values are included in the cache key.
+
+**Conditions for deciding**
+When flipbook playback has been used with real operation videos and it turns out the number of frames or the positions do not fit the defaults.
+
+#### Flipbook Playback for Animated Images
+
+**Current state**
+For animated GIFs and animated WebPs, only the first still frame becomes the thumbnail (§2.1).
+
+**Why not decide now**
+Making sprite sheets as with videos would need a path that extracts frames per image format.
+We do not know how much demand there is for browsing animated images.
+
+**Conditions for deciding**
+When, while browsing a folder with many animated images, it turns out that the first frame alone cannot tell the contents apart.
+
+#### Whether to Reflect a Folder's Representative Thumbnail on Screen Immediately
+
+**Current state**
+The representative selection follows changes in contents with the version and the 30-second expiry, and for a request after the contents change, it returns the re-selected representative if candidates remain, and returns `NotFound` with no candidate only when images and videos have run out (§5, [representative-selection-cache](#representative-selection-cache)).
+The web client does not re-request the image of a tile it has displayed as long as the row remains a request target, so there is a period in which the folder and archive tiles right after deleting the contents show a stale image.
+
+**Why not decide now**
+Reflecting immediately would need a mechanism to discard and re-request the relevant tile's request after a change.
+It has to be decided together with the condition of not increasing requests and generation with each round trip of scrolling in the same listing, and not addressing it (status quo) is also an option.
+
+**Conditions for deciding**
+When the operation of deleting contents while looking at the folder view is repeated in actual use, and stale representative thumbnails become a problem in actual use.
+
+## 11. Current State and Remaining Work
+
+### 11.1 Current Code
+
+Representative selection uses lightweight enumeration of names and kinds, and holds positive and negative results for 4096 targets and 30 seconds. Selections for the same target, version, and generation are shared by single-flight, and an unknown version and local updates within the last 2 seconds are not held. The daemon's reflection of changes advances `StorageService`'s generation, preventing the publication and reuse of stale selections. The candidate's attributes are fetched each time without following symlinks, and if it has disappeared or changed to something other than a file, it is selected again once.
+
+Grid and List target only the folders and archives of visible rows, and wait 200 ms from the microtask after the DOM notification. Images and videos keep the existing prefetch range. The queue holds the deadline of the same visible Entry, and cancels timers and requests when off-screen and on dispose.
+
+Representative selection, candidate attributes, the lookup, read, and LRU update of the image cache, and generation are recorded at separate measurement points. Connection acquisition and execution of the LRU update are also distinguished. The format and keys of the image cache are not changed, and LRU updates are taken out of the response and written together as in [§8.2](#82-capacity-budgets-and-lru). The comparison is in the [measurement record](../measurements/2026-10-15-browse-thumbnails.md).
+
+`ThumbnailGenerator` generates according to the rules of §3 through §8.
+It handles images, images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
+The cache is a SQLite index and real files in `state_dir/thumbnail/`, with a budget for thumbnails and sprite sheets and a budget for display images.
+The thumbnail API is returned by a hand-written route outside the generated router ([design.md §11.1](../design.md#return-thumbnail-responses-outside-the-generated-router)).
+
+All the keys in §9.1 can be specified from the configuration file.
+The output formats are WebP, JPEG, and PNG, and if the request does not specify one, it is `[thumbnail] format` (the default is WebP).
+Lossy WebP is encoded with libwebp-sys with the compression effort fixed at 2, and for quality, `quality` is used for thumbnails and sprite sheets and `display_quality` for display images.
+The key includes quality only for lossy formats, and the default of `display_sizes` is `[2048, 4096]`.
+The number and positions of frames cannot be configured and are fixed to the defaults in code (8 frames, 10% to 90%).
+A video's duration is obtained from the media info service shared with video playback. The LRU and the merging of concurrent requests are common with the video's media info ([Video Playback Design §3](./video.md#3-media-info)).
+
+In environments where ffmpeg and ffprobe are not on `PATH`, the tests for videos and images read with ffmpeg are skipped with the reason printed.
+CI installs ffmpeg and makes the video tests mandatory with `PXNA_REQUIRE_FFMPEG=1`.
+
+### 11.2 Roadmap
+
+This milestone (M4 and M11 of [design.md §12.2](../design.md#122-roadmap)) has no remaining work.
+The API that returns media info and transcoded playback are covered by [Video Playback Design §8.2](./video.md#82-roadmap), and the issues held as deferred by §10.2.
+
+For confirmed defects, see [issues.md](../issues.md).

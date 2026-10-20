@@ -1,0 +1,1425 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "base_commit": "4987dd4f9d4f04ce6e04d20ede14312c88b37ba1",
+  "order": "ABBAABBAAB",
+  "environment": {
+    "rust": "1.96.0",
+    "profile": "dev",
+    "fixture": {
+      "schema": 1,
+      "folders": 22432,
+      "files": 1,
+      "entry_names_sha256": "d567f0d840598037d2bb8b0581c0e7a095d4ba63313dd2ddba584dca6f36c312",
+      "mtime_unix": 1700000000
+    },
+    "filesystem": "ext4",
+    "filesystem_cache": "uncontrolled; repeated paths; no cache dropping",
+    "background": "own timeline EOF completed before every API sample; external load uncontrolled",
+    "browser": "Chrome/155.0.8059.79",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    }
+  },
+  "builds": {
+    "daemon-B": "3016f90c520bc3c9480f12c5f6e759cf53b776492e16e9fc82f6866d349c09cf",
+    "daemon-D": "9d1a587ea61d66bd7e95fbb980cd19202126af6ecb47a208f89388c360b757a9",
+    "web-B2": {
+      "assets/geist-cyrillic-ext-wght-normal-DjL33-gN.woff2": "2317fa4bb293c9c0b110e18315d529235c47a0ddd3338cea3d8c7955e927899e",
+      "assets/geist-cyrillic-wght-normal-BEAKL7Jp.woff2": "6894439694946a589d157ece003086960a6a4013d74a813dab7602efdb3d8c09",
+      "assets/geist-latin-ext-wght-normal-DC-KSUi6.woff2": "824f485b5d26e2f2da3c2b236132ece1bc8e4e43373452950bb0e40548b4313f",
+      "assets/geist-latin-wght-normal-BgDaEnEv.woff2": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1",
+      "assets/geist-vietnamese-wght-normal-6IgcOCM7.woff2": "8fa40e5d248247735eb97a0bd593b8852440430600d6ba01364c31fe0abc1fe1",
+      "assets/hls-D9b4QHpD.js": "316cb8ab04d5f01ede3fdba11b360ec844c93de57bd217722dbaca0c63db162b",
+      "assets/index-B6umceFb.js": "9281e6740deffbe829f1ca6e9c93dc412397c28718b5431867a0767a54b63ae7",
+      "assets/index-DkSJmmY0.css": "d74cc710a43e23006c29a97d46cad184385c45db86811445cc591fe67ccb5bba",
+      "favicon.ico": "2b8ad2d33455a8f736fc3a8ebf8f0bdea8848ad4c0db48a2833bd0f9cd775932",
+      "index.html": "106007fa28646d35dc6618f19ef5a7268452a214b837016b45f8aebf19db649d"
+    },
+    "web-C3": {
+      "assets/geist-cyrillic-ext-wght-normal-DjL33-gN.woff2": "2317fa4bb293c9c0b110e18315d529235c47a0ddd3338cea3d8c7955e927899e",
+      "assets/geist-cyrillic-wght-normal-BEAKL7Jp.woff2": "6894439694946a589d157ece003086960a6a4013d74a813dab7602efdb3d8c09",
+      "assets/geist-latin-ext-wght-normal-DC-KSUi6.woff2": "824f485b5d26e2f2da3c2b236132ece1bc8e4e43373452950bb0e40548b4313f",
+      "assets/geist-latin-wght-normal-BgDaEnEv.woff2": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1",
+      "assets/geist-vietnamese-wght-normal-6IgcOCM7.woff2": "8fa40e5d248247735eb97a0bd593b8852440430600d6ba01364c31fe0abc1fe1",
+      "assets/hls-D9b4QHpD.js": "316cb8ab04d5f01ede3fdba11b360ec844c93de57bd217722dbaca0c63db162b",
+      "assets/index-DkSJmmY0.css": "d74cc710a43e23006c29a97d46cad184385c45db86811445cc591fe67ccb5bba",
+      "assets/index-xRcto3ml.js": "36ac47959cc0997c8280288a2293d0070d83451ee203695faba4146062389548",
+      "favicon.ico": "2b8ad2d33455a8f736fc3a8ebf8f0bdea8848ad4c0db48a2833bd0f9cd775932",
+      "index.html": "6c734a2eccbe063e632e7e731857b22b3946236fbfc3ca05ec4347841b783af6"
+    },
+    "implementation_verifier_tree": "812f2853e17b510588db207af0b2f8356524a665"
+  },
+  "api_runs": [
+    {
+      "label": "summary-final-api-01-A",
+      "variant": "A",
+      "elapsed_sec": 1.063890869030729,
+      "snapshot": "05919a81-559b-4b83-b229-2091f3c76a30",
+      "utc": "2026-10-15T16:14:16.942089+00:00"
+    },
+    {
+      "label": "summary-final-api-02-B",
+      "variant": "B",
+      "elapsed_sec": 0.9144310399424285,
+      "snapshot": "c6d47540-78f4-4fe2-91b7-2442a0c017b9",
+      "utc": "2026-10-15T16:14:26.891098+00:00"
+    },
+    {
+      "label": "summary-final-api-03-B",
+      "variant": "B",
+      "elapsed_sec": 0.9108249580021948,
+      "snapshot": "9ee52e42-fcad-4517-976f-f11c7e119d57",
+      "utc": "2026-10-15T16:14:37.935160+00:00"
+    },
+    {
+      "label": "summary-final-api-04-A",
+      "variant": "A",
+      "elapsed_sec": 1.0714866099879146,
+      "snapshot": "a7a9cba3-22f7-4965-a77b-a1d2ecb2de71",
+      "utc": "2026-10-15T16:14:48.878309+00:00"
+    },
+    {
+      "label": "summary-final-api-05-A",
+      "variant": "A",
+      "elapsed_sec": 1.0371483529452235,
+      "snapshot": "ae972a50-ed6c-470a-ad97-9fbc50506ad7",
+      "utc": "2026-10-15T16:14:59.708267+00:00"
+    },
+    {
+      "label": "summary-final-api-06-B",
+      "variant": "B",
+      "elapsed_sec": 0.9342056568711996,
+      "snapshot": "ea74251e-3b91-4542-876c-9252aa4ccc4e",
+      "utc": "2026-10-15T16:15:10.446375+00:00"
+    },
+    {
+      "label": "summary-final-api-07-B",
+      "variant": "B",
+      "elapsed_sec": 0.8983262369874865,
+      "snapshot": "57b0b83a-0d98-4bdc-9b88-1d9027f9197b",
+      "utc": "2026-10-15T16:15:21.547794+00:00"
+    },
+    {
+      "label": "summary-final-api-08-A",
+      "variant": "A",
+      "elapsed_sec": 1.0321384000126272,
+      "snapshot": "6a7b56f6-1bcc-4b9f-8086-d42d1980dc83",
+      "utc": "2026-10-15T16:15:32.695848+00:00"
+    },
+    {
+      "label": "summary-final-api-09-A",
+      "variant": "A",
+      "elapsed_sec": 1.057552405865863,
+      "snapshot": "417e1020-cffc-4d03-af08-bc31eafb874c",
+      "utc": "2026-10-15T16:15:42.783813+00:00"
+    },
+    {
+      "label": "summary-final-api-10-B",
+      "variant": "B",
+      "elapsed_sec": 0.877732619876042,
+      "snapshot": "d2208ef8-5b8f-4a28-be87-1e70a5e7bb23",
+      "utc": "2026-10-15T16:15:52.955816+00:00"
+    }
+  ],
+  "cache_runs": [
+    {
+      "variant": "A",
+      "elapsed_sec": 0.01228744094260037
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.015010778093710542
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.00970369903370738
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.008723757928237319
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.008390740025788546
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.008490114938467741
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.005056500202044845
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.00460410607047379
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.004715319024398923
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.005289528984576464
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.00856912205927074
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.0052164169028401375
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.0049770420882850885
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.00683101499453187
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.005318925017490983
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.011987617937847972
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.011268912814557552
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.009204334113746881
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.00858725095167756
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.011392973130568862
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.012699848040938377
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.011346427956596017
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.009831341914832592
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.00831959000788629
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.008111663162708282
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.010154970921576023
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.006552379112690687
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.006038237130269408
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.0066460000816732645
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.0075898978393524885
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.008058029925450683
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.004925661953166127
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.005149857839569449
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.004710670094937086
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.004661311861127615
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.012572955107316375
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.011675351997837424
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.009167443960905075
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.008606207091361284
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.009280554950237274
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.012832757085561752
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.011758352164179087
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.009453961858525872
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.008730847155675292
+    },
+    {
+      "variant": "A",
+      "elapsed_sec": 0.008299184031784534
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.00817117397673428
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.00539778103120625
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.004823233932256699
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.004680152982473373
+    },
+    {
+      "variant": "B",
+      "elapsed_sec": 0.004551115212962031
+    }
+  ],
+  "restart_runs": [
+    {
+      "label": "summary-final-restart-01-A",
+      "variant": "A",
+      "elapsed_sec": 0.8930177309084684,
+      "snapshot": "95689157-1eeb-4e0c-bc0e-4dd98313ab30",
+      "utc": "2026-10-15T16:16:15.897919+00:00"
+    },
+    {
+      "label": "summary-final-restart-02-B",
+      "variant": "B",
+      "elapsed_sec": 0.2627888519782573,
+      "snapshot": "dd12d43f-54ce-4b7f-a192-35db71969082",
+      "utc": "2026-10-15T16:16:26.244469+00:00"
+    },
+    {
+      "label": "summary-final-restart-03-B",
+      "variant": "B",
+      "elapsed_sec": 0.2605980238877237,
+      "snapshot": "dd12d43f-54ce-4b7f-a192-35db71969082",
+      "utc": "2026-10-15T16:16:36.082700+00:00"
+    },
+    {
+      "label": "summary-final-restart-04-A",
+      "variant": "A",
+      "elapsed_sec": 0.8955768130254,
+      "snapshot": "39b4d63c-229a-4953-a67c-85546b352cd3",
+      "utc": "2026-10-15T16:16:47.963738+00:00"
+    },
+    {
+      "label": "summary-final-restart-05-A",
+      "variant": "A",
+      "elapsed_sec": 0.8960637690033764,
+      "snapshot": "df0da413-0222-4887-8fd1-ac8766029627",
+      "utc": "2026-10-15T16:16:59.198413+00:00"
+    },
+    {
+      "label": "summary-final-restart-06-B",
+      "variant": "B",
+      "elapsed_sec": 0.25862987502478063,
+      "snapshot": "dd12d43f-54ce-4b7f-a192-35db71969082",
+      "utc": "2026-10-15T16:17:09.591398+00:00"
+    },
+    {
+      "label": "summary-final-restart-07-B",
+      "variant": "B",
+      "elapsed_sec": 0.25465800310485065,
+      "snapshot": "dd12d43f-54ce-4b7f-a192-35db71969082",
+      "utc": "2026-10-15T16:17:20.785302+00:00"
+    },
+    {
+      "label": "summary-final-restart-08-A",
+      "variant": "A",
+      "elapsed_sec": 0.9174728079233319,
+      "snapshot": "7381e0fa-e2b0-4bef-bf24-0549b1972916",
+      "utc": "2026-10-15T16:17:31.626761+00:00"
+    },
+    {
+      "label": "summary-final-restart-09-A",
+      "variant": "A",
+      "elapsed_sec": 0.8617132920771837,
+      "snapshot": "320f06e3-cf26-4c72-bf26-366377f9c6b3",
+      "utc": "2026-10-15T16:17:43.630776+00:00"
+    },
+    {
+      "label": "summary-final-restart-10-B",
+      "variant": "B",
+      "elapsed_sec": 0.2579529059585184,
+      "snapshot": "dd12d43f-54ce-4b7f-a192-35db71969082",
+      "utc": "2026-10-15T16:17:54.227281+00:00"
+    }
+  ],
+  "ui_runs": [
+    {
+      "variant": "A",
+      "label": "summary-ui-01-A",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 73.60000014305115,
+      "first_row_ms": 302.30000019073486,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.256372,
+      "observer_ms": 0.6000001430511475
+    },
+    {
+      "variant": "B",
+      "label": "summary-ui-02-B",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 118.5,
+      "first_row_ms": 375.69999980926514,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.290171,
+      "observer_ms": 0.8999998569488525
+    },
+    {
+      "variant": "B",
+      "label": "summary-ui-03-B",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 46.799999952316284,
+      "first_row_ms": 249.70000004768372,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.224998,
+      "observer_ms": 0.6000001430511475
+    },
+    {
+      "variant": "A",
+      "label": "summary-ui-04-A",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 75.90000009536743,
+      "first_row_ms": 306.10000014305115,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.292888,
+      "observer_ms": 0.5000002384185791
+    },
+    {
+      "variant": "A",
+      "label": "summary-ui-05-A",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 67.09999990463257,
+      "first_row_ms": 351.2999999523163,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.298556,
+      "observer_ms": 0.6000001430511475
+    },
+    {
+      "variant": "B",
+      "label": "summary-ui-06-B",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 51.799999952316284,
+      "first_row_ms": 247.5,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.234412,
+      "observer_ms": 0.799999475479126
+    },
+    {
+      "variant": "B",
+      "label": "summary-ui-07-B",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 55.200000047683716,
+      "first_row_ms": 288.30000019073486,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.253622,
+      "observer_ms": 0.40000009536743164
+    },
+    {
+      "variant": "A",
+      "label": "summary-ui-08-A",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 56.59999990463257,
+      "first_row_ms": 1058.5999999046326,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.23929,
+      "observer_ms": 0.40000009536743164
+    },
+    {
+      "variant": "A",
+      "label": "summary-ui-09-A",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 74.79999995231628,
+      "first_row_ms": 274.19999980926514,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.294174,
+      "observer_ms": 0.19999980926513672
+    },
+    {
+      "variant": "B",
+      "label": "summary-ui-10-B",
+      "browser": "Chrome/155.0.8059.79",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "after_response_ms": 65.70000004768372,
+      "first_row_ms": 279.60000014305115,
+      "max_rows": 30,
+      "requests": 1,
+      "script_sec": 0.263679,
+      "observer_ms": 0.5000002384185791
+    }
+  ],
+  "profiles": [
+    {
+      "label": "summary-final-api-01-A",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.132921715,
+          "metadata_sec": 0.10579254499999996,
+          "elapsed_sec": 0.39446136
+        },
+        "listing_scan": {
+          "message": "listing scan completed",
+          "operation": "listing_scan",
+          "entry_count": 22433,
+          "conversion_sec": 0.1247218420000001,
+          "elapsed_sec": 0.394835656,
+          "truncated": false
+        },
+        "listing_sort": {
+          "message": "listing sort completed",
+          "operation": "listing_sort",
+          "entry_count": 22433,
+          "elapsed_sec": 0.654526655
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-api-02-B",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11251510099999999,
+          "metadata_sec": 0.097133238,
+          "elapsed_sec": 0.243203305
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.215190085
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.903742355
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-api-03-B",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11966968499999998,
+          "metadata_sec": 0.09164580800000006,
+          "elapsed_sec": 0.243788401
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.240802921
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.901147203
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-api-04-A",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.12861451900000007,
+          "metadata_sec": 0.10025028899999999,
+          "elapsed_sec": 0.384571307
+        },
+        "listing_scan": {
+          "message": "listing scan completed",
+          "operation": "listing_scan",
+          "entry_count": 22433,
+          "conversion_sec": 0.12224369599999955,
+          "elapsed_sec": 0.384878691,
+          "truncated": false
+        },
+        "listing_sort": {
+          "message": "listing sort completed",
+          "operation": "listing_sort",
+          "entry_count": 22433,
+          "elapsed_sec": 0.672252135
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-api-05-A",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.12402500699999998,
+          "metadata_sec": 0.09269077900000006,
+          "elapsed_sec": 0.372885588
+        },
+        "listing_scan": {
+          "message": "listing scan completed",
+          "operation": "listing_scan",
+          "entry_count": 22433,
+          "conversion_sec": 0.12334541199999986,
+          "elapsed_sec": 0.373223494,
+          "truncated": false
+        },
+        "listing_sort": {
+          "message": "listing sort completed",
+          "operation": "listing_sort",
+          "entry_count": 22433,
+          "elapsed_sec": 0.649674194
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-api-06-B",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.10206807299999988,
+          "metadata_sec": 0.09300884499999998,
+          "elapsed_sec": 0.214769323
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.22316032
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.923377899
+        },
+        "summary_persist": {
+          "message": "summary index committed",
+          "operation": "summary_persist",
+          "entry_count": 22433
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-api-07-B",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.10251796400000006,
+          "metadata_sec": 0.10310152999999998,
+          "elapsed_sec": 0.230933984
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.209940206
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.888512599
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-api-08-A",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.130194549,
+          "metadata_sec": 0.094825603,
+          "elapsed_sec": 0.377038395
+        },
+        "listing_scan": {
+          "message": "listing scan completed",
+          "operation": "listing_scan",
+          "entry_count": 22433,
+          "conversion_sec": 0.11784161599999968,
+          "elapsed_sec": 0.37736768,
+          "truncated": false
+        },
+        "listing_sort": {
+          "message": "listing sort completed",
+          "operation": "listing_sort",
+          "entry_count": 22433,
+          "elapsed_sec": 0.640035462
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-api-09-A",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.12959302599999992,
+          "metadata_sec": 0.095702365,
+          "elapsed_sec": 0.374899733
+        },
+        "listing_scan": {
+          "message": "listing scan completed",
+          "operation": "listing_scan",
+          "entry_count": 22433,
+          "conversion_sec": 0.12041077199999985,
+          "elapsed_sec": 0.375262277,
+          "truncated": false
+        },
+        "listing_sort": {
+          "message": "listing sort completed",
+          "operation": "listing_sort",
+          "entry_count": 22433,
+          "elapsed_sec": 0.667624913
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-api-10-B",
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11142050900000001,
+          "metadata_sec": 0.09363817,
+          "elapsed_sec": 0.231098053
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.204194024
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.867490503
+        }
+      },
+      "background_ended_before_request": true
+    }
+  ],
+  "restart_profiles": [
+    {
+      "label": "summary-final-restart-01-A",
+      "reused_seed": false,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.09745448299999998,
+          "metadata_sec": 0.08755780999999996,
+          "elapsed_sec": 0.206077343
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.209849879
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.882592588
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-restart-02-B",
+      "reused_seed": true,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11297714600000003,
+          "metadata_sec": 0.09291715699999996,
+          "elapsed_sec": 0.231823485
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-restart-03-B",
+      "reused_seed": true,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11264962600000003,
+          "metadata_sec": 0.09896892499999992,
+          "elapsed_sec": 0.244433669
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-restart-04-A",
+      "reused_seed": false,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11143439699999991,
+          "metadata_sec": 0.09511509499999997,
+          "elapsed_sec": 0.240086386
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.198344478
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.885393064
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-restart-05-A",
+      "reused_seed": false,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11283537999999999,
+          "metadata_sec": 0.09198211399999999,
+          "elapsed_sec": 0.243831646
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.20593208
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.885041223
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-restart-06-B",
+      "reused_seed": true,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11527397400000003,
+          "metadata_sec": 0.105891192,
+          "elapsed_sec": 0.248645454
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-restart-07-B",
+      "reused_seed": true,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.122095635,
+          "metadata_sec": 0.10837701100000002,
+          "elapsed_sec": 0.258032889
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-restart-08-A",
+      "reused_seed": false,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11667007300000007,
+          "metadata_sec": 0.09300673400000004,
+          "elapsed_sec": 0.242825835
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.200888739
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.907759273
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-restart-09-A",
+      "reused_seed": false,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.110727111,
+          "metadata_sec": 0.09708776200000006,
+          "elapsed_sec": 0.234284105
+        },
+        "local_summary_listing": {
+          "message": "summary listing completed",
+          "operation": "local_summary_listing",
+          "entry_count": 22433,
+          "elapsed_sec": 0.196754701
+        },
+        "summary_scan": {
+          "message": "summary scan completed",
+          "operation": "summary_scan",
+          "entry_count": 22433,
+          "elapsed_sec": 0.851982217
+        }
+      },
+      "background_ended_before_request": true
+    },
+    {
+      "label": "summary-final-restart-10-B",
+      "reused_seed": true,
+      "operations": {
+        "local_listing": {
+          "message": "listing stream completed",
+          "operation": "local_listing",
+          "recursive": false,
+          "entry_count": 22433,
+          "enumeration_sec": 0.11101364100000001,
+          "metadata_sec": 0.10026668499999998,
+          "elapsed_sec": 0.233650221
+        }
+      },
+      "background_ended_before_request": true
+    }
+  ],
+  "summary": {
+    "api": {
+      "A": {
+        "median": 1.057552405865863,
+        "min": 1.0321384000126272,
+        "max": 1.0714866099879146,
+        "n": 5
+      },
+      "B": {
+        "median": 0.9108249580021948,
+        "min": 0.877732619876042,
+        "max": 0.9342056568711996,
+        "n": 5
+      }
+    },
+    "restart": {
+      "A": {
+        "median": 0.8955768130254,
+        "min": 0.8617132920771837,
+        "max": 0.9174728079233319,
+        "n": 5
+      },
+      "B": {
+        "median": 0.25862987502478063,
+        "min": 0.25465800310485065,
+        "max": 0.2627888519782573,
+        "n": 5
+      }
+    },
+    "cache": {
+      "A": {
+        "median": 0.00970369903370738,
+        "min": 0.008111663162708282,
+        "max": 0.015010778093710542,
+        "n": 25
+      },
+      "B": {
+        "median": 0.005289528984576464,
+        "min": 0.004551115212962031,
+        "max": 0.010154970921576023,
+        "n": 25
+      }
+    },
+    "ui_response": {
+      "A": {
+        "median": 73.60000014305115,
+        "min": 56.59999990463257,
+        "max": 75.90000009536743,
+        "n": 5
+      },
+      "B": {
+        "median": 55.200000047683716,
+        "min": 46.799999952316284,
+        "max": 118.5,
+        "n": 5
+      }
+    },
+    "ui_first_row": {
+      "A": {
+        "median": 306.10000014305115,
+        "min": 274.19999980926514,
+        "max": 1058.5999999046326,
+        "n": 5
+      },
+      "B": {
+        "median": 279.60000014305115,
+        "min": 247.5,
+        "max": 375.69999980926514,
+        "n": 5
+      }
+    },
+    "ui_script": {
+      "A": {
+        "median": 0.292888,
+        "min": 0.23929,
+        "max": 0.298556,
+        "n": 5
+      },
+      "B": {
+        "median": 0.253622,
+        "min": 0.224998,
+        "max": 0.290171,
+        "n": 5
+      }
+    }
+  },
+  "acceptance": {
+    "summary_initial_ratio": {
+      "actual": 0.8612575158925233,
+      "limit": 0.9,
+      "pass": true
+    },
+    "persistent_restart_ratio": {
+      "actual": 0.2887858096181477,
+      "limit": 0.5,
+      "pass": true
+    },
+    "cached_increase_sec": {
+      "actual": -0.004414170049130917,
+      "limit": 0.005,
+      "pass": true
+    },
+    "ui_response_ms": {
+      "actual": 55.200000047683716,
+      "limit": 500,
+      "pass": true
+    },
+    "ui_max_rows": {
+      "actual": 30,
+      "limit": 200,
+      "pass": true
+    },
+    "ui_target_requests": {
+      "actual": 1,
+      "limit": 2,
+      "pass": true
+    }
+  },
+  "http": {
+    "checks": [
+      {
+        "check": "capabilities unauthenticated",
+        "status": 401
+      },
+      {
+        "check": "summary unauthenticated",
+        "status": 401
+      },
+      {
+        "check": "details unauthenticated",
+        "status": 401
+      },
+      {
+        "check": "probe unauthenticated",
+        "status": 401
+      },
+      {
+        "check": "capabilities flags",
+        "status": 200
+      },
+      {
+        "check": "missing library",
+        "status": 404
+      },
+      {
+        "check": "escape path",
+        "status": 400
+      },
+      {
+        "check": "summary metadata sort rejected",
+        "status": 400
+      },
+      {
+        "check": "empty detail batch",
+        "status": 400
+      },
+      {
+        "check": "duplicate normalized detail paths",
+        "status": 400
+      },
+      {
+        "check": "detail count limit",
+        "status": 400
+      },
+      {
+        "check": "unimplemented probe",
+        "status": 501
+      },
+      {
+        "check": "partial detail result",
+        "status": 200
+      }
+    ],
+    "flags": {
+      "summaryListing": true,
+      "entryDetails": true,
+      "childProbes": false
+    }
+  },
+  "browser_checks": {
+    "list": {
+      "rowCount": 16,
+      "listRendered": true,
+      "summaries": 4,
+      "details": 1
+    },
+    "end": {
+      "focused": "▸folder-22431",
+      "treeRows": 16,
+      "lastPageRequested": true
+    },
+    "selection": {
+      "selected": "folder-000002023/11/14 22:134.0 KBフォルダ",
+      "infoPanel": "folder-00000種類フォルダ更新日時2023/11/14 22:13場所/twitter/folder-00000",
+      "renameDisabled": true,
+      "deleteDisabled": true
+    },
+    "console_404_thumbnail_lines": 27
+  },
+  "dtype_reference": {
+    "utc": "2026-10-15T15:28:51.347878+00:00",
+    "source": "Linux getdents64 d_type; no per-entry stat; names not saved",
+    "conditions": "read-only reference; mutable actual data and other load uncontrolled",
+    "runs": [
+      {
+        "label": "fixed-ext4",
+        "entries": 22433,
+        "d_type_counts": {
+          "4": 22432,
+          "8": 1
+        },
+        "unknown": 0,
+        "getdents_calls": 12,
+        "elapsed_sec": 0.07097485405392945
+      },
+      {
+        "label": "actual-virtiofs",
+        "entries": 22433,
+        "d_type_counts": {
+          "4": 22432,
+          "8": 1
+        },
+        "unknown": 0,
+        "getdents_calls": 213,
+        "elapsed_sec": 0.05323752691037953
+      }
+    ]
+  },
+  "verification": {
+    "rust": "426 passed, 6 skipped; cargo make test includes fmt/clippy/lint-style",
+    "web": "505 passed, 65 files, maxWorkers4/testTimeout30000; typecheck/lint/build pass",
+    "web_lint_warnings": 234,
+    "implementation_review": {
+      "agent": "f142619e-6019-4c54-a82b-c2caa8bbedce",
+      "model": "claude-sonnet-5-5",
+      "verdict": "pass",
+      "scope": "S1-S3 code and functional checks; S4 final performance excluded",
+      "tree_before_after": "812f2853e17b510588db207af0b2f8356524a665"
+    },
+    "measurement_review": {
+      "agent": "25f1ff61-5905-45ce-9fe2-2d4d845faf23",
+      "model": "claude-sonnet-5-5",
+      "verdict": "pass",
+      "scope": "final B1 performance, raw data and adoption; B2/B3 excluded",
+      "tree_before_after": "4a33380a1ff457860608c586d778f483100ddff3"
+    }
+  },
+  "limitations": [
+    "Synthetic empty ext4 folders; real media content load not measured.",
+    "OS and VirtioFS cache layers not isolated; no cold-state claim.",
+    "Name/type response omits details that old API returns. Details latency is not included in first summary response.",
+    "Index restart uses a freshly committed seed copied after process stop/WAL checkpoint and within TTL.",
+    "UI uses the same final daemon-D and prewarmed full and summary snapshots; browser HTTP cache disabled, shared Chrome process and other browser caches uncontrolled.",
+    "Default five-second full web suite has an existing Timeline100k timeout in prior record; this full run uses the prescribed 30-second setting without changing product test defaults.",
+    "Early daemon-C results remain as provisional external data; final performance above uses daemon-D.",
+    "No extrapolation to original165s or active background contention. B2/B3 unimplemented.",
+    "Actual VirtioFS d_type reference is mutable/uncontrolled and measures getdents plus Python parsing, not full listing API."
+  ],
+  "sources": {
+    "<tmp>/pxna-browse-run/summary-final-api-01-A.json": "b6f99c64a439a9cae431a34d430ea2604ff92597bde9558ad8e2f0ddf06d501f",
+    "<tmp>/pxna-browse-run/summary-final-api-02-B.json": "460476182d3d8237944315402d721e1a1ebb4ebb993ee3654828cc8a6939c0a0",
+    "<tmp>/pxna-browse-run/summary-final-api-03-B.json": "754cf022af66ca002e24ed45d4dd701c81612e1044886f50cb8469ff22447953",
+    "<tmp>/pxna-browse-run/summary-final-api-04-A.json": "f6f4dd5927d64e87bc9fc29e64bbe48c946a87e144271b3ea6ffbc836585b542",
+    "<tmp>/pxna-browse-run/summary-final-api-05-A.json": "2ba5acf6af878d30df2e067dba94954ada83fb74d61744b29b7985346f1d49a6",
+    "<tmp>/pxna-browse-run/summary-final-api-06-B.json": "ec3e34a8e577b31af8805ab7d738c9829d542238ba3cdf2944132f0da8df9478",
+    "<tmp>/pxna-browse-run/summary-final-api-07-B.json": "5b3ef541f8a9c159e33a6567bb664c35f9e4d3b5a37194939a976f48d8504407",
+    "<tmp>/pxna-browse-run/summary-final-api-08-A.json": "891207fe6cd21fec8c79f5ee133a04ea33b65ddfa76ba1af2e9db33e7f96f3d6",
+    "<tmp>/pxna-browse-run/summary-final-api-09-A.json": "168b478318ec4b5314dfb8d248c199f5fd830720ae98f45dd5ac7c9d5d173b77",
+    "<tmp>/pxna-browse-run/summary-final-api-10-B.json": "2f49ce8ee070997118b4b8f45ec4afdfdcf96827fd64430b6e3f469f236adab5",
+    "<tmp>/pxna-browse-run/summary-final-restart-01-A.json": "d01c60c5fbd86d73832cd6c21ff253d3840eb163a2031dd479bb072d718be901",
+    "<tmp>/pxna-browse-run/summary-final-restart-02-B.json": "8f43f36f35910f7ab2617657c4bdf101bd15f41217e9ae67e501f84383cbd918",
+    "<tmp>/pxna-browse-run/summary-final-restart-03-B.json": "337e4907836e47a101b8f8a6e5313bf587befceef5233c0a88e2294a2a700244",
+    "<tmp>/pxna-browse-run/summary-final-restart-04-A.json": "12c17a07c5ea66152d45cff10d6ade1df389466f254efb4213a226f58969e857",
+    "<tmp>/pxna-browse-run/summary-final-restart-05-A.json": "d38e0e6c2123c895bcf1e3204c416422d84c46117baa640be22b80e56f3963e9",
+    "<tmp>/pxna-browse-run/summary-final-restart-06-B.json": "f0c931d74155d548cd1208cbc9f4c6c227f004c3bb50520e42719e23f7ed8ec0",
+    "<tmp>/pxna-browse-run/summary-final-restart-07-B.json": "1ce566abf0822b52fd9e8cd57a00a88caa664b377d5e20eeaddaa5b3ad0e9266",
+    "<tmp>/pxna-browse-run/summary-final-restart-08-A.json": "2d13ada07afbcc912538e5a39a8f85f7c8273228992f37150c0d8fa782fcafaa",
+    "<tmp>/pxna-browse-run/summary-final-restart-09-A.json": "e962dbaf00728f8889e58e82a91e7daa79ccac070b35d4a1bc3539a802154f3c",
+    "<tmp>/pxna-browse-run/summary-final-restart-10-B.json": "aaa5cdcdec9be01d303eeaf33b2e5bc5372eb2a441333e972831fa3da2bffbeb",
+    "<tmp>/pxna-browse-run/summary-final-api-01-A-cache.json": "96f1f571cec5c50e95058bd64663009503f69f72ff8dde209f1028b1a4010c1c",
+    "<tmp>/pxna-browse-run/summary-final-api-01-A.log": "01a3706959e6901477b220e4ee0a8bfbc929c21e7e50439205c4dd3147664117",
+    "<tmp>/pxna-browse-run/summary-final-api-02-B-cache.json": "2aeb33dd034e45f85b905d34a9933ffb3ec593270a4098c43381822bb5024314",
+    "<tmp>/pxna-browse-run/summary-final-api-02-B.log": "5badfae27c65cb1cf78c036d7e8259780a60244eb6b58834dc8025d1bef35931",
+    "<tmp>/pxna-browse-run/summary-final-api-03-B-cache.json": "f3e9e04272f3c0292c3c7c999d1973645815f50f73a85fccd5257e64674c37fd",
+    "<tmp>/pxna-browse-run/summary-final-api-03-B.log": "89778d98787b62a0ee6655d8570787d0169c9b8fc5c2cb073661c27e2ecbbcfd",
+    "<tmp>/pxna-browse-run/summary-final-api-04-A-cache.json": "bbdf934c012169fc028a5ecd81ee338b1ae46c29c0fc13f4ce5432066781860e",
+    "<tmp>/pxna-browse-run/summary-final-api-04-A.log": "bb63e057ff3c2bb065af436a8887a030b45744de2df6603ac0c89875796a1cac",
+    "<tmp>/pxna-browse-run/summary-final-api-05-A-cache.json": "cc850ef036beb0f62b69b63089d82dceda9316d2fa8dd85dcc71b8337b744c89",
+    "<tmp>/pxna-browse-run/summary-final-api-05-A.log": "e087aeb63c94cdf0a8b052724407cc8d2765f77053ec7fe78d92c73e47774724",
+    "<tmp>/pxna-browse-run/summary-final-api-06-B-cache.json": "9c56dc83198e7de3bbf80cc9f7f1c4702e9ca1aa8df4dfe05039e3cefb2f02db",
+    "<tmp>/pxna-browse-run/summary-final-api-06-B.log": "bcdfea6c90773f2214f65e46e8db55e424acd823bfb39a8e55c809e681d9450d",
+    "<tmp>/pxna-browse-run/summary-final-api-07-B-cache.json": "f149412dc6223f78d7ed0ce7dae0d1c11cbfb24ef8d918d7d21da21c070a71a7",
+    "<tmp>/pxna-browse-run/summary-final-api-07-B.log": "e5b2366a6f0b3321e3dd23cc147746fbd5086fd6fca2785cccf4fee91b497a05",
+    "<tmp>/pxna-browse-run/summary-final-api-08-A-cache.json": "924b203473adef3a45b7d5519928d08b64c546cb2c79234b7414f334169a7832",
+    "<tmp>/pxna-browse-run/summary-final-api-08-A.log": "13de8c7ca57dc9eb7dbe8650b0750d34fc2e95560f838666a1bca18c4e07900e",
+    "<tmp>/pxna-browse-run/summary-final-api-09-A-cache.json": "00ab052367545e6e88ec2d6aa48da2b8fcb2398db0d7aea0b19af2b1918d6d7e",
+    "<tmp>/pxna-browse-run/summary-final-api-09-A.log": "980a79559cdbce90b70c32471c6e23f25a21608d7f774710b7380a9549390f20",
+    "<tmp>/pxna-browse-run/summary-final-api-10-B-cache.json": "c603572579a5aca339174ce27f549bb66bae6949abcffeccd855f97074233a64",
+    "<tmp>/pxna-browse-run/summary-final-api-10-B.log": "648c0a46e11046cce327dc34b3ad61dbe23a75d4f3f161f20f1d72b9b86d0349",
+    "<tmp>/pxna-browse-run/summary-final-index-seed.json": "2de0c73164ba018baebba0c0286a364ec8b252e4b473e74d358e8cb4988dbd6e",
+    "<tmp>/pxna-browse-run/summary-final-restart-01-A.log": "09322aef5242060c55a91dcd7bd88ad4737c4f873f69857362641367da4b8e25",
+    "<tmp>/pxna-browse-run/summary-final-restart-02-B.log": "a42148dea59be9fbbf0585ade2262f55e7309583926d93da787e5cc132e8e23e",
+    "<tmp>/pxna-browse-run/summary-final-restart-03-B.log": "13ad0c549d783080ad150e6bdf871e586bf596eb8bac15b9c6a857ffd1fc269b",
+    "<tmp>/pxna-browse-run/summary-final-restart-04-A.log": "d5670211d9dc64b19005a5e816ea131724209f484a8adcf3d91230a982551038",
+    "<tmp>/pxna-browse-run/summary-final-restart-05-A.log": "4a543c003a76b9c851289a598822514cdd1e62a7d40b5b42a32766fbd810735c",
+    "<tmp>/pxna-browse-run/summary-final-restart-06-B.log": "64953d52091f19bc5185a656b09f064956007790b98b0220dcec8282f66a06ae",
+    "<tmp>/pxna-browse-run/summary-final-restart-07-B.log": "92e584ed49edb31024b83224615ef37c90f86adeb6a5ffc6590f91be3039123e",
+    "<tmp>/pxna-browse-run/summary-final-restart-08-A.log": "bc886ac5589290455113063f57201eb0fce49a55d0696fced7e030c27eb98cbf",
+    "<tmp>/pxna-browse-run/summary-final-restart-09-A.log": "397150534e488072cb6249a76063a04809d47d4ec020e440c9f8a80c0a931a88",
+    "<tmp>/pxna-browse-run/summary-final-restart-10-B.log": "0b8a83a4589f0f630bf5bf75dc0e5224f7359e8a65de7f78f1e8a819230732ab",
+    "<tmp>/pxna-browse-run/summary-ui-01-A.json": "827433d9ee0cb0a30c29ae21cdc882c7968ff6fc80d139868e39e947cc865d06",
+    "<tmp>/pxna-browse-run/summary-ui-02-B.json": "e9869ee2752f7a6135a53939c8ff3baed180df7f74f74e7e0a235266515c3955",
+    "<tmp>/pxna-browse-run/summary-ui-03-B.json": "831ef5eb067b9219750ddb9a8f468e573f003ae1d98a4d57046581611bb0bcb2",
+    "<tmp>/pxna-browse-run/summary-ui-04-A.json": "7dc04b8d48ebae405d18461d1fdc05c2088617df577b79c4da311c610957ff3f",
+    "<tmp>/pxna-browse-run/summary-ui-05-A.json": "8fb579fa1908ec586f65d24d727f09cd73202f01d8c39d1317343f170d40473c",
+    "<tmp>/pxna-browse-run/summary-ui-06-B.json": "9a86b9136d712796b9f75d41587868f15ee367bd97a98943cdcf3ee123b7a6ab",
+    "<tmp>/pxna-browse-run/summary-ui-07-B.json": "9c6953a6053e13f771947af597064b059baff729b101fe2a12299861a78dbd6a",
+    "<tmp>/pxna-browse-run/summary-ui-08-A.json": "13ffc35b75d74d4baf4ea3df5db129823e228103eec6c6c73b34992d4f396a2f",
+    "<tmp>/pxna-browse-run/summary-ui-09-A.json": "764a06a77ff7c35e43e83abd41aef37e01ee6a7c26756889df84d1f21633c576",
+    "<tmp>/pxna-browse-run/summary-ui-10-B.json": "f4c1dc4fc2d1d2743a85194131282b93665ac8f619e7226e2ea072e8e2955384",
+    "<tmp>/pxna-browse-run/summary-final-http-checks.json": "fc4863269c7a2f836d4c556402afb74c46ee05df596cfddb2246901718ba0c29",
+    "<tmp>/pxna-browse-run/summary-browser-list-check.json": "7a1f160ff9079521a6fd75242d9ed858026cf0531eb74661c8c2ab5219774905",
+    "<tmp>/pxna-browse-run/summary-browser-end-check.json": "d90c67cff8527808c0a2facbe3623c855e534d0fe8ff691d1ab03028754b627c",
+    "<tmp>/pxna-browse-run/summary-browser-selection-check.json": "7ffc44004bde3bd938c9623dd4f8bd2fafe00054ada61cc59f465d95583475e9",
+    "<tmp>/.playwright-cli/console-2026-10-15T16-20-16-396Z.log": "8e413ae9a72afbe50c1ab91a1499a16a9da48124f45a93b82c1bd5252ebf8157",
+    "<tmp>/pxna-browse-fixture/manifest.json": "e161a04ac3b0b8f668792aca07c87a3f5e0421d20cf86a5005b0787b18e8b41d",
+    "<tmp>/pxna-dtype-20261015.json": "1e7c58eb74a4a4eb62c4e8a14f8e8f9db7e9bb04f5870ad13db4a67ce2d6d1d5",
+    "<repo>/docs/measurements/2026-10-15-browse-phase-one.json": "018f02e3cb2c736e7219f30b35d3f55ba391a1c0a565e2b8ef45f30c95041066",
+    "<tmp>/pxna-browse-run/summary-D-build.json": "ff24980bc99b85f9fcb4fd2fed60074eef6a9e430deb7f821cca15fc13e00a5f",
+    "<tmp>/pxna-browse-run/summary-web-C3-build.json": "052708d769ee124e804339827c0a556186e5ee375f42fa9d6f2e0949f90a5a08",
+    "<tmp>/pxna-summary-corrected-units.log": "594418e86398e9c053a53e273c4571d7174c6605e5cf01be6ff35120a37023d6",
+    "<tmp>/pxna-rust-summary-corrected-final.log": "f093150cf56e226ff2d69fe0ec6b36e88feca189ae44343e419084b97962f995",
+    "<tmp>/pxna-summary-C3-tests.log": "c91a133999bc457fc9c78fdd5f929fedbeabd25fca61eaf67e8ca6846dbe7319",
+    "<tmp>/pxna-summary-C3-typecheck.log": "e18a527e8ef23412dabe1e56bf60169ad6ce8848324d9c5186809a4e2d7cc1e5",
+    "<tmp>/pxna-summary-C3-lint.log": "3455628cc7daece8cb0ad5523d7e00ba5efac37b0307e8f080a4cbd46da9f690",
+    "<tmp>/pxna-summary-C3-build.log": "cfd5aebe915f0c1750e3bc3a6523910130fe299c18140e7c12405dbf56465155",
+    "<tmp>/pxna-summary-fixture-verify.log": "b180021427b30d4335d2aedb1a8f642a3289e2d7a0d6e5d553450339729fa9bc",
+    "<tmp>/pxna-doc-verifier-summary-code-before.json": "917a1880a3de81701f639c2a35f0afcefb9ce9734d294e32a16e23e679a559e1",
+    "<tmp>/pxna-doc-verifier-summary-code-after.json": "917a1880a3de81701f639c2a35f0afcefb9ce9734d294e32a16e23e679a559e1",
+    "<tmp>/pxna-browse-run/summary-final-tools/tools/performance/api.py": "f235951c937ae9dc243eb43b56e227662989bc6b89999c9180eb04255e18a3dd",
+    "<tmp>/pxna-browse-run/summary-final-tools/tools/performance/browse.mjs": "44283f174a8cd2297d2575cdae1323addcc3a043e8a73b915749a5bb1758e8a8",
+    "<tmp>/pxna-browse-run/summary-final-tools/tools/performance/fixture.py": "83697f5dda0174a3373d864af52149095829902e25f268ab012c88da0ebcadd2",
+    "<tmp>/pxna-browse-run/summary-final-tools/docs/measurements/browse-performance-protocol.md": "462129c8e502f9c17bbe5120e01a772507bc777a4245d14516a4b5fe2510f043",
+    "<tmp>/pxna-browse-run/summary-completed-plan.md": "faab577a5ef702375fb7f1c85f8b15ed96232a61cbc1fcdbf66e0869988d1790"
+  },
+  "tool_snapshots": {
+    "tools/performance/api.py": {
+      "snapshot": "<tmp>/pxna-browse-run/summary-final-tools/tools/performance/api.py",
+      "sha256": "f235951c937ae9dc243eb43b56e227662989bc6b89999c9180eb04255e18a3dd"
+    },
+    "tools/performance/browse.mjs": {
+      "snapshot": "<tmp>/pxna-browse-run/summary-final-tools/tools/performance/browse.mjs",
+      "sha256": "44283f174a8cd2297d2575cdae1323addcc3a043e8a73b915749a5bb1758e8a8"
+    },
+    "tools/performance/fixture.py": {
+      "snapshot": "<tmp>/pxna-browse-run/summary-final-tools/tools/performance/fixture.py",
+      "sha256": "83697f5dda0174a3373d864af52149095829902e25f268ab012c88da0ebcadd2"
+    },
+    "docs/measurements/browse-performance-protocol.md": {
+      "snapshot": "<tmp>/pxna-browse-run/summary-final-tools/docs/measurements/browse-performance-protocol.md",
+      "sha256": "462129c8e502f9c17bbe5120e01a772507bc777a4245d14516a4b5fe2510f043"
+    }
+  },
+  "completed_plan_snapshot": "<tmp>/pxna-browse-run/summary-completed-plan.md"
+}

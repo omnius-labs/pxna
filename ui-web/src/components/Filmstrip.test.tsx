@@ -1,0 +1,217 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, expect, it, vi } from "vitest";
+
+import type { Entry } from "../library/entries";
+import type { Listing } from "../library/listing";
+import { stubResizeObserver } from "../testing/preferences";
+import type { ThumbnailQueue } from "../thumbnails/queue";
+import { Filmstrip } from "./Filmstrip";
+
+const mock = vi.hoisted(() => ({
+    first: 0,
+    last: 2,
+    scrollToIndex: vi.fn(),
+    options: undefined as { horizontal?: boolean; count: number } | undefined,
+}));
+vi.mock("@tanstack/react-virtual", () => ({
+    useVirtualizer: (options: { horizontal?: boolean; count: number; estimateSize: () => number }) => {
+        mock.options = options;
+        return {
+            range: { startIndex: mock.first, endIndex: mock.last },
+            scrollToIndex: mock.scrollToIndex,
+            getTotalSize: () => options.count * options.estimateSize(),
+            getVirtualItems: () =>
+                Array.from({ length: mock.last - mock.first + 1 }, (_, offset) => ({
+                    index: mock.first + offset,
+                    key: mock.first + offset,
+                    start: (mock.first + offset) * options.estimateSize(),
+                    size: options.estimateSize(),
+                })),
+        };
+    },
+}));
+afterEach(() => {
+    mock.scrollToIndex.mockReset();
+    mock.first = 0;
+    mock.last = 2;
+});
+
+const image = (index: number): Entry => ({
+    name: `img-${index}.png`,
+    path: `/dir/img-${index}.png`,
+    kind: "file",
+    metadata: { size: 1, readonly: false, contentType: "image/png" },
+    file: { archive: false },
+});
+const video: Entry = {
+    name: "clip.mp4",
+    path: "/dir/clip.mp4",
+    kind: "file",
+    metadata: { size: 1, readonly: false, contentType: "video/mp4" },
+    file: { archive: false },
+};
+const folder: Entry = { name: "sub", path: "/dir/sub", kind: "folder", metadata: { size: 0, readonly: false } };
+
+/// 0 は動画、1 はフォルダ、2 以降は画像、`loaded` を超える位置は未読。
+function listingOf(totalCount: number, loaded: number): Listing {
+    return {
+        truncated: false,
+        totalCount,
+        version: 1,
+        snapshot: "one",
+        entryAt: (index) => (index >= loaded ? undefined : index === 0 ? video : index === 1 ? folder : image(index)),
+        pageStatus: () => "loaded",
+        pageError: () => null,
+        loadPages: async () => {},
+        retry: () => {},
+    };
+}
+
+const IDLE = { status: "idle" };
+function fakeQueue() {
+    const setWanted = vi.fn();
+    const queue = {
+        subscribe: () => () => {},
+        getState: () => IDLE,
+        setWanted,
+    } as unknown as ThumbnailQueue;
+    return { queue, setWanted };
+}
+
+async function render(props: Partial<React.ComponentProps<typeof Filmstrip>> = {}) {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const restore = stubResizeObserver();
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const { queue, setWanted } = fakeQueue();
+    const onSelect = vi.fn();
+    const onPages = vi.fn();
+    const all = {
+        listing: listingOf(1000, 200),
+        base: "/dir",
+        index: 3,
+        queue,
+        onSelect,
+        onPages,
+        ...props,
+    };
+    await act(async () => root.render(<Filmstrip {...all} />));
+    return {
+        host,
+        onSelect,
+        onPages,
+        setWanted,
+        rerender: (next: Partial<React.ComponentProps<typeof Filmstrip>>) =>
+            act(async () => root.render(<Filmstrip {...all} {...next} />)),
+        dispose: async () => {
+            await act(async () => root.unmount());
+            host.remove();
+            restore();
+        },
+    };
+}
+const byName = (host: HTMLElement, name: string) => host.querySelector<HTMLElement>(`[aria-label="${name}"]`);
+
+it("1000 件の一覧に、1 件 56 px の横の仮想スクロールで、全体の幅を先に確保する", async () => {
+    const h = await render();
+    try {
+        expect(mock.options?.horizontal).toBe(true);
+        expect(mock.options?.count).toBe(1000);
+        const inner = byName(h.host, "フィルムストリップ")?.firstElementChild as HTMLElement;
+        expect(inner.style.width).toBe("56000px");
+        // 描くのは、仮想スクロールが返した見えている範囲だけである。
+        expect(h.host.querySelectorAll("[aria-label$='.png'], [aria-label$='.mp4'], [aria-label=sub]")).toHaveLength(3);
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("画像の位置はボタンで、押すと起点からの相対パスで移動し、開いている位置を強調する", async () => {
+    mock.first = 2;
+    mock.last = 4;
+    const h = await render({ index: 3 });
+    try {
+        const current = byName(h.host, "img-3.png");
+        expect(current?.tagName).toBe("BUTTON");
+        expect(current?.getAttribute("aria-current")).toBe("true");
+        expect(byName(h.host, "img-4.png")?.hasAttribute("aria-current")).toBe(false);
+        await act(async () => byName(h.host, "img-4.png")?.click());
+        expect(h.onSelect).toHaveBeenCalledExactlyOnceWith("img-4.png");
+        await act(async () => current?.click());
+        expect(h.onSelect).toHaveBeenCalledTimes(1);
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("画像でない Entry の位置は、ボタンにせず、種類のアイコンを出す", async () => {
+    mock.first = 0;
+    mock.last = 2;
+    const h = await render();
+    try {
+        for (const name of ["clip.mp4", "sub"]) {
+            const element = byName(h.host, name);
+            expect(element?.tagName).toBe("DIV");
+            expect(element?.querySelector("svg")).not.toBeNull();
+            await act(async () => element?.click());
+        }
+        expect(h.onSelect).not.toHaveBeenCalled();
+        expect(h.host.querySelectorAll("button")).toHaveLength(1);
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("未読の位置は、空の枠を出して、ボタンにしない", async () => {
+    mock.first = 198;
+    mock.last = 201;
+    const h = await render({ listing: listingOf(1000, 200), index: 198 });
+    try {
+        expect(h.host.querySelectorAll("[data-placeholder]")).toHaveLength(2);
+        expect(h.host.querySelectorAll("button")).toHaveLength(2);
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("開いている位置を変えると、その位置を中央にするスクロールを指定する", async () => {
+    const h = await render({ index: 3 });
+    try {
+        expect(mock.scrollToIndex).toHaveBeenLastCalledWith(3, { align: "center" });
+        await h.rerender({ index: 7 });
+        expect(mock.scrollToIndex).toHaveBeenLastCalledWith(7, { align: "center" });
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("見えている範囲のページを渡し、範囲が動くと前のページを外し、閉じると空にする", async () => {
+    mock.first = 0;
+    mock.last = 22;
+    const h = await render();
+    try {
+        expect([...(h.onPages.mock.lastCall?.[0] ?? [])]).toEqual([0]);
+        mock.first = 909;
+        mock.last = 931;
+        await h.rerender({});
+        expect([...(h.onPages.mock.lastCall?.[0] ?? [])]).toEqual([4]);
+    } finally {
+        await h.dispose();
+    }
+    expect([...(h.onPages.mock.lastCall?.[0] ?? [])]).toEqual([]);
+});
+
+it("見えている範囲の画像だけサムネイルを要求し、閉じると要求を取り消す", async () => {
+    mock.first = 0;
+    mock.last = 4;
+    const h = await render();
+    const wanted = h.setWanted.mock.lastCall?.[0] as ReadonlyMap<string, number>;
+    expect(wanted.has("/dir/img-2.png")).toBe(true);
+    expect(wanted.has("/dir/clip.mp4")).toBe(false);
+    expect(wanted.has("/dir/sub")).toBe(false);
+    await h.dispose();
+    expect(h.setWanted.mock.lastCall?.[0]).toEqual(new Map());
+});

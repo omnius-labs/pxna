@@ -1,0 +1,3477 @@
+openapi: 3.0.3
+info:
+    title: Pxna
+    version: 0.3.0
+    description: |
+        Pxna daemon API for authenticated remote file browsing and
+        management.
+
+        The first registered user becomes the single owner for the Pxna
+        instance. Public setup is disabled after that user is created.
+
+        Browser clients use an HttpOnly session cookie. Native clients use the same server-side session through an opaque Bearer token.
+        File APIs behave identically for both authentication transports.
+
+        File paths are always relative to a daemon-configured Library. The
+        API never accepts arbitrary host filesystem roots from clients.
+
+        A path inside an archive is written by plain concatenation, as in
+        `/photos/a.zip/dir/x.png`. `RelativePath` has no archive separator
+        and its grammar does not change. The daemon locates the boundary by
+        probing the filesystem, which is unambiguous because a file and a
+        directory cannot share a name in one directory. An archive's root is
+        addressed by the endpoint rather than a trailing slash: the folder
+        endpoints treat `/photos/a.zip` as the archive root, the file
+        endpoints treat it as the zip file itself.
+
+        Mutations follow one rule set. Operations whose duration is
+        independent of content size respond synchronously; operations that
+        scale with content size return `202` and an operation id that is
+        polled through the Operations API. Copy, move, and upload share a
+        `conflict` policy that defaults to `fail`, so nothing is overwritten
+        unless a client explicitly asks for it. Mutations are rejected with
+        `403` both for paths inside archives and for Libraries marked
+        `readonly`.
+    license:
+        name: MIT
+
+servers:
+    - url: http://localhost:6050/api/v1
+      description: Local development daemon
+
+tags:
+    - name: Health
+      description: Daemon liveness checks.
+    - name: Setup
+      description: One-time owner registration.
+    - name: Auth
+      description: Password login and session management.
+    - name: Preferences
+      description: Display preferences the owner saves on the server.
+    - name: Libraries
+      description: Libraries available to the current user.
+    - name: Folders
+      description: Folder metadata and folder listing.
+    - name: Files
+      description: File metadata and byte content.
+    - name: Thumbnails
+      description: Generated preview images for supported files.
+    - name: Uploads
+      description: Resumable chunked upload sessions.
+    - name: Video
+      description: Media information and authenticated HLS playback sessions.
+    - name: Operations
+      description: Progress tracking for long-running mutations.
+    - name: Timeline
+      description: Images and videos of a Library ordered by their timeline date.
+    - name: Rating
+      description: The current user's good or bad rating of an image or video.
+    - name: Tags
+      description: The current user's tags on images and videos, and the words the user has created.
+
+security:
+    - cookieAuth: []
+    - bearerAuth: []
+
+paths:
+    /health:
+        get:
+            tags:
+                - Health
+            summary: Check daemon health
+            operationId: getHealth
+            security: []
+            responses:
+                "200":
+                    description: The daemon is running.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/HealthResponse"
+                            example:
+                                result: true
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /setup/status:
+        get:
+            tags:
+                - Setup
+            summary: Get initial setup status
+            description: Checks whether the owner has already been registered.
+            operationId: getSetupStatus
+            security: []
+            responses:
+                "200":
+                    description: Current setup status.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/SetupStatus"
+                            examples:
+                                uninitialized:
+                                    value:
+                                        initialized: false
+                                initialized:
+                                    value:
+                                        initialized: true
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /setup:
+        post:
+            tags:
+                - Setup
+            summary: Register the initial owner
+            description: |
+                Creates the only owner and an authenticated session. This operation
+                is available only while no user exists. The check and user creation must
+                be performed atomically so concurrent requests cannot create two owners.
+
+                With `sessionTransport=cookie`, the session is returned through
+                `Set-Cookie` and `accessToken` is omitted. With
+                `sessionTransport=bearer`, the opaque token is returned as
+                `accessToken` for storage in the native client's secure credential store.
+            operationId: createInitialSetup
+            security: []
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/InitialSetupRequest"
+            responses:
+                "201":
+                    description: Owner and authenticated session created.
+                    headers:
+                        Set-Cookie:
+                            $ref: "#/components/headers/SessionCookie"
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/AuthResult"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "409":
+                    $ref: "#/components/responses/AlreadyInitialized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /auth/login:
+        post:
+            tags:
+                - Auth
+            summary: Log in with username and password
+            description: |
+                Creates a server-side session after password verification.
+
+                Browser clients request `cookie`; native clients request `bearer`.
+                Both transports create the same kind of revocable server-side session.
+                No refresh token or JWT is used.
+            operationId: login
+            security: []
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/LoginRequest"
+            responses:
+                "200":
+                    description: Login succeeded.
+                    headers:
+                        Set-Cookie:
+                            $ref: "#/components/headers/SessionCookie"
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/AuthResult"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /auth/me:
+        get:
+            tags:
+                - Auth
+            summary: Get the current user and session
+            operationId: getCurrentUser
+            responses:
+                "200":
+                    description: Current authenticated user and session.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/CurrentAuth"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /auth/session:
+        delete:
+            tags:
+                - Auth
+            summary: Revoke the current session
+            description: |
+                Revokes the server-side session. Cookie clients also receive an expired
+                session cookie. Native clients must delete the token from a secure
+                credential store after this request succeeds.
+            operationId: deleteCurrentSession
+            responses:
+                "204":
+                    description: Session revoked.
+                    headers:
+                        Set-Cookie:
+                            $ref: "#/components/headers/ClearedSessionCookie"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /preferences:
+        get:
+            tags:
+                - Preferences
+            summary: Get the display preferences
+            description: |
+                Returns the saved display preferences. When nothing has been
+                saved yet, the server returns the default values.
+            operationId: getPreferences
+            responses:
+                "200":
+                    description: Display preferences.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Preferences"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+        put:
+            tags:
+                - Preferences
+            summary: Replace the display preferences
+            description: |
+                Replaces all display preferences with the given values. The
+                server validates the ranges and keeps the saved values when
+                any value is out of range. The ranges are part of this
+                contract, so a value out of range is rejected with 400 before
+                the handler runs, and that 400 body is plain text rather than
+                an `ErrorResponse`.
+            operationId: putPreferences
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/Preferences"
+            responses:
+                "200":
+                    description: The saved display preferences.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Preferences"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries:
+        get:
+            tags:
+                - Libraries
+            summary: List available Libraries
+            description: |
+                Returns the daemon-configured libraries owned by the current
+                owner. Physical host paths are not exposed.
+            operationId: listLibraries
+            responses:
+                "200":
+                    description: Available Libraries.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/LibraryList"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}:
+        get:
+            tags:
+                - Libraries
+            summary: Get a Library
+            operationId: getLibrary
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            responses:
+                "200":
+                    description: Library metadata.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/LibraryResponse"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/folders:
+        get:
+            tags:
+                - Folders
+            summary: Get folder metadata
+            operationId: getFolder
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            responses:
+                "200":
+                    description: Folder metadata.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FolderResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+        post:
+            tags:
+                - Folders
+            summary: Create a folder
+            description: |
+                Creates a new folder. With `createParents=true`, missing
+                intermediate folders are created as well. An entry already
+                existing at `path` returns `409`; a missing parent with
+                `createParents=false` returns `404`.
+            operationId: createFolder
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/CreateFolderRequest"
+            responses:
+                "201":
+                    description: Folder created.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FolderResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/folders/entries:
+        get:
+            tags:
+                - Folders
+            summary: List folder entries
+            description: |
+                Lists direct children by default. Set `recursive=true` only for an
+                explicit recursive traversal within the selected Library.
+
+                `rating` and `tag` keep only the images and videos that the
+                current user has rated or tagged that way; they combine with the
+                other filters. While one of them is set, `snapshot` also changes
+                whenever the user rates or tags anything, so a client that pages
+                through the result re-reads from the start instead of mixing
+                pages from before and after the change.
+            operationId: listFolderEntries
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/RecursiveQuery"
+                - $ref: "#/components/parameters/ListOffsetQuery"
+                - $ref: "#/components/parameters/NameFilterQuery"
+                - $ref: "#/components/parameters/ListLimitQuery"
+                - $ref: "#/components/parameters/SortQuery"
+                - $ref: "#/components/parameters/OrderQuery"
+                - $ref: "#/components/parameters/IncludeHiddenQuery"
+                - $ref: "#/components/parameters/FoldersFirstQuery"
+                - $ref: "#/components/parameters/FoldersOnlyQuery"
+                - $ref: "#/components/parameters/RatingFilterQuery"
+                - $ref: "#/components/parameters/TagFilterQuery"
+            responses:
+                "200":
+                    description: Folder entries.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FolderListing"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /capabilities:
+        get:
+            tags: [Libraries]
+            summary: Get optional browsing capabilities
+            operationId: getCapabilities
+            description: |
+                Authenticated feature discovery. A client falls back to the
+                original detailed listing when this endpoint is absent or a
+                required capability is false. Errors on an existing feature
+                endpoint are not interpreted as absence of that feature.
+            responses:
+                "200":
+                    description: Optional browsing features implemented by this daemon.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Capabilities"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/folders/summaries:
+        get:
+            tags: [Folders]
+            summary: List names and kinds without detailed metadata
+            operationId: listFolderSummaries
+            description: |
+                Lists direct children only. The snapshot identifies the sequence
+                of names and kinds; subsequent detail requests do not change
+                its ordering or total count. Size, timestamps, readonly and
+                symbolic-link targets are not present in this response.
+                Use listFolderEntries for recursive, size or modified_at sorting.
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/ListOffsetQuery"
+                - $ref: "#/components/parameters/NameFilterQuery"
+                - $ref: "#/components/parameters/ListLimitQuery"
+                - name: sort
+                  in: query
+                  schema:
+                      type: string
+                      enum: [name, kind]
+                      default: name
+                - $ref: "#/components/parameters/OrderQuery"
+                - $ref: "#/components/parameters/IncludeHiddenQuery"
+                - $ref: "#/components/parameters/FoldersFirstQuery"
+                - $ref: "#/components/parameters/FoldersOnlyQuery"
+            responses:
+                "200":
+                    description: Names and kinds from one summary snapshot.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FolderSummaryListing"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/entries/details:
+        post:
+            tags: [Folders]
+            summary: Read current details for up to 200 entries
+            operationId: getEntryDetails
+            description: |
+                Read-only metadata request. Validates all paths and rejects
+                duplicates after normalization before resolving any entry.
+                Returns one result per path in request order, with normalized
+                Library-relative paths. Per-entry failures do not discard the
+                other results. Resolves at most four entries concurrently across
+                all requests and Libraries. The leaf is inspected without
+                following a symbolic link, as in a directory listing.
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/EntryDetailsRequest"
+            responses:
+                "200":
+                    description: Exactly one detail or error kind per requested path.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryDetailsResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "413":
+                    $ref: "#/components/responses/PayloadTooLarge"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/folders/children:
+        get:
+            tags: [Folders]
+            summary: Probe for a folder-like direct child within a small budget
+            operationId: probeFolderChildren
+            description: |
+                A tri-state hint, independent of loading the child listing.
+                Counts directories and archive hints, not symlink targets.
+                After authentication and path validation, the probe includes
+                boundary checks and worker waiting in a 50 ms response budget,
+                examines at most 128 entries, and stops at the first match.
+                Returns null when busy, incomplete or interrupted. False is
+                returned only after reaching EOF without a matching child.
+                Does not open or extract a new archive just for this probe.
+                A timed-out blocking call retains its work slot until it exits.
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/IncludeHiddenQuery"
+            responses:
+                "200":
+                    description: True, confirmed false, or unknown (null).
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FolderChildrenProbe"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "501":
+                    description: Child probes are not provided; childProbes is false. No response body.
+
+    /libraries/{libraryId}/timeline/entries:
+        get:
+            tags:
+                - Timeline
+            summary: List timeline entries
+            description: |
+                Lists the images and videos of a Library, including those inside
+                archives, from newest to oldest timeline date. The result comes
+                from the timeline index that the daemon builds in the
+                background, not from a traversal at request time.
+
+                At most one of `after`, `before`, `month` and `around` selects
+                where the page starts. Without any of them the page starts at
+                the newest entry. `previous` and `next` are cursors for the
+                pages before and after the returned entries and are absent
+                when there is nothing further in that direction.
+            operationId: listTimelineEntries
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - name: after
+                  in: query
+                  required: false
+                  description: Cursor from `next`. Returns the entries older than the cursor.
+                  schema:
+                      type: string
+                - name: before
+                  in: query
+                  required: false
+                  description: Cursor from `previous`. Returns the entries newer than the cursor.
+                  schema:
+                      type: string
+                - name: month
+                  in: query
+                  required: false
+                  description: Starts at the newest entry of this month (`YYYY-MM`), or of the next older month that has entries.
+                  schema:
+                      type: string
+                      pattern: "^[0-9]{4}-[0-9]{2}$"
+                - name: around
+                  in: query
+                  required: false
+                  description: Returns a page that has this entry near its middle.
+                  schema:
+                      $ref: "#/components/schemas/RelativePath"
+                - $ref: "#/components/parameters/ListLimitQuery"
+            responses:
+                "200":
+                    description: Timeline entries.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TimelineListing"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/timeline/months:
+        get:
+            tags:
+                - Timeline
+            summary: List the months that have timeline entries
+            description: |
+                Returns the number of entries per month, newest month first.
+                The counts are kept up to date together with the timeline
+                index, so they always equal the number of entries `entries`
+                returns for that month.
+            operationId: listTimelineMonths
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            responses:
+                "200":
+                    description: Entry counts per month.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TimelineMonths"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/timeline/status:
+        get:
+            tags:
+                - Timeline
+            summary: Get the state of the timeline scan
+            operationId: getTimelineStatus
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            responses:
+                "200":
+                    description: State of the scan.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TimelineStatus"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/timeline/refresh:
+        post:
+            tags:
+                - Timeline
+            summary: Start a full timeline scan
+            description: |
+                Starts a scan of the whole Library in the background and
+                returns the current state. When a full scan is already
+                running, nothing is started.
+            operationId: refreshTimeline
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            responses:
+                "202":
+                    description: The scan is running.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TimelineStatus"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/folders/copy:
+        post:
+            tags:
+                - Folders
+            summary: Copy folders
+            description: |
+                Copies whole folder trees. Folder copies always run
+                asynchronously because their duration scales with tree size.
+                Per-entry conflicts are resolved with `conflict` and reported
+                in the operation result.
+            operationId: copyFolders
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/EntryTransferRequest"
+            responses:
+                "202":
+                    description: Copy operation started.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/folders/move:
+        post:
+            tags:
+                - Folders
+            summary: Move or rename folders
+            description: |
+                Moves folders. A rename is a move whose destination stays in
+                the same parent. A single source moving within one Library is
+                a metadata-only rename and completes synchronously with
+                `200`; the returned entry carries the final path. Multi-source
+                and cross-library moves return `202`. A cross-library move
+                copies the tree and then deletes the source.
+            operationId: moveFolders
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/EntryTransferRequest"
+            responses:
+                "200":
+                    description: Moved synchronously.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryList"
+                "202":
+                    description: Move operation started.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/folders/delete:
+        post:
+            tags:
+                - Folders
+            summary: Delete folders
+            description: |
+                Permanently deletes folders; there is no trash. With
+                `recursive=false` every target must be empty and deletion
+                completes synchronously with `204`; a non-empty target
+                returns `409`. With `recursive=true` whole trees are deleted
+                through an asynchronous operation.
+            operationId: deleteFolders
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/DeleteFoldersRequest"
+            responses:
+                "202":
+                    description: Delete operation started.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "204":
+                    description: Folders deleted.
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/files:
+        get:
+            tags:
+                - Files
+            summary: Get file metadata
+            operationId: getFile
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            responses:
+                "200":
+                    description: File metadata.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FileResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/files/content:
+        get:
+            tags:
+                - Files
+            summary: Read file content
+            description: |
+                Streams raw file bytes. Clients may use either HTTP `Range` or the
+                explicit `offset` and `limit` query parameters. If both are provided,
+                `Range` takes precedence. With neither `offset` nor `limit`, the whole
+                file is streamed. With `offset` alone, the window is 1 MiB.
+            operationId: readFileContent
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/RangeHeader"
+                - $ref: "#/components/parameters/OffsetQuery"
+                - $ref: "#/components/parameters/ReadLimitQuery"
+            responses:
+                "200":
+                    description: Full or requested file bytes.
+                    headers:
+                        Accept-Ranges:
+                            $ref: "#/components/headers/AcceptRanges"
+                        Content-Length:
+                            $ref: "#/components/headers/ContentLength"
+                        ETag:
+                            $ref: "#/components/headers/ETag"
+                    content:
+                        application/octet-stream:
+                            schema:
+                                type: string
+                                format: binary
+                "206":
+                    description: Partial file bytes.
+                    headers:
+                        Accept-Ranges:
+                            $ref: "#/components/headers/AcceptRanges"
+                        Content-Range:
+                            $ref: "#/components/headers/ContentRange"
+                        Content-Length:
+                            $ref: "#/components/headers/ContentLength"
+                        ETag:
+                            $ref: "#/components/headers/ETag"
+                    content:
+                        application/octet-stream:
+                            schema:
+                                type: string
+                                format: binary
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "416":
+                    $ref: "#/components/responses/RangeNotSatisfiable"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+        put:
+            tags:
+                - Files
+            summary: Write file content in one request
+            description: |
+                Writes a whole file from the raw request body. The bytes are
+                staged as a hidden `.pxna-tmp-*` file in the target's own
+                directory and renamed into place atomically, so a failed
+                request never leaves a partial file at the target path.
+                Staging next to the target keeps the rename inside one
+                filesystem even when the Library spans mounts.
+                Bodies larger than 32 MiB are rejected with `413`; use an
+                upload session for those.
+            operationId: writeFileContent
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/ConflictQuery"
+            requestBody:
+                required: true
+                content:
+                    application/octet-stream:
+                        schema:
+                            type: string
+                            format: binary
+            responses:
+                "201":
+                    description: File written.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FileResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "413":
+                    $ref: "#/components/responses/PayloadTooLarge"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "507":
+                    $ref: "#/components/responses/InsufficientStorage"
+
+    /libraries/{libraryId}/files/copy:
+        post:
+            tags:
+                - Files
+            summary: Copy files
+            description: |
+                Copies files into a destination folder or, for a single
+                source, to an exact destination path. File copies always run
+                asynchronously because their duration scales with file size.
+                Per-entry conflicts are resolved with `conflict` and reported
+                in the operation result.
+            operationId: copyFiles
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/EntryTransferRequest"
+            responses:
+                "202":
+                    description: Copy operation started.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/files/move:
+        post:
+            tags:
+                - Files
+            summary: Move or rename files
+            description: |
+                Moves files. A rename is a move whose destination stays in
+                the same folder. A single source moving within one Library is
+                a metadata-only rename and completes synchronously with
+                `200`; the returned entry carries the final path. Multi-source
+                and cross-library moves return `202`. A cross-library move
+                copies the bytes and then deletes the source.
+            operationId: moveFiles
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/EntryTransferRequest"
+            responses:
+                "200":
+                    description: Moved synchronously.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryList"
+                "202":
+                    description: Move operation started.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/files/delete:
+        post:
+            tags:
+                - Files
+            summary: Delete files
+            description: |
+                Permanently deletes files; there is no trash. A single source
+                completes synchronously with `204`. Multiple sources are
+                deleted through an asynchronous operation.
+            operationId: deleteFiles
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/DeleteFilesRequest"
+            responses:
+                "202":
+                    description: Delete operation started.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "204":
+                    description: File deleted.
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/thumbnails:
+        get:
+            tags:
+                - Thumbnails
+            summary: Get a thumbnail
+            description: |
+                Returns a generated image for an image, a video, a folder, or
+                an archive.
+
+                `variant` selects what is generated. `thumbnail` is the small
+                image shown in a grid tile; for a video it is the first frame.
+                `display` is an aspect-preserving image whose long edge fits
+                the display size, shown first by a viewer; without `width`
+                and `height` it uses the largest display size, not the
+                default 256. `sprite` is a
+                video's frames placed side by side in one image, and the
+                `Pxna-Frame-Count` header tells how many frames it holds.
+
+                The server rounds `width` and `height` up to its fixed size
+                steps, so the returned image can be larger than requested.
+
+                For a folder or an archive, the server picks the first image
+                or video among its direct children in natural name order and
+                returns that entry's thumbnail; `NotFound` means there is none.
+
+                The response `Content-Type` follows `format`.
+            operationId: getThumbnail
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/ThumbnailVariantQuery"
+                - $ref: "#/components/parameters/ThumbnailWidthQuery"
+                - $ref: "#/components/parameters/ThumbnailHeightQuery"
+                - $ref: "#/components/parameters/ThumbnailFormatQuery"
+                - $ref: "#/components/parameters/ResizeQuery"
+                - $ref: "#/components/parameters/ResamplerQuery"
+                - $ref: "#/components/parameters/AnchorQuery"
+            responses:
+                "200":
+                    description: Thumbnail image.
+                    headers:
+                        Cache-Control:
+                            $ref: "#/components/headers/CacheControl"
+                        ETag:
+                            $ref: "#/components/headers/ETag"
+                        Pxna-Frame-Count:
+                            $ref: "#/components/headers/PxnaFrameCount"
+                    content:
+                        image/webp:
+                            schema:
+                                type: string
+                                format: binary
+                        image/jpeg:
+                            schema:
+                                type: string
+                                format: binary
+                        image/png:
+                            schema:
+                                type: string
+                                format: binary
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/uploads:
+        post:
+            tags:
+                - Uploads
+            summary: Create an upload session
+            description: |
+                Creates a resumable upload session for one file. The final
+                size must be declared up front and is verified at commit.
+                Chunks are staged as a hidden `.pxna-tmp-*` file in the
+                target's own directory; the target path itself is only
+                touched at commit time. With `conflict=fail`, an existing
+                target is rejected both here and again at commit.
+
+                Sessions expire 24 hours after creation and are held in
+                memory only, so a daemon restart discards them.
+            operationId: createUpload
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/UploadCreateRequest"
+            responses:
+                "201":
+                    description: Upload session created.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/UploadResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "507":
+                    $ref: "#/components/responses/InsufficientStorage"
+
+    /libraries/{libraryId}/uploads/{uploadId}:
+        get:
+            tags:
+                - Uploads
+            summary: Get an upload session
+            description: |
+                Returns session state. An interrupted client reads
+                `committedSize` here and resumes chunking from that offset.
+            operationId: getUpload
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/UploadIdPath"
+            responses:
+                "200":
+                    description: Upload session state.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/UploadResponse"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+        delete:
+            tags:
+                - Uploads
+            summary: Abort an upload session
+            description: Discards the session and its staged bytes.
+            operationId: deleteUpload
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/UploadIdPath"
+            responses:
+                "204":
+                    description: Upload session discarded.
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/uploads/{uploadId}/content:
+        put:
+            tags:
+                - Uploads
+            summary: Write an upload chunk
+            description: |
+                Appends one chunk of raw bytes at `offset`. The offset must
+                equal the session's current `committedSize`; anything else
+                returns `409` so an interrupted client first reads the
+                session state and resumes from there.
+            operationId: writeUploadContent
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/UploadIdPath"
+                - $ref: "#/components/parameters/UploadOffsetQuery"
+            requestBody:
+                required: true
+                content:
+                    application/octet-stream:
+                        schema:
+                            type: string
+                            format: binary
+            responses:
+                "204":
+                    description: Chunk accepted.
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "507":
+                    $ref: "#/components/responses/InsufficientStorage"
+
+    /libraries/{libraryId}/uploads/{uploadId}/commit:
+        post:
+            tags:
+                - Uploads
+            summary: Commit an upload session
+            description: |
+                Verifies that exactly `size` bytes were staged, then
+                atomically publishes them to the target path using the
+                conflict policy chosen at session creation. An incomplete
+                session returns `400`.
+            operationId: commitUpload
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/UploadIdPath"
+            responses:
+                "201":
+                    description: File created at the target path.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FileResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /operations:
+        get:
+            tags:
+                - Operations
+            summary: List operations
+            description: |
+                Returns running operations and recently finished ones.
+                Operations are held in memory only: a daemon restart clears
+                them, and finished operations are pruned after about one
+                hour.
+            operationId: listOperations
+            responses:
+                "200":
+                    description: Known operations.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationList"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /operations/{operationId}:
+        get:
+            tags:
+                - Operations
+            summary: Get an operation
+            operationId: getOperation
+            parameters:
+                - $ref: "#/components/parameters/OperationIdPath"
+            responses:
+                "200":
+                    description: Operation state.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /operations/{operationId}/cancel:
+        post:
+            tags:
+                - Operations
+            summary: Cancel an operation
+            description: |
+                Requests cooperative cancellation. Entries already processed
+                are not rolled back. Cancelling a finished operation is a
+                no-op that returns its current state.
+            operationId: cancelOperation
+            parameters:
+                - $ref: "#/components/parameters/OperationIdPath"
+            responses:
+                "202":
+                    description: Cancellation requested.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/media-info:
+        get:
+            tags: [Video]
+            summary: Inspect media information
+            operationId: getMediaInfo
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            responses:
+                "200":
+                    description: Media information of an image or a video.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/MediaInfoResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/video/sessions:
+        post:
+            tags: [Video]
+            summary: Start an HLS conversion session
+            operationId: createVideoSession
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/VideoSessionCreateRequest"
+            responses:
+                "201":
+                    description: Video session created.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/VideoSessionResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/video/sessions/{sessionId}:
+        delete:
+            tags: [Video]
+            summary: End an HLS conversion session
+            operationId: deleteVideoSession
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/VideoSessionIdPath"
+            responses:
+                "204":
+                    description: Video session ended.
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/video/sessions/{sessionId}/playlist.m3u8:
+        get:
+            tags: [Video]
+            summary: Read the full VOD playlist
+            operationId: getVideoPlaylist
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/VideoSessionIdPath"
+            responses:
+                "200":
+                    description: VOD playlist.
+                    content:
+                        application/vnd.apple.mpegurl:
+                            schema:
+                                type: string
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/video/sessions/{sessionId}/segments/{segmentName}:
+        get:
+            tags: [Video]
+            summary: Read a completed transport stream segment
+            operationId: getVideoSegment
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/VideoSessionIdPath"
+                - $ref: "#/components/parameters/VideoSegmentNamePath"
+            responses:
+                "200":
+                    description: MPEG transport stream segment.
+                    content:
+                        video/mp2t:
+                            schema:
+                                type: string
+                                format: binary
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/rating:
+        get:
+            tags:
+                - Rating
+            summary: Get the rating of an image or video
+            description: |
+                Returns the current user's rating. `none` means the entry has not
+                been rated. Ratings are kept per user, so another user's rating
+                never appears here. Reading works the same for a `readonly`
+                Library.
+            operationId: getRating
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            responses:
+                "200":
+                    description: The rating.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/RatingResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+        put:
+            tags:
+                - Rating
+            summary: Set the rating of an image or video
+            description: |
+                Replaces the current user's rating. `none` clears it. The rating
+                is stored by the daemon, not on the entry, so it is accepted for a
+                `readonly` Library and for a path inside an archive, and the
+                entry itself is never changed. Only images and videos can be
+                rated; other files are rejected with `400`.
+            operationId: putRating
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/PutRatingRequest"
+            responses:
+                "200":
+                    description: The saved rating.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/RatingResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/tags:
+        get:
+            tags:
+                - Tags
+            summary: Get the tags of an image or video
+            description: |
+                Returns the current user's tags on the entry, sorted by word.
+                Tags are kept per user. Reading works the same for a `readonly`
+                Library.
+            operationId: getEntryTags
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            responses:
+                "200":
+                    description: The tags.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryTagsResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+        put:
+            tags:
+                - Tags
+            summary: Replace the tags of an image or video
+            description: |
+                Replaces the current user's tags on the entry with the given set.
+                Words are trimmed and duplicates are dropped; a word the user has
+                not used before is created. An invalid word or too many tags is
+                rejected with `400` and nothing is changed. Like a rating, tags
+                are stored by the daemon, so they are accepted for a `readonly`
+                Library and for a path inside an archive.
+            operationId: putEntryTags
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/PutEntryTagsRequest"
+            responses:
+                "200":
+                    description: The saved tags.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryTagsResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /tags:
+        get:
+            tags:
+                - Tags
+            summary: List the words the current user has created
+            description: |
+                Returns every word the user has used on any entry, sorted. A word
+                stays in the list after it is removed from the last entry that
+                had it. Clients use the list to complete a word being typed.
+            operationId: listTags
+            responses:
+                "200":
+                    description: The words.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TagsResponse"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+components:
+    securitySchemes:
+        cookieAuth:
+            type: apiKey
+            in: cookie
+            name: __Host-pxna_session
+            description: |
+                Browser session cookie. The server sets it with `Path=/`, `HttpOnly`,
+                `Secure`, and `SameSite=Strict`. It is never exposed to JavaScript.
+                When the daemon runs with `[web] insecure_cookie = true`, the cookie is named
+                `pxna_session` and `Secure` is omitted.
+        bearerAuth:
+            type: http
+            scheme: bearer
+            bearerFormat: opaque-session-token
+            description: |
+                Opaque native-client session token. Native clients store it in a secure
+                credential store and send it through the Authorization header. It is not a JWT.
+
+    parameters:
+        VideoSessionIdPath:
+            name: sessionId
+            in: path
+            required: true
+            schema:
+                type: string
+                minLength: 1
+        VideoSegmentNamePath:
+            name: segmentName
+            in: path
+            required: true
+            schema:
+                type: string
+                pattern: '^[0-9]+\.ts$'
+
+        LibraryIdPath:
+            name: libraryId
+            in: path
+            required: true
+            description: Opaque identifier of a Library owned by the owner.
+            schema:
+                $ref: "#/components/schemas/LibraryId"
+
+        PathQuery:
+            name: path
+            in: query
+            required: true
+            description: Path relative to the selected Library.
+            schema:
+                $ref: "#/components/schemas/RelativePath"
+            example: /photos/2026
+
+        RecursiveQuery:
+            name: recursive
+            in: query
+            required: false
+            description: Whether to include descendants below the requested folder.
+            schema:
+                type: boolean
+                default: false
+
+        ListOffsetQuery:
+            name: offset
+            in: query
+            required: false
+            description: Offset in the sorted and filtered listing.
+            schema:
+                type: integer
+                format: int64
+                minimum: 0
+                default: 0
+
+        NameFilterQuery:
+            name: query
+            in: query
+            required: false
+            description: |
+                Whitespace-separated terms that must all occur in an entry name.
+                Names and terms are normalized with NFKC and converted to lowercase.
+            schema:
+                type: string
+
+        ListLimitQuery:
+            name: limit
+            in: query
+            required: false
+            description: Maximum number of entries to return.
+            schema:
+                type: integer
+                format: int32
+                minimum: 1
+                maximum: 1000
+                default: 200
+
+        SortQuery:
+            name: sort
+            in: query
+            required: false
+            description: Sort key for folder entries.
+            schema:
+                type: string
+                enum:
+                    - name
+                    - kind
+                    - size
+                    - modified_at
+                default: name
+
+        OrderQuery:
+            name: order
+            in: query
+            required: false
+            description: Sort direction.
+            schema:
+                type: string
+                enum:
+                    - asc
+                    - desc
+                default: asc
+
+        IncludeHiddenQuery:
+            name: includeHidden
+            in: query
+            required: false
+            description: Whether hidden entries should be returned.
+            schema:
+                type: boolean
+                default: false
+
+        FoldersFirstQuery:
+            name: foldersFirst
+            in: query
+            required: false
+            description: |
+                Place folders, and files whose `file.archive` hint is true,
+                before the other entries. `sort` and `order` apply within each
+                of the two groups.
+            schema:
+                type: boolean
+                default: false
+
+        FoldersOnlyQuery:
+            name: foldersOnly
+            in: query
+            required: false
+            description: |
+                Return only folders and files whose `file.archive` hint is
+                true. `totalCount` counts the entries after this filter.
+            schema:
+                type: boolean
+                default: false
+
+        RatingFilterQuery:
+            name: rating
+            in: query
+            required: false
+            description: |
+                Return only images and videos with this rating of the current
+                user. `none` selects the images and videos that have not been
+                rated. Folders and other files never match. `totalCount` counts
+                the entries after this filter.
+            schema:
+                type: string
+                enum:
+                    - good
+                    - bad
+                    - none
+
+        TagFilterQuery:
+            name: tag
+            in: query
+            required: false
+            description: |
+                Return only images and videos that have this tag of the current
+                user. The word is trimmed like a tag being set; a word the user
+                has never used selects nothing. `totalCount` counts the entries
+                after this filter.
+            schema:
+                $ref: "#/components/schemas/TagName"
+
+        RangeHeader:
+            name: Range
+            in: header
+            required: false
+            description: |
+                Single HTTP byte range as defined by RFC 7233, including suffix
+                ranges such as `bytes=-500`. The daemon parses this header itself,
+                so the schema intentionally carries no pattern.
+
+                Multi-range requests such as `bytes=0-99,200-299` are not supported.
+                The daemon ignores the header and returns a full `200` response in
+                that case, as RFC 7233 permits. A well-formed but unsatisfiable
+                range returns `416`.
+            schema:
+                type: string
+            example: bytes=0-65535
+
+        OffsetQuery:
+            name: offset
+            in: query
+            required: false
+            description: Byte offset used when `Range` is not supplied.
+            schema:
+                type: integer
+                format: int64
+                minimum: 0
+                default: 0
+
+        ReadLimitQuery:
+            name: limit
+            in: query
+            required: false
+            description: Maximum bytes in an explicit read window. Defaults to 1 MiB only when offset is supplied.
+            schema:
+                type: integer
+                format: int64
+                minimum: 1
+                maximum: 134217728
+
+        ThumbnailVariantQuery:
+            name: variant
+            in: query
+            required: false
+            description: What to generate. See the operation description.
+            schema:
+                $ref: "#/components/schemas/ThumbnailVariant"
+
+        ThumbnailWidthQuery:
+            name: width
+            in: query
+            required: false
+            description: Requested thumbnail width in pixels.
+            schema:
+                type: integer
+                format: int32
+                minimum: 1
+                maximum: 4096
+                default: 256
+
+        ThumbnailHeightQuery:
+            name: height
+            in: query
+            required: false
+            description: Requested thumbnail height in pixels.
+            schema:
+                type: integer
+                format: int32
+                minimum: 1
+                maximum: 4096
+                default: 256
+
+        ThumbnailFormatQuery:
+            name: format
+            in: query
+            required: false
+            description: |
+                Thumbnail image format. When omitted, the server uses the
+                format set by `[thumbnail] format` (`webp` by default).
+            schema:
+                $ref: "#/components/schemas/ImageFormat"
+
+        ResizeQuery:
+            name: resize
+            in: query
+            required: false
+            description: |
+                Resize behavior. `fit` keeps the aspect ratio, fits the image
+                inside the box, and never enlarges it. `pad` fills the box with
+                transparent margins, so it cannot be combined with
+                `format=jpeg`.
+            schema:
+                $ref: "#/components/schemas/ImageResize"
+
+        ResamplerQuery:
+            name: resampler
+            in: query
+            required: false
+            description: Image resampler.
+            schema:
+                $ref: "#/components/schemas/ImageResampler"
+
+        AnchorQuery:
+            name: anchor
+            in: query
+            required: false
+            description: Anchor position used when resizing and cropping.
+            schema:
+                $ref: "#/components/schemas/ImageAnchor"
+
+        ConflictQuery:
+            name: conflict
+            in: query
+            required: false
+            description: How to resolve an existing entry at the target path.
+            schema:
+                $ref: "#/components/schemas/ConflictPolicy"
+
+        UploadIdPath:
+            name: uploadId
+            in: path
+            required: true
+            description: Opaque identifier of an upload session.
+            schema:
+                $ref: "#/components/schemas/UploadId"
+
+        UploadOffsetQuery:
+            name: offset
+            in: query
+            required: true
+            description: |
+                Byte offset of this chunk. Must equal the session's current
+                `committedSize`.
+            schema:
+                type: integer
+                format: int64
+                minimum: 0
+
+        OperationIdPath:
+            name: operationId
+            in: path
+            required: true
+            description: Opaque identifier of a long-running operation.
+            schema:
+                $ref: "#/components/schemas/OperationId"
+
+    headers:
+        SessionCookie:
+            description: |
+                Present only when `sessionTransport=cookie`. Production deployments
+                must use HTTPS so the Secure cookie can be accepted by the browser.
+            schema:
+                type: string
+            example: __Host-pxna_session=opaque-token; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000
+
+        ClearedSessionCookie:
+            description: Expired browser session cookie.
+            schema:
+                type: string
+            example: __Host-pxna_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0
+
+        AcceptRanges:
+            description: Indicates byte range support.
+            schema:
+                type: string
+                enum:
+                    - bytes
+
+        CacheControl:
+            description: Cache policy for thumbnail responses.
+            schema:
+                type: string
+            example: private, max-age=86400
+
+        ContentLength:
+            description: Response body length in bytes.
+            schema:
+                type: integer
+                format: int64
+                minimum: 0
+
+        ContentRange:
+            description: Byte range returned in a partial response.
+            schema:
+                type: string
+            example: bytes 0-65535/1048576
+
+        ETag:
+            description: Entity tag for cache validation.
+            schema:
+                type: string
+
+        PxnaFrameCount:
+            description: |
+                Number of frames placed side by side in a `sprite` image. Present
+                only for `variant=sprite`.
+            schema:
+                type: integer
+                format: int32
+                minimum: 1
+
+    responses:
+        InvalidRequest:
+            description: |
+                Invalid request. `kind` is `InvalidRequest`, or
+                `UnsupportedType` when the target cannot be opened as an
+                archive, or `LimitExceeded` when an archive exceeds an entry,
+                size, or nesting limit.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: InvalidRequest
+                        message: Invalid request.
+
+        Unauthorized:
+            description: Missing or invalid authentication.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: Unauthorized
+                        message: Authentication is required.
+
+        Forbidden:
+            description: |
+                The requested resource cannot be accessed or written. `kind` is
+                `Forbidden` for a `readonly` Library and for a mutation inside
+                an archive, or `PasswordRequired` for a password-protected
+                archive.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: Forbidden
+                        message: Library access is not allowed.
+
+        NotFound:
+            description: Resource not found.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: NotFound
+                        message: Entry not found.
+
+        AlreadyInitialized:
+            description: The initial owner has already been registered.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: AlreadyInitialized
+                        message: Initial setup is already complete.
+
+        RangeNotSatisfiable:
+            description: Requested byte range cannot be satisfied.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: RangeNotSatisfiable
+                        message: Requested range is outside the file size.
+
+        Conflict:
+            description: |
+                The request conflicts with the current state of the target.
+                This also covers a source archive that changed while the
+                daemon was reading it.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: Conflict
+                        message: Entry already exists.
+
+        PayloadTooLarge:
+            description: The request body exceeds the one-shot write limit.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: PayloadTooLarge
+                        message: Body exceeds the 32 MiB one-shot limit.
+
+        InsufficientStorage:
+            description: The daemon does not have enough disk space.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: InsufficientStorage
+                        message: Not enough disk space.
+
+        GatewayTimeout:
+            description: Extraction or thumbnail generation timed out.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: Timeout
+                        message: Archive extraction timed out.
+
+        InternalServerError:
+            description: Internal server error.
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/ErrorResponse"
+                    example:
+                        kind: InternalServerError
+                        message: Unexpected server error.
+
+    schemas:
+        MediaInfo:
+            type: object
+            description: |
+                Media information of an image or a video. `kind` tells which
+                one it is, and only the matching property (`image` or `video`)
+                is present.
+            required: [kind]
+            properties:
+                kind:
+                    $ref: "#/components/schemas/MediaInfoKind"
+                video:
+                    $ref: "#/components/schemas/VideoMediaInfo"
+                image:
+                    $ref: "#/components/schemas/ImageMediaInfo"
+        Preferences:
+            type: object
+            additionalProperties: false
+            description: |
+                Display preferences. `wide` and `narrow` are chosen by the
+                width of the screen (768 CSS px); `sort` does not depend on it.
+            required: [wide, narrow, sort]
+            properties:
+                wide:
+                    $ref: "#/components/schemas/DisplaySet"
+                narrow:
+                    $ref: "#/components/schemas/DisplaySet"
+                sort:
+                    $ref: "#/components/schemas/SortPreference"
+        DisplaySet:
+            type: object
+            additionalProperties: false
+            required: [tileSize, thumbnailShape, view, originalImage]
+            properties:
+                tileSize:
+                    type: integer
+                    format: int32
+                    minimum: 1
+                    maximum: 5
+                    description: Tile size step from 1 (smallest) to 5 (largest).
+                thumbnailShape:
+                    $ref: "#/components/schemas/ThumbnailShape"
+                view:
+                    $ref: "#/components/schemas/ListView"
+                originalImage:
+                    $ref: "#/components/schemas/OriginalImageMode"
+        ThumbnailShape:
+            type: string
+            enum:
+                - crop
+                - fit
+        ListView:
+            type: string
+            enum:
+                - grid
+                - list
+        OriginalImageMode:
+            type: string
+            description: |
+                When a viewer swaps the display image for the original image.
+                `auto` swaps automatically; `onZoom` swaps only when the user
+                zooms in.
+            enum:
+                - auto
+                - onZoom
+        SortPreference:
+            type: object
+            additionalProperties: false
+            required: [key, order]
+            properties:
+                key:
+                    $ref: "#/components/schemas/SortKey"
+                order:
+                    $ref: "#/components/schemas/SortOrder"
+        SortKey:
+            type: string
+            description: Same values as the `sort` query parameter.
+            enum:
+                - name
+                - kind
+                - size
+                - modified_at
+        SortOrder:
+            type: string
+            description: Same values as the `order` query parameter.
+            enum:
+                - asc
+                - desc
+        MediaInfoKind:
+            type: string
+            enum:
+                - image
+                - video
+        VideoMediaInfo:
+            type: object
+            description: Container, codecs, duration and resolution of a video.
+            required: [container, videoCodec, durationSecs, width, height, frameRate, contentType]
+            properties:
+                container:
+                    type: string
+                videoCodec:
+                    type: string
+                audioCodec:
+                    type: string
+                    nullable: true
+                durationSecs:
+                    type: number
+                    format: double
+                    minimum: 0
+                width:
+                    type: integer
+                    format: int32
+                    minimum: 0
+                height:
+                    type: integer
+                    format: int32
+                    minimum: 0
+                frameRate:
+                    type: number
+                    format: double
+                    minimum: 0
+                contentType:
+                    type: string
+                    description: MIME type with codecs for HTMLMediaElement.canPlayType.
+        ImageMediaInfo:
+            type: object
+            description: Format, size and shooting information of an image.
+            required: [contentType, width, height, shooting]
+            properties:
+                contentType:
+                    type: string
+                    description: MIME type decided from the file extension.
+                width:
+                    type: integer
+                    format: int32
+                    minimum: 1
+                    description: |
+                        Width after applying the EXIF orientation. For formats whose
+                        orientation is given by a rotation (HEIC, AVIF and so on), the
+                        width as stored; apply `rotation` to get the displayed one.
+                height:
+                    type: integer
+                    format: int32
+                    minimum: 1
+                    description: |
+                        Height after applying the EXIF orientation. For formats whose
+                        orientation is given by a rotation (HEIC, AVIF and so on), the
+                        height as stored; apply `rotation` to get the displayed one.
+                rotation:
+                    type: integer
+                    format: int32
+                    minimum: 90
+                    maximum: 270
+                    description: |
+                        Counterclockwise rotation in degrees (90, 180 or 270) that a
+                        viewer applies to the stored image to display it upright. It is
+                        not applied to `width` and `height`. Present only for formats
+                        whose orientation is given by a rotation, when the image has one.
+                shooting:
+                    $ref: "#/components/schemas/ShootingInfo"
+        ShootingInfo:
+            type: object
+            description: |
+                Shooting information read from Exif. Every property is absent
+                when the image has no Exif or the Exif does not carry it.
+                Location is never returned.
+            properties:
+                takenAt:
+                    type: string
+                    description: |
+                        Shooting time as `YYYY-MM-DDTHH:MM:SS` without a time zone.
+                cameraMake:
+                    type: string
+                cameraModel:
+                    type: string
+                lensModel:
+                    type: string
+                focalLengthMm:
+                    type: number
+                    format: double
+                fNumber:
+                    type: number
+                    format: double
+                exposureTimeSecs:
+                    type: number
+                    format: double
+                iso:
+                    type: integer
+                    format: int32
+                    minimum: 0
+        MediaInfoResponse:
+            type: object
+            required: [mediaInfo]
+            properties:
+                mediaInfo:
+                    $ref: "#/components/schemas/MediaInfo"
+        VideoSessionCreateRequest:
+            type: object
+            required: [path]
+            properties:
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+        VideoSession:
+            type: object
+            required: [id, libraryId, path, playlistUrl, durationSecs]
+            properties:
+                id:
+                    type: string
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                playlistUrl:
+                    type: string
+                durationSecs:
+                    type: number
+                    format: double
+                    minimum: 0
+        VideoSessionResponse:
+            type: object
+            required: [session]
+            properties:
+                session:
+                    $ref: "#/components/schemas/VideoSession"
+
+        HealthResponse:
+            type: object
+            required:
+                - result
+            properties:
+                result:
+                    type: boolean
+
+        SetupStatus:
+            type: object
+            required:
+                - initialized
+            properties:
+                initialized:
+                    type: boolean
+                    description: Whether the initial owner exists.
+
+        InitialSetupRequest:
+            type: object
+            additionalProperties: false
+            required:
+                - username
+                - password
+                - sessionTransport
+            properties:
+                username:
+                    $ref: "#/components/schemas/Username"
+                password:
+                    $ref: "#/components/schemas/Password"
+                sessionTransport:
+                    $ref: "#/components/schemas/SessionTransport"
+
+        LoginRequest:
+            type: object
+            additionalProperties: false
+            required:
+                - username
+                - password
+                - sessionTransport
+            properties:
+                username:
+                    $ref: "#/components/schemas/Username"
+                password:
+                    $ref: "#/components/schemas/Password"
+                sessionTransport:
+                    $ref: "#/components/schemas/SessionTransport"
+
+        Username:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: ^[A-Za-z0-9._-]+$
+            example: admin
+
+        Password:
+            type: string
+            format: password
+            writeOnly: true
+            minLength: 8
+            maxLength: 256
+
+        SessionTransport:
+            type: string
+            description: How the client receives and sends the session credential.
+            enum:
+                - cookie
+                - bearer
+            default: cookie
+
+        AuthResult:
+            type: object
+            required:
+                - user
+                - session
+            properties:
+                user:
+                    $ref: "#/components/schemas/User"
+                session:
+                    $ref: "#/components/schemas/AuthSession"
+                accessToken:
+                    type: string
+                    minLength: 1
+                    description: |
+                        Opaque token returned only for `sessionTransport=bearer`. Browser
+                        cookie sessions omit this property.
+
+        CurrentAuth:
+            type: object
+            required:
+                - user
+                - session
+            properties:
+                user:
+                    $ref: "#/components/schemas/User"
+                session:
+                    $ref: "#/components/schemas/AuthSession"
+
+        User:
+            type: object
+            required:
+                - id
+                - username
+                - role
+                - createdAt
+                - updatedAt
+            properties:
+                id:
+                    $ref: "#/components/schemas/UserId"
+                username:
+                    $ref: "#/components/schemas/Username"
+                role:
+                    $ref: "#/components/schemas/UserRole"
+                createdAt:
+                    type: string
+                    format: date-time
+                updatedAt:
+                    type: string
+                    format: date-time
+
+        UserId:
+            type: string
+            minLength: 1
+            description: Opaque daemon-issued user identifier.
+            example: usr_01HZY3R0K8S9J2R0C3MSM6QGTV
+
+        UserRole:
+            type: string
+            enum:
+                - owner
+
+        AuthSession:
+            type: object
+            required:
+                - id
+                - userId
+                - status
+                - transport
+                - createdAt
+                - expiresAt
+            properties:
+                id:
+                    $ref: "#/components/schemas/SessionId"
+                userId:
+                    $ref: "#/components/schemas/UserId"
+                status:
+                    $ref: "#/components/schemas/SessionStatus"
+                transport:
+                    $ref: "#/components/schemas/SessionTransport"
+                createdAt:
+                    type: string
+                    format: date-time
+                expiresAt:
+                    type: string
+                    format: date-time
+                lastSeenAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+
+        SessionId:
+            type: string
+            minLength: 1
+            description: Opaque daemon-issued session identifier.
+            example: ses_01HZY3R0K8S9J2R0C3MSM6QGTV
+
+        SessionStatus:
+            type: string
+            enum:
+                - active
+                - expired
+                - revoked
+
+        LibraryList:
+            type: object
+            required:
+                - libraries
+            properties:
+                libraries:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/Library"
+
+        LibraryResponse:
+            type: object
+            required:
+                - library
+            properties:
+                library:
+                    $ref: "#/components/schemas/Library"
+
+        Library:
+            type: object
+            required:
+                - id
+                - name
+                - readonly
+            properties:
+                id:
+                    $ref: "#/components/schemas/LibraryId"
+                name:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                    example: Photos
+                readonly:
+                    type: boolean
+
+        LibraryId:
+            type: string
+            minLength: 1
+            maxLength: 64
+            pattern: ^[A-Za-z0-9._-]+$
+            description: |
+                Library identifier chosen by the operator in the daemon
+                configuration file. Unlike the daemon-issued identifiers in
+                this API it is a readable name, not a generated token. It is
+                what the API uses in place of a host path, so the physical
+                location of a Library is never exposed.
+
+                Because the value is used as a URL path segment, the
+                character set is restricted. The daemon rejects a
+                configuration that violates it at startup.
+            example: photos
+
+        FolderResponse:
+            type: object
+            required:
+                - folder
+            properties:
+                folder:
+                    $ref: "#/components/schemas/FileSystemEntry"
+
+        FileResponse:
+            type: object
+            required:
+                - file
+            properties:
+                file:
+                    $ref: "#/components/schemas/FileSystemEntry"
+
+        TimelineListing:
+            type: object
+            required:
+                - entries
+            properties:
+                entries:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/TimelineEntry"
+                previous:
+                    type: string
+                    description: Cursor for the page of newer entries. Absent when there are none.
+                next:
+                    type: string
+                    description: Cursor for the page of older entries. Absent when there are none.
+
+        TimelineEntry:
+            type: object
+            required:
+                - entry
+                - timelineDate
+                - timelineDateSource
+            properties:
+                entry:
+                    $ref: "#/components/schemas/FileSystemEntry"
+                timelineDate:
+                    type: string
+                    description: |
+                        Date the entry is ordered by, as `YYYY-MM-DDTHH:MM:SS`
+                        without a time zone, in the daemon's configured time zone.
+                timelineDateSource:
+                    type: string
+                    description: Where `timelineDate` came from.
+                    enum:
+                        - exif
+                        - creationTime
+                        - modified
+                        - archiveModified
+
+        TimelineMonths:
+            type: object
+            required:
+                - months
+            properties:
+                months:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/TimelineMonth"
+
+        TimelineMonth:
+            type: object
+            required:
+                - month
+                - count
+            properties:
+                month:
+                    type: string
+                    pattern: "^[0-9]{4}-[0-9]{2}$"
+                    example: "2025-05"
+                count:
+                    type: integer
+                    format: int64
+                    minimum: 1
+
+        TimelineStatus:
+            type: object
+            required:
+                - running
+                - processedFiles
+            properties:
+                running:
+                    type: boolean
+                    description: True while a full scan of the Library is running.
+                processedFiles:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Files and archive entries processed by the running scan.
+                completedAt:
+                    type: string
+                    format: date-time
+                    description: When the last full scan finished. Absent before the first one.
+
+        FolderListing:
+            type: object
+            required:
+                - entries
+                - totalCount
+                - snapshot
+                - truncated
+            properties:
+                entries:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/FileSystemEntry"
+                totalCount:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Total count after filtering the snapshot.
+                snapshot:
+                    type: string
+                    description: Opaque identifier of the listing snapshot.
+                truncated:
+                    type: boolean
+                    description: True when recursive traversal reached its entry limit.
+
+        Capabilities:
+            type: object
+            required: [summaryListing, entryDetails, childProbes]
+            properties:
+                summaryListing:
+                    type: boolean
+                entryDetails:
+                    type: boolean
+                childProbes:
+                    type: boolean
+
+        FileSystemEntrySummary:
+            type: object
+            required: [path, name, kind, archive]
+            properties:
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                name:
+                    type: string
+                    description: Last path segment.
+                kind:
+                    $ref: "#/components/schemas/FileSystemEntryKind"
+                archive:
+                    type: boolean
+                    description: Extension-derived archive hint; false unless kind is file.
+
+        FolderSummaryListing:
+            type: object
+            required: [entries, totalCount, snapshot, truncated]
+            properties:
+                entries:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/FileSystemEntrySummary"
+                totalCount:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                snapshot:
+                    type: string
+                    description: Identifier of the names and kinds, not of later detail metadata.
+                truncated:
+                    type: boolean
+                    description: Always false for a complete direct-child summary listing.
+
+        EntryDetailsRequest:
+            type: object
+            required: [paths]
+            properties:
+                paths:
+                    type: array
+                    minItems: 1
+                    maxItems: 200
+                    uniqueItems: true
+                    items:
+                        $ref: "#/components/schemas/RelativePath"
+
+        EntryDetailResult:
+            type: object
+            description: Exactly one of detail and error is present; no host paths or error messages.
+            required: [path]
+            properties:
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                detail:
+                    $ref: "#/components/schemas/FileSystemEntry"
+                error:
+                    $ref: "#/components/schemas/ErrorKind"
+
+        EntryDetailsResponse:
+            type: object
+            required: [results]
+            properties:
+                results:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/EntryDetailResult"
+
+        FolderChildrenProbe:
+            type: object
+            required: [hasChildren, maxAgeMs]
+            properties:
+                maxAgeMs:
+                    type: integer
+                    format: int32
+                    minimum: 0
+                    maximum: 30000
+                    description: Remaining validity; zero for unknown. Reused cache results do not receive a new lifetime.
+                hasChildren:
+                    type: boolean
+                    nullable: true
+                sourceVersion:
+                    type: string
+                    description: Opaque source version when it could be observed; absent if not known.
+
+        FileSystemEntry:
+            type: object
+            required:
+                - path
+                - name
+                - metadata
+                - kind
+            properties:
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                name:
+                    type: string
+                    description: Last path segment.
+                    example: IMG_0001.png
+                metadata:
+                    $ref: "#/components/schemas/FileSystemMetadata"
+                kind:
+                    $ref: "#/components/schemas/FileSystemEntryKind"
+                file:
+                    $ref: "#/components/schemas/FileSystemEntryFileDetail"
+                folder:
+                    $ref: "#/components/schemas/FileSystemEntryFolderDetail"
+                link:
+                    $ref: "#/components/schemas/FileSystemEntryLinkDetail"
+
+        FileSystemMetadata:
+            type: object
+            required:
+                - size
+                - readonly
+            properties:
+                size:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: File size in bytes. Folders return 0 unless known.
+                readonly:
+                    type: boolean
+                createdAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+                modifiedAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+                accessedAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+                contentType:
+                    type: string
+                    nullable: true
+                    example: image/png
+
+        FileSystemEntryKind:
+            type: string
+            enum:
+                - file
+                - folder
+                - link
+
+        FileSystemEntryFileDetail:
+            type: object
+            nullable: true
+            description: Present when `kind` is `file`.
+            required:
+                - archive
+            properties:
+                archive:
+                    type: boolean
+                    description: |
+                        Whether the daemon expects to be able to list this
+                        file's contents as a folder. This is a hint derived
+                        from the extension alone; the daemon does not read the
+                        file to answer a listing. Opening the archive may
+                        still fail with `UnsupportedType`.
+
+                        The set of recognised extensions is a server property,
+                        so clients must not maintain their own list.
+
+        FileSystemEntryFolderDetail:
+            type: object
+            nullable: true
+            description: Present when `kind` is `folder`.
+            properties:
+                hasChildren:
+                    type: boolean
+                    nullable: true
+
+        FileSystemEntryLinkDetail:
+            type: object
+            nullable: true
+            description: Present when `kind` is `link`.
+            properties:
+                targetPath:
+                    allOf:
+                        - $ref: "#/components/schemas/RelativePath"
+                    nullable: true
+                    description: |
+                        Link target, present only when it resolves to a path
+                        inside the same Library. It is null for a broken link
+                        and for a link pointing outside the Library, because
+                        host absolute paths are never exposed.
+                targetKind:
+                    allOf:
+                        - $ref: "#/components/schemas/FileSystemEntryKind"
+                    nullable: true
+                    description: |
+                        Kind of the resolved target, so a client can choose an
+                        icon without a second request. Null whenever
+                        `targetPath` is null.
+
+        RelativePath:
+            type: string
+            minLength: 1
+            maxLength: 4096
+            description: |
+                Absolute-looking path within the selected Library. The resolved
+                path must never escape that library.
+            example: /photos/2026/IMG_0001.png
+
+        RatingValue:
+            type: string
+            description: A rating. `none` means the entry has not been rated.
+            enum:
+                - good
+                - bad
+                - none
+
+        RatingResponse:
+            type: object
+            required:
+                - rating
+            properties:
+                rating:
+                    $ref: "#/components/schemas/RatingValue"
+
+        PutRatingRequest:
+            type: object
+            additionalProperties: false
+            required:
+                - path
+                - rating
+            properties:
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                rating:
+                    $ref: "#/components/schemas/RatingValue"
+
+        TagName:
+            type: string
+            minLength: 1
+            maxLength: 64
+            description: |
+                A tag word of 1 to 64 characters after trimming, without control
+                characters. Upper and lower case are different words.
+            example: trip
+
+        EntryTagsResponse:
+            type: object
+            required:
+                - tags
+            properties:
+                tags:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/TagName"
+
+        PutEntryTagsRequest:
+            type: object
+            additionalProperties: false
+            required:
+                - path
+                - tags
+            properties:
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                tags:
+                    type: array
+                    maxItems: 32
+                    items:
+                        $ref: "#/components/schemas/TagName"
+
+        TagsResponse:
+            type: object
+            required:
+                - tags
+            properties:
+                tags:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/TagName"
+
+        ConflictPolicy:
+            type: string
+            description: |
+                How to resolve an entry that already exists at the target
+                path. `fail` rejects with `409`. `skip` leaves the existing
+                entry untouched and reports the source as skipped.
+                `overwrite` replaces the existing entry. `rename` writes
+                under an alternative name, which is reported back in the
+                result.
+            enum:
+                - fail
+                - skip
+                - overwrite
+                - rename
+            default: fail
+
+        CreateFolderRequest:
+            type: object
+            additionalProperties: false
+            required:
+                - path
+            properties:
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                createParents:
+                    type: boolean
+                    default: false
+                    description: Create missing intermediate folders as well.
+
+        EntryTransferRequest:
+            type: object
+            additionalProperties: false
+            description: |
+                Copy or move request. Exactly one of `dstPath` and
+                `dstFolderPath` must be provided. `dstPath` names the exact
+                target and is only valid with a single source; this is also
+                how a rename is expressed. `dstFolderPath` names a target
+                folder and keeps each source's name. `dstLibraryId` defaults
+                to the source Library.
+            required:
+                - srcPaths
+            properties:
+                srcPaths:
+                    type: array
+                    minItems: 1
+                    maxItems: 1000
+                    items:
+                        $ref: "#/components/schemas/RelativePath"
+                dstLibraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                dstPath:
+                    $ref: "#/components/schemas/RelativePath"
+                dstFolderPath:
+                    $ref: "#/components/schemas/RelativePath"
+                conflict:
+                    $ref: "#/components/schemas/ConflictPolicy"
+
+        DeleteFilesRequest:
+            type: object
+            additionalProperties: false
+            required:
+                - srcPaths
+            properties:
+                srcPaths:
+                    type: array
+                    minItems: 1
+                    maxItems: 1000
+                    items:
+                        $ref: "#/components/schemas/RelativePath"
+
+        DeleteFoldersRequest:
+            type: object
+            additionalProperties: false
+            required:
+                - srcPaths
+            properties:
+                srcPaths:
+                    type: array
+                    minItems: 1
+                    maxItems: 1000
+                    items:
+                        $ref: "#/components/schemas/RelativePath"
+                recursive:
+                    type: boolean
+                    default: false
+                    description: Delete non-empty folders and everything below them.
+
+        EntryList:
+            type: object
+            required:
+                - entries
+            properties:
+                entries:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/FileSystemEntry"
+
+        UploadCreateRequest:
+            type: object
+            additionalProperties: false
+            required:
+                - path
+                - size
+            properties:
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                size:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Final file size in bytes, verified at commit.
+                conflict:
+                    $ref: "#/components/schemas/ConflictPolicy"
+
+        UploadResponse:
+            type: object
+            required:
+                - upload
+            properties:
+                upload:
+                    $ref: "#/components/schemas/Upload"
+
+        Upload:
+            type: object
+            required:
+                - id
+                - path
+                - size
+                - committedSize
+                - status
+                - expiresAt
+            properties:
+                id:
+                    $ref: "#/components/schemas/UploadId"
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                size:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                committedSize:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Bytes accepted so far; the next chunk's `offset`.
+                status:
+                    $ref: "#/components/schemas/UploadStatus"
+                expiresAt:
+                    type: string
+                    format: date-time
+
+        UploadId:
+            type: string
+            minLength: 1
+            description: Opaque daemon-issued upload session identifier.
+            example: upl_01HZY3R0K8S9J2R0C3MSM6QGTV
+
+        UploadStatus:
+            type: string
+            enum:
+                - active
+                - committed
+                - aborted
+                - expired
+
+        OperationResponse:
+            type: object
+            required:
+                - operation
+            properties:
+                operation:
+                    $ref: "#/components/schemas/Operation"
+
+        OperationList:
+            type: object
+            required:
+                - operations
+            properties:
+                operations:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/Operation"
+
+        Operation:
+            type: object
+            required:
+                - id
+                - kind
+                - status
+                - libraryId
+                - processedCount
+                - skippedCount
+                - failedEntries
+                - createdAt
+            properties:
+                id:
+                    $ref: "#/components/schemas/OperationId"
+                kind:
+                    $ref: "#/components/schemas/OperationKind"
+                status:
+                    $ref: "#/components/schemas/OperationStatus"
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                destinationLibraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                resultEntries:
+                    type: array
+                    description: Successfully published top-level destinations, including names chosen by conflict=rename.
+                    items:
+                        $ref: "#/components/schemas/FileSystemEntry"
+                processedCount:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                totalCount:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    nullable: true
+                    description: Total entries to process, when known up front.
+                skippedCount:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Entries left untouched by `conflict=skip`.
+                failedEntries:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/OperationFailure"
+                createdAt:
+                    type: string
+                    format: date-time
+                finishedAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+
+        OperationId:
+            type: string
+            minLength: 1
+            description: Opaque daemon-issued operation identifier.
+            example: op_01HZY3R0K8S9J2R0C3MSM6QGTV
+
+        OperationKind:
+            type: string
+            enum:
+                - copy_files
+                - move_files
+                - delete_files
+                - copy_folders
+                - move_folders
+                - delete_folders
+
+        OperationStatus:
+            type: string
+            enum:
+                - pending
+                - running
+                - succeeded
+                - failed
+                - cancelled
+
+        OperationFailure:
+            type: object
+            required:
+                - path
+                - kind
+            properties:
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                kind:
+                    $ref: "#/components/schemas/ErrorKind"
+                message:
+                    type: string
+
+        ThumbnailVariant:
+            type: string
+            enum:
+                - thumbnail
+                - display
+                - sprite
+            default: thumbnail
+
+        ImageFormat:
+            type: string
+            enum:
+                - webp
+                - jpeg
+                - png
+
+        ImageResize:
+            type: string
+            enum:
+                - crop
+                - pad
+                - manual
+                - fit
+            default: crop
+
+        ImageResampler:
+            type: string
+            enum:
+                - lanczos3
+            default: lanczos3
+
+        ImageAnchor:
+            type: string
+            enum:
+                - bottom
+                - bottom_left
+                - bottom_right
+                - center
+                - left
+                - right
+                - top
+                - top_left
+                - top_right
+            default: center
+
+        ErrorResponse:
+            type: object
+            required:
+                - kind
+            properties:
+                kind:
+                    $ref: "#/components/schemas/ErrorKind"
+                message:
+                    type: string
+                requestId:
+                    type: string
+                    description: Optional request identifier for server logs.
+
+        ErrorKind:
+            type: string
+            description: |
+                `UnsupportedType`, `LimitExceeded`, and `PasswordRequired`
+                describe the target file rather than the request, so a client
+                can tell "cannot open this format", "too large to handle", and
+                "password protected" apart without parsing `message`.
+                `Timeout` means that extracting an archive or generating a
+                thumbnail did not finish within the daemon's time limit. The
+                result is not cached, so repeating the same request can hit the
+                same limit again; no `Retry-After` is returned.
+            enum:
+                - InternalServerError
+                - InvalidRequest
+                - UnsupportedType
+                - LimitExceeded
+                - NotFound
+                - Unauthorized
+                - Forbidden
+                - PasswordRequired
+                - AlreadyInitialized
+                - RangeNotSatisfiable
+                - Conflict
+                - PayloadTooLarge
+                - InsufficientStorage
+                - Timeout

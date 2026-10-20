@@ -1,0 +1,53 @@
+[package]
+name = "omnius-pxna-interface"
+version = "0.1.0"
+authors = ["OpenAPI Generator team and contributors"]
+description = "Pxna daemon API for authenticated remote file browsing and management.  The first registered user becomes the single owner for the Pxna instance. Public setup is disabled after that user is created.  Browser clients use an HttpOnly session cookie. Native clients use the same server-side session through an opaque Bearer token. File APIs behave identically for both authentication transports.  File paths are always relative to a daemon-configured Library. The API never accepts arbitrary host filesystem roots from clients.  A path inside an archive is written by plain concatenation, as in `/photos/a.zip/dir/x.png`. `RelativePath` has no archive separator and its grammar does not change. The daemon locates the boundary by probing the filesystem, which is unambiguous because a file and a directory cannot share a name in one directory. An archive's root is addressed by the endpoint rather than a trailing slash: the folder endpoints treat `/photos/a.zip` as the archive root, the file endpoints treat it as the zip file itself.  Mutations follow one rule set. Operations whose duration is independent of content size respond synchronously; operations that scale with content size return `202` and an operation id that is polled through the Operations API. Copy, move, and upload share a `conflict` policy that defaults to `fail`, so nothing is overwritten unless a client explicitly asks for it. Mutations are rejected with `403` both for paths inside archives and for Libraries marked `readonly`. "
+license = "MIT"
+edition = "2024"
+
+[features]
+default = ["server"]
+server = []
+conversion = [
+    "frunk",
+    "frunk_derives",
+    "frunk_core",
+    "frunk-enum-core",
+    "frunk-enum-derive",
+]
+
+[dependencies]
+ammonia = "4"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["multipart"] }
+axum-extra = { version = "0.12", features = [
+  "cookie",
+  "query",
+  "typed-header",
+] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+frunk = { version = "0.4", optional = true }
+frunk-enum-core = { version = "0.3", optional = true }
+frunk-enum-derive = { version = "0.3", optional = true }
+frunk_core = { version = "0.4", optional = true }
+frunk_derives = { version = "0.4", optional = true }
+headers = "0.4"
+http = "1"
+lazy_static = "1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_html_form = "0.2"
+serde_json = { version = "1", features = ["raw_value"] }
+tokio = { version = "1", default-features = false, features = [
+    "signal",
+    "rt-multi-thread",
+] }
+tracing = { version = "0.1", features = ["attributes"] }
+uuid = { version = "1", features = ["serde"] }
+validator = { version = "0.20", features = ["derive"] }
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
