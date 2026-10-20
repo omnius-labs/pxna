@@ -1,0 +1,38 @@
+# For running locally. Copy .env.example to .env and adjust the settings.
+x-uid: &uid "${PXNA_UID:-1000}:${PXNA_GID:-1000}"
+
+services:
+  # Docker creates ./.pxna owned by root, so change its owner to the user that runs pxna.
+  init:
+    build: &build
+      context: .
+      dockerfile: Dockerfile
+    image: pxna:local
+    user: "0:0"
+    entrypoint:
+      - sh
+      - -c
+      - mkdir -p /pxna/state && chown ${PXNA_UID:-1000}:${PXNA_GID:-1000} /pxna /pxna/state
+    volumes:
+      - ./.pxna:/pxna
+    restart: "no"
+
+  pxna:
+    build: *build
+    image: pxna:local
+    user: *uid
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${PXNA_PORT:-6050}:6050"
+    environment:
+      TZ: ${TZ:-Asia/Tokyo}
+    tmpfs:
+      # The daemon places its process lock here, so it must be writable.
+      - /config:uid=${PXNA_UID:-1000},gid=${PXNA_GID:-1000},mode=0755
+    volumes:
+      - ./docker/pxna.toml:/config/pxna.toml:ro
+      - ./.pxna/state:/state
+      - ${PXNA_LIBRARY_DIR:?Set PXNA_LIBRARY_DIR to your Library directory}:/libraries
+    restart: unless-stopped

@@ -1,0 +1,36 @@
+[core]
+listen_addr = "0.0.0.0:6050"
+state_dir = "./state"
+
+[logging]
+level = "debug" # "trace" | "debug" | "info" | "warn" | "error"
+json = false
+
+[web]
+dir = "../../ui-web/dist"
+# insecure_cookie = true # Drops Secure and __Host-. Only when the path is protected by other means, such as Tailscale
+
+# [media]
+# ffmpeg_path = "ffmpeg"
+# ffprobe_path = "ffprobe"
+
+# [video]
+# max_concurrent_transcodes = 1
+# segment_secs = 6
+# restart_threshold_segments = 3
+# max_height = 1080
+# encoder = "libx264"
+# encoder_args = ["-preset", "veryfast", "-crf", "23"]
+# session_idle_timeout_secs = 300
+
+# [timeline]
+# time_zone = "Asia/Tokyo"       # If omitted, TZ or the OS setting is used. Docker defaults to UTC, so set it here or via TZ
+# scan_interval_secs = 86400     # Seconds from the end of the last aggregation to the next one. 0 disables periodic aggregation
+# max_concurrent_extractions = 1 # Concurrent archive extractions during aggregation
+# max_concurrent_probes = 1      # Concurrent ffprobe runs during aggregation
+
+[[libraries]]
+id = "photos"
+name = "Photos"
+path = "./demo/photos"
+readonly = false

@@ -1,0 +1,153 @@
+name: test-daemon-all
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+      - "release/*"
+    paths:
+      - ".github/workflows/test-daemon-all.yml"
+      - "daemon/**"
+      - "!daemon/docs/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: ./daemon
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximize build space
+        uses: AdityaGarg8/remove-unwanted-software@v5
+        with:
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: "recursive"
+
+      - name: restore timestamps
+        uses: chetan/git-restore-mtime-action@v2
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "20.1"
+          directory: ${{ runner.temp }}/llvm
+
+      - name: Setup rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup cargo make
+        uses: davidB/rust-cargo-make@v1
+        with:
+          version: latest
+
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: "ubuntu-latest-all-lint"
+          cache-on-failure: "true"
+          cache-workspace-crates: "true"
+          workspaces: |
+            daemon -> target
+
+      - name: Lint
+        run: cargo make lint
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Maximize build space
+        if: runner.os == 'Linux'
+        uses: AdityaGarg8/remove-unwanted-software@v5
+        with:
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: "recursive"
+
+      - name: restore timestamps
+        uses: chetan/git-restore-mtime-action@v2
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "20.1"
+          directory: ${{ runner.temp }}/llvm
+
+      - name: Setup rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup cargo make
+        uses: davidB/rust-cargo-make@v1
+        with:
+          version: latest
+
+      - name: Install cargo nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: "${{ matrix.os }}-all-test"
+          cache-on-failure: "true"
+          cache-workspace-crates: "true"
+          workspaces: |
+            daemon -> target
+
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+
+      - name: Use system unwinder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "DYLD_LIBRARY_PATH=" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=$LLVM_PATH/lib" >> "$GITHUB_ENV"
+
+      - name: Test (Linux, including Docker integration)
+        if: runner.os == 'Linux'
+        env:
+          PXNA_REQUIRE_FFMPEG: "1"
+        run: cargo make test
+
+      - name: Test (macOS and Windows)
+        if: runner.os != 'Linux'
+        env:
+          PXNA_REQUIRE_FFMPEG: "1"
+        run: |
+          cargo make lint
+          cargo nextest run --all-features -E "not (package(omnius-core-migration) & binary(postgres))"

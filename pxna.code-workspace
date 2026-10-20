@@ -1,0 +1,16 @@
+{
+  "folders": [
+    {
+      "path": "./",
+    },
+    {
+      "path": "./daemon",
+    },
+    {
+      "path": "./ui-web",
+    },
+    {
+      "path": "./daemon/refs/core-rs",
+    },
+  ],
+}

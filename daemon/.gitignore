@@ -1,0 +1,15 @@
+/target
+/tmp
+/bin
+/state
+/demo
+
+# Do not include the actual configuration; include only the template config/pxna.toml.example.
+config/*
+!config/pxna.toml.example
+
+# Visual Studio Code
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/settings.json
