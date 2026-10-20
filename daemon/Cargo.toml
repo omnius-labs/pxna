@@ -111,7 +111,7 @@ kamadak-exif = "0.6.1"
 async_zip = { version = "0.0.18", features = ["full"] }
 sevenz-rust2 = "0.22.0"
 encoding_rs = "0.8.35"
-mockall = "0.14.0"
+mockall = "0.15.0"
 syn = { version = "2.0.117", features = ["full"] }
 proc-macro2 = { version = "1.0.104", features = ["span-locations"] }
 walkdir = "2.5.0"
