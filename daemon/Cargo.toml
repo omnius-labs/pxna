@@ -108,7 +108,7 @@ async-stream = "0.3.6"
 image = { version = "0.25.9", default-features = false, features = ["bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
 libwebp-sys = "0.14.4"
 kamadak-exif = "0.6.1"
-async_zip = { version = "0.0.18", features = ["full"] }
+async_zip = { version = "0.0.19", features = ["full"] }
 sevenz-rust2 = "0.22.0"
 encoding_rs = "0.8.35"
 mockall = "0.14.0"
