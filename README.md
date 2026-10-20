@@ -79,6 +79,13 @@ npx --yes shadcn@4.21.4 add <component>
 Use trusted registry configuration and local paths.
 The CLI still depends on [braces with an unpatched denial-of-service vulnerability](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm); removing it from the project does not patch the CLI itself.
 
+### Linting
+
+```sh
+(cd daemon && cargo make lint)
+(cd ui-web && npm run lint)
+```
+
 ## Running in Docker
 
 Initialize the submodules, then build and start the container:
@@ -104,7 +111,6 @@ This project is not accepting external contributions for now.
 ## License
 
 Pxna is licensed under the [GNU Affero General Public License v3.0](LICENSE).
-Copyright (C) 2026 Lyrise.
 
 ## Links
 
