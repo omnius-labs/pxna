@@ -73,7 +73,7 @@ thiserror = "2.0.18"
 jsonwebtoken = "10.4.0"
 validator = { version = "0.20.0", features = ["derive"] }
 once_cell = "1.21.4"
-base64 = "0.22.1"
+base64 = "0.23.1"
 futures = "0.3.32"
 futures-util = "0.3.32"
 serial_test = "3.4.0"
