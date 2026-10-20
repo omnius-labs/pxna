@@ -114,24 +114,27 @@ flowchart TB
         iface["omnius-pxna-interface<br/>generated router"]
         stream["Hand-written routes<br/>file content, thumbnails, HLS"]
         handler["ApiServer<br/>implementation of generated traits"]
+        video["Video transcode sessions<br/>src/service/video"]
+        timeline["Timeline aggregation<br/>src/service/timeline"]
     end
 
     subgraph engine["omnius-pxna-engine"]
         fs["StorageService"]
         thumb["ThumbnailGenerator"]
-        video["Video transcoding"]
         auth["AuthService"]
         prefs["Display preferences"]
+        ratings["Ratings and tags"]
     end
 
     ffmpeg["ffmpeg / ffprobe<br/>external processes"]
 
     subgraph persist["Persistence"]
         localfs[("Local FS<br/>Library")]
-        sqlite[("SQLite<br/>users, sessions, display preferences")]
+        sqlite[("SQLite<br/>users, sessions, display preferences, ratings and tags")]
         thumbcache[("SQLite + files<br/>thumbnail cache")]
         archivecache[("SQLite + files<br/>archive extraction cache")]
         segments[("files<br/>HLS segments")]
+        timelineidx[("Timeline index")]
     end
 
     web -->|"HTTP + Cookie"| iface
@@ -145,6 +148,10 @@ flowchart TB
     handler --> video
     handler --> auth
     handler --> prefs
+    handler --> ratings
+    handler --> timeline
+    timeline --> fs
+    timeline --> timelineidx
     thumb --> fs
     video --> fs
     thumb --> ffmpeg
@@ -155,6 +162,7 @@ flowchart TB
     video --> segments
     auth --> sqlite
     prefs --> sqlite
+    ratings --> sqlite
 ```
 
 The web client is served from the same process and the same port as the daemon.
@@ -244,7 +252,7 @@ Because this boundary is settled before being passed to the engine, the engine d
 
 The procedure is as follows.
 
-1. Normalize the `RelativePath` and remove `.` and `..`, and treat a remaining `..` and absolute paths as `InvalidInput`
+1. Normalize the `RelativePath` and remove `.` and `..`, and treat a remaining `..` and absolute paths as `InvalidRequest`
 2. `stat` the full path joined with the Library root, and if it succeeds, settle it as rank 0 with no boundary
 3. Only on `ENOENT` or `ENOTDIR`, `stat` one segment at a time from the start, and take the first thing that is not a directory as the boundary
 4. Recurse the same procedure on the remaining segments inside the boundary against that archive's index
@@ -280,9 +288,9 @@ The individual definitions and the authoritative responses are in `daemon/openap
 | `PasswordRequired`    | 403    | Password-protected archive                                                                                                             |
 | `NotFound`            | 404    | No target, no parent folder, an expired operation                                                                                      |
 | `Conflict`            | 409    | An existing conflict with `conflict=fail`, chunk offset mismatch, non-recursive deletion of a non-empty folder, an archive changing during processing |
+| `AlreadyInitialized`  | 409    | `POST /setup` when the owner is already registered                                                                                     |
 | `PayloadTooLarge`     | 413    | A one-shot PUT over 32 MiB                                                                                                             |
 | `RangeNotSatisfiable` | 416    | `Range` is out of range                                                                                                                |
-| `AlreadyInitialized`  | 409    | `POST /setup` when the owner is already registered                                                                                     |
 | `InsufficientStorage` | 507    | Insufficient capacity at the write destination                                                                                         |
 | `Timeout`             | 504    | Exceeding the deadline for extracting an archive or generating a thumbnail with ffmpeg                                                 |
 | `InternalServerError` | 500    | Anything else                                                                                                                          |
@@ -407,6 +415,7 @@ Even when the username does not exist, a dummy hash is verified, to make it hard
 
 This section gathers the mutating conventions scattered across `openapi.yaml` from the viewpoint of judgment.
 For individual paths and schemas, see `openapi.yaml`.
+API paths in this document are written relative to the server base `/api/v1`, such as `/libraries/{id}/files/...`.
 
 ### 8.1 Namespaces
 
@@ -428,7 +437,7 @@ This is so that, at the same path, one can both list its contents and download, 
 
 ### 8.2 Determining Sync and Async
 
-There is one criterion: **whether the time taken is proportional to the content size**.
+There is one criterion: **whether the time taken is proportional to the content size or to the number of entries**.
 Those that are not proportional respond synchronously, and those that are proportional return `202` and `{operation}`, with the identifier carried in `operation.id`.
 
 | Operation                   | Condition                                          | Response |
@@ -541,11 +550,12 @@ sequenceDiagram
         C->>D: PUT /uploads/{id}/content?offset=N
         D->>D: Check offset == committedSize (409 on mismatch)
         D->>S: Append
-        D-->>C: 204 {committedSize updated}
+        D-->>C: 204
     end
 
     C->>D: POST /uploads/{id}/commit
     D->>D: Check actual bytes == size (400 on mismatch)
+    D->>L: Conflict check again (409 if one exists with conflict=fail)
     D->>L: Publish atomically with rename
     D-->>C: 201 {file}
 ```
@@ -1221,6 +1231,7 @@ The container passes build and smoke tests in native CI for amd64 and arm64.
 
 The order is provisional.
 Only the dependencies must be respected.
+M7 is a retired number and is not used.
 
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
@@ -1232,7 +1243,7 @@ Only the dependencies must be respected.
 | M5 | Implement the storage service and archive driver of the [Storage Layer Design](./design/storage.md), and enable browsing inside archives | M1 | Done |
 | M6 | Switch the web client to a Vite SPA served from the daemon on the same origin, add sorting and cursors of listings and the `Timeout` response to the server, and implement the tree, grid, and image viewer of the [Client Design](./design/client.md) | M0, M1, M2, M4 | Done |
 | M8 | Implement the stream routes, media info, and transcoded playback of the [Video Playback Design](./design/video.md), and the web client's video viewer | M1, M6 | Done |
-| M9 | Build the amd64 and arm64 Docker images that include ffmpeg and the web build output | M0 | Done |
+| M9 | Build the amd64 and arm64 Docker images that include ffmpeg and the web build output | M0, M6 | Done |
 | M10 | Implement the snapshots, `offset`-based page extraction, name matching, and recursion limits of the [Listing and Search Design](./design/listing.md), and abolish cursors and `searchEntries` | M1 | Done |
 | M11 | Implement thumbnail WebP output and the quality setting, the display preferences API and storage, and media info for images | M2, M4, M8 | Done |
 | M12 | Implement the web client's screen skeleton, the display preferences screen, grids and lists that secure the overall height, and search | M10, M11 | Done |
