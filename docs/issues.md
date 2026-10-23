@@ -22,7 +22,7 @@ Line numbers change, so recheck the relevant location when filing and when fixin
 
 | Item | Severity | Investigated | Issue |
 | --- | --- | --- | --- |
-| [Representative thumbnails are not reflected on screen after their contents are deleted](./issues/representative-thumbnail-stale.md) | Medium | 2026-10-16 | - |
+| [Representative thumbnails are not reflected on screen after their contents are deleted](./issues/representative-thumbnail-stale.md) | Medium | 2026-10-23 | - |
 
 There is only one item at present, and it has no relationship with other items.
 
@@ -32,13 +32,11 @@ The following are design issues whose fix has not been decided, so they are not 
 
 | Issue | Reference |
 | --- | --- |
-| TLS and exposure outside the LAN | [design.md §11.2](./design.md#tls-and-exposure-outside-the-lan) |
 | Limiting login attempts | [design.md §11.2](./design.md#limiting-login-attempts) |
 | Multi-user and permission model | [design.md §11.2](./design.md#multi-user-and-permission-model) |
 | Persisting Operations | [design.md §11.2](./design.md#persisting-operations) |
 | Optimistic locking with ETag and If-Match | [design.md §11.2](./design.md#optimistic-locking-with-etag--if-match) |
 | Separating the admin port | [design.md §11.2](./design.md#separating-the-admin-port) |
-| Indexing search | [Listing and Search Design §8.2](./design/listing.md#indexing-search) |
 | Whether to reflect external changes in listings immediately | [Listing and Search Design §8.2](./design/listing.md#whether-to-reflect-external-changes-in-listings-immediately) |
 | Process isolation for archive handling | [Storage Layer Design §9.2](./design/storage.md#process-isolation-for-archive-handling) |
 | Password-protected archives and decrypted caches | [Storage Layer Design §9.2](./design/storage.md#password-protected-archives-and-decrypted-caches) |

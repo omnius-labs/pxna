@@ -165,6 +165,7 @@ It can also be combined with name terms, recursion, and sorting.
 
 - Filtering selects only images and videos. Folders and files that are neither images nor videos cannot be rated or tagged, so they are not included under any condition. Unrated means images and videos that have not been rated, and does not include folders and the like.
 - Filtering is not put into the listing's snapshot, and is done when cutting the page, with the set of paths looked up from the user's ratings and tags. Giving a rating or tag does not rescan, and the snapshot can be shared independently of the filtering conditions, as with names and sort order.
+- A recursive listing answered from the name index is the exception. It starts from the user's rated or tagged paths under the start (for unrated, from the images and videos of the index minus the rated paths), keeps those the name index holds, and puts only the result in the snapshot, together with the conditions and the version of ratings and tags ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)). Writing a rating or tag rebuilds that snapshot from the index without walking the file system. A row left by an Entry deleted outside Pxna does not appear there after the next aggregation, because the index no longer holds the path.
 - During filtering, the version of ratings and tags is added to the listing's identifier. The version advances inside the daemon each time ratings or tags are written. If a rating were given in the middle of reading pages in succession, the preceding and following pages would be cut from different sets, so the identifier is changed to make the client reread. The identifier of an unfiltered listing does not change.
 - Only the detail listing accepts the conditions. The summary listing does not, and the client uses the detail listing when there are conditions.
 - The timeline does not accept conditions (§8.2).
@@ -260,12 +261,15 @@ No implementation would be needed, but the results of sorting would be lost ever
 **Decision**
 Filtering by ratings and tags is done as a condition of search mode. The server does not change the snapshot, and at page cutting, matches against the set looked up from the user's ratings and tags (§7.1).
 The version of ratings and tags is added to the identifier of a listing during filtering.
+A recursive listing answered from the name index starts from the set of rated or tagged paths, or for unrated from the index's images and videos minus the rated paths, and its snapshot holds only the result (§7.1).
 
 **Reason**
 Search mode is a screen for choosing a start and a scope and searching, so "only good in this folder" and "tagged videos across the whole Library" can be expressed with the same operation.
 Ratings and tags change each time they are given, so if they were put in the snapshot's conditions, each time a rating is given it would rescan.
 If matched at page cutting, the scan result can be shared as with name conditions.
 Ratings and tags are a set of paths that can be looked up one by one per Entry, so at the scale of personal use, reading the set on every request is cheap.
+Matching at page cutting needs a snapshot of all Entries under the start, which a recursive listing answered from the name index does not build.
+Rated and tagged Entries are a small part of a Library, so starting from them and rebuilding when a rating is written costs one lookup in the index. Only the unrated condition starts from the index's images and videos, and is bounded by the count limit of listings.
 
 **Rejected alternative 1**
 A method that also places filtering in the folder view.
