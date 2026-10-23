@@ -25,7 +25,7 @@ services:
       init:
         condition: service_completed_successfully
     ports:
-      - "127.0.0.1:${PXNA_PORT:-6050}:6050"
+      - "${PXNA_BIND:-127.0.0.1}:${PXNA_PORT:-6050}:6050"
     environment:
       TZ: ${TZ:-Asia/Tokyo}
     tmpfs:
