@@ -30,6 +30,8 @@ Please initialize the submodules right after cloning.
 git submodule update --init
 ```
 
+To keep the submodules in sync on `git pull` and `git checkout`, also run `git config submodule.recurse true` (add `--global` to apply it to every repository).
+
 ### Installing Required Dependencies
 
 #### Debian and Ubuntu
@@ -88,16 +90,19 @@ The CLI still depends on [braces with an unpatched denial-of-service vulnerabili
 
 ## Running in Docker
 
-Initialize the submodules, then build and start the container:
+Create `.env`, then run `start.sh`. It initializes the submodules, then builds and starts the container (arguments are passed to `docker compose up`):
 
 ```sh
 cp .env.example .env
 # Edit .env and set PXNA_LIBRARY_DIR to the absolute path of your library.
-docker compose up --build -d
+./start.sh
 ```
 
+The image build fails with a message if the submodules are empty, for example when you run `docker compose up` directly without `start.sh`.
+
 Open `http://localhost:6050` and create the owner account. The image includes the SPA, ffmpeg, and ffprobe.
-The container listens on `127.0.0.1` only. Change the port with `PXNA_PORT`.
+The container listens on `127.0.0.1` only. Change the address with `PXNA_BIND` and the port with `PXNA_PORT`.
+Setting `PXNA_BIND=0.0.0.0` exposes pxna to your network. Authentication is a single owner password, so use it only on a trusted network or behind an HTTPS reverse proxy.
 The container runs as `PXNA_UID:PXNA_GID` (default `1000:1000`), so match them to the owner of the library (`id -u`, `id -g`) when you want to modify files.
 The SQLite database, uploads, and caches live in `.pxna/state`, which survives restarts. The `init` service sets its owner on startup.
 The configuration is [config/pxna.toml](config/pxna.toml), mounted read-only at `/config/pxna.toml`; Library paths refer to paths inside the container.

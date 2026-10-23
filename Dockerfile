@@ -13,6 +13,7 @@ ARG PXNA_BUILD_VERSION=0.1.0
 WORKDIR /build/daemon
 RUN apt-get update && apt-get install -y --no-install-recommends libclang-dev pkg-config cmake && rm -rf /var/lib/apt/lists/*
 COPY daemon/ ./
+RUN test -f refs/core-rs/Cargo.toml || { echo "The core-rs submodule is empty. Run ./start.sh, or 'git submodule update --init' first." >&2; exit 1; }
 RUN --mount=type=cache,id=pxna-registry-${TARGETARCH},target=/usr/local/cargo/registry \
     --mount=type=cache,id=pxna-target-${TARGETARCH},target=/build/daemon/target \
     RUSTC_WRAPPER= cargo build --locked --release -p omnius-pxna-daemon && \
