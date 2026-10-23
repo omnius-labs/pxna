@@ -36,12 +36,14 @@ For items whose source is `Literature only`, reread the primary sources every 3 
 | [Chromium's modal dialog cannot be made full screen, and elements drawn outside the dialog cannot be operated](./knowledges/chromium-modal-dialog-fullscreen.md) | Chromium 154.0.8037.98 | Verified | 2026-10-10 |
 | [Radix's confirmation dialog and menu propagate the Esc keydown, and a Tab in a Portal child reaches React ancestors](./knowledges/radix-nested-layer-events.md) | radix-ui 1.6.7 | Verified | 2026-10-10 |
 | [ffprobe reports the AVIF irot as the Display Matrix rotation, and the width and height stay as encoded](./knowledges/ffprobe-heif-rotation.md) | ffmpeg 8.1.1 | Verified | 2026-10-11 |
+| [SQLite's FTS5 trigram tokenizer matches only substrings of 3 or more characters through the index](./knowledges/sqlite-fts5-trigram.md) | SQLite FTS5 documentation, libsqlite3-sys 0.30.1 (SQLite 3.46.0) | Literature only | 2026-10-23 |
 
 The first 2 items, the WebP size item, and the webp crate item are the premises of the decision to output thumbnails as lossy WebP.
 The first 2 items hold as a pair, and if image gains a lossy WebP encoder, there is no longer a reason to depend on libwebp-sys.
 The kamadak-exif item is independent and is the premise for reading shooting info in an image's media info.
 The POSIX modification-time item and the NFS item are the premises of the freshness of listing snapshots, and the NFS item describes the delay before the modification time, for which the POSIX item holds, reaches the client.
 The macOS normalization item is the reason names are normalized before matching in name search.
+The SQLite trigram item is the premise of how the name index matches terms, and it does not depend on the other items.
 
 The Chromium directory-reading and beforeunload items are the premises of bringing in folders and of the leave confirmation during uploads. They do not depend on the other external component items.
 The ffprobe rotation item is independent and is the premise of the decision to return the rotation of images read with ffmpeg as an attribute without swapping the dimensions.

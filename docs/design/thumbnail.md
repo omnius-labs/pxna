@@ -150,6 +150,11 @@ The selection of the representative is reused after checking the target's versio
 The chosen Entry's attributes are checked on every request, and the cache key of the image itself and the cache key of the representative selection are kept separate.
 The direct children of an archive can be looked up from the index cache, so each file is not extracted to make the selection.
 
+The URL of a representative thumbnail is the folder's or archive's path, so it stays the same when the chosen Entry changes.
+For that reason, the response for a folder or archive carries `Cache-Control: private, no-cache` and the `ETag` of the chosen Entry's key, and the browser revalidates it on every request.
+While the representative is the same, revalidation returns 304 and the image is not transferred again.
+The response for a file can be cached for a day, because a replaced file gets a new key and therefore a new `ETag` ([design decision](#representative-revalidation)).
+
 ## 6. Video Frame Sequence
 
 ### 6.1 Positions to Extract
@@ -504,6 +509,28 @@ It omits the full scan of direct children that was repeated even for requests th
 **Rejected alternative**
 The previous method of selecting again every time is simple, but repeats enumeration and attribute fetching even after caching, so it is replaced. Holding forever hides external changes, so we do not adopt it.
 
+<a id="representative-revalidation"></a>
+#### Revalidate Representative Thumbnails and Request Them Again After Our Own Changes
+
+**Decision**
+The response for a folder or archive is revalidated by the browser on every request (§5).
+After the daemon's own change, when the web client rereads the listing, it discards the states of the folder and archive tiles in the thumbnail queue, whether read or failed, and requests them again ([Client Design §4](./client.md#4-thumbnail-requests)).
+External changes appear when the tile leaves the request targets and returns, within the 30-second expiry of the representative selection ([representative-selection-cache](#representative-selection-cache)).
+
+**Reason**
+With the one-day cache of file responses, a request that the client makes again still receives the old representative from the browser cache.
+Revalidation fixes that without changing the URL, and costs a 304 while the representative is the same.
+Requesting again only right after our own change keeps scrolling back and forth in the same listing from adding requests or generation.
+The tiles requested again are at most those in the request targets, and the server's selection has already been invalidated by the same change.
+
+**Rejected alternative 1**
+A method that changes only the server's cache header.
+A tile that stays in the request targets would keep showing the old image until it leaves them, so we rejected it.
+
+**Rejected alternative 2**
+A method that leaves the current behavior as it is.
+There is no data loss, but a tile could show a stale representative for up to a day, so we rejected it.
+
 <a id="folder-thumbnail-delay"></a>
 #### Request Folder Thumbnails After the Listing Is Displayed
 
@@ -541,19 +568,6 @@ We do not know how much demand there is for browsing animated images.
 **Conditions for deciding**
 When, while browsing a folder with many animated images, it turns out that the first frame alone cannot tell the contents apart.
 
-#### Whether to Reflect a Folder's Representative Thumbnail on Screen Immediately
-
-**Current state**
-The representative selection follows changes in contents with the version and the 30-second expiry, and for a request after the contents change, it returns the re-selected representative if candidates remain, and returns `NotFound` with no candidate only when images and videos have run out (§5, [representative-selection-cache](#representative-selection-cache)).
-The web client does not re-request the image of a tile it has displayed as long as the row remains a request target, so there is a period in which the folder and archive tiles right after deleting the contents show a stale image.
-
-**Why not decide now**
-Reflecting immediately would need a mechanism to discard and re-request the relevant tile's request after a change.
-It has to be decided together with the condition of not increasing requests and generation with each round trip of scrolling in the same listing, and not addressing it (status quo) is also an option.
-
-**Conditions for deciding**
-When the operation of deleting contents while looking at the folder view is repeated in actual use, and stale representative thumbnails become a problem in actual use.
-
 ## 11. Current State and Remaining Work
 
 ### 11.1 Current Code
@@ -568,6 +582,7 @@ Representative selection, candidate attributes, the lookup, read, and LRU update
 It handles images, images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
 The cache is a SQLite index and real files in `state_dir/thumbnail/`, with a budget for thumbnails and sprite sheets and a budget for display images.
 The thumbnail API is returned by a hand-written route outside the generated router ([design.md §11.1](../design.md#return-thumbnail-responses-outside-the-generated-router)).
+Responses for folders and archives carry the same `Cache-Control: private, max-age=86400` as files, and the web client does not request the tiles again after the daemon's own changes, so the revalidation of §5 is not in place.
 
 All the keys in §9.1 can be specified from the configuration file.
 The output formats are WebP, JPEG, and PNG, and if the request does not specify one, it is `[thumbnail] format` (the default is WebP).
@@ -581,7 +596,16 @@ CI installs ffmpeg and makes the video tests mandatory with `PXNA_REQUIRE_FFMPEG
 
 ### 11.2 Roadmap
 
-This milestone (M4 and M11 of [design.md §12.2](../design.md#122-roadmap)) has no remaining work.
+M4 and M11 of [design.md §12.2](../design.md#122-roadmap) have no remaining work.
 The API that returns media info and transcoded playback are covered by [Video Playback Design §8.2](./video.md#82-roadmap), and the issues held as deferred by §10.2.
+
+The order is provisional.
+Only the dependencies must be respected.
+
+| No. | Content | Dependencies assumed | State |
+| --- | --- | --- | --- |
+| T1 | Return folder and archive responses with `no-cache` revalidation, and have the web client request folder and archive tiles again after the daemon's own changes ([design decision](#representative-revalidation)) | None | Not started |
+
+T1 corresponds to M20 of [design.md §12.2](../design.md#122-roadmap).
 
 For confirmed defects, see [issues.md](../issues.md).

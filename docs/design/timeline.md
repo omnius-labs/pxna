@@ -32,7 +32,7 @@ If you want to know what works now, read §10 first.
 ## 2. Responsibilities and Boundaries
 
 The timeline is a listing for viewing a Library's photos and videos in the order they were taken, without following folder hierarchy.
-Folder listings and name search return the result of scanning the target after receiving a request ([Listing and Search Design §4](./listing.md#4-snapshots)).
+Folder listings return the result of scanning the target after receiving a request, and recursive searches with conditions are answered from the name index ([Listing and Search Design §4](./listing.md#4-snapshots), [§5.2](./listing.md#52-answering-recursive-listings-with-conditions)).
 The timeline is returned from the timeline index that the daemon has aggregated in advance.
 If the whole Library were scanned on every request, the wait until the first page would be proportional to the size of the Library, and images and videos would have to be opened one by one to obtain the timeline dates (§9.1).
 
@@ -48,6 +48,7 @@ The boundaries with other concerns are as follows.
 | The daemon's own mutating operations, and the point at which they finish | [design.md §8](../design.md#8-conventions-for-mutating-apis) |
 | Where the index lives, and the impact when it is lost | [design.md §9.2](../design.md#92-where-state-lives) |
 | The timeline screen and when pages are read | [Client Design §3.10](./client.md#310-timeline) |
+| The name index that aggregation's walk updates, and when it becomes usable | [Listing and Search Design §5.1](./listing.md#51-name-index) |
 
 ### 2.1 What Is Not Built
 
@@ -55,6 +56,7 @@ The boundaries with other concerns are as follows.
   Aggregation reads only timeline dates, and thumbnails are made when requested, as before ([Thumbnail Design §2.1](./thumbnail.md#21-what-is-not-built)).
 - The timeline index is not used for name search or listings.
   The index holds only images and videos, so it cannot produce search results that include folders and other files.
+  Instead, the walk passes the names it enumerates to the name index ([Listing and Search Design §5.1](./listing.md#51-name-index)).
 - A timeline spanning Libraries is not provided.
   By having a Library per Entry, determining changeability does not need to be split per Entry.
 - External changes to files are not followed by notifications.
@@ -137,6 +139,10 @@ An archive is reopened, and all the Entry rows belonging to that archive are rep
 Images removed from the archive disappear from the rows and the per-month counts through this replacement.
 In the second and later aggregations, the costs are only the scan itself and the files that changed.
 
+Each time aggregation enumerates a local folder, it passes the folder's direct children, including folders and files that are neither images nor videos, to the name index.
+A full aggregation also passes its generation, so that the name index removes the rows of folders not seen in the scan by the same rule as the file rows below.
+The walk is shared, so the name index adds no I/O beyond writing its rows ([Listing and Search Design §5.1](./listing.md#51-name-index)).
+
 Rows that have been read are committed a few hundred at a time.
 Even in the middle of aggregation, Entries that have been read appear in the timeline and the per-month counts.
 
@@ -166,11 +172,13 @@ The limit and deadline for one extraction use the same values of `[storage.archi
 ### 6.3 When Aggregation Starts
 
 At daemon startup, a Library whose index has not a single file row starts a full aggregation immediately.
+A Library whose name index is not usable ([Listing and Search Design §5.1](./listing.md#51-name-index)) also starts one, so that an existing Library gains a name index without waiting for the interval.
 This aggregation starts regardless of the value of `scan_interval_secs`.
 
 If `[timeline] scan_interval_secs` is not 0, for each Library, a full aggregation also starts when `scan_interval_secs` has passed since the last full aggregation finished.
 A Library that has never finished a full aggregation is treated as the interval having passed.
 If `scan_interval_secs` is 0, only this periodic aggregation is absent.
+The name index then reflects external changes only through manual aggregation.
 
 From the web client, a full aggregation can be started with `POST /libraries/{libraryId}/timeline/refresh`.
 Only one full aggregation of the same Library runs at a time, and a request received while one is running returns the current state.
@@ -584,6 +592,7 @@ For archives, `FileStorageArchive::block_groups` and `extract_group` extract eac
 For renames and moves within the same Library, `renamed` reassigns the rows' paths.
 The API has 4 endpoints: `GET /libraries/{libraryId}/timeline/entries`, `.../months`, `.../status`, and `POST .../refresh`.
 A video's `creation_time` is read by `MediaTools::probe_creation_time`.
+Aggregation does not pass enumerated names to the name index, and startup does not look at whether the name index is usable. This is part of L1 in [Listing and Search Design §9.2](./listing.md#92-roadmap).
 
 ### 10.2 Roadmap
 

@@ -21,5 +21,10 @@ During implementation, advance the state of the child and of this document, and 
 
 | Plan | Purpose | State | Predecessor |
 | --- | --- | --- | --- |
+| [lan-plaintext-exposure](./plans/lan-plaintext-exposure.md) | Setting `PXNA_BIND` lets a phone on the LAN or a VPN log in to the compose setup over plain HTTP | Not started | - |
+| [representative-thumbnail-refresh](./plans/representative-thumbnail-refresh.md) | Folder tiles show the new representative right after our own changes | Not started | - |
+| [viewer-touch-gestures](./plans/viewer-touch-gestures.md) | The image viewer can be operated with one hand on a phone | Not started | - |
+| [name-index-store](./plans/name-index-store.md) | Every non-hidden Entry of a Library is held in a name index that follows our own changes | Not started | - |
+| [name-index-search](./plans/name-index-search.md) | A search from the root of a 10-million-Entry Library returns its first page within a second | Not started | name-index-store |
 
-There are currently no plans in progress.
+The two name index plans run in order. The other three are independent of each other and of them.

@@ -176,10 +176,16 @@ For an image swapped in immediately, the display image is a stopgap until the or
 Other images keep the display image until zoomed, so it is matched to the number of the screen's pixels.
 The server rounds up to size steps, so the client need not know the step values.
 
-Zoom is done with the wheel or a touch pinch.
+Zoom is done with the wheel, a touch pinch, or a double tap.
+A double tap switches between the whole image and an enlarged view, and the enlarged view counts as zooming for the timing of fetching the original image.
 While zoomed, dragging moves the display position.
 
 In the viewer, left and right flicks or key operations move to the previous or next Entry of the current listing (including search results).
+A downward swipe closes the viewer, the same as the close button.
+Flicks and the downward swipe are accepted only while the image is shown whole, so that they do not take over the drag of a zoomed image.
+In the video viewer they are not accepted, so that they do not collide with the player's own controls.
+The image area takes all touch gestures itself (`touch-action: none`, `overscroll-behavior: contain`), so the browser's pull-to-refresh and scrolling of the page do not start from it.
+A flick is a horizontal movement of more than 50 CSS px within 300 ms, a downward swipe is a downward movement of more than 80 CSS px, and a double tap is two taps within 300 ms and 30 CSS px. A double tap at the whole view enlarges 2 times around the tapped point.
 The order of previous and next follows the same sort as the listing.
 When moving to an Entry on a page not yet read, that page is read.
 The display images of one before and one after are requested in advance, so they are shown without waiting when moved to.
@@ -294,9 +300,11 @@ The rating choice (すべて (All), 良い (Good), 悪い (Bad), 未評価 (Unra
 When a rating or tag is specified, even without search terms, the images and videos under the start (directly under it, with "サブフォルダを含めない") that satisfy the conditions are listed. They can be combined with name terms, the start, and the scope, and ratings and tags narrow to those satisfying both.
 A filtered listing is not reread when a rating or tag is given. The re-given result is reflected the next time the listing is opened and when the server returns a different identifier. The filtering rules and the handling of the listing's identifier are authoritative in [Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings).
 
-The first page of a subtree search does not return until the server's scan finishes.
+The first page of a subtree search does not return until the server's query of the name index, or its walk, finishes ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)).
 In the meantime it indicates that searching is in progress, and the request is canceled when the terms, start, or scope is changed or the search is ended.
-The server stops the scan when all requests waiting for the scan have been cut ([Listing and Search Design §4.1](./listing.md#41-the-unit-that-is-built)).
+The server stops the work when all requests waiting for it have been cut ([Listing and Search Design §4.1](./listing.md#41-the-unit-that-is-built)).
+When a subtree search from a folder outside archives gets a response telling that the name index did not answer, "索引を作成中のため、結果が不完全な場合があります。" (The index is being built, so the results may be incomplete.) is displayed above the results.
+A search with "サブフォルダを含めない" or from inside an archive is walked by design and does not show it.
 If the response's `truncated` is set, it indicates that the result is partial and urges moving the starting folder down and searching again.
 A subtree search does not search inside archives, so to search inside an archive, open the archive and then search.
 
@@ -511,6 +519,11 @@ If the API's URL were put directly in an `img` element's `src`, the browser woul
 
 A tile for which the server returned a deadline expiry (`Timeout`) becomes an icon showing the kind, like files whose thumbnail cannot be made, and is not requested again while that folder is displayed.
 As with the failure of a listing, this is because repeating can hit the same deadline expiry.
+
+The exception is right after the daemon's own change.
+When the listing is reread after a change made through Pxna, the read and failed states of folder and archive tiles are discarded, and the tiles in the request targets are requested again.
+A representative can change with the contents, and the server revalidates its response on every request, so a request made again receives the new representative ([Thumbnail Design §10.1](./thumbnail.md#representative-revalidation)).
+Image and video tiles are not requested again, because their thumbnails change only when the file itself is replaced.
 
 ## 5. Design Decisions
 
@@ -1319,6 +1332,28 @@ If capabilities' childProbes is false, or the capabilities query is not provided
 **Reason**
 Unconfirmed is not misjudged as empty, and folder checks of all 20,000 items do not become new background load.
 
+#### Add Double Tap and a Downward Swipe to the Viewer's Touch Operations
+
+**Decision**
+In addition to left and right flicks and pinch, the viewer accepts a double tap to switch zoom and a downward swipe to close (§3.4).
+Flicks and the swipe are accepted only while the image is shown whole, and not in the video viewer.
+The gestures are recognized with the Pointer Events the viewer already uses for dragging, without adding a gesture library.
+
+**Reason**
+A narrow screen fetches the original image only on zoom by default, and a double tap reaches the enlarged view with one hand.
+A downward swipe closes the viewer without reaching for the button at the top of a phone screen.
+Taking the gestures in the image area keeps them from starting the browser's pull-to-refresh, which a downward swipe would otherwise collide with.
+Limiting flicks and the swipe to the whole view keeps them from competing with dragging a zoomed image, and keeping them off videos keeps them from competing with the player's seek bar.
+The set of gestures is small, so recognizing them in the existing pointer handling does not need a dependency.
+
+**Rejected alternative 1**
+A method that implements only left and right flicks and pinch.
+There would be fewer gestures to tell apart, but reaching the enlarged view and closing would need two fingers or the button at the top, so we rejected it.
+
+**Rejected alternative 2**
+A method that also moves back and forth among videos with flicks.
+Movement would be the same for images and videos, but a horizontal drag on the seek bar would be taken as a flick, so we rejected it.
+
 ### 5.2 Deferred
 
 #### Whether to Show Counts on Folder Tiles
@@ -1401,7 +1436,8 @@ On a wide screen, from the listing's context menu and the toolbar, one can creat
 Internal drag moves to the same Library's tree and folder tiles, and copies when Alt is pressed. It rejects destinations that are readonly or archives, scrolls at the listing's edges, and expands closed tree folders after 1 second.
 [upload.ts](../../ui-web/src/library/upload.ts) sends the toolbar's file and folder selection and OS drops in a queue of at most 2. Files of 32 MiB or less are written directly, and larger files send 16 MiB chunks. Folders are created first, and the conflict policy is also applied to what is underneath. For OS folders, it reads from the same reader until an empty batch, and does not drop the tail of what is underneath ([Measurements of Chromium](../knowledges/chromium-directory-reader.md)). A session is discarded when canceled, and the listing and tree are reread once per published file.
 The activity panel is shown overlaid at the bottom right and shows the progress, state, and failures and skips of Operations and uploads. Operations are updated every second only while running, and return even after a reload. Uploads show the number of bytes sent and can be canceled while waiting and sending. When collapsed it becomes a status bar button and shows the unread count. The items lined up when it is opened become read and are shown faintly, and finished items can be removed with ×. During an upload a leave confirmation is registered, and it is released when a terminal state is reached. On narrow screens, the entrances to operations and the panel are not shown.
-The viewer does not have back-and-forth movement by left and right flicks or zoom by pinch.
+The viewer does not have back-and-forth movement by left and right flicks, zoom by pinch or double tap, or closing by a downward swipe.
+The thumbnail queue does not discard the states of folder and archive tiles after the daemon's own changes, and search mode does not display the notice for results the name index did not answer.
 To the right of the listing on a wide screen, the info panel ([InfoPanel.tsx](../../ui-web/src/components/InfoPanel.tsx)), which can be opened and closed with a toolbar button, is placed.
 The open/closed state is saved in the browser's `localStorage`, and is open when first opened.
 When one item is selected, the name, kind, size, modification date, and Library-relative path are shown from the Entry the selection holds, without a request.
@@ -1425,9 +1461,11 @@ Only the dependencies must be respected.
 
 | No. | Content | Dependencies assumed |
 | --- | --- | --- |
-| C10 | Implement back-and-forth movement by left and right flicks in the viewer, and zoom by pinch | None |
+| C10 | Implement back-and-forth movement by left and right flicks in the viewer, zoom by pinch and double tap, and closing by a downward swipe | None |
+| C11 | Discard the states of folder and archive tiles and request them again when the listing is reread after the daemon's own change (§4) | None |
+| C12 | Display the notice of §3.6 when a subtree search from a folder outside archives is not answered from the name index | L1 of [Listing and Search Design §9.2](./listing.md#92-roadmap) |
 
-C10 corresponds to M15 of [design.md §12.2](../design.md#122-roadmap).
+C10 corresponds to M15, C11 to part of M20, and C12 to part of M19 of [design.md §12.2](../design.md#122-roadmap).
 M13, which corresponds to C8b, M14, which corresponds to C9a and C9b, and M17, which corresponds to the timeline screen, are complete.
 With the narrow-screen default of "only on zoom" as is, the state in which the original image cannot be shown by touch operation alone continues until C10.
 
