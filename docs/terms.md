@@ -56,8 +56,9 @@ Design rationale, implementation status, defects, and external behavior are each
 | Summary listing | listing | `FolderSummaryListing` | `listFolderSummaries` | A listing that returns, page by page, the names, kinds, and archive hints of direct children without waiting for detailed attributes | detail listing |
 | Detail batch | listing | `EntryDetailResult` | `getEntryDetails` | A read operation that returns the current attributes of up to 200 explicitly given paths, with per-item success or failure | attribute index |
 | Browse index | listing | `SummaryIndex` | `[listing] summary_index_capacity_bytes` | Derived state that reuses summary listings of already browsed direct children across restarts after checking their version and expiry | search index |
+| Name index | listing | `NameIndex` | `indexed` (whether a listing was answered from it) | Derived state, updated by aggregation and the daemon's own changes, that holds the normalized names of a Library's non-hidden Entries outside archives and answers recursive listings with conditions | search index |
 | Child probe | listing | `ChildProbe` | `probeFolderChildren` | An operation that checks the expansion hint of a visible row with a shallow enumeration that stops at the first folder-like child | recursive check |
-| Subtree search | listing | - | `recursive=true` with `query`, the default scope of search mode | A listing that recursively scans under a starting folder and returns Entries whose names match the condition | global search |
+| Subtree search | listing | - | `recursive=true` with `query`, the default scope of search mode | A listing that covers everything under a starting folder and returns Entries whose names match the condition, from the name index or by walking | global search |
 | Search mode | client | - | `/search/{libraryId}`, `q`, `path`, `flat=1`, `rating`, `tag` | The web screen where you choose, within the screen, a start (the whole Library or under a folder) and a scope (include descendants or only direct children), and search by name, rating, and tag. Both folder view and the timeline enter the same screen | search box, search page |
 | Activity panel | client | - | - | A list, overlaid at the bottom right of the web client, of the progress and results of Operations and uploads | transfer panel |
 | Info panel | client | - | `pxna.infoPanelOpen` (a `localStorage` key) | The web display, placed to the right of a listing, of the details and media info of the selected Entry | inspector |
@@ -86,7 +87,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | Timeline date | timeline | `TimelineDate` | `timelineDate` | The date and time, without a time zone, by which the timeline orders Entries, decided from the shooting date and time or `creation_time` (or else the modification time) | - |
 | Timeline date source | timeline | `TimelineDateSource` | `timelineDateSource` | Which of the shooting date and time, `creation_time`, the Entry's modification time, or the archive's modification time the timeline date came from | - |
 | Timeline index | timeline | `TimelineIndex` | `state_dir/timeline/index.db` | A SQLite index, built by aggregation, that holds per Library the Entries to list in the timeline and their timeline dates | timeline cache |
-| Aggregation | timeline | `TimelineScanner` | `/timeline/refresh`, `/timeline/status` | The process that scans a Library, reads the timeline dates of images and videos, and reflects them in the timeline index | indexing, scan |
+| Aggregation | timeline | `TimelineScanner` | `/timeline/refresh`, `/timeline/status` | The process that scans a Library, reads the timeline dates of images and videos, and reflects them in the timeline index, passing the names it enumerates to the name index | indexing, scan |
 | [Rating](./terms/rating-tags.md#t-rating) | rating-tags | `Rating` | `rating`, `RatingValue` | The good or bad value a user gives to an image or video. The unrated state is represented as none | star, score |
 | Vocabulary | rating-tags | `RatingTagService::tags` | `GET /tags` | The list of tag words the user has created so far. Words removed from Entries remain and serve as completion candidates while typing | tag list |
 | Tag | rating-tags | `TagName` | `tags` | A word the user freely attaches to an image or video. Up to 32 per Entry, each word up to 64 characters, case-sensitive | label |
@@ -137,6 +138,17 @@ An ArchiveIndex represents the contents of one archive, and an ArchiveRuntime re
 
 **What goes wrong if they are confused**
 If the limits are included in the per-archive index, the process cannot limit extraction concurrency consistently.
+
+<a id="t-browse-index-vs-name-index"></a>
+#### Browse index and Name index
+
+**Boundary**
+The browse index holds summary listings of direct children that have been browsed, and checks each against the folder's version before reuse.
+The name index holds the names of every non-hidden Entry of a Library, is updated by aggregation and the daemon's own changes, and is used only for recursive listings with conditions.
+Both live under `state_dir/listing`.
+
+**What goes wrong if they are confused**
+If a folder listing is answered from the name index, external changes to that folder stay invisible until the next aggregation, although the browse index would have caught them with the folder's modification time.
 
 <a id="t-thumbnail-vs-display-image"></a>
 #### Thumbnail and Display image
