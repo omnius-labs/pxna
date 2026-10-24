@@ -128,7 +128,7 @@ flowchart TB
         ratings["Ratings and tags"]
     end
 
-    ffmpeg["ffmpeg / ffprobe<br/>external processes"]
+    ffmpeg["ffmpeg / ffprobe / heif-dec<br/>external processes"]
 
     subgraph persist["Persistence"]
         localfs[("Local FS<br/>Library")]
@@ -174,7 +174,7 @@ This premise is what makes the CSRF protection in §8.5 hold.
 Only the responses for file content, thumbnails, and HLS are returned by hand-written routes that do not go through the generated router (§11.1).
 This is because the generated router cannot return the response body as a stream or vary the response's `Content-Type` according to the request.
 Authentication and Library boundary checks go through the same daemon-layer processing as other paths.
-ffmpeg and ffprobe are not linked into the daemon and are started as external processes.
+ffmpeg, ffprobe, and libheif's heif-dec are not linked into the daemon and are started as external processes.
 
 ## 4. Internal Structure of the Daemon
 
@@ -680,7 +680,7 @@ This is so that engine tests can create the same tables without going through th
 ### 9.3 Distribution
 
 The daemon is distributed as a Docker image.
-The image is built for two architectures, amd64 and arm64, and contains the daemon's executable, the web build output, and ffmpeg and ffprobe.
+The image is built for two architectures, amd64 and arm64, on Debian trixie, and contains the daemon's executable, the web build output, ffmpeg and ffprobe, and libheif's heif-dec.
 
 | What is passed in from outside the container | How it is passed |
 | --- | --- |
@@ -1084,7 +1084,7 @@ The implementation is small, but it would rewrite the generated output's respons
 #### Make the Docker Image the Basis of Distribution
 
 **Decision**
-The daemon is distributed as a Docker image containing ffmpeg, ffprobe, and the web build output, for amd64 and arm64 (§9.3).
+The daemon is distributed as a Docker image containing ffmpeg, ffprobe, heif-dec, and the web build output, for amd64 and arm64 (§9.3).
 
 **Reason**
 Thumbnails and video transcoding call ffmpeg as an external process ([Thumbnail Design](./design/thumbnail.md#call-ffmpeg-as-an-external-process)), so the execution environment needs ffmpeg.
@@ -1095,6 +1095,25 @@ We also build for arm64 so that it can run on ARM NAS devices and small servers.
 **Rejected alternative**
 Distributing only native executables per OS.
 The operator would have to install ffmpeg separately, and differences in version can change the behavior of frame extraction and conversion, so we rejected it.
+
+#### Bundle a Pinned Static Build of ffmpeg
+
+**Decision**
+The image bundles the GPL static build of ffmpeg 9.0 published by BtbN/FFmpeg-Builds, instead of Debian's package.
+The build is pinned by the month-end autobuild release, the file name, and the SHA-256 for each of amd64 and arm64 in `Dockerfile`.
+
+**Reason**
+Debian's ffmpeg is 5.1 on bookworm, which cannot open HEIC, and 7.1 on trixie, which reads only one tile of a tile grid; ffprobe of 8.1 does not report the rotation of a tile grid ([ffmpeg and HEIF tile grids](./knowledge/ffmpeg-heif-tile-grid.md)).
+The GPL build is needed because transcoding uses libx264 ([Video Playback Design §5.3](./design/video.md#53-output)).
+BtbN deletes daily autobuilds after about a month and keeps month-end ones for longer, so pinning a month-end one keeps the image buildable.
+
+**Rejected alternative 1**
+Copying ffmpeg from a third-party Docker image such as `mwader/static-ffmpeg`.
+It takes one line, but it depends on a further third party's image, so we rejected it.
+
+**Rejected alternative 2**
+Installing jellyfin-ffmpeg from Jellyfin's apt repository.
+It would add the management of a repository and its signing key, and installs under a non-standard path, so we rejected it.
 
 #### Publish the Container Only After Verifying Both Architectures
 

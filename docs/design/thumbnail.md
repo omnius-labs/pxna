@@ -53,7 +53,7 @@ The boundaries with other concerns are as follows.
   This avoids having to follow changes and generating files nobody looks at.
 - Compatibility with Susie plugins (loading Windows DLLs) is not provided.
   This avoids having a per-OS plugin mechanism.
-  Formats the `image` crate cannot read are left to ffmpeg (§3).
+  Formats the `image` crate cannot read are left to libheif or ffmpeg (§3).
 - For animated GIFs and animated WebPs, only the first still frame becomes the thumbnail.
   This avoids having a path that extracts a frame sequence per image format.
 - Delivering the original image for the viewer is not covered.
@@ -68,7 +68,8 @@ The set of supported extensions is a property of the server, and the client is n
 | Kind | Determination | Generation method |
 | --- | --- | --- |
 | Image | An extension the `image` crate can read | Shrunk with `ImageConverter` |
-| Other images | Extensions such as HEIC and AVIF that are not read by the `image` crate but are decided to be read with ffmpeg | Extract the first frame with ffmpeg and then shrink |
+| HEIF images | The extensions `heic` and `heif` | Decode the primary image with libheif's heif-dec and then shrink. If heif-dec cannot be started or fails, read it in the same way as other images |
+| Other images | Extensions such as AVIF that are not read by the `image` crate but are decided to be read with ffmpeg | Extract one image with ffmpeg's default stream selection and then shrink |
 | Video | Video extensions decided to be read with ffmpeg | Extract the frame sequence with ffmpeg (§6) |
 | Folders and archives | The Entry's kind and the archive flag | Return the representative thumbnail (§5) |
 
@@ -79,10 +80,14 @@ The listing response puts the MIME type decided from the extension in the `metad
 The client decides image and video tiles and the viewer from the `image/` and `video/` prefixes (the reason is in §10.1).
 It is not put on files that match none of them.
 
-ffmpeg is started by the daemon as an external process.
-The path of a physical file is passed to ffmpeg.
+An image encoded as a tile grid has one stream per tile, and the image is assembled from the stream group that bundles them.
+Pointing at the first stream gives only one tile, so ffmpeg is not given a stream for images and is left to its default selection, which assembles the grid in ffmpeg 9.0 ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)).
+heif-dec assembles the grid and applies the rotation of `irot` ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
+
+ffmpeg and heif-dec are started by the daemon as external processes.
+The path of a physical file is passed to them.
 For an entry in an archive, it is made a physical file with `materialize_file` and then passed, and the lease is held until generation finishes.
-If the lease were released, a file ffmpeg is reading could be deleted by the extraction cache's LRU.
+If the lease were released, a file being read could be deleted by the extraction cache's LRU.
 
 ## 4. Size and Shape
 
@@ -210,7 +215,7 @@ The client requests only the tiles in the visible range and the prefetch margin,
 
 The server-side rules are the following three.
 
-- Upper limits on concurrency are set for image conversion and for ffmpeg runs respectively. Requests that reach the limit wait in arrival order
+- Upper limits on concurrency are set for image conversion and for ffmpeg and heif-dec runs respectively. Requests that reach the limit wait in arrival order
 - Concurrent requests for the same cache key are merged into one generation by single-flight
 - A request whose connection was cut while waiting is discarded without starting generation. A request cut after generation started is generated to the end and put in the cache
 
@@ -282,7 +287,7 @@ If the conversion implementation, the encoder's quality, or the way frames are e
 
 ### 9.1 Where the Configuration Belongs
 
-The thumbnail configuration goes in the top-level `[thumbnail]`, and the locations of the ffmpeg and ffprobe executables go in `[media]`, shared with video playback.
+The thumbnail configuration goes in the top-level `[thumbnail]`, and the locations of the ffmpeg, ffprobe, and heif-dec executables go in `[media]`, shared with video playback.
 Byte sizes, counts, times, and parallelism allow only positive values and are validated at daemon startup.
 
 | key | Default | Applies to |
@@ -295,13 +300,14 @@ Byte sizes, counts, times, and parallelism allow only positive values and are va
 | `[thumbnail] cache_capacity_bytes` | 2 GiB | Capacity budget for thumbnails and sprite sheets |
 | `[thumbnail] display_cache_capacity_bytes` | 2 GiB | Capacity budget for display images |
 | `[thumbnail] max_concurrent_images` | 4 | Number of image conversions running at the same time |
-| `[thumbnail] max_concurrent_videos` | 2 | Number of ffmpeg runs for frame extraction at the same time |
+| `[thumbnail] max_concurrent_videos` | 2 | Number of ffmpeg and heif-dec runs at the same time |
 | `[thumbnail] video_timeout_secs` | 60 | Deadline for one frame extraction |
 | `[media] ffmpeg_path` | `ffmpeg` | The ffmpeg executable |
 | `[media] ffprobe_path` | `ffprobe` | The ffprobe executable |
+| `[media] heif_dec_path` | `heif-dec` | libheif's heif-dec executable. `heif-convert` of libheif before 1.17 takes the same arguments |
 
 The defaults of `[media]` are names searched from `PATH`.
-The Docker image for distribution bundles both ([design.md §9.3](../design.md#93-distribution)).
+The Docker image for distribution bundles all three ([design.md §9.3](../design.md#93-distribution)).
 
 ## 10. Design Decisions
 
@@ -373,6 +379,31 @@ The cost of needing ffmpeg in the execution environment is paid by making the Do
 **Rejected alternative**
 A method that links ffmpeg as a library with bindings such as `ffmpeg-next`.
 The dependency on the execution environment goes away, but the 3-OS CI would have to prepare ffmpeg's development libraries, and decoder anomalies would spread to the daemon's process, so we rejected it.
+
+#### Read HEIF with libheif's heif-dec, and Fall Back to ffmpeg
+
+**Decision**
+HEIC and HEIF images are decoded with libheif's heif-dec, started as an external process like ffmpeg.
+If heif-dec cannot be started or exits with an error, the cause is logged and the image is read with ffmpeg.
+AVIF and the other formats decided to be read with ffmpeg stay with ffmpeg.
+
+**Reason**
+HEIC written by macOS's `sips` is encoded as a tile grid of 512×512 tiles, and the heif-dec and heif-convert of the libheif versions packaged by Debian and Ubuntu assemble the grid and apply `irot` ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
+The ffmpeg in Debian before trixie cannot open HEIC at all, and the one in trixie reads only one tile ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)), so reading HEIC well with ffmpeg alone depends on its version.
+Falling back to ffmpeg keeps HEIC readable in development environments without libheif when their ffmpeg assembles grids.
+AVIF was left to ffmpeg because its rotation behavior was already verified there ([Measurements of ffprobe](../knowledge/ffprobe-heif-rotation.md)) and changing its path was not needed to show HEIC.
+
+**Rejected alternative 1**
+A method that reads HEIC only with ffmpeg 9.0.
+It keeps one tool, but how HEIC is read would depend entirely on the ffmpeg version of the environment, and environments with the ffmpeg packaged by Debian or Ubuntu could not show HEIC, so we rejected it.
+
+**Rejected alternative 2**
+A method that links libheif as a library through bindings.
+For the same reason as ffmpeg (§10.1 "Call ffmpeg as an External Process"), a decoder anomaly would spread to the daemon's process, so we rejected it.
+
+**Rejected alternative 3**
+A method that reads HEIC with heif-dec and also routes AVIF to libheif.
+The HEIF family would be handled by one tool, but it would change the verified AVIF path without a need, so we rejected it.
 
 #### Announce Images and Videos with the Listing's contentType
 
@@ -579,7 +610,7 @@ Grid and List target only the folders and archives of visible rows, and wait 200
 Representative selection, candidate attributes, the lookup, read, and LRU update of the image cache, and generation are recorded at separate measurement points. Connection acquisition and execution of the LRU update are also distinguished. The format and keys of the image cache are not changed, and LRU updates are taken out of the response and written together as in [§8.2](#82-capacity-budgets-and-lru). The comparison is in the [measurement record](../measurements/2026-10-15-browse-thumbnails.md).
 
 `ThumbnailGenerator` generates according to the rules of §3 through §8.
-It handles images, images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
+It handles images, HEIF images read with heif-dec, images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
 The cache is a SQLite index and real files in `state_dir/thumbnail/`, with a budget for thumbnails and sprite sheets and a budget for display images.
 The thumbnail API is returned by a hand-written route outside the generated router ([design.md §11.1](../design.md#return-thumbnail-responses-outside-the-generated-router)).
 Responses for folders and archives carry the same `Cache-Control: private, max-age=86400` as files, and the web client does not request the tiles again after the daemon's own changes, so the revalidation of §5 is not in place.
@@ -592,7 +623,9 @@ The number and positions of frames cannot be configured and are fixed to the def
 A video's duration is obtained from the media info service shared with video playback. The LRU and the merging of concurrent requests are common with the video's media info ([Video Playback Design §3](./video.md#3-media-info)).
 
 In environments where ffmpeg and ffprobe are not on `PATH`, the tests for videos and images read with ffmpeg are skipped with the reason printed.
-CI installs ffmpeg and makes the video tests mandatory with `PXNA_REQUIRE_FFMPEG=1`.
+The tests that assemble tile grids with ffmpeg are also skipped when ffmpeg is older than 8, and the test that reads the rotation of a tile grid with ffprobe when it is older than 9.
+The HEIF tests use heif-dec or heif-convert from `PATH`, and are skipped without either.
+Linux CI installs ffmpeg and libheif, and makes these tests mandatory with `PXNA_REQUIRE_FFMPEG=1` and `PXNA_REQUIRE_HEIF_DEC=1`.
 
 ### 11.2 Roadmap
 

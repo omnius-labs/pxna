@@ -1,6 +1,6 @@
 # ffmpeg 8.1.1 Reports the AVIF irot as the Display Matrix Rotation and Applies It When Decoding, and ffmpeg 5.1 to 7.1 Ignore irot
 
-**Source: Verified** (ffmpeg 8.1.1 / 2026-10-11, ffmpeg 5.1.9, 6.1.1, 7.1.5 / 2026-10-24)
+**Source: Verified** (ffmpeg 8.1.1 / 2026-10-11, ffmpeg 5.1.9, 6.1.1, 7.1.5 / 2026-10-24, ffmpeg 9.0.2 / 2026-10-25)
 
 One item of [knowledge.md](../knowledge.md).
 
@@ -14,10 +14,11 @@ With ffmpeg 8.1.1 on macOS (AVIF created with libsvtav1), we confirmed the follo
 
 ffmpeg 5.1.9 (Debian bookworm), 6.1.1 (Ubuntu 24.04), and 7.1.5 (Debian trixie) ignore `irot`.
 For the 64×32 AVIF with `irot` value 1, `ffprobe -show_streams` gave a `width` of 64 and a `height` of 32 and had no `side_data_list`, and decoding to PNG gave 64×32 without the rotation.
-The rotation ffprobe reports and the rotation decoding applies therefore agree in every version we checked: both are present in 8.1.1, and both are absent in 5.1.9, 6.1.1, and 7.1.5.
+ffmpeg 9.0.2 (BtbN static build) reads `irot` as 8.1.1 does. For the 64×32 AVIFs with `irot` values 1 and 2, `ffprobe -show_streams` gave a `width` of 64, a `height` of 32, and a `rotation` of 90 and -180, and decoding to PNG gave 32×64 and 64×32.
+The rotation ffprobe reports and the rotation decoding applies therefore agree in every version we checked: both are present in 8.1.1 and 9.0.2, and both are absent in 5.1.9, 6.1.1, and 7.1.5.
 
 We did not check HEIC, the mirroring `imir`, ffmpeg versions other than the four above, or images whose Exif orientation disagrees with `irot`.
-HEIC could not be checked because the ffmpeg at hand cannot write HEIC and we have no real file. AVIF and HEIC have `irot` through the same HEIF mechanism, so the same result is expected. This is a conjecture.
+For HEIC encoded as a tile grid, the result differs from AVIF without tiles and is in [ffmpeg and HEIF tile grids](./ffmpeg-heif-tile-grid.md).
 
 ## Basis
 
@@ -91,12 +92,14 @@ for image in debian:bookworm-slim ubuntu:24.04 debian:trixie-slim; do
 done
 ```
 
+ffmpeg 9.0.2 was `ffmpeg-n9.0.2-17-g2a571b6068-linuxarm64-gpl-9.0.tar.xz` of the BtbN/FFmpeg-Builds release `autobuild-2026-09-30-13-08`, and the same two commands were run in `debian:trixie-slim` on `rot90.avif` and `rot180.avif` of the same directory.
+
 ## Implication
 
 This is the premise of the decision in [Video Playback Design §7.1](../design/video.md#return-the-rotation-of-images-read-with-ffmpeg-as-an-attribute-without-swapping-the-dimensions).
-The server decides the media info `rotation` depending on the `rotation` in the `side_data_list` of the video stream, in the `-show_streams` JSON that `probe_image_size` in [ffmpeg.rs](../../daemon/modules/engine/src/core/media/ffmpeg.rs#L58) receives.
+For an image without a tile grid, the server decides the media info `rotation` depending on the `rotation` in the `side_data_list` of the video stream, in the JSON that `probe_image_size` in [ffmpeg.rs](../../daemon/modules/engine/src/core/media/ffmpeg.rs#L63) receives.
 An image without `irot` has no `side_data_list`, so it can be treated as having no rotation.
 
 With the checked ffmpeg 5.1.9, 6.1.1, and 7.1.5, an image with `irot` is returned with no rotation and its thumbnails and display images come out unrotated, so the media info and the images still agree.
-The Docker image is based on Debian bookworm and installs its ffmpeg 5.1, so the rotation of `irot` does not take effect there. Of the versions checked, it takes effect only with ffmpeg 8.1.1.
-CI installs the ffmpeg 6.1 of Ubuntu 24.04, so the test in [generator.rs](../../daemon/modules/engine/src/core/thumbnail/generator.rs#L1180) decides the expected rotation from whether the thumbnail of the 90-degree image comes out portrait.
+The Docker image bundles ffmpeg 9.0, so the rotation of `irot` takes effect there ([design.md](../design.md#bundle-a-pinned-static-build-of-ffmpeg)).
+CI installs the ffmpeg 6.1 of Ubuntu 24.04, so the test in [generator.rs](../../daemon/modules/engine/src/core/thumbnail/generator.rs#L1216) decides the expected rotation from whether the thumbnail of the 90-degree image comes out portrait.

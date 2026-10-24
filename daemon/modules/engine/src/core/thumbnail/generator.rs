@@ -116,6 +116,8 @@ struct Inner {
     conversions: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     ffmpeg_runs: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    heif_dec_runs: std::sync::atomic::AtomicUsize,
 }
 
 /// 要求を、サイズ段階へ切り上げた、キャッシュのキーに含める条件にそろえたもの。
@@ -185,6 +187,8 @@ impl ThumbnailGenerator {
                 conversions: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 ffmpeg_runs: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                heif_dec_runs: std::sync::atomic::AtomicUsize::new(0),
             }),
         })
     }
@@ -301,6 +305,12 @@ impl ThumbnailGenerator {
     fn ffmpeg_runs(&self) -> usize {
         self.inner.ffmpeg_runs.load(std::sync::atomic::Ordering::SeqCst)
     }
+
+    /// heif-dec を起動した回数。
+    #[cfg(test)]
+    fn heif_dec_runs(&self) -> usize {
+        self.inner.heif_dec_runs.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 impl Inner {
@@ -361,7 +371,7 @@ impl Inner {
     fn semaphore_for(&self, kind: MediaKind) -> Arc<Semaphore> {
         match kind {
             MediaKind::Image => self.image_permits.clone(),
-            MediaKind::FfmpegImage | MediaKind::Video => self.video_permits.clone(),
+            MediaKind::FfmpegImage | MediaKind::HeifImage | MediaKind::Video => self.video_permits.clone(),
         }
     }
 
@@ -391,8 +401,14 @@ impl Inner {
                 }
             }
             MediaKind::FfmpegImage => {
-                let mut frames = self.extract_frames(file.path(), &[0.0]).await?;
-                let input = frames.swap_remove(0);
+                let input = self.extract_image(file.path()).await?;
+                Produced {
+                    image: self.convert_one(input, &job.plan).await?,
+                    sprite: None,
+                }
+            }
+            MediaKind::HeifImage => {
+                let input = self.decode_heif(file.path()).await?;
                 Produced {
                     image: self.convert_one(input, &job.plan).await?,
                     sprite: None,
@@ -499,6 +515,25 @@ impl Inner {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.tools.extract_frames(file, positions_secs).await
+    }
+
+    async fn extract_image(&self, file: &Path) -> Result<Vec<u8>> {
+        #[cfg(test)]
+        self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.tools.extract_image(file).await
+    }
+
+    /// heif-dec で読む。heif-dec がないか、読めなかったときは、ffmpeg で読み直す。
+    async fn decode_heif(&self, file: &Path) -> Result<Vec<u8>> {
+        #[cfg(test)]
+        self.heif_dec_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        match self.tools.decode_heif(file).await {
+            Ok(image) => Ok(image),
+            Err(error) => {
+                warn!(error = ?error, "heif-dec failed to decode a HEIF image, so ffmpeg reads it instead");
+                self.extract_image(file).await
+            }
+        }
     }
 
     /// 拡張子が合っていても中身が読めない file は、`UnsupportedType` にする。
@@ -1124,6 +1159,7 @@ mod tests {
             MediaOptions {
                 ffmpeg_path: "/nonexistent/ffmpeg".into(),
                 ffprobe_path: "/nonexistent/ffprobe".into(),
+                heif_dec_path: "/nonexistent/heif-dec".into(),
             },
         )
         .await?;
@@ -1288,13 +1324,133 @@ mod tests {
             return Ok(());
         }
         let fixture = fixture(ThumbnailOptions::default()).await?;
-        // ffmpeg で読むと定めた拡張子でも、中身は ffmpeg が内容から判定するので、PNG を HEIC の名前で置いて経路を確かめる。
-        let file = fixture.dir.path().join("photo.heic");
+        // ffmpeg で読むと定めた拡張子でも、中身は ffmpeg が内容から判定するので、PNG を JPEG XL の名前で置いて経路を確かめる。
+        let file = fixture.dir.path().join("photo.jxl");
         write_png(&file, 600, 300)?;
 
         let thumbnail = fixture.generator.generate(&nested(&file), &thumbnail_request(256, 256)).await?;
         assert_eq!(size(&thumbnail)?, (256, 128));
         assert_eq!(fixture.generator.ffmpeg_runs(), 1);
+        assert_eq!(fixture.generator.heif_dec_runs(), 0);
+        Ok(())
+    }
+
+    /// macOS の `sips` が書いた、512×512 のタイル 6 枚で 1280×960 を符号化した HEIC と、その `irot` の角度を 90 度に書き換えた HEIC。
+    /// 作り方は docs/knowledge/ffmpeg-heif-tile-grid.md にある。
+    /// 名前と、組み立てて回転を反映した後の幅と高さを返す。
+    fn write_tiled_heics(dir: &Path) -> TestResult<Vec<(std::path::PathBuf, (u32, u32))>> {
+        let files = [
+            ("grid.heic", include_bytes!("../../../tests/fixtures/grid.heic").as_slice(), (1280, 960)),
+            ("grid-rot90.heic", include_bytes!("../../../tests/fixtures/grid-rot90.heic").as_slice(), (960, 1280)),
+        ];
+        let mut written = Vec::new();
+        for (name, bytes, displayed) in files {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes)?;
+            written.push((path, displayed));
+        }
+        Ok(written)
+    }
+
+    /// PATH にある libheif のデコーダ。1.17 より前の名前の heif-convert も、同じ引数で使える。
+    /// ローカルでは libheif のない環境を許すが、CI では HEIF の検証を必須にする。
+    fn heif_decoder() -> Option<&'static str> {
+        let found = ["heif-dec", "heif-convert"].into_iter().find(|program| {
+            std::process::Command::new(program)
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        });
+        if found.is_none() {
+            assert!(std::env::var_os("PXNA_REQUIRE_HEIF_DEC").is_none(), "heif-dec or heif-convert is required in CI");
+            eprintln!("skipped: neither heif-dec nor heif-convert is available on PATH");
+        }
+        found
+    }
+
+    /// PATH にある ffmpeg が指定した版より前なら、確かめずに飛ばす。版を読めない build も飛ばす。
+    /// 確かめた範囲では、タイルを組み立てて読むのは 8.1 と 9.0 で、ffprobe がタイルを束ねた画像の回転を返すのは 9.0 だけである。
+    fn skip_before_ffmpeg(required: u32) -> bool {
+        if skip_without_ffmpeg() {
+            return true;
+        }
+        let output = std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .map(|output| output.stdout)
+            .unwrap_or_default();
+        let major = String::from_utf8_lossy(&output)
+            .strip_prefix("ffmpeg version ")
+            .map(|rest| rest.trim_start_matches('n').chars().take_while(char::is_ascii_digit).collect::<String>())
+            .and_then(|digits| digits.parse::<u32>().ok());
+        let supported = major.is_some_and(|major| major >= required);
+        if !supported {
+            eprintln!("skipped: ffmpeg {major:?} is older than {required}");
+        }
+        !supported
+    }
+
+    #[tokio::test]
+    async fn a_tiled_heic_is_decoded_whole_by_heif_dec_test() -> TestResult {
+        let Some(decoder) = heif_decoder() else {
+            return Ok(());
+        };
+        let media = MediaOptions {
+            heif_dec_path: decoder.into(),
+            ..MediaOptions::default()
+        };
+        let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
+        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
+            let image = fixture.generator.generate(&nested(&file), &display).await?;
+            assert_eq!(size(&image)?, displayed, "{}: タイル 1 枚ではなく、組み立てて回転した画像になる", file.display());
+        }
+        assert_eq!(fixture.generator.heif_dec_runs(), 2);
+        assert_eq!(fixture.generator.ffmpeg_runs(), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn without_heif_dec_a_tiled_heic_is_decoded_whole_by_ffmpeg_test() -> TestResult {
+        if skip_before_ffmpeg(8) {
+            return Ok(());
+        }
+        let media = MediaOptions {
+            heif_dec_path: "/nonexistent/heif-dec".into(),
+            ..MediaOptions::default()
+        };
+        let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
+        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
+            let image = fixture.generator.generate(&nested(&file), &display).await?;
+            assert_eq!(size(&image)?, displayed, "{}: heif-dec がなければ ffmpeg で読み直す", file.display());
+        }
+        assert_eq!(fixture.generator.heif_dec_runs(), 2);
+        assert_eq!(fixture.generator.ffmpeg_runs(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn media_information_of_a_tiled_heic_is_the_assembled_size_test() -> TestResult {
+        if skip_before_ffmpeg(9) {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let expected = [(1280, 960, 0), (1280, 960, 90)];
+        for ((file, _), expected) in write_tiled_heics(fixture.dir.path())?.into_iter().zip(expected) {
+            let source = fixture.generator.inner.fs.resolve_entry(&nested(&file)).await?;
+            let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source).await? else {
+                return Err("a HEIC must be recognized as an image".into());
+            };
+            assert_eq!(
+                (info.width, info.height, info.rotation),
+                expected,
+                "{}: 幅と高さは入れ替えず、回転を別に返す",
+                file.display()
+            );
+            assert_eq!(info.content_type, "image/heic");
+        }
         Ok(())
     }
 
@@ -1365,6 +1521,7 @@ mod tests {
         let media = MediaOptions {
             ffmpeg_path: "/nonexistent/ffmpeg".into(),
             ffprobe_path: "/nonexistent/ffprobe".into(),
+            heif_dec_path: "/nonexistent/heif-dec".into(),
         };
         let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
         let video = fixture.dir.path().join("clip.mp4");
