@@ -2,7 +2,7 @@
 
 **Source: Literature only** (SQLite FTS5 documentation, sqlite.org/fts5.html / 2026-10-23)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

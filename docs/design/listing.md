@@ -128,13 +128,13 @@ The target's version is decided according to the kind of target as follows.
 Separately from this, any snapshot is considered stale once `snapshot_max_age_secs` has passed since it was built.
 A recursive listing has no means of checking changes underneath with one stat, so freshness is checked by this elapsed time alone.
 
-On POSIX-compliant file systems, a local folder's modification time changes when an Entry is created, deleted, or renamed among its direct children ([Directory modification time](../knowledges/posix-directory-mtime.md) in [knowledges.md](../knowledges.md)).
+On POSIX-compliant file systems, a local folder's modification time changes when an Entry is created, deleted, or renamed among its direct children ([Directory modification time](../knowledge/posix-directory-mtime.md) in [knowledge.md](../knowledge.md)).
 A change to the contents of an existing file, and a change inside a child folder, do not change the modification time.
 These are not reflected in the listing's size and modification date until `snapshot_max_age_secs` has passed since the snapshot was built.
 
 On file systems with coarse modification-time precision, a change right after a scan gets the same time as before the scan and may not show up as a version difference.
 Therefore, if the difference between the time the scan started and the folder's modification time is less than 2 seconds, that snapshot is rebuilt on the next request.
-If a Library is placed on an NFS mount, a change on another device may be delayed before showing up in the modification time because of the client's attribute cache ([NFS attribute cache](../knowledges/nfs-attribute-cache.md) in [knowledges.md](../knowledges.md)).
+If a Library is placed on an NFS mount, a change on another device may be delayed before showing up in the modification time because of the client's attribute cache ([NFS attribute cache](../knowledge/nfs-attribute-cache.md) in [knowledge.md](../knowledge.md)).
 During that time, the old listing is returned.
 
 The daemon's own mutating operations discard snapshots without waiting for the modification time.
@@ -158,7 +158,7 @@ An Entry matches if its name contains all of the terms obtained by splitting `qu
 Before matching, both the name and the terms are normalized with NFKC, and lowercased with Unicode's lowercase mapping.
 
 We normalize because a Library may contain both decomposed and composed names.
-macOS's HFS Plus stores filenames in decomposed form, and APFS stores them in the normalization they had at creation ([macOS filename normalization](../knowledges/macos-filename-normalization.md) in [knowledges.md](../knowledges.md)).
+macOS's HFS Plus stores filenames in decomposed form, and APFS stores them in the normalization they had at creation ([macOS filename normalization](../knowledge/macos-filename-normalization.md) in [knowledge.md](../knowledge.md)).
 If the "が" in a name is decomposed (か of U+304B and the voiced mark of U+3099) and the "が" in the term is composed (U+304C), comparing without normalization does not match.
 NFKC also unifies full-width and half-width alphanumerics into the same characters.
 
@@ -194,7 +194,7 @@ An index that has dropped part of a Library cannot tell a missing Entry from an 
 Its size is proportional to the number of Entries.
 
 A term of 3 or more characters is matched against a trigram index of the normalized names, and a shorter term is matched by comparing the normalized names of the candidates directly.
-SQLite's trigram tokenizer matches no rows for a substring shorter than 3 characters ([SQLite FTS5 trigram](../knowledges/sqlite-fts5-trigram.md) in [knowledges.md](../knowledges.md)).
+SQLite's trigram tokenizer matches no rows for a substring shorter than 3 characters ([SQLite FTS5 trigram](../knowledge/sqlite-fts5-trigram.md) in [knowledge.md](../knowledge.md)).
 When all terms are shorter than 3 characters, the candidates are all rows under the start.
 Names are stored already normalized by the rules of §5, so the trigram index compares them as they are and does not fold case or remove diacritics itself.
 The meaning of a match is the same as in a walk.

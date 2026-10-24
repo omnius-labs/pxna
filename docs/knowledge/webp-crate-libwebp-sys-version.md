@@ -2,7 +2,7 @@
 
 **Source: Literature only** (`Cargo.toml` of webp 0.3.1 / 2026-10-05)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

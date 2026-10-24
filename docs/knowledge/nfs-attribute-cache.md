@@ -2,7 +2,7 @@
 
 **Source: Literature only** (Linux man-pages nfs(5) / 2026-10-03)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

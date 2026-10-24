@@ -2,7 +2,7 @@
 
 **Source: Literature only** (POSIX.1-2024 (IEEE Std 1003.1-2024) / 2026-10-03)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

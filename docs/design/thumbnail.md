@@ -123,7 +123,7 @@ For that reason the quality values are separated.
 PNG is compressed losslessly and does not use a quality value.
 
 libwebp is used for lossy WebP encoding.
-This is because the image crate's WebP encoder has only lossless compression ([The image crate's WebP encoder](../knowledges/image-webp-encoder.md) in [knowledges.md](../knowledges.md)).
+This is because the image crate's WebP encoder has only lossless compression ([The image crate's WebP encoder](../knowledge/image-webp-encoder.md) in [knowledge.md](../knowledge.md)).
 JPEG cannot represent transparency, so the combination of `pad` and JPEG is `InvalidRequest`.
 WebP and PNG can represent transparency, so they can be combined with `pad`.
 
@@ -432,9 +432,9 @@ The default format is lossy WebP.
 Encoding calls libwebp-sys directly and fixes the compression effort (`method`) at 2.
 
 **Reason**
-By Google's comparison, lossy WebP is 25% to 34% smaller than JPEG at the same SSIM ([The size of lossy WebP](../knowledges/webp-lossy-size.md) in [knowledges.md](../knowledges.md)).
+By Google's comparison, lossy WebP is 25% to 34% smaller than JPEG at the same SSIM ([The size of lossy WebP](../knowledge/webp-lossy-size.md) in [knowledge.md](../knowledge.md)).
 The main subjects are photos and video frames, so the transfer volume of listings and the viewer is expected to decrease.
-The libwebp used for lossy encoding is built by libwebp-sys from its bundled C source, so no system libraries need to be added to the 3-OS CI and the container images ([Building libwebp-sys](../knowledges/libwebp-sys-build.md) in [knowledges.md](../knowledges.md)).
+The libwebp used for lossy encoding is built by libwebp-sys from its bundled C source, so no system libraries need to be added to the 3-OS CI and the container images ([Building libwebp-sys](../knowledge/libwebp-sys-build.md) in [knowledge.md](../knowledge.md)).
 The cost is that the build needs a C compiler and there is one more dependency on a C library.
 libwebp-sys calls C functions, so the calls need unsafe.
 We close creating the configuration, importing pixels, encoding, and freeing the allocated output into one function, and confine unsafe to inside that function.
@@ -463,7 +463,7 @@ It makes it easy to try and compare formats, but if each browser requested with 
 
 **Rejected alternative 6**
 A method that uses the `webp` crate, which has a safe API.
-It avoids writing unsafe, but the libwebp-sys that `webp` crate 0.3.1 depends on is the 0.9 series, different from the version whose build method we confirmed (0.14.4), so we rejected it ([The webp crate's dependency](../knowledges/webp-crate-libwebp-sys-version.md) in [knowledges.md](../knowledges.md)).
+It avoids writing unsafe, but the libwebp-sys that `webp` crate 0.3.1 depends on is the 0.9 series, different from the version whose build method we confirmed (0.14.4), so we rejected it ([The webp crate's dependency](../knowledge/webp-crate-libwebp-sys-version.md) in [knowledge.md](../knowledge.md)).
 
 #### Keep the Thumbnail Cache as an LRU of a SQLite Index and Real Files
 

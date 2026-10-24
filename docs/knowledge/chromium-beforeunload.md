@@ -2,7 +2,7 @@
 
 **Source: Verified** (Chromium 155.0.8059.39 / 2026-10-07)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

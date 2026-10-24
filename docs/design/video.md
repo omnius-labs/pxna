@@ -218,7 +218,7 @@ Shooting info is read from Exif with kamadak-exif, and location information is n
 
 **Reason**
 The info panel can request the same API for both images and videos, and the cache key and the merging of concurrent requests can be shared with videos.
-kamadak-exif can extract Exif in the same way from JPEG, PNG, WebP, TIFF, and from HEIC and AVIF read with ffmpeg ([Formats supported by kamadak-exif](../knowledges/kamadak-exif-containers.md) in [knowledges.md](../knowledges.md)).
+kamadak-exif can extract Exif in the same way from JPEG, PNG, WebP, TIFF, and from HEIC and AVIF read with ffmpeg ([Formats supported by kamadak-exif](../knowledge/kamadak-exif-containers.md) in [knowledge.md](../knowledge.md)).
 We exclude location information because there is no screen that shows a map, and showing coordinates does not help with browsing.
 
 **Rejected alternative 1**
@@ -237,7 +237,7 @@ When `rotation` is 90 or 270 degrees, the client swaps the width and height for 
 
 **Reason**
 ffprobe returns AVIF's `irot` as the `rotation` of the Display Matrix in `side_data_list`, separately from the width and height, and the width and height stay as encoded.
-ffmpeg's decoding applies the rotation ([Measurements of ffprobe](../knowledges/ffprobe-heif-rotation.md)).
+ffmpeg's decoding applies the rotation ([Measurements of ffprobe](../knowledge/ffprobe-heif-rotation.md)).
 Thumbnails and display images are made from images decoded by ffmpeg, so they are expected to come out in the rotated orientation.
 HEIC has `irot` through the same HEIF mechanism as AVIF, so the same result is expected, but we have not confirmed it with a real file.
 Dimensions and rotation are separate facts, so if they are returned as is, the server does not need a rule for interpreting an image's orientation, and the client can handle it to suit the display.

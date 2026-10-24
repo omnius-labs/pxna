@@ -2,7 +2,7 @@
 
 **Source: Literature only** (Apple's Technical Note TN1150 and Apple File System Guide / 2026-10-03)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

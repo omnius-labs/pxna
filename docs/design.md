@@ -24,7 +24,7 @@ Definitions of words are not in this document.
 | [Rating and Tag Design](./design/rating-tags.md) | What can be rated and tagged, value rules, storage, following changes, filtering listings, API conventions                                          |
 | [terms.md](./terms.md)                        | Definitions of terms, spelling, aliases, boundaries with neighboring terms                                                                              |
 | [issues.md](./issues.md)                      | Clear defects confirmed in code and handling policies                                                                                                    |
-| [knowledges.md](./knowledges.md)              | Facts verified about the libraries and external components depended on                                                                                   |
+| [knowledge.md](./knowledge.md)                | Facts verified about the libraries and external components depended on                                                                                   |
 | [plans.md](./plans.md)                        | Work in progress and dependencies                                                                                                                        |
 | [measurements.md](./measurements.md)          | Measurement records specifying commits and environments, comparison procedures, aggregate values, measurement conditions and limits                      |
 | [reviews.md](./reviews.md)                    | History of reviews and transcription status of findings                                                                                                  |

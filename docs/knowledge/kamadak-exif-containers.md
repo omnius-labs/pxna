@@ -2,7 +2,7 @@
 
 **Source: Literature only** (kamadak-exif 0.6.1 API reference and source code / 2026-10-03)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

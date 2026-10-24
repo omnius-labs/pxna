@@ -23,20 +23,20 @@ For items whose source is `Literature only`, reread the primary sources every 3 
 
 | Item | Subject verified | Source | Last confirmed |
 | --- | --- | --- | --- |
-| [The image crate's WebP encoder has only lossless compression](./knowledges/image-webp-encoder.md) | image 0.25.9 | Literature only | 2026-10-03 |
-| [libwebp-sys builds the bundled libwebp with cc](./knowledges/libwebp-sys-build.md) | libwebp-sys 0.14.4 | Literature only | 2026-10-03 |
-| [webp crate 0.3.1 depends on the 0.9 series of libwebp-sys](./knowledges/webp-crate-libwebp-sys-version.md) | webp 0.3.1 | Literature only | 2026-10-05 |
-| [kamadak-exif reads Exif from TIFF, JPEG, HEIF, PNG, and WebP](./knowledges/kamadak-exif-containers.md) | kamadak-exif 0.6.1 | Literature only | 2026-10-03 |
-| [Google states that lossy WebP is 25% to 34% smaller than JPEG at the same SSIM](./knowledges/webp-lossy-size.md) | Google's WebP explanation page (as of 2026-10-03) | Literature only | 2026-10-03 |
-| [A directory's modification time is updated by creating, deleting, or renaming its direct children](./knowledges/posix-directory-mtime.md) | POSIX.1-2024 | Literature only | 2026-10-03 |
-| [The Linux NFS client caches directory attributes for 30 to 60 seconds by default](./knowledges/nfs-attribute-cache.md) | Linux man-pages nfs(5) (as of 2026-10-03) | Literature only | 2026-10-03 |
-| [HFS Plus stores filenames in decomposed form, and APFS preserves the normalization used at creation](./knowledges/macos-filename-normalization.md) | TN1150, Apple File System Guide | Literature only | 2026-10-03 |
-| [Chromium's directory reading returns 100 entries at a time](./knowledges/chromium-directory-reader.md) | Chromium 155.0.8059.39 | Verified | 2026-10-07 |
-| [Chromium shows a leave confirmation when a beforeunload is canceled after an operation](./knowledges/chromium-beforeunload.md) | Chromium 155.0.8059.39 | Verified | 2026-10-07 |
-| [Chromium's modal dialog cannot be made full screen, and elements drawn outside the dialog cannot be operated](./knowledges/chromium-modal-dialog-fullscreen.md) | Chromium 154.0.8037.98 | Verified | 2026-10-10 |
-| [Radix's confirmation dialog and menu propagate the Esc keydown, and a Tab in a Portal child reaches React ancestors](./knowledges/radix-nested-layer-events.md) | radix-ui 1.6.7 | Verified | 2026-10-10 |
-| [ffprobe reports the AVIF irot as the Display Matrix rotation, and the width and height stay as encoded](./knowledges/ffprobe-heif-rotation.md) | ffmpeg 8.1.1 | Verified | 2026-10-11 |
-| [SQLite's FTS5 trigram tokenizer matches only substrings of 3 or more characters through the index](./knowledges/sqlite-fts5-trigram.md) | SQLite FTS5 documentation, libsqlite3-sys 0.30.1 (SQLite 3.46.0) | Literature only | 2026-10-23 |
+| [The image crate's WebP encoder has only lossless compression](./knowledge/image-webp-encoder.md) | image 0.25.9 | Literature only | 2026-10-03 |
+| [libwebp-sys builds the bundled libwebp with cc](./knowledge/libwebp-sys-build.md) | libwebp-sys 0.14.4 | Literature only | 2026-10-03 |
+| [webp crate 0.3.1 depends on the 0.9 series of libwebp-sys](./knowledge/webp-crate-libwebp-sys-version.md) | webp 0.3.1 | Literature only | 2026-10-05 |
+| [kamadak-exif reads Exif from TIFF, JPEG, HEIF, PNG, and WebP](./knowledge/kamadak-exif-containers.md) | kamadak-exif 0.6.1 | Literature only | 2026-10-03 |
+| [Google states that lossy WebP is 25% to 34% smaller than JPEG at the same SSIM](./knowledge/webp-lossy-size.md) | Google's WebP explanation page (as of 2026-10-03) | Literature only | 2026-10-03 |
+| [A directory's modification time is updated by creating, deleting, or renaming its direct children](./knowledge/posix-directory-mtime.md) | POSIX.1-2024 | Literature only | 2026-10-03 |
+| [The Linux NFS client caches directory attributes for 30 to 60 seconds by default](./knowledge/nfs-attribute-cache.md) | Linux man-pages nfs(5) (as of 2026-10-03) | Literature only | 2026-10-03 |
+| [HFS Plus stores filenames in decomposed form, and APFS preserves the normalization used at creation](./knowledge/macos-filename-normalization.md) | TN1150, Apple File System Guide | Literature only | 2026-10-03 |
+| [Chromium's directory reading returns 100 entries at a time](./knowledge/chromium-directory-reader.md) | Chromium 155.0.8059.39 | Verified | 2026-10-07 |
+| [Chromium shows a leave confirmation when a beforeunload is canceled after an operation](./knowledge/chromium-beforeunload.md) | Chromium 155.0.8059.39 | Verified | 2026-10-07 |
+| [Chromium's modal dialog cannot be made full screen, and elements drawn outside the dialog cannot be operated](./knowledge/chromium-modal-dialog-fullscreen.md) | Chromium 154.0.8037.98 | Verified | 2026-10-10 |
+| [Radix's confirmation dialog and menu propagate the Esc keydown, and a Tab in a Portal child reaches React ancestors](./knowledge/radix-nested-layer-events.md) | radix-ui 1.6.7 | Verified | 2026-10-10 |
+| [ffprobe reports the AVIF irot as the Display Matrix rotation, and the width and height stay as encoded](./knowledge/ffprobe-heif-rotation.md) | ffmpeg 8.1.1 | Verified | 2026-10-11 |
+| [SQLite's FTS5 trigram tokenizer matches only substrings of 3 or more characters through the index](./knowledge/sqlite-fts5-trigram.md) | SQLite FTS5 documentation, libsqlite3-sys 0.30.1 (SQLite 3.46.0) | Literature only | 2026-10-23 |
 
 The first 2 items, the WebP size item, and the webp crate item are the premises of the decision to output thumbnails as lossy WebP.
 The first 2 items hold as a pair, and if image gains a lossy WebP encoder, there is no longer a reason to depend on libwebp-sys.

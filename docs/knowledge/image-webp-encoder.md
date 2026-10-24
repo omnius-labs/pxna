@@ -2,7 +2,7 @@
 
 **Source: Literature only** (image 0.25.9 source code and the docs.rs API reference / 2026-10-03)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

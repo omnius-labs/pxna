@@ -2,7 +2,7 @@
 
 **Source: Literature only** (libwebp-sys 0.14.4 README, feature list, and `build.rs` / 2026-10-03)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

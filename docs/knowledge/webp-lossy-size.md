@@ -2,7 +2,7 @@
 
 **Source: Literature only** (Google's WebP explanation page / 2026-10-03)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

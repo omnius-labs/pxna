@@ -2,7 +2,7 @@
 
 **Source: Verified** (ffmpeg 8.1.1 / 2026-10-11)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 

@@ -13,7 +13,7 @@ This work adds the name index and keeps it updated by aggregation's walk and by 
 | [Listing and Search Design §8.1](../design/listing.md#name-index) | The decision to use a Library-wide name index and its reasons |
 | [Timeline Design §6](../design/timeline.md#6-aggregation) | The walk that passes names to the index, and when aggregation starts |
 | [design.md §9.2](../design.md#92-where-state-lives) | Where the index lives and the impact of losing it |
-| [SQLite FTS5 trigram](../knowledges/sqlite-fts5-trigram.md) | The behavior of the trigram tokenizer the index depends on |
+| [SQLite FTS5 trigram](../knowledge/sqlite-fts5-trigram.md) | The behavior of the trigram tokenizer the index depends on |
 
 [design.md](../design.md#11-division-of-responsibility-between-documents) holds the map of the document family.
 

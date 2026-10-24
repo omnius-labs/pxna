@@ -2,7 +2,7 @@
 
 **Source: Verified** (radix-ui 1.6.7, @radix-ui/react-dismissable-layer 1.1.19 / 2026-10-10)
 
-One item of [knowledges.md](../knowledges.md).
+One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 
