@@ -286,6 +286,14 @@ CREATE TABLE timeline_settings (
         Ok(())
     }
 
+    /// 書き込みのトランザクションを始める。
+    ///
+    /// 複数の Library の集計が同じ索引へ同時に書くので、始めから書き込みのロックを取る。読み取りから始めると、
+    /// ほかの書き込みの後に書き込みへ移るときに busy の待ちを経ずに `SQLITE_BUSY` で失敗し、その Library の集計が止まる。
+    async fn write(&self) -> Result<Transaction<'static, Sqlite>> {
+        Ok(self.db.begin_with("BEGIN IMMEDIATE").await?)
+    }
+
     // ---- 集計の状態 ----
 
     /// 今の世代。全体の集計をまだ始めていなければ 0 である。
@@ -373,7 +381,7 @@ CREATE TABLE timeline_settings (
     /// 記録する世代は、渡された世代と今の世代の大きい方にする。範囲の集計が古い世代のまま書いても、行の世代が後退せず、
     /// 全体の集計の掃除で消されない。
     pub async fn apply(&self, library: &str, generation: i64, batch: &TimelineBatch) -> Result<()> {
-        let mut tx = self.db.begin().await?;
+        let mut tx = self.write().await?;
         let current: Option<i64> = sqlx::query_scalar("SELECT generation FROM timeline_scans WHERE library_id = ?")
             .bind(library)
             .fetch_optional(&mut *tx)
@@ -452,7 +460,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
 
     /// `path` とその配下のファイルの行と、それらに属する Entry の行を消す。
     pub async fn remove(&self, library: &str, path: &str) -> Result<()> {
-        let mut tx = self.db.begin().await?;
+        let mut tx = self.write().await?;
         Self::remove_in(&mut tx, library, path).await?;
         tx.commit().await?;
         Ok(())
@@ -492,7 +500,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
         let (Some(src_range), Some(dst_range)) = (PathRange::of(src), PathRange::of(dst)) else {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("cannot rename the library root"));
         };
-        let mut tx = self.db.begin().await?;
+        let mut tx = self.write().await?;
         Self::remove_in(&mut tx, library, &dst_range.exact).await?;
 
         let offset = i64::try_from(src_range.exact.chars().count() + 1)?;
@@ -559,7 +567,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
     pub async fn sweep(&self, library: &str, scope: &str, generation: i64, scoped: bool) -> Result<()> {
         const STALE: &str = "((generation >= 0 AND generation < ?) OR (generation < 0 AND -generation - 1 < ?))";
         let pending = if scoped { generation + 1 } else { generation };
-        let mut tx = self.db.begin().await?;
+        let mut tx = self.write().await?;
         match PathRange::of(scope) {
             None => {
                 let sql = format!("DELETE FROM timeline_entries WHERE library_id = ? AND file_path IN (SELECT path FROM timeline_files WHERE library_id = ? AND {STALE})");
@@ -635,7 +643,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
                     break;
                 };
                 last = Some((tail.try_get("library_id")?, tail.try_get("path")?));
-                let mut tx = self.db.begin().await?;
+                let mut tx = self.write().await?;
                 for row in &rows {
                     let library: String = row.try_get("library_id")?;
                     let path: String = row.try_get("path")?;

@@ -183,6 +183,7 @@ The name index then reflects external changes only through manual aggregation.
 From the web client, a full aggregation can be started with `POST /libraries/{libraryId}/timeline/refresh`.
 Only one full aggregation of the same Library runs at a time, and a request received while one is running returns the current state.
 Including range aggregations (§6.4), only one aggregation runs on the same Library, and aggregation yields its turn to the next aggregation each time it finishes reading one folder.
+Aggregations of different Libraries run at the same time and write to the same index, so each write transaction takes the write lock from its start and waits for the others instead of failing.
 
 The progress of aggregation is returned by `GET /libraries/{libraryId}/timeline/status`.
 It is not made an Operation (§9.1).
