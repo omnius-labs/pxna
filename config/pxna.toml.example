@@ -1,5 +1,6 @@
-# Bundled configuration for the container. The image bakes it in as /config/pxna.toml,
-# and compose.yaml mounts ./config/pxna.toml over it. Paths are inside the container.
+# Template configuration for the container. The image bakes it in as /config/pxna.toml.
+# start.sh copies it to config/pxna.toml (not tracked by git) when that file is missing,
+# and compose.yaml mounts config/pxna.toml over the baked-in copy. Paths are inside the container.
 
 [core]
 listen_addr = "0.0.0.0:6050" # Inside the container. compose.yaml publishes it on ${PXNA_BIND:-127.0.0.1}:${PXNA_PORT:-6050}
@@ -35,7 +36,14 @@ insecure_cookie = true
 # max_concurrent_probes = 1      # Concurrent ffprobe runs during aggregation
 
 [[libraries]]
-id = "library"
-name = "Library"
-path = "/libraries" # compose.yaml mounts PXNA_LIBRARY_DIR here
+id = "contents"
+name = "Contents"
+path = "/libraries/contents" # compose.yaml mounts PXNA_CONTENTS_DIR here
 readonly = false
+
+# Additional libraries need a matching mount in compose.override.yaml (see compose.override.yaml.example).
+# [[libraries]]
+# id = "videos"
+# name = "Videos"
+# path = "/libraries/videos"
+# readonly = false

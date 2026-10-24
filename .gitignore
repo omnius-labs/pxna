@@ -3,3 +3,5 @@ buildServer.json
 /.pxna
 /.env
 /.serena
+/compose.override.yaml
+/config/pxna.toml

@@ -638,7 +638,7 @@ readonly = false
 If omitted, the daemon provides only the API (§10.1).
 `[web] insecure_cookie = true` removes `Secure` and the `__Host-` prefix from the session cookie and makes the name `pxna_session`.
 Browsers reject a `Secure` cookie over `http://` from anywhere other than `localhost`, so the plaintext operation of §2 needs it.
-The daemon's default is `false`, and the `config/pxna.toml` that `compose.yaml` mounts sets it to `true` (§11.1).
+The daemon's default is `false`, and the template `config/pxna.toml.example`, from which `start.sh` creates the `config/pxna.toml` that `compose.yaml` mounts, sets it to `true` (§11.1).
 
 Libraries can be defined only here.
 There is no means of adding or removing a Library through the API.
@@ -1119,7 +1119,7 @@ The daemon serves plain HTTP and does not terminate TLS.
 Devices on the LAN connect directly, and access from outside the LAN goes through a VPN such as Tailscale.
 `compose.yaml` publishes the listening port on the address given by the environment variable `PXNA_BIND`, which defaults to `127.0.0.1`.
 The operator who wants other devices to connect sets `PXNA_BIND`, for example to `0.0.0.0`.
-The bundled `config/pxna.toml` sets `[web] insecure_cookie = true` (§9.1, §9.3), and the daemon's own default of `insecure_cookie` stays `false`.
+The bundled template `config/pxna.toml.example` sets `[web] insecure_cookie = true` (§9.1, §9.3), and the daemon's own default of `insecure_cookie` stays `false`.
 
 **Reason**
 The daemon does not need to issue or renew certificates, and the operator does not need a proxy in front of it.

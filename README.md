@@ -90,11 +90,11 @@ The CLI still depends on [braces with an unpatched denial-of-service vulnerabili
 
 ## Running in Docker
 
-Create `.env`, then run `start.sh`. It initializes the submodules, then builds and starts the container (arguments are passed to `docker compose up`):
+Create `.env`, then run `start.sh`. It initializes the submodules, creates `config/pxna.toml` from the template if it is missing, then builds and starts the container (arguments are passed to `docker compose up`):
 
 ```sh
 cp .env.example .env
-# Edit .env and set PXNA_LIBRARY_DIR to the absolute path of your library.
+# Edit .env and set PXNA_CONTENTS_DIR to the absolute path of your library.
 ./start.sh
 ```
 
@@ -105,9 +105,21 @@ The container listens on `127.0.0.1` only. Change the address with `PXNA_BIND` a
 Setting `PXNA_BIND=0.0.0.0` exposes pxna to your network. Authentication is a single owner password, so use it only on a trusted network or behind an HTTPS reverse proxy.
 The container runs as `PXNA_UID:PXNA_GID` (default `1000:1000`), so match them to the owner of the library (`id -u`, `id -g`) when you want to modify files.
 The SQLite database, uploads, and caches live in `.pxna/state`, which survives restarts. The `init` service sets its owner on startup.
-The configuration is [config/pxna.toml](config/pxna.toml), mounted read-only at `/config/pxna.toml`; Library paths refer to paths inside the container.
+The configuration is `config/pxna.toml`, created from [config/pxna.toml.example](config/pxna.toml.example) and mounted read-only at `/config/pxna.toml`. It is not tracked by git, so edit it freely. Library paths refer to paths inside the container.
+`PXNA_CONTENTS_DIR` is mounted at `/libraries/contents`, which backs the `contents` library.
 `TZ` (default `Asia/Tokyo`) sets the time zone used by the timeline.
 The image built from the `Dockerfile` runs as UID/GID `10001:10001`, and its configuration directory must be writable so the daemon can create its process lock. Set `[web] dir` to `/opt/pxna/web` when supplying another configuration.
+
+### Adding Libraries
+
+`.env` sets only one directory. To add more, copy the override template; `docker compose` merges `compose.override.yaml` automatically, and it is not tracked by git:
+
+```sh
+cp compose.override.yaml.example compose.override.yaml
+# Edit compose.override.yaml and mount each directory at /libraries/<id>.
+# Add a matching [[libraries]] entry with path = "/libraries/<id>" to config/pxna.toml.
+./start.sh
+```
 
 ## Contributing
 

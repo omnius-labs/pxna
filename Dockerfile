@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     mkdir -p /config /state /libraries && chown pxna:pxna /config /state /libraries
 COPY --from=daemon /usr/local/bin/pxna-daemon /usr/local/bin/pxna-daemon
 COPY --from=web /build/ui-web/dist/ /opt/pxna/web/
-COPY --chown=pxna:pxna config/pxna.toml /config/pxna.toml
+COPY --chown=pxna:pxna config/pxna.toml.example /config/pxna.toml
 ENV PXNA_DAEMON_CONFIG_DIR=/config
 USER 10001:10001
 EXPOSE 6050

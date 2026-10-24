@@ -17,3 +17,5 @@ pxna.code-workspace
 .env
 .env.example
 compose.yaml
+compose.override.yaml*
+config/pxna.toml
