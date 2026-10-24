@@ -603,7 +603,7 @@ Completed ones are pruned after about an hour.
 
 ### 8.9 Search
 
-Search has no dedicated API; it is done by adding a name condition to the folder listing, and when searching under a folder, the same condition is added to the recursive listing.
+Search is a listing with conditions. The search API applies name, rating, and tag conditions to the listing of each chosen Library, recursive when searching under a folder, and merges them into one sequence.
 A recursive listing with conditions is answered from the name index that aggregation updates, and walks the file system only while that index is not usable.
 The sorting of listings, snapshots, name matching, recursion limits, and the reasons for adopting these are authoritative in [Listing and Search Design](./design/listing.md).
 How the client reads listings and search is covered by [Client Design §3.5](./design/client.md#35-loading-listings) and [§3.6](./design/client.md#36-search).
@@ -1296,6 +1296,7 @@ M7 is a retired number and is not used.
 | M19 | Implement the name index of the [Listing and Search Design](./design/listing.md), its update by aggregation, answering recursive listings with conditions from it, and the web client's notice for walked results | M10, M16, M18 | Not started |
 | M20 | Revalidate folder and archive thumbnails, and have the web client request them again after the daemon's own changes | M4, M13 | Not started |
 | M21 | Make the address the compose port is published on configurable with `PXNA_BIND` (default `127.0.0.1`) and enable `insecure_cookie` in the bundled configuration (§11.1) | M9 | Not started |
+| M22 | Implement the search API across Libraries of the [Listing and Search Design](./design/listing.md#53-searching-across-libraries), and the web client's search mode with its conditions in the left area and the three-choice mode switch | M12, M17, M18 | Done |
 
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.

@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import { TIMELINE_SCOPE } from "../location";
+import { CROSS_LIBRARY_SCOPE } from "../location";
 import { canMutate, createFolder, DeleteEntriesError, deleteEntries, renameEntry, validateName } from "./entryActions";
 
 const { post, refresh } = vi.hoisted(() => ({ post: vi.fn(), refresh: vi.fn() }));
@@ -200,7 +200,7 @@ it("タイムラインの選択は Library ごとに削除し、一部の Librar
     });
     const error = await deleteEntries(
         new QueryClient(),
-        TIMELINE_SCOPE,
+        CROSS_LIBRARY_SCOPE,
         new Map([
             ["/a/x.jpg", { folder: false }],
             ["/b/y.jpg", { folder: false }],
@@ -218,7 +218,7 @@ it("タイムラインの選択は Library ごとに削除し、一部の Librar
 });
 it("タイムラインの鍵の名前を変えるときは、Library 相対パスで要求する", async () => {
     post.mockResolvedValueOnce(result({ entries: [entry] }));
-    await renameEntry(new QueryClient(), TIMELINE_SCOPE, { path: "/a/dir/x.jpg", folder: false }, "y.jpg");
+    await renameEntry(new QueryClient(), CROSS_LIBRARY_SCOPE, { path: "/a/dir/x.jpg", folder: false }, "y.jpg");
     expect(post.mock.calls[0]![1]).toEqual({
         params: { path: { libraryId: "a" } },
         body: { srcPaths: ["/dir/x.jpg"], dstPath: "/dir/y.jpg" },

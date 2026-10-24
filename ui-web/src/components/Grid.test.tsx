@@ -4,9 +4,10 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
-import type { Entry, FolderListing } from "../library/entries";
+import { type Entry, entryPlace, type FolderListing } from "../library/entries";
+import type { ListingSource } from "../library/listing";
 import { emptySelection } from "../library/selection";
-import type { BrowseLocation } from "../location";
+import { CROSS_LIBRARY_SCOPE, entryAddress } from "../location";
 import { stubResizeObserver } from "../testing/preferences";
 import { ThumbnailQueue } from "../thumbnails/queue";
 import { Grid } from "./Grid";
@@ -72,7 +73,7 @@ it("reserves the full height and shows unread frames while requesting only visib
             root.render(
                 <QueryClientProvider client={client}>
                     <Grid
-                        location={{ libraryId: "big", path: "/" }}
+                        source={{ kind: "folder", libraryId: "big", path: "/" }}
                         tileSize={3}
                         shape="crop"
                         narrow={false}
@@ -116,7 +117,24 @@ const searchEntries: Entry[] = ["/base/gamma.txt", "/base/deep/delta.txt"].map((
     kind: "file",
     metadata: { size: 0, readonly: false },
 }));
-async function searchHarness(location: BrowseLocation, data: FolderListing | null) {
+const searchSource = (recursive: boolean, query = "txt"): ListingSource => ({
+    kind: "search",
+    criteria: { libraryIds: ["search"], path: "/base", recursive, query, tags: [] },
+});
+const placeUnder = (entry: Entry) =>
+    entryPlace("/base", { ...entry, path: entryAddress(CROSS_LIBRARY_SCOPE, entry.path).path });
+/// 検索の応答。Entry は Library の id を添える。
+const searchPage = (entries: Entry[], totalCount: number, snapshot: string, truncated: boolean) => ({
+    entries: entries.map((entry) => ({ libraryId: "search", entry })),
+    totalCount,
+    snapshot,
+    truncatedLibraryIds: truncated ? ["search"] : [],
+});
+async function searchHarness(
+    source: ListingSource,
+    data: FolderListing | ReturnType<typeof searchPage> | null,
+    place?: (entry: Entry) => string,
+) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     mock.first = 0;
     mock.last = 2;
@@ -131,7 +149,8 @@ async function searchHarness(location: BrowseLocation, data: FolderListing | nul
         root.render(
             <QueryClientProvider client={client}>
                 <Grid
-                    location={location}
+                    source={source}
+                    place={place}
                     tileSize={3}
                     shape="crop"
                     narrow={false}
@@ -165,8 +184,9 @@ async function searchHarness(location: BrowseLocation, data: FolderListing | nul
 }
 it.each([true, false])("グリッドは配下の検索のときだけ名前の下に場所を出す %s", async (recursive) => {
     const h = await searchHarness(
-        { libraryId: "search", path: "/base", query: "txt", recursive },
-        { entries: searchEntries, totalCount: 2, snapshot: "search", truncated: false },
+        searchSource(recursive),
+        searchPage(searchEntries, 2, "search", false),
+        recursive ? placeUnder : undefined,
     );
     try {
         const tiles = [...h.host.querySelectorAll("[role=option]")];
@@ -181,7 +201,7 @@ it.each([true, false])("グリッドは配下の検索のときだけ名前の�
     }
 });
 it.each([true, false])("グリッドは配下の最初のページだけ検索中と示す %s", async (recursive) => {
-    const h = await searchHarness({ libraryId: "search", path: "/base", query: "txt", recursive }, null);
+    const h = await searchHarness(searchSource(recursive), null, recursive ? placeUnder : undefined);
     try {
         expect(h.host.textContent).toBe(recursive ? "検索中…" : "読み込み中…");
     } finally {
@@ -189,14 +209,11 @@ it.each([true, false])("グリッドは配下の最初のページだけ検索�
     }
 });
 it.each([false, true])("グリッドは検索の 0 件と打ち切りを示す %s", async (truncated) => {
-    const h = await searchHarness(
-        { libraryId: "search", path: "/base", query: "missing", recursive: true },
-        { entries: [], totalCount: 0, snapshot: "empty", truncated },
-    );
+    const h = await searchHarness(searchSource(true, "missing"), searchPage([], 0, "empty", truncated), placeUnder);
     try {
         expect(h.host.textContent).toContain("一致する項目がありません。");
         expect(h.host.querySelector('[role="status"]')?.textContent).toBe(
-            truncated ? "結果の一部を表示しています。起点のフォルダを下げて探し直してください。" : undefined,
+            truncated ? "結果の一部を表示しています。Library を絞るか、場所を下げて探し直してください。" : undefined,
         );
     } finally {
         await h.dispose();
@@ -204,7 +221,7 @@ it.each([false, true])("グリッドは検索の 0 件と打ち切りを示す %
 });
 it("グリッドは 0 件の通常の一覧を空のフォルダと示す", async () => {
     const h = await searchHarness(
-        { libraryId: "search", path: "/base" },
+        { kind: "folder", libraryId: "search", path: "/base" },
         { entries: [], totalCount: 0, snapshot: "empty", truncated: false },
     );
     try {
@@ -214,12 +231,9 @@ it("グリッドは 0 件の通常の一覧を空のフォルダと示す", asyn
     }
 });
 it("グリッドは結果があるときも打ち切りを示す", async () => {
-    const h = await searchHarness(
-        { libraryId: "search", path: "/base", query: "txt", recursive: true },
-        { entries: searchEntries, totalCount: 2, snapshot: "search", truncated: true },
-    );
+    const h = await searchHarness(searchSource(true), searchPage(searchEntries, 2, "search", true), placeUnder);
     try {
-        expect(h.host.querySelector('[role="status"]')?.textContent).toContain("起点のフォルダを下げて");
+        expect(h.host.querySelector('[role="status"]')?.textContent).toContain("Library を絞るか");
     } finally {
         await h.dispose();
     }
@@ -238,10 +252,10 @@ it("only wants visible folder/archive thumbnails while retaining image/video pre
         snapshot: "visible-thumbnails",
         truncated: false,
     };
-    const h = await searchHarness({ libraryId: "visible-thumbnails", path: "/" }, data);
+    const h = await searchHarness({ kind: "folder", libraryId: "visible-thumbnails", path: "/" }, data);
     try {
         const last = spy.mock.calls.at(-1);
-        if (!last || !last[1]) throw new Error("thumbnail demand missing");
+        if (!last?.[1]) throw new Error("thumbnail demand missing");
         const wanted = last[0];
         const delayed = last[1];
         const visible = new Set(

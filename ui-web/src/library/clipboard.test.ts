@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { TIMELINE_SCOPE } from "../location";
+import { CROSS_LIBRARY_SCOPE } from "../location";
 import { EntryClipboard, isCut } from "./clipboard";
 
 it("切り取りとコピーは選択の Library と種類を保存し、置換とクリアを通知する", () => {
@@ -46,7 +46,7 @@ it("タイムラインの選択は Library ごとの組に分けて保存する"
     const store = new EntryClipboard();
     store.write(
         "cut",
-        TIMELINE_SCOPE,
+        CROSS_LIBRARY_SCOPE,
         new Map([
             ["/a/x.jpg", { folder: false }],
             ["/b/y.jpg", { folder: false }],
@@ -59,8 +59,8 @@ it("タイムラインの選択は Library ごとの組に分けて保存する"
         ["b", ["/y.jpg"]],
     ]);
     expect(isCut(contents, "b", "/y.jpg")).toBe(true);
-    expect(isCut(contents, TIMELINE_SCOPE, "/a/sub/z.jpg")).toBe(true);
-    expect(isCut(contents, TIMELINE_SCOPE, "/b/x.jpg")).toBe(false);
+    expect(isCut(contents, CROSS_LIBRARY_SCOPE, "/a/sub/z.jpg")).toBe(true);
+    expect(isCut(contents, CROSS_LIBRARY_SCOPE, "/b/x.jpg")).toBe(false);
 
     // 1 つの組を送り終えても、ほかの組は残る。
     store.removeAccepted(contents!.sources[0]!, ["/x.jpg", "/sub/z.jpg"]);

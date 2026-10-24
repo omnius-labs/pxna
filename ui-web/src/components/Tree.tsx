@@ -1,16 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import {
-    Fragment,
-    type KeyboardEvent,
-    type ReactNode,
-    useEffect,
-    useLayoutEffect,
-    useMemo,
-    useRef,
-    useState,
-} from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useEntryActions } from "../library/actionContext";
 import { useEntryDrop } from "../library/dnd";
 import { PAGE_SIZE } from "../library/listing";
@@ -26,9 +17,26 @@ import { EntryIcon } from "./EntryIcon";
 import { NameDialog, type NameTarget } from "./NameDialog";
 import { TreeMenu } from "./TreeMenu";
 
+interface TreeProps {
+    /// 強調して出す位置。
+    location?: BrowseLocation;
+    /// 並べる Library。省略すると、すべての Library を並べる。
+    libraryIds?: readonly string[];
+    /// フォルダを選んだとき。あれば、フォルダ表示へ移らずに呼び、メニューとドロップを出さない。検索の場所を選ぶときに使う。
+    onSelect?: (location: BrowseLocation) => void;
+}
+
 /// Library の階層を表すツリー。フォルダ扱いの Entry だけを並べ、展開したときに子を取得する。
-export function Tree({ location }: { location?: BrowseLocation }) {
-    const libraries = useQuery(librariesQuery);
+export function Tree({ location, libraryIds, onSelect }: TreeProps) {
+    const allLibraries = useQuery(librariesQuery);
+    const libraryKey = libraryIds?.join("\n");
+    // biome-ignore lint/correctness/useExhaustiveDependencies: 並べる Library は libraryKey に畳んで比べる
+    const shown = useMemo(
+        () => allLibraries.data?.filter((library) => libraryIds?.includes(library.id) ?? true),
+        [allLibraries.data, libraryKey],
+    );
+    const libraries = { data: shown };
+    const picking = onSelect !== undefined;
     const actions = useEntryActions();
     const narrow = useNarrowScreen();
     const [editing, setEditing] = useState<{ type: "create" | "rename"; node: TreeNode }>();
@@ -192,7 +200,9 @@ export function Tree({ location }: { location?: BrowseLocation }) {
     }, [pendingFocus, nodes, listings, visibleKey]);
 
     const open = (node: TreeNode) =>
-        void navigate({ href: browseHref({ libraryId: node.libraryId, path: node.path }) });
+        onSelect
+            ? onSelect({ libraryId: node.libraryId, path: node.path })
+            : void navigate({ href: browseHref({ libraryId: node.libraryId, path: node.path }) });
     const toggle = (key: string, expand: boolean) =>
         setExpanded((current) => {
             const next = new Set(current);
@@ -295,84 +305,80 @@ export function Tree({ location }: { location?: BrowseLocation }) {
                                         )}
                                     </div>
                                 ) : (
-                                    <Fragment>
-                                        <TreeDropTarget
+                                    <TreeDropTarget
+                                        node={node}
+                                        narrow={narrow || picking}
+                                        onExpand={() => toggle(node.key, true)}
+                                    >
+                                        <TreeMenu
                                             node={node}
-                                            narrow={narrow}
-                                            onExpand={() => toggle(node.key, true)}
+                                            narrow={narrow || picking}
+                                            onCreate={() => {
+                                                toggle(node.key, true);
+                                                setEditing({ type: "create", node });
+                                            }}
+                                            onRename={() => setEditing({ type: "rename", node })}
+                                            onDelete={() =>
+                                                setDeletion({
+                                                    libraryId: node.libraryId,
+                                                    items: new Map([[node.path, { folder: node.kind === "folder" }]]),
+                                                })
+                                            }
                                         >
-                                            <TreeMenu
-                                                node={node}
-                                                narrow={narrow}
-                                                onCreate={() => {
-                                                    toggle(node.key, true);
-                                                    setEditing({ type: "create", node });
-                                                }}
-                                                onRename={() => setEditing({ type: "rename", node })}
-                                                onDelete={() =>
-                                                    setDeletion({
-                                                        libraryId: node.libraryId,
-                                                        items: new Map([
-                                                            [node.path, { folder: node.kind === "folder" }],
-                                                        ]),
-                                                    })
-                                                }
-                                            >
-                                                {/* biome-ignore lint/a11y/useKeyWithClickEvents: キーボード操作は親の ul の onKeyDown で一括処理する */}
-                                                <div
-                                                    key={node.key}
-                                                    ref={(element) => {
-                                                        if (element) {
-                                                            itemRefs.current.set(node.key, element);
-                                                        } else {
-                                                            itemRefs.current.delete(node.key);
-                                                        }
-                                                    }}
-                                                    role="treeitem"
-                                                    aria-level={node.level}
-                                                    aria-posinset={
-                                                        node.childIndex === undefined ? undefined : node.childIndex + 1
+                                            {/* biome-ignore lint/a11y/useKeyWithClickEvents: キーボード操作は親の ul の onKeyDown で一括処理する */}
+                                            <div
+                                                key={node.key}
+                                                ref={(element) => {
+                                                    if (element) {
+                                                        itemRefs.current.set(node.key, element);
+                                                    } else {
+                                                        itemRefs.current.delete(node.key);
                                                     }
-                                                    aria-setsize={parent?.totalCount}
-                                                    aria-expanded={node.expandable ? node.expanded : undefined}
-                                                    aria-selected={node.key === currentKey}
-                                                    aria-busy={loadingKeys.has(node.key) || undefined}
-                                                    tabIndex={node.key === activeKey ? 0 : -1}
-                                                    className={`flex h-8 cursor-pointer items-center gap-1 truncate py-0.5 pr-2 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${node.key === currentKey ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""}`}
-                                                    style={{ paddingLeft: `${(node.level - 1) * 0.875 + 0.25}rem` }}
-                                                    onClick={() => {
-                                                        setFocusedKey(node.key);
-                                                        open(node);
+                                                }}
+                                                role="treeitem"
+                                                aria-level={node.level}
+                                                aria-posinset={
+                                                    node.childIndex === undefined ? undefined : node.childIndex + 1
+                                                }
+                                                aria-setsize={parent?.totalCount}
+                                                aria-expanded={node.expandable ? node.expanded : undefined}
+                                                aria-selected={node.key === currentKey}
+                                                aria-busy={loadingKeys.has(node.key) || undefined}
+                                                tabIndex={node.key === activeKey ? 0 : -1}
+                                                className={`flex h-8 cursor-pointer items-center gap-1 truncate py-0.5 pr-2 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${node.key === currentKey ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""}`}
+                                                style={{ paddingLeft: `${(node.level - 1) * 0.875 + 0.25}rem` }}
+                                                onClick={() => {
+                                                    setFocusedKey(node.key);
+                                                    open(node);
+                                                }}
+                                            >
+                                                <span
+                                                    aria-hidden="true"
+                                                    className={`inline-block w-4 shrink-0 text-center text-muted-foreground ${node.expandable ? "" : "invisible"}`}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        toggle(node.key, !node.expanded);
                                                     }}
                                                 >
+                                                    {node.expanded ? "▾" : "▸"}
+                                                </span>
+                                                <EntryIcon
+                                                    kind={node.kind}
+                                                    className="h-4 w-4 shrink-0 text-muted-foreground"
+                                                />
+                                                <span className="truncate">{node.name}</span>
+                                                {failedKeys.has(node.key) && (
                                                     <span
-                                                        aria-hidden="true"
-                                                        className={`inline-block w-4 shrink-0 text-center text-muted-foreground ${node.expandable ? "" : "invisible"}`}
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            toggle(node.key, !node.expanded);
-                                                        }}
+                                                        role="alert"
+                                                        className="ml-1 shrink-0 text-destructive"
+                                                        title="中身を読めませんでした"
                                                     >
-                                                        {node.expanded ? "▾" : "▸"}
+                                                        !
                                                     </span>
-                                                    <EntryIcon
-                                                        kind={node.kind}
-                                                        className="h-4 w-4 shrink-0 text-muted-foreground"
-                                                    />
-                                                    <span className="truncate">{node.name}</span>
-                                                    {failedKeys.has(node.key) && (
-                                                        <span
-                                                            role="alert"
-                                                            className="ml-1 shrink-0 text-destructive"
-                                                            title="中身を読めませんでした"
-                                                        >
-                                                            !
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </TreeMenu>
-                                        </TreeDropTarget>
-                                    </Fragment>
+                                                )}
+                                            </div>
+                                        </TreeMenu>
+                                    </TreeDropTarget>
                                 )}
                             </div>
                         );

@@ -25,6 +25,7 @@ During implementation, advance the state of the child and of this document, and 
 | [representative-thumbnail-refresh](./plans/representative-thumbnail-refresh.md) | Folder tiles show the new representative right after our own changes | Not started | - |
 | [viewer-touch-gestures](./plans/viewer-touch-gestures.md) | The image viewer can be operated with one hand on a phone | Not started | - |
 | [name-index-store](./plans/name-index-store.md) | Every non-hidden Entry of a Library is held in a name index that follows our own changes | Not started | - |
-| [name-index-search](./plans/name-index-search.md) | A search from the root of a 10-million-Entry Library returns its first page within a second | Not started | name-index-store |
+| [search-condition-panel](./plans/search-condition-panel.md) | Every Library, or chosen ones, can be searched by name, rating, and several tags with the conditions in the left area | Done | - |
+| [name-index-search](./plans/name-index-search.md) | A search from the root of a 10-million-Entry Library returns its first page within a second | Not started | name-index-store, search-condition-panel |
 
-The two name index plans run in order. The other three are independent of each other and of them.
+The two name index plans run in order, and `name-index-search` also follows `search-condition-panel`, whose search API it answers. The other three are independent of each other and of them.

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { emptySelection, type Selection } from "../library/selection";
 import { TimelineStore } from "../library/timeline";
-import { TIMELINE_SCOPE } from "../location";
+import { CROSS_LIBRARY_SCOPE } from "../location";
 import { stubResizeObserver } from "../testing/preferences";
 import { TimelineGrid } from "./TimelineGrid";
 
@@ -70,7 +70,7 @@ async function harness(store: TimelineStore, onSelectionChange = vi.fn<(selectio
             <QueryClientProvider client={client}>
                 <TimelineGrid
                     store={store}
-                    libraryId={TIMELINE_SCOPE}
+                    libraryId={CROSS_LIBRARY_SCOPE}
                     tileSize={3}
                     shape="crop"
                     narrow={false}

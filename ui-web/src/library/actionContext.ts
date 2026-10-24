@@ -18,8 +18,8 @@ export interface EntryActionState {
     rename?: () => void;
     delete?: () => void;
     downloadHref?: string;
-    /// タイムラインの操作か。今のフォルダがないので、新しいフォルダ、貼り付け、ドラッグでの移動は出さない。
-    timeline?: boolean;
+    /// Library を横断する画面（タイムラインと検索）の操作か。今のフォルダがないので、新しいフォルダ、貼り付け、ドラッグでの移動は出さない。
+    crossLibrary?: boolean;
     /// 選んだ Entry の親フォルダを、フォルダ表示で開く。
     reveal?: () => void;
 }

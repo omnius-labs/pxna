@@ -33,7 +33,7 @@ function full(path = "/f0"): Entry {
 function harness(wanted = [0], tree = false) {
     const client = new QueryClient();
     client.setQueryData(["capabilities"], caps);
-    const store = folderListingStore(client, "test", "/", { key: "name", order: "asc" }, undefined, tree);
+    const store = folderListingStore(client, "test", "/", { key: "name", order: "asc" }, tree);
     const owner = {};
     cleanups.push(() => {
         store.release(owner);

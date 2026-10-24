@@ -249,12 +249,23 @@ it("archive は files/move、ルートは rename/delete 非表示、readonly は
         expect([...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual([
             "新しいフォルダ",
             "貼り付け",
+            "このフォルダ内を検索",
         ]);
         await act(async () =>
             document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
         );
         await h.menu("Ro");
         expect(document.querySelector('[role="menuitem"]')?.getAttribute("aria-disabled")).toBe("true");
+    } finally {
+        await h.dispose();
+    }
+});
+it("「このフォルダ内を検索」は、そのフォルダを起点に条件のない検索を開く", async () => {
+    const h = await harness();
+    try {
+        await h.menu("tree");
+        await h.select("このフォルダ内を検索");
+        expect(navigate).toHaveBeenLastCalledWith({ href: "/search?lib=ops&path=%2Ftree" });
     } finally {
         await h.dispose();
     }

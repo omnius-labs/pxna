@@ -6,6 +6,7 @@ pub mod libraries;
 pub mod operations;
 pub mod preferences;
 pub mod rating_tags;
+pub mod search;
 pub mod setup;
 pub mod thumbnails;
 pub mod timeline;
