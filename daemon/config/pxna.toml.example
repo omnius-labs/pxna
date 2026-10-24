@@ -13,7 +13,7 @@ dir = "../../ui-web/dist"
 # [media]
 # ffmpeg_path = "ffmpeg"
 # ffprobe_path = "ffprobe"
-# heif_dec_path = "heif-dec" # libheif. HEIC falls back to ffmpeg without it
+# heif_dec_path = "heif-dec" # libheif. Used for HEIC/AVIF with alpha and as a fallback
 
 # [video]
 # max_concurrent_transcodes = 1

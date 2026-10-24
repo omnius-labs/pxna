@@ -19,7 +19,7 @@ use crate::{
         },
     },
     prelude::*,
-    service::{EntryCacheKey, MediaInfoService, NestedFsEntry, ResolvedStoragePath, StorageService},
+    service::{EntryCacheKey, MediaInfo, MediaInfoService, NestedFsEntry, ResolvedStoragePath, StorageService},
 };
 
 const GIB: u64 = 1024 * 1024 * 1024;
@@ -400,15 +400,8 @@ impl Inner {
                     sprite: None,
                 }
             }
-            MediaKind::FfmpegImage => {
-                let input = self.extract_image(file.path()).await?;
-                Produced {
-                    image: self.convert_one(input, &job.plan).await?,
-                    sprite: None,
-                }
-            }
-            MediaKind::HeifImage => {
-                let input = self.decode_heif(file.path()).await?;
+            MediaKind::FfmpegImage | MediaKind::HeifImage => {
+                let input = self.decode_ffmpeg_image(&job.source, file.path(), job.kind).await?;
                 Produced {
                     image: self.convert_one(input, &job.plan).await?,
                     sprite: None,
@@ -517,23 +510,61 @@ impl Inner {
         self.tools.extract_frames(file, positions_secs).await
     }
 
+    /// ffmpeg で読む画像をデコードする。HEIC/HEIF/AVIF は PPM、それ以外（JXL、JP2）は PNG を使う。
+    /// アルファ付きの HEIC/HEIF/AVIF は heif-dec に回し、ffmpeg が失敗したときも heif-dec で読み直す。
+    async fn decode_ffmpeg_image(&self, source: &ResolvedStoragePath, file: &Path, kind: MediaKind) -> Result<Vec<u8>> {
+        let heif_decodable = kind == MediaKind::HeifImage || Self::is_avif(source);
+        if !heif_decodable {
+            return self.extract_image(file).await;
+        }
+        if self.has_alpha(source).await? {
+            return self.decode_heif(file).await;
+        }
+        match self.extract_image_pixels(file).await {
+            Ok(image) => Ok(image),
+            Err(error) => {
+                warn!(error = ?error, "ffmpeg failed to decode a HEIF or AVIF image, so heif-dec reads it instead");
+                self.decode_heif(file).await
+            }
+        }
+    }
+
+    /// 拡張子が avif の file か。アルファを保持できる heif-dec に回せるかの判定に使う。
+    fn is_avif(source: &ResolvedStoragePath) -> bool {
+        Self::file_name(&source.path().to_nested_path_buf())
+            .rsplit_once('.')
+            .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("avif"))
+    }
+
+    /// 画像がアルファの補助画像を持つか。probe に失敗したときは、アルファを見落とさないよう heif-dec に回す。
+    async fn has_alpha(&self, source: &ResolvedStoragePath) -> Result<bool> {
+        match self.media_info.probe(source).await {
+            Ok(MediaInfo::Image(info)) => Ok(info.has_alpha),
+            Ok(_) => Ok(false),
+            Err(error) => {
+                warn!(error = ?error, "failed to probe an image for alpha, so heif-dec reads it");
+                Ok(true)
+            }
+        }
+    }
+
     async fn extract_image(&self, file: &Path) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.tools.extract_image(file).await
     }
 
-    /// heif-dec で読む。heif-dec がないか、読めなかったときは、ffmpeg で読み直す。
+    async fn extract_image_pixels(&self, file: &Path) -> Result<Vec<u8>> {
+        #[cfg(test)]
+        self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.tools.extract_image_pixels(file).await
+    }
+
+    /// heif-dec で読む。アルファ付きの HEIC/HEIF/AVIF と、ffmpeg が読めなかったときのフォールバックに使う。
     async fn decode_heif(&self, file: &Path) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.heif_dec_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        match self.tools.decode_heif(file).await {
-            Ok(image) => Ok(image),
-            Err(error) => {
-                warn!(error = ?error, "heif-dec failed to decode a HEIF image, so ffmpeg reads it instead");
-                self.extract_image(file).await
-            }
-        }
+        self.tools.decode_heif(file).await
     }
 
     /// 拡張子が合っていても中身が読めない file は、`UnsupportedType` にする。
@@ -1392,7 +1423,85 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_tiled_heic_is_decoded_whole_by_heif_dec_test() -> TestResult {
+    async fn a_tiled_heic_is_decoded_whole_by_ffmpeg_test() -> TestResult {
+        if skip_before_ffmpeg(9) {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
+        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
+            let image = fixture.generator.generate(&nested(&file), &display).await?;
+            assert_eq!(size(&image)?, displayed, "{}: タイル 1 枚ではなく、組み立てて回転した画像になる", file.display());
+        }
+        assert_eq!(fixture.generator.heif_dec_runs(), 0, "アルファのない HEIC は ffmpeg だけで読む");
+        assert_eq!(fixture.generator.ffmpeg_runs(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_heic_is_read_by_heif_dec_when_ffmpeg_fails_test() -> TestResult {
+        let Some(decoder) = heif_decoder() else {
+            return Ok(());
+        };
+        let media = MediaOptions {
+            ffmpeg_path: "/nonexistent/ffmpeg".into(),
+            heif_dec_path: decoder.into(),
+            ..MediaOptions::default()
+        };
+        let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
+        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
+            let image = fixture.generator.generate(&nested(&file), &display).await?;
+            assert_eq!(size(&image)?, displayed, "{}: ffmpeg が読めないときは heif-dec で読み直す", file.display());
+        }
+        assert_eq!(fixture.generator.heif_dec_runs(), 2);
+        assert_eq!(fixture.generator.ffmpeg_runs(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_heic_is_read_by_heif_dec_when_the_alpha_probe_fails_test() -> TestResult {
+        let Some(decoder) = heif_decoder() else {
+            return Ok(());
+        };
+        let media = MediaOptions {
+            ffprobe_path: "/nonexistent/ffprobe".into(),
+            heif_dec_path: decoder.into(),
+            ..MediaOptions::default()
+        };
+        let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
+        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
+            let image = fixture.generator.generate(&nested(&file), &display).await?;
+            assert_eq!(size(&image)?, displayed, "{}: アルファの判定に失敗したら heif-dec で読む", file.display());
+        }
+        assert_eq!(fixture.generator.heif_dec_runs(), 2);
+        assert_eq!(fixture.generator.ffmpeg_runs(), 0);
+        Ok(())
+    }
+
+    /// 赤の左半分が不透明で、右半分が透明な画像。HEIC と AVIF、それぞれタイルなしとタイルありを返す。
+    fn write_alpha_images(dir: &Path) -> TestResult<Vec<(std::path::PathBuf, (u32, u32))>> {
+        let files = [
+            ("alpha.heic", include_bytes!("../../../tests/fixtures/alpha.heic").as_slice(), (512, 512)),
+            ("alpha-grid.heic", include_bytes!("../../../tests/fixtures/alpha-grid.heic").as_slice(), (1024, 1024)),
+            ("alpha.avif", include_bytes!("../../../tests/fixtures/alpha.avif").as_slice(), (512, 512)),
+            ("alpha-grid.avif", include_bytes!("../../../tests/fixtures/alpha-grid.avif").as_slice(), (1024, 1024)),
+        ];
+        let mut written = Vec::new();
+        for (name, bytes, displayed) in files {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes)?;
+            written.push((path, displayed));
+        }
+        Ok(written)
+    }
+
+    #[tokio::test]
+    async fn an_image_with_alpha_is_read_by_heif_dec_test() -> TestResult {
+        if skip_without_ffmpeg() {
+            return Ok(());
+        }
         let Some(decoder) = heif_decoder() else {
             return Ok(());
         };
@@ -1401,33 +1510,52 @@ mod tests {
             ..MediaOptions::default()
         };
         let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
-        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
-        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Webp, ImageResizeType::Fit);
+        for (file, displayed) in write_alpha_images(fixture.dir.path())? {
             let image = fixture.generator.generate(&nested(&file), &display).await?;
-            assert_eq!(size(&image)?, displayed, "{}: タイル 1 枚ではなく、組み立てて回転した画像になる", file.display());
+            let decoded = ImageConverter::decode(&image.bytes)?;
+            assert_eq!((decoded.width(), decoded.height()), displayed, "{}: 組み立てと回転を反映する", file.display());
+            let rgba = decoded.to_rgba8();
+            assert_eq!(rgba.get_pixel(decoded.width() / 4, decoded.height() / 2)[3], 255, "{}: 不透明な左半分", file.display());
+            assert_eq!(rgba.get_pixel(decoded.width() * 3 / 4, decoded.height() / 2)[3], 0, "{}: 透明な右半分", file.display());
         }
-        assert_eq!(fixture.generator.heif_dec_runs(), 2);
+        assert_eq!(fixture.generator.heif_dec_runs(), 4, "アルファ付きは heif-dec に回す");
         assert_eq!(fixture.generator.ffmpeg_runs(), 0);
         Ok(())
     }
 
     #[tokio::test]
-    async fn without_heif_dec_a_tiled_heic_is_decoded_whole_by_ffmpeg_test() -> TestResult {
-        if skip_before_ffmpeg(8) {
+    async fn a_jxl_with_alpha_keeps_it_on_the_ffmpeg_png_path_test() -> TestResult {
+        if skip_without_ffmpeg() {
             return Ok(());
         }
-        let media = MediaOptions {
-            heif_dec_path: "/nonexistent/heif-dec".into(),
-            ..MediaOptions::default()
-        };
-        let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
-        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
-        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
-            let image = fixture.generator.generate(&nested(&file), &display).await?;
-            assert_eq!(size(&image)?, displayed, "{}: heif-dec がなければ ffmpeg で読み直す", file.display());
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("alpha.jxl");
+        std::fs::write(&file, include_bytes!("../../../tests/fixtures/alpha.jxl"))?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Webp, ImageResizeType::Fit);
+        let image = fixture.generator.generate(&nested(&file), &display).await?;
+        let decoded = ImageConverter::decode(&image.bytes)?;
+        let rgba = decoded.to_rgba8();
+        assert_eq!((rgba.width(), rgba.height()), (512, 512));
+        assert_eq!(rgba.get_pixel(rgba.width() / 4, rgba.height() / 2)[3], 255, "不透明な左半分");
+        assert_eq!(rgba.get_pixel(rgba.width() * 3 / 4, rgba.height() / 2)[3], 0, "透明な右半分");
+        assert_eq!(fixture.generator.heif_dec_runs(), 0);
+        assert_eq!(fixture.generator.ffmpeg_runs(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_avif_is_thumbnailed_through_ppm_test() -> TestResult {
+        if skip_without_ffmpeg() {
+            return Ok(());
         }
-        assert_eq!(fixture.generator.heif_dec_runs(), 2);
-        assert_eq!(fixture.generator.ffmpeg_runs(), 2);
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("blue.avif");
+        std::fs::write(&file, include_bytes!("../../../tests/fixtures/blue.avif"))?;
+        let thumbnail = fixture.generator.generate(&nested(&file), &thumbnail_request(256, 256)).await?;
+        assert_eq!(size(&thumbnail)?, (64, 32), "元の画像より大きくはしない");
+        assert_eq!(fixture.generator.heif_dec_runs(), 0, "アルファのない AVIF は ffmpeg の PPM だけで読む");
+        assert_eq!(fixture.generator.ffmpeg_runs(), 1);
         Ok(())
     }
 

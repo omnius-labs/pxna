@@ -19,7 +19,7 @@ insecure_cookie = true
 # [media]
 # ffmpeg_path = "ffmpeg"   # Installed in the image
 # ffprobe_path = "ffprobe"
-# heif_dec_path = "heif-dec" # libheif, installed in the image. HEIC falls back to ffmpeg without it
+# heif_dec_path = "heif-dec" # libheif, installed in the image. Used for HEIC/AVIF with alpha and as a fallback
 
 # [video]
 # max_concurrent_transcodes = 1

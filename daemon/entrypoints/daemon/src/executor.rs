@@ -146,6 +146,8 @@ impl Executor {
 
             Self::tracing_config(&conf.logging);
 
+            crate::media_check::MediaEnvironment::verify(&conf.media).await?;
+
             let state = Arc::new(DaemonState::new(conf).await?);
             state.timeline.start();
             ApiServer::serve(state, token.clone()).await

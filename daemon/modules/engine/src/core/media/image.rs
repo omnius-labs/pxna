@@ -17,6 +17,8 @@ pub struct ImageInfo {
     /// 保存された画像を、表示のために反時計回りに回す角度（0、90、180、270 度）。`width` と `height` には反映していない。
     /// ffmpeg で読む形式だけが、0 以外になりうる。
     pub rotation: u16,
+    /// アルファの補助画像を持つか。ffprobe が gray の映像 stream と色の映像 stream の両方を返したときに true にする。
+    pub has_alpha: bool,
     pub exif: ImageExif,
 }
 
@@ -117,6 +119,7 @@ struct ProbeImageStream {
     codec_type: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
+    pix_fmt: Option<String>,
     #[serde(default)]
     side_data_list: Vec<ProbeSideData>,
 }
@@ -178,19 +181,38 @@ impl ProbeImageOutput {
                 .map(|(width, height)| (width, height, ProbeSideData::display_rotation(&stream.side_data_list)))
         })
     }
+
+    /// gray の映像 stream があり、色の stream もあれば、アルファの補助画像を持つとみなす。
+    /// モノクロ画像とモノクロのアルファのように gray が 2 本以上並ぶ場合も拾うため、映像 stream が複数あるときも対象にする。
+    /// タイル化されたグレースケール画像はアルファなしでも複数の gray stream を持つため、heif-dec に回る（遅いが正しい）。
+    fn has_alpha(&self) -> bool {
+        let mut video_count = 0;
+        let mut gray = false;
+        let mut color = false;
+        for stream in self.streams.iter().filter(|stream| stream.codec_type.as_deref() == Some("video")) {
+            video_count += 1;
+            match stream.pix_fmt.as_deref() {
+                Some(pix_fmt) if pix_fmt.starts_with("gray") => gray = true,
+                Some(_) => color = true,
+                None => {}
+            }
+        }
+        gray && (color || video_count > 1)
+    }
 }
 
 impl ImageInfo {
-    /// ffprobe の出力から、画像の幅と高さと、回転（反時計回りの 0、90、180、270 度）を得る。幅と高さは入れ替えない。
+    /// ffprobe の出力から、画像の幅と高さと、回転（反時計回りの 0、90、180、270 度）と、アルファの有無を得る。幅と高さは入れ替えない。
     /// Tile Grid があればその寸法を、なければ最初の映像 stream の寸法を使う。
-    pub fn parse_probe_size(bytes: &[u8]) -> Result<(u32, u32, u16)> {
+    pub fn parse_probe_size(bytes: &[u8]) -> Result<(u32, u32, u16, bool)> {
         let probe: ProbeImageOutput =
             serde_json::from_slice(bytes).map_err(|error| Error::from_error(error, ErrorKind::UnsupportedType).with_message("invalid image information"))?;
-        probe
+        let (width, height, rotation) = probe
             .tile_grid_size()
             .or_else(|| probe.first_video_stream_size())
             .filter(|(width, height, _)| *width > 0 && *height > 0)
-            .ok_or_else(|| Error::new(ErrorKind::UnsupportedType).with_message("image size is unavailable"))
+            .ok_or_else(|| Error::new(ErrorKind::UnsupportedType).with_message("image size is unavailable"))?;
+        Ok((width, height, rotation, probe.has_alpha()))
     }
 }
 
@@ -387,14 +409,14 @@ mod tests {
     #[test]
     fn parses_the_size_of_the_first_video_stream_test() -> TestResult {
         let bytes = br#"{"streams":[{"codec_type":"audio"},{"codec_type":"video","width":4032,"height":3024}]}"#;
-        assert_eq!(ImageInfo::parse_probe_size(bytes)?, (4032, 3024, 0));
+        assert_eq!(ImageInfo::parse_probe_size(bytes)?, (4032, 3024, 0, false));
         assert!(ImageInfo::parse_probe_size(br#"{"streams":[]}"#).is_err());
         assert!(ImageInfo::parse_probe_size(br#"{"streams":[{"codec_type":"video","width":0,"height":0}]}"#).is_err());
         Ok(())
     }
 
     /// 回転の値は、ffprobe の Display Matrix が返す、符号つきの度数である。
-    fn parse_with_side_data(side_data: &str) -> Result<(u32, u32, u16)> {
+    fn parse_with_side_data(side_data: &str) -> Result<(u32, u32, u16, bool)> {
         let json = format!(r#"{{"streams":[{{"codec_type":"video","width":64,"height":32,"side_data_list":{side_data}}}]}}"#);
         ImageInfo::parse_probe_size(json.as_bytes())
     }
@@ -403,9 +425,9 @@ mod tests {
     fn normalizes_the_display_matrix_rotation_without_swapping_the_size_test() -> TestResult {
         for (value, expected) in [(90, 90), (-90, 270), (180, 180), (-180, 180), (270, 270), (-270, 90), (0, 0), (360, 0)] {
             let side_data = format!(r#"[{{"side_data_type":"Display Matrix","rotation":{value}}}]"#);
-            assert_eq!(parse_with_side_data(&side_data)?, (64, 32, expected), "rotation {value}");
+            assert_eq!(parse_with_side_data(&side_data)?, (64, 32, expected, false), "rotation {value}");
         }
-        assert_eq!(parse_with_side_data(r#"[{"side_data_type":"Display Matrix","rotation":90.0}]"#)?, (64, 32, 90));
+        assert_eq!(parse_with_side_data(r#"[{"side_data_type":"Display Matrix","rotation":90.0}]"#)?, (64, 32, 90, false));
         Ok(())
     }
 
@@ -418,10 +440,10 @@ mod tests {
             r#"[{"side_data_type":"Display Matrix","rotation":90.5}]"#,
             r#"[{"side_data_type":"Mastering display metadata","rotation":90}]"#,
         ] {
-            assert_eq!(parse_with_side_data(side_data)?, (64, 32, 0), "{side_data}");
+            assert_eq!(parse_with_side_data(side_data)?, (64, 32, 0, false), "{side_data}");
         }
         let without_side_data = br#"{"streams":[{"codec_type":"video","width":64,"height":32}]}"#;
-        assert_eq!(ImageInfo::parse_probe_size(without_side_data)?, (64, 32, 0));
+        assert_eq!(ImageInfo::parse_probe_size(without_side_data)?, (64, 32, 0, false));
         Ok(())
     }
 
@@ -431,12 +453,32 @@ mod tests {
         let bytes = br#"{"streams":[{"codec_type":"video","width":512,"height":512},{"codec_type":"video","width":512,"height":512}],
             "stream_groups":[{"type":"Tile Grid","components":[{"nb_tiles":6,"coded_width":1536,"coded_height":1024,"width":1280,"height":960,
             "side_data_list":[{"side_data_type":"Display Matrix","rotation":90}]}]}]}"#;
-        assert_eq!(ImageInfo::parse_probe_size(bytes)?, (1280, 960, 90));
+        assert_eq!(ImageInfo::parse_probe_size(bytes)?, (1280, 960, 90, false));
 
         let other_group = br#"{"streams":[{"codec_type":"video","width":64,"height":32}],"stream_groups":[{"type":"LCEVC","components":[{"width":128,"height":64}]}]}"#;
-        assert_eq!(ImageInfo::parse_probe_size(other_group)?, (64, 32, 0));
+        assert_eq!(ImageInfo::parse_probe_size(other_group)?, (64, 32, 0, false));
         let no_groups = br#"{"streams":[{"codec_type":"video","width":64,"height":32}],"stream_groups":[]}"#;
-        assert_eq!(ImageInfo::parse_probe_size(no_groups)?, (64, 32, 0));
+        assert_eq!(ImageInfo::parse_probe_size(no_groups)?, (64, 32, 0, false));
+        Ok(())
+    }
+
+    #[test]
+    fn a_gray_video_stream_next_to_a_color_stream_is_an_alpha_image_test() -> TestResult {
+        let untiled = br#"{"streams":[{"codec_type":"video","width":512,"height":512,"pix_fmt":"yuvj420p"},{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(untiled)?, (512, 512, 0, true));
+
+        let tiled = br#"{"streams":[{"codec_type":"video","width":512,"height":512,"pix_fmt":"yuvj420p"},{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"}],
+            "stream_groups":[{"type":"Tile Grid","components":[{"width":1024,"height":1024}]}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(tiled)?, (1024, 1024, 0, true));
+
+        let grayscale_only = br#"{"streams":[{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(grayscale_only)?, (512, 512, 0, false));
+
+        let embedded = br#"{"streams":[{"codec_type":"video","width":512,"height":512,"pix_fmt":"rgba"}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(embedded)?, (512, 512, 0, false));
+
+        let gray_and_gray = br#"{"streams":[{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"},{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(gray_and_gray)?, (512, 512, 0, true), "モノクロ画像 + モノクロのアルファ");
         Ok(())
     }
 }
