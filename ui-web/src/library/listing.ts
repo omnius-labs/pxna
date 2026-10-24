@@ -474,7 +474,7 @@ export function retryEntryDetails(client: QueryClient, libraryId: string, paths:
 /// 表示中の一覧は古いページを残して先頭から再取得し、未表示のキャッシュは捨てる。
 export async function refreshLibrary(client: QueryClient, libraryId: string): Promise<void> {
     await client.cancelQueries({ queryKey: ["entries", libraryId] });
-    const timeline = refreshTimeline(client, libraryId);
+    const timeline = refreshTimeline(client, [libraryId]);
     const active: FolderListingStore[] = [];
     for (const [key, store] of stores.get(client) ?? []) {
         if (JSON.parse(key)[0] !== libraryId) continue;

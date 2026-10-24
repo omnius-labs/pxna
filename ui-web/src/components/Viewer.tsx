@@ -8,7 +8,7 @@ import { type Listing, locationFilter, useFolderListing } from "../library/listi
 import type { SortPreference } from "../library/preferences";
 import { putRating, RATING_LABELS, type Rating, ratingQuery } from "../library/ratingTags";
 import { keepRange, reachablePages, useTimelineStore } from "../library/timeline";
-import { type BrowseLocation, relativePath, timelineEntryPath } from "../location";
+import { type BrowseLocation, relativePath, TIMELINE_SCOPE, timelineEntryPath } from "../location";
 import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { FILMSTRIP_ITEM_WIDTH } from "../viewer/filmstrip";
 import { displayImageUrl, fileContentUrl, originalImageUrl } from "../viewer/urls";
@@ -79,15 +79,17 @@ export function Viewer({ sort, ...props }: ViewerProps) {
 }
 
 interface TimelineViewerProps extends Omit<ViewerProps, "location" | "sort"> {
-    libraryId: string;
-    /// 開く Entry の Library 相対パス（先頭の `/` を除く）。
+    /// タイムラインに並べている Library の id。
+    libraryIds: readonly string[];
+    /// 開く Entry の鍵（先頭の `/` を除く）。Library の id を含む。
     view: string;
 }
 
 /// タイムラインの順で前後へ移るビューア。開いたときの Entry を中央に含む範囲から読み、前後へ読み足す。
-export function TimelineViewer({ libraryId, view, ...props }: TimelineViewerProps) {
+/// Entry は Library を横断するので、所在はタイムラインの範囲の鍵から求める。
+export function TimelineViewer({ libraryIds, view, ...props }: TimelineViewerProps) {
     const [opened] = useState(view);
-    const store = useTimelineStore(libraryId, { kind: "around", path: timelineEntryPath(opened) });
+    const store = useTimelineStore(libraryIds, { kind: "around", path: timelineEntryPath(opened) });
     const { wantedPages, changeWantedPages } = useWantedPages();
     const path = timelineEntryPath(view);
     // フィルムストリップを遠くへ送っても、開いている Entry から離れすぎたページは読まない。
@@ -118,7 +120,7 @@ export function TimelineViewer({ libraryId, view, ...props }: TimelineViewerProp
     return (
         <ViewerView
             {...props}
-            location={{ libraryId, path: "/", view }}
+            location={{ libraryId: TIMELINE_SCOPE, path: "/", view }}
             listing={store}
             scope={["timeline"]}
             onPages={changeWantedPages}

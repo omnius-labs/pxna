@@ -4,13 +4,16 @@ use chrono::{DateTime, Datelike as _, NaiveDate, Utc};
 use omnius_core_migration::sqlite::{MigrationRequest, SqliteMigrator};
 use sqlx::{
     Row as _, Sqlite, SqlitePool, Transaction,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteRow},
+    query::Query,
+    sqlite::{SqliteArguments, SqliteConnectOptions, SqliteJournalMode, SqliteRow},
 };
 
 use super::{TimelineDate, TimelineZone};
 use crate::prelude::*;
 
 const DATABASE_FILE_NAME: &str = "index.db";
+
+type SqliteQuery<'q> = Query<'q, Sqlite, SqliteArguments>;
 
 /// 1 つの問い合わせに並べる値の数。SQLite の上限より十分小さくする。
 const CHUNK: usize = 500;
@@ -81,13 +84,6 @@ pub struct TimelineRow {
 }
 
 impl TimelineRow {
-    pub fn cursor(&self) -> TimelineCursor {
-        TimelineCursor {
-            date: self.date.text(),
-            path: self.path.clone(),
-        }
-    }
-
     fn from_row(row: &SqliteRow) -> Result<Self> {
         let date: String = row.try_get("date")?;
         let source: String = row.try_get("date_source")?;
@@ -135,33 +131,65 @@ impl TimelineBatch {
     }
 }
 
-/// ページの位置。ページの端の Entry の並びの日時と Library 相対パスの組である。
+/// ページに並べる Entry の行と、その行の Library。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelineListedRow {
+    pub library: String,
+    pub row: TimelineRow,
+}
+
+impl TimelineListedRow {
+    pub fn cursor(&self) -> TimelineCursor {
+        TimelineCursor {
+            date: self.row.date.text(),
+            library: self.library.clone(),
+            path: self.row.path.clone(),
+        }
+    }
+
+    fn from_row(row: &SqliteRow) -> Result<Self> {
+        Ok(Self {
+            library: row.try_get("library_id")?,
+            row: TimelineRow::from_row(row)?,
+        })
+    }
+}
+
+/// ページの位置。ページの端の Entry の並びの日時、Library、Library 相対パスの組である。
+///
+/// 並びの日時が同じ Entry は、Library の id、Library 相対パスの順に並べる。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelineCursor {
     pub date: String,
+    pub library: String,
     pub path: String,
 }
 
 impl TimelineCursor {
     const DATE_LENGTH: usize = "YYYY-MM-DDTHH:MM:SS".len();
 
-    /// 並びの日時の 19 文字に Library 相対パスを続けた文字列から作る。
+    /// 並びの日時の 19 文字に Library の id と Library 相対パスを続けた文字列から作る。
+    ///
+    /// Library の id は `/` を含まないので、日時の後の最初の `/` から後が Library 相対パスである。
     pub fn parse(value: &str) -> Result<Self> {
         let invalid = || Error::new(ErrorKind::InvalidInput).with_message("invalid timeline cursor");
         let date = value.get(..Self::DATE_LENGTH).ok_or_else(invalid)?;
-        let path = value.get(Self::DATE_LENGTH..).ok_or_else(invalid)?;
+        let rest = value.get(Self::DATE_LENGTH..).ok_or_else(invalid)?;
         TimelineDate::parse(date, "exif", None).map_err(|_| invalid())?;
-        if !path.starts_with('/') {
+        let slash = rest.find('/').ok_or_else(invalid)?;
+        let (library, path) = rest.split_at(slash);
+        if library.is_empty() {
             return Err(invalid());
         }
         Ok(Self {
             date: date.to_string(),
+            library: library.to_string(),
             path: path.to_string(),
         })
     }
 
     pub fn encode(&self) -> String {
-        format!("{}{}", self.date, self.path)
+        format!("{}{}{}", self.date, self.library, self.path)
     }
 }
 
@@ -176,14 +204,14 @@ pub enum TimelineAnchor {
     Before(TimelineCursor),
     /// `YYYY-MM` の月の、最も新しい Entry から。その月が空なら、それより古い Entry から。
     Month(String),
-    /// Library 相対パスの Entry を中央に含む範囲。
-    Around(String),
+    /// Library の、Library 相対パスの Entry を中央に含む範囲。
+    Around { library: String, path: String },
 }
 
 /// 新しい順に並べたページと、その前後を読むための cursor。前後に Entry がなければ `None` にする。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelinePage {
-    pub rows: Vec<TimelineRow>,
+    pub rows: Vec<TimelineListedRow>,
     pub previous: Option<TimelineCursor>,
     pub next: Option<TimelineCursor>,
 }
@@ -215,6 +243,36 @@ impl PathRange {
     }
 }
 
+/// 読み出しの対象にする Library の組。空の組は作れない。
+struct TimelineLibraries<'a> {
+    ids: &'a [String],
+}
+
+impl<'a> TimelineLibraries<'a> {
+    fn new(ids: &'a [String]) -> Result<Self> {
+        if ids.is_empty() {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message("at least one library is needed"));
+        }
+        Ok(Self { ids })
+    }
+
+    fn contains(&self, id: &str) -> bool {
+        self.ids.iter().any(|candidate| candidate == id)
+    }
+
+    /// `library_id` が組に入る条件。引数は `bind` で bind する。
+    fn condition(&self) -> String {
+        format!("library_id IN ({})", vec!["?"; self.ids.len()].join(", "))
+    }
+
+    fn bind<'q>(&self, query: SqliteQuery<'q>) -> SqliteQuery<'q>
+    where
+        'a: 'q,
+    {
+        self.ids.iter().fold(query, |query, id| query.bind(id.as_str()))
+    }
+}
+
 /// タイムラインに並べる Entry、ファイル、月ごとの件数、集計の状態を持つ SQLite の索引。
 pub struct TimelineIndex {
     db: SqlitePool,
@@ -234,9 +292,10 @@ impl TimelineIndex {
     }
 
     async fn migrate(db: &SqlitePool) -> Result<()> {
-        let requests = vec![MigrationRequest {
-            name: "2026-10-14_timeline_index".to_string(),
-            queries: r#"
+        let requests = vec![
+            MigrationRequest {
+                name: "2026-10-14_timeline_index".to_string(),
+                queries: r#"
 CREATE TABLE timeline_files (
     library_id TEXT NOT NULL,
     path TEXT NOT NULL,
@@ -277,13 +336,31 @@ CREATE TABLE timeline_settings (
     value TEXT NOT NULL
 ) WITHOUT ROWID;
 "#
-            .to_string(),
-        }];
+                .to_string(),
+            },
+            MigrationRequest {
+                // Library を横断して並びの日時の順に読むので、並びの索引の先頭を日時にする。
+                name: "2026-10-24_timeline_cross_library_order".to_string(),
+                queries: r#"
+DROP INDEX timeline_entries_order;
+CREATE INDEX timeline_entries_date ON timeline_entries (date DESC, library_id, path);
+"#
+                .to_string(),
+            },
+        ];
         SqliteMigrator::migrate(db, requests).await?;
         for trigger in TRIGGERS {
             sqlx::query(sqlx::AssertSqlSafe(*trigger)).execute(db).await?;
         }
         Ok(())
+    }
+
+    /// 書き込みのトランザクションを始める。
+    ///
+    /// 複数の Library の集計が同じ索引へ同時に書くので、始めから書き込みのロックを取る。読み取りから始めると、
+    /// ほかの書き込みの後に書き込みへ移るときに busy の待ちを経ずに `SQLITE_BUSY` で失敗し、その Library の集計が止まる。
+    async fn write(&self) -> Result<Transaction<'static, Sqlite>> {
+        Ok(self.db.begin_with("BEGIN IMMEDIATE").await?)
     }
 
     // ---- 集計の状態 ----
@@ -373,7 +450,7 @@ CREATE TABLE timeline_settings (
     /// 記録する世代は、渡された世代と今の世代の大きい方にする。範囲の集計が古い世代のまま書いても、行の世代が後退せず、
     /// 全体の集計の掃除で消されない。
     pub async fn apply(&self, library: &str, generation: i64, batch: &TimelineBatch) -> Result<()> {
-        let mut tx = self.db.begin().await?;
+        let mut tx = self.write().await?;
         let current: Option<i64> = sqlx::query_scalar("SELECT generation FROM timeline_scans WHERE library_id = ?")
             .bind(library)
             .fetch_optional(&mut *tx)
@@ -452,7 +529,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
 
     /// `path` とその配下のファイルの行と、それらに属する Entry の行を消す。
     pub async fn remove(&self, library: &str, path: &str) -> Result<()> {
-        let mut tx = self.db.begin().await?;
+        let mut tx = self.write().await?;
         Self::remove_in(&mut tx, library, path).await?;
         tx.commit().await?;
         Ok(())
@@ -492,7 +569,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
         let (Some(src_range), Some(dst_range)) = (PathRange::of(src), PathRange::of(dst)) else {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("cannot rename the library root"));
         };
-        let mut tx = self.db.begin().await?;
+        let mut tx = self.write().await?;
         Self::remove_in(&mut tx, library, &dst_range.exact).await?;
 
         let offset = i64::try_from(src_range.exact.chars().count() + 1)?;
@@ -559,7 +636,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
     pub async fn sweep(&self, library: &str, scope: &str, generation: i64, scoped: bool) -> Result<()> {
         const STALE: &str = "((generation >= 0 AND generation < ?) OR (generation < 0 AND -generation - 1 < ?))";
         let pending = if scoped { generation + 1 } else { generation };
-        let mut tx = self.db.begin().await?;
+        let mut tx = self.write().await?;
         match PathRange::of(scope) {
             None => {
                 let sql = format!("DELETE FROM timeline_entries WHERE library_id = ? AND file_path IN (SELECT path FROM timeline_files WHERE library_id = ? AND {STALE})");
@@ -635,7 +712,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
                     break;
                 };
                 last = Some((tail.try_get("library_id")?, tail.try_get("path")?));
-                let mut tx = self.db.begin().await?;
+                let mut tx = self.write().await?;
                 for row in &rows {
                     let library: String = row.try_get("library_id")?;
                     let path: String = row.try_get("path")?;
@@ -664,44 +741,53 @@ ON CONFLICT (library_id, path) DO UPDATE SET
 
     // ---- 読み出し ----
 
-    pub async fn page(&self, library: &str, anchor: &TimelineAnchor, limit: usize) -> Result<TimelinePage> {
+    /// `libraries` の Entry を 1 本の並びにしたページ。`libraries` は空でない。
+    pub async fn page(&self, libraries: &[String], anchor: &TimelineAnchor, limit: usize) -> Result<TimelinePage> {
+        let libraries = TimelineLibraries::new(libraries)?;
         let limit = limit.max(1);
         let rows = match anchor {
-            TimelineAnchor::Newest => self.older(library, None, limit).await?,
-            TimelineAnchor::After(cursor) => self.older(library, Some(cursor), limit).await?,
-            TimelineAnchor::Before(cursor) => self.newer(library, cursor, limit).await?,
+            TimelineAnchor::Newest => self.older(&libraries, None, limit).await?,
+            TimelineAnchor::After(cursor) => self.older(&libraries, Some(cursor), limit).await?,
+            TimelineAnchor::Before(cursor) => self.newer(&libraries, cursor, limit).await?,
             TimelineAnchor::Month(month) => {
                 let end = Self::month_end(month)?;
-                self.older_than_date(library, &end, limit).await?
+                self.older_than_date(&libraries, &end, limit).await?
             }
-            TimelineAnchor::Around(path) => {
-                let Some(center) = self.row(library, path).await? else {
+            TimelineAnchor::Around { library, path } => {
+                let center = match libraries.contains(library) {
+                    true => self.row(library, path).await?,
+                    false => None,
+                };
+                let Some(center) = center else {
                     return Err(Error::new(ErrorKind::NotFound).with_message("timeline entry not found"));
                 };
                 let cursor = center.cursor();
                 let newer_count = (limit - 1) / 2;
-                let mut rows = self.newer(library, &cursor, newer_count).await?;
+                let mut rows = self.newer(&libraries, &cursor, newer_count).await?;
                 rows.push(center);
-                rows.extend(self.older(library, Some(&cursor), limit - rows.len()).await?);
+                rows.extend(self.older(&libraries, Some(&cursor), limit - rows.len()).await?);
                 rows
             }
         };
         let previous = match rows.first() {
-            Some(first) if self.exists_newer(library, &first.cursor()).await? => Some(first.cursor()),
+            Some(first) if self.exists_newer(&libraries, &first.cursor()).await? => Some(first.cursor()),
             _ => None,
         };
         let next = match rows.last() {
-            Some(last) if self.exists_older(library, &last.cursor()).await? => Some(last.cursor()),
+            Some(last) if self.exists_older(&libraries, &last.cursor()).await? => Some(last.cursor()),
             _ => None,
         };
         Ok(TimelinePage { rows, previous, next })
     }
 
-    pub async fn months(&self, library: &str) -> Result<Vec<(String, u64)>> {
-        let rows = sqlx::query("SELECT month, count FROM timeline_months WHERE library_id = ? AND count > 0 ORDER BY month DESC")
-            .bind(library)
-            .fetch_all(&self.db)
-            .await?;
+    /// `libraries` の月ごとの件数を足し合わせ、新しい月から並べる。`libraries` は空でない。
+    pub async fn months(&self, libraries: &[String]) -> Result<Vec<(String, u64)>> {
+        let libraries = TimelineLibraries::new(libraries)?;
+        let sql = format!(
+            "SELECT month, SUM(count) AS count FROM timeline_months WHERE {} AND count > 0 GROUP BY month ORDER BY month DESC",
+            libraries.condition()
+        );
+        let rows = libraries.bind(sqlx::query(sqlx::AssertSqlSafe(sql))).fetch_all(&self.db).await?;
         rows.iter()
             .map(|row| {
                 let count: i64 = row.try_get("count")?;
@@ -710,94 +796,112 @@ ON CONFLICT (library_id, path) DO UPDATE SET
             .collect()
     }
 
-    const COLUMNS: &'static str = "path, file_path, kind, date, date_source, date_instant, size, modified_ns, readonly";
+    const COLUMNS: &'static str = "library_id, path, file_path, kind, date, date_source, date_instant, size, modified_ns, readonly";
 
-    async fn row(&self, library: &str, path: &str) -> Result<Option<TimelineRow>> {
+    /// 並びの順。索引 `timeline_entries_date` の順と同じにする。
+    const NEWEST_FIRST: &'static str = "ORDER BY date DESC, library_id ASC, path ASC";
+    const OLDEST_FIRST: &'static str = "ORDER BY date ASC, library_id DESC, path DESC";
+
+    /// cursor より古い Entry の条件。引数は日時、日時、Library、Library 相対パスの順に bind する。
+    const OLDER_THAN_CURSOR: &'static str = "(date < ? OR (date = ? AND (library_id, path) > (?, ?)))";
+    /// cursor より新しい Entry の条件。引数は `OLDER_THAN_CURSOR` と同じ順に bind する。
+    const NEWER_THAN_CURSOR: &'static str = "(date > ? OR (date = ? AND (library_id, path) < (?, ?)))";
+
+    async fn row(&self, library: &str, path: &str) -> Result<Option<TimelineListedRow>> {
         let sql = format!("SELECT {} FROM timeline_entries WHERE library_id = ? AND path = ?", Self::COLUMNS);
         let row = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(library).bind(path).fetch_optional(&self.db).await?;
-        row.as_ref().map(TimelineRow::from_row).transpose()
+        row.as_ref().map(TimelineListedRow::from_row).transpose()
     }
 
     /// cursor より古い Entry を、新しい順に `limit` 件。cursor がなければ最も新しい Entry から。
-    async fn older(&self, library: &str, cursor: Option<&TimelineCursor>, limit: usize) -> Result<Vec<TimelineRow>> {
+    async fn older(&self, libraries: &TimelineLibraries<'_>, cursor: Option<&TimelineCursor>, limit: usize) -> Result<Vec<TimelineListedRow>> {
         if limit == 0 {
             return Ok(Vec::new());
         }
         let rows = match cursor {
             None => {
-                let sql = format!("SELECT {} FROM timeline_entries WHERE library_id = ? ORDER BY date DESC, path ASC LIMIT ?", Self::COLUMNS);
-                sqlx::query(sqlx::AssertSqlSafe(sql)).bind(library).bind(i64::try_from(limit)?).fetch_all(&self.db).await?
+                let sql = format!(
+                    "SELECT {} FROM timeline_entries WHERE {} {} LIMIT ?",
+                    Self::COLUMNS,
+                    libraries.condition(),
+                    Self::NEWEST_FIRST
+                );
+                libraries
+                    .bind(sqlx::query(sqlx::AssertSqlSafe(sql)))
+                    .bind(i64::try_from(limit)?)
+                    .fetch_all(&self.db)
+                    .await?
             }
             Some(cursor) => {
                 let sql = format!(
-                    "SELECT {} FROM timeline_entries WHERE library_id = ?1 AND (date < ?2 OR (date = ?2 AND path > ?3)) ORDER BY date DESC, path ASC LIMIT ?4",
-                    Self::COLUMNS
+                    "SELECT {} FROM timeline_entries WHERE {} AND {} {} LIMIT ?",
+                    Self::COLUMNS,
+                    libraries.condition(),
+                    Self::OLDER_THAN_CURSOR,
+                    Self::NEWEST_FIRST
                 );
-                sqlx::query(sqlx::AssertSqlSafe(sql))
-                    .bind(library)
-                    .bind(&cursor.date)
-                    .bind(&cursor.path)
+                Self::bind_cursor(libraries.bind(sqlx::query(sqlx::AssertSqlSafe(sql))), cursor)
                     .bind(i64::try_from(limit)?)
                     .fetch_all(&self.db)
                     .await?
             }
         };
-        rows.iter().map(TimelineRow::from_row).collect()
+        rows.iter().map(TimelineListedRow::from_row).collect()
     }
 
-    async fn older_than_date(&self, library: &str, date: &str, limit: usize) -> Result<Vec<TimelineRow>> {
+    async fn older_than_date(&self, libraries: &TimelineLibraries<'_>, date: &str, limit: usize) -> Result<Vec<TimelineListedRow>> {
         let sql = format!(
-            "SELECT {} FROM timeline_entries WHERE library_id = ? AND date < ? ORDER BY date DESC, path ASC LIMIT ?",
-            Self::COLUMNS
+            "SELECT {} FROM timeline_entries WHERE {} AND date < ? {} LIMIT ?",
+            Self::COLUMNS,
+            libraries.condition(),
+            Self::NEWEST_FIRST
         );
-        let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
-            .bind(library)
+        let rows = libraries
+            .bind(sqlx::query(sqlx::AssertSqlSafe(sql)))
             .bind(date)
             .bind(i64::try_from(limit)?)
             .fetch_all(&self.db)
             .await?;
-        rows.iter().map(TimelineRow::from_row).collect()
+        rows.iter().map(TimelineListedRow::from_row).collect()
     }
 
     /// cursor より新しい Entry のうち、cursor に近い `limit` 件を新しい順に。
-    async fn newer(&self, library: &str, cursor: &TimelineCursor, limit: usize) -> Result<Vec<TimelineRow>> {
+    async fn newer(&self, libraries: &TimelineLibraries<'_>, cursor: &TimelineCursor, limit: usize) -> Result<Vec<TimelineListedRow>> {
         if limit == 0 {
             return Ok(Vec::new());
         }
         let sql = format!(
-            "SELECT {} FROM timeline_entries WHERE library_id = ?1 AND (date > ?2 OR (date = ?2 AND path < ?3)) ORDER BY date ASC, path DESC LIMIT ?4",
-            Self::COLUMNS
+            "SELECT {} FROM timeline_entries WHERE {} AND {} {} LIMIT ?",
+            Self::COLUMNS,
+            libraries.condition(),
+            Self::NEWER_THAN_CURSOR,
+            Self::OLDEST_FIRST
         );
-        let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
-            .bind(library)
-            .bind(&cursor.date)
-            .bind(&cursor.path)
+        let rows = Self::bind_cursor(libraries.bind(sqlx::query(sqlx::AssertSqlSafe(sql))), cursor)
             .bind(i64::try_from(limit)?)
             .fetch_all(&self.db)
             .await?;
-        let mut rows = rows.iter().map(TimelineRow::from_row).collect::<Result<Vec<_>>>()?;
+        let mut rows = rows.iter().map(TimelineListedRow::from_row).collect::<Result<Vec<_>>>()?;
         rows.reverse();
         Ok(rows)
     }
 
-    async fn exists_newer(&self, library: &str, cursor: &TimelineCursor) -> Result<bool> {
-        let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM timeline_entries WHERE library_id = ?1 AND (date > ?2 OR (date = ?2 AND path < ?3)))")
-            .bind(library)
-            .bind(&cursor.date)
-            .bind(&cursor.path)
-            .fetch_one(&self.db)
-            .await?;
-        Ok(exists)
+    async fn exists_newer(&self, libraries: &TimelineLibraries<'_>, cursor: &TimelineCursor) -> Result<bool> {
+        self.exists(libraries, Self::NEWER_THAN_CURSOR, cursor).await
     }
 
-    async fn exists_older(&self, library: &str, cursor: &TimelineCursor) -> Result<bool> {
-        let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM timeline_entries WHERE library_id = ?1 AND (date < ?2 OR (date = ?2 AND path > ?3)))")
-            .bind(library)
-            .bind(&cursor.date)
-            .bind(&cursor.path)
-            .fetch_one(&self.db)
-            .await?;
-        Ok(exists)
+    async fn exists_older(&self, libraries: &TimelineLibraries<'_>, cursor: &TimelineCursor) -> Result<bool> {
+        self.exists(libraries, Self::OLDER_THAN_CURSOR, cursor).await
+    }
+
+    async fn exists(&self, libraries: &TimelineLibraries<'_>, than_cursor: &str, cursor: &TimelineCursor) -> Result<bool> {
+        let sql = format!("SELECT EXISTS (SELECT 1 FROM timeline_entries WHERE {} AND {than_cursor})", libraries.condition());
+        let row = Self::bind_cursor(libraries.bind(sqlx::query(sqlx::AssertSqlSafe(sql))), cursor).fetch_one(&self.db).await?;
+        Ok(row.try_get(0)?)
+    }
+
+    fn bind_cursor<'q>(query: SqliteQuery<'q>, cursor: &'q TimelineCursor) -> SqliteQuery<'q> {
+        query.bind(&cursor.date).bind(&cursor.date).bind(&cursor.library).bind(&cursor.path)
     }
 
     /// `YYYY-MM` の翌月の 1 日 0 時。その月の Entry はすべてこれより前に並ぶ。
@@ -836,6 +940,10 @@ mod tests {
         }
     }
 
+    fn lib() -> Vec<String> {
+        vec!["lib".to_string()]
+    }
+
     fn media(size: u64) -> TimelineFileVersion {
         TimelineFileVersion::Media { size, modified_ns: 1 }
     }
@@ -845,6 +953,10 @@ mod tests {
     }
 
     async fn insert(index: &TimelineIndex, rows: &[TimelineRow]) -> Result<()> {
+        insert_into(index, "lib", rows).await
+    }
+
+    async fn insert_into(index: &TimelineIndex, library: &str, rows: &[TimelineRow]) -> Result<()> {
         let mut batch = TimelineBatch::default();
         for row in rows {
             if !batch.files.iter().any(|(path, _)| path == &row.file_path) {
@@ -853,15 +965,15 @@ mod tests {
             }
             batch.rows.push(row.clone());
         }
-        index.apply("lib", 1, &batch).await
+        index.apply(library, 1, &batch).await
     }
 
     fn paths(page: &TimelinePage) -> Vec<&str> {
-        page.rows.iter().map(|row| row.path.as_str()).collect()
+        page.rows.iter().map(|listed| listed.row.path.as_str()).collect()
     }
 
     async fn month_counts(index: &TimelineIndex) -> Result<Vec<(String, u64)>> {
-        index.months("lib").await
+        index.months(&lib()).await
     }
 
     #[tokio::test]
@@ -874,27 +986,27 @@ mod tests {
         insert(&index, &rows).await?;
 
         let mut seen = Vec::new();
-        let mut page = index.page("lib", &TimelineAnchor::Newest, 3).await?;
+        let mut page = index.page(&lib(), &TimelineAnchor::Newest, 3).await?;
         assert_eq!(page.previous, None);
         loop {
             seen.extend(paths(&page).into_iter().map(str::to_string));
             let Some(next) = page.next.clone() else { break };
-            page = index.page("lib", &TimelineAnchor::After(next), 3).await?;
+            page = index.page(&lib(), &TimelineAnchor::After(next), 3).await?;
         }
-        let all = index.page("lib", &TimelineAnchor::Newest, 100).await?;
+        let all = index.page(&lib(), &TimelineAnchor::Newest, 100).await?;
         assert_eq!(seen, paths(&all));
         assert_eq!(seen.len(), 7);
 
         // 末尾から前へ読み戻しても、同じ並びになる。
         let last = all.rows.last().unwrap().cursor();
         let mut back = vec![last.path.clone()];
-        let mut page = index.page("lib", &TimelineAnchor::Before(last), 2).await?;
+        let mut page = index.page(&lib(), &TimelineAnchor::Before(last), 2).await?;
         loop {
             let mut current = paths(&page).into_iter().map(str::to_string).collect::<Vec<_>>();
             current.extend(back);
             back = current;
             let Some(previous) = page.previous.clone() else { break };
-            page = index.page("lib", &TimelineAnchor::Before(previous), 2).await?;
+            page = index.page(&lib(), &TimelineAnchor::Before(previous), 2).await?;
         }
         assert_eq!(back, seen);
         Ok(())
@@ -915,15 +1027,24 @@ mod tests {
         )
         .await?;
 
-        let page = index.page("lib", &TimelineAnchor::Month("2024-02".to_string()), 2).await?;
+        let page = index.page(&lib(), &TimelineAnchor::Month("2024-02".to_string()), 2).await?;
         assert_eq!(paths(&page), ["/b.jpg", "/c.jpg"]);
         assert!(page.previous.is_some() && page.next.is_some());
-        let page = index.page("lib", &TimelineAnchor::Month("2024-01".to_string()), 2).await?;
+        let page = index.page(&lib(), &TimelineAnchor::Month("2024-01".to_string()), 2).await?;
         assert_eq!(paths(&page), ["/d.jpg"], "空の月はそれより古い Entry から");
 
-        let page = index.page("lib", &TimelineAnchor::Around("/c.jpg".to_string()), 3).await?;
+        let page = index
+            .page(
+                &lib(),
+                &TimelineAnchor::Around {
+                    library: "lib".to_string(),
+                    path: "/c.jpg".to_string(),
+                },
+                3,
+            )
+            .await?;
         assert_eq!(paths(&page), ["/b.jpg", "/c.jpg", "/d.jpg"]);
-        assert!(index.page("lib", &TimelineAnchor::Month("2024-13".to_string()), 2).await.is_err());
+        assert!(index.page(&lib(), &TimelineAnchor::Month("2024-13".to_string()), 2).await.is_err());
         Ok(())
     }
 
@@ -980,10 +1101,10 @@ mod tests {
 
         let archives = index.rename("lib", "/old", "/new").await?;
         assert_eq!(archives, ["/new/x.zip"]);
-        let page = index.page("lib", &TimelineAnchor::Newest, 10).await?;
+        let page = index.page(&lib(), &TimelineAnchor::Newest, 10).await?;
         assert_eq!(paths(&page), ["/older.jpg", "/new/x.zip/b.jpg", "/new/a.jpg"], "`/older` は範囲に入らない");
-        assert_eq!(page.rows[1].file_path, "/new/x.zip");
-        assert_eq!(page.rows[1].date.source, TimelineDateSource::Exif, "日時は読み直さない");
+        assert_eq!(page.rows[1].row.file_path, "/new/x.zip");
+        assert_eq!(page.rows[1].row.date.source, TimelineDateSource::Exif, "日時は読み直さない");
 
         // 付け替えた行は未確認なので、範囲の集計が触れなければ掃除で消える。
         let batch = TimelineBatch {
@@ -992,7 +1113,7 @@ mod tests {
         };
         index.apply("lib", 5, &batch).await?;
         index.sweep("lib", "/new", 5, true).await?;
-        assert_eq!(paths(&index.page("lib", &TimelineAnchor::Newest, 10).await?), ["/older.jpg", "/new/a.jpg"]);
+        assert_eq!(paths(&index.page(&lib(), &TimelineAnchor::Newest, 10).await?), ["/older.jpg", "/new/a.jpg"]);
         assert_eq!(month_counts(&index).await?, [("2024-01".to_string(), 2)]);
         Ok(())
     }
@@ -1014,7 +1135,7 @@ mod tests {
         };
         index.apply("lib", first, &batch).await?;
         index.sweep("lib", "/", second, false).await?;
-        assert_eq!(paths(&index.page("lib", &TimelineAnchor::Newest, 10).await?), ["/late.jpg"]);
+        assert_eq!(paths(&index.page(&lib(), &TimelineAnchor::Newest, 10).await?), ["/late.jpg"]);
         Ok(())
     }
 
@@ -1028,7 +1149,7 @@ mod tests {
         index.rename("lib", "/a.jpg", "/b.jpg").await?;
         index.sweep("lib", "/", scan, false).await?;
         assert_eq!(
-            paths(&index.page("lib", &TimelineAnchor::Newest, 10).await?),
+            paths(&index.page(&lib(), &TimelineAnchor::Newest, 10).await?),
             ["/b.jpg"],
             "集計の最中に付け替えた行は、全体の掃除で消えない"
         );
@@ -1036,14 +1157,14 @@ mod tests {
 
         // 範囲の集計が触れなかった行は、対象外の名前になったものとして消える。
         index.sweep("lib", "/b.jpg", scan, true).await?;
-        assert!(paths(&index.page("lib", &TimelineAnchor::Newest, 10).await?).is_empty());
+        assert!(paths(&index.page(&lib(), &TimelineAnchor::Newest, 10).await?).is_empty());
 
         // 次の全体の集計は、その前に付け替えて判定されなかった行を消す。
         insert(&index, &[row("/c.jpg", "/c.jpg", "2024-01-01T00:00:00")]).await?;
         index.rename("lib", "/c.jpg", "/d.jpg").await?;
         let next = index.begin_scan("lib").await?;
         index.sweep("lib", "/", next, false).await?;
-        assert!(paths(&index.page("lib", &TimelineAnchor::Newest, 10).await?).is_empty());
+        assert!(paths(&index.page(&lib(), &TimelineAnchor::Newest, 10).await?).is_empty());
         Ok(())
     }
 
@@ -1066,7 +1187,7 @@ mod tests {
         // 中断の後に archive がなくなったら、次の全体の集計の掃除で Entry と月の件数が消える。
         let next = index.begin_scan("lib").await?;
         index.sweep("lib", "/", next, false).await?;
-        assert!(paths(&index.page("lib", &TimelineAnchor::Newest, 10).await?).is_empty());
+        assert!(paths(&index.page(&lib(), &TimelineAnchor::Newest, 10).await?).is_empty());
         assert!(month_counts(&index).await?.is_empty());
         Ok(())
     }
@@ -1114,7 +1235,7 @@ mod tests {
         )
         .await?;
         index.rename("lib", "/src.zip", "/dst.zip").await?;
-        assert_eq!(paths(&index.page("lib", &TimelineAnchor::Newest, 10).await?), ["/dst.zip/a.jpg"]);
+        assert_eq!(paths(&index.page(&lib(), &TimelineAnchor::Newest, 10).await?), ["/dst.zip/a.jpg"]);
         assert_eq!(month_counts(&index).await?, [("2024-01".to_string(), 1)]);
         Ok(())
     }
@@ -1133,10 +1254,62 @@ mod tests {
 
         let tokyo = TimelineZone::new(Some("Asia/Tokyo"))?;
         index.rezone(&tokyo).await?;
-        let page = index.page("lib", &TimelineAnchor::Newest, 10).await?;
-        assert_eq!(page.rows[0].date.text(), "2024-02-01T05:00:00");
-        assert_eq!(page.rows[1].date.text(), "2024-01-15T00:00:00", "Exif の値は直さない");
+        let page = index.page(&lib(), &TimelineAnchor::Newest, 10).await?;
+        assert_eq!(page.rows[0].row.date.text(), "2024-02-01T05:00:00");
+        assert_eq!(page.rows[1].row.date.text(), "2024-01-15T00:00:00", "Exif の値は直さない");
         assert_eq!(month_counts(&index).await?, [("2024-02".to_string(), 1), ("2024-01".to_string(), 1)]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn libraries_are_merged_into_one_order_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = index(&dir).await?;
+        insert_into(
+            &index,
+            "a",
+            &[row("/1.jpg", "/1.jpg", "2024-03-01T00:00:00"), row("/same.jpg", "/same.jpg", "2024-02-01T00:00:00")],
+        )
+        .await?;
+        insert_into(
+            &index,
+            "b",
+            &[row("/2.jpg", "/2.jpg", "2024-02-15T00:00:00"), row("/same.jpg", "/same.jpg", "2024-02-01T00:00:00")],
+        )
+        .await?;
+        insert_into(&index, "c", &[row("/3.jpg", "/3.jpg", "2024-02-20T00:00:00")]).await?;
+        let both = vec!["b".to_string(), "a".to_string()];
+        let listed = |page: &TimelinePage| page.rows.iter().map(|listed| format!("{}{}", listed.library, listed.row.path)).collect::<Vec<_>>();
+
+        let all = index.page(&both, &TimelineAnchor::Newest, 10).await?;
+        assert_eq!(listed(&all), ["a/1.jpg", "b/2.jpg", "a/same.jpg", "b/same.jpg"], "同じ日時は Library の id の順");
+
+        // 同じ日時、同じ path の Entry が Library の境目にあっても、ページは重ならず飛ばさない。
+        let mut seen = Vec::new();
+        let mut page = index.page(&both, &TimelineAnchor::Newest, 1).await?;
+        loop {
+            seen.extend(listed(&page));
+            let Some(next) = page.next.clone() else { break };
+            page = index.page(&both, &TimelineAnchor::After(next), 1).await?;
+        }
+        assert_eq!(seen, listed(&all));
+        let last = all.rows.last().unwrap().cursor();
+        let previous = index.page(&both, &TimelineAnchor::Before(last), 1).await?;
+        assert_eq!(listed(&previous), ["a/same.jpg"]);
+
+        let around = TimelineAnchor::Around {
+            library: "b".to_string(),
+            path: "/same.jpg".to_string(),
+        };
+        assert_eq!(listed(&index.page(&both, &around, 3).await?), ["a/same.jpg", "b/same.jpg"]);
+        let outside = TimelineAnchor::Around {
+            library: "c".to_string(),
+            path: "/3.jpg".to_string(),
+        };
+        assert_eq!(*index.page(&both, &outside, 3).await.unwrap_err().kind(), ErrorKind::NotFound, "組の外の Library の Entry");
+
+        assert_eq!(index.months(&both).await?, [("2024-03".to_string(), 1), ("2024-02".to_string(), 3)]);
+        assert!(index.page(&[], &TimelineAnchor::Newest, 10).await.is_err());
         Ok(())
     }
 
@@ -1144,11 +1317,14 @@ mod tests {
     fn cursor_round_trips_test() -> TestResult {
         let cursor = TimelineCursor {
             date: "2024-01-01T00:00:00".to_string(),
+            library: "my.photos".to_string(),
             path: "/a b/c.jpg".to_string(),
         };
+        assert_eq!(cursor.encode(), "2024-01-01T00:00:00my.photos/a b/c.jpg");
         assert_eq!(TimelineCursor::parse(&cursor.encode())?, cursor);
         assert!(TimelineCursor::parse("2024-01-01").is_err());
         assert!(TimelineCursor::parse("2024-01-01T00:00:00relative").is_err());
+        assert!(TimelineCursor::parse("2024-01-01T00:00:00/a.jpg").is_err(), "Library のない cursor");
         Ok(())
     }
 }

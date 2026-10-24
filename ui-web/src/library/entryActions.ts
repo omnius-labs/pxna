@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import { ApiError, api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
+import { entryAddress, groupByLibrary } from "../location";
 import type { Entry } from "./entries";
 import { refreshLibrary } from "./listing";
 
@@ -31,16 +32,18 @@ export async function createFolder(client: QueryClient, libraryId: string, path:
     await refreshLibrary(client, libraryId);
     return data.folder;
 }
+/// `scope` は Library の id か、タイムラインの範囲である。
 export async function renameEntry(
     client: QueryClient,
-    libraryId: string,
+    scope: string,
     entry: { path: string; folder: boolean },
     name: string,
 ): Promise<Entry> {
-    const dstPath = childPath(entry.path.slice(0, entry.path.lastIndexOf("/")), name);
+    const { libraryId, path } = entryAddress(scope, entry.path);
+    const dstPath = childPath(path.slice(0, path.lastIndexOf("/")), name);
     const route = entry.folder ? "/libraries/{libraryId}/folders/move" : "/libraries/{libraryId}/files/move";
     const data = unwrap(
-        await api.POST(route, { params: { path: { libraryId } }, body: { srcPaths: [entry.path], dstPath } }),
+        await api.POST(route, { params: { path: { libraryId } }, body: { srcPaths: [path], dstPath } }),
     );
     if (!("entries" in data)) throw new Error("名前の変更が同期で完了しませんでした。");
     await refreshLibrary(client, libraryId);
@@ -61,45 +64,53 @@ export class DeleteEntriesError extends ApiError {
         );
     }
 }
+/// `scope` は Library の id か、タイムラインの範囲である。Library ごとに要求を分け、一部の Library だけが失敗しても、ほかの Library の削除は進める。
 export async function deleteEntries(
     client: QueryClient,
-    libraryId: string,
+    scope: string,
     items: ReadonlyMap<string, { folder: boolean }>,
 ): Promise<Operation[]> {
-    const files = [...items].filter(([, item]) => !item.folder).map(([path]) => path);
-    const folders = [...items].filter(([, item]) => item.folder).map(([path]) => path);
     const requests = [];
-    if (files.length)
-        requests.push(
-            api.POST("/libraries/{libraryId}/files/delete", {
-                params: { path: { libraryId } },
-                body: { srcPaths: files },
-            }),
-        );
-    if (folders.length)
-        requests.push(
-            api.POST("/libraries/{libraryId}/folders/delete", {
-                params: { path: { libraryId } },
-                body: { srcPaths: folders, recursive: true },
-            }),
-        );
+    for (const [libraryId, group] of groupByLibrary(scope, items)) {
+        const files = [...group].filter(([, item]) => !item.folder).map(([path]) => path);
+        const folders = [...group].filter(([, item]) => item.folder).map(([path]) => path);
+        if (files.length)
+            requests.push({
+                libraryId,
+                request: api.POST("/libraries/{libraryId}/files/delete", {
+                    params: { path: { libraryId } },
+                    body: { srcPaths: files },
+                }),
+            });
+        if (folders.length)
+            requests.push({
+                libraryId,
+                request: api.POST("/libraries/{libraryId}/folders/delete", {
+                    params: { path: { libraryId } },
+                    body: { srcPaths: folders, recursive: true },
+                }),
+            });
+    }
     const operations: Operation[] = [];
     const failures: unknown[] = [];
-    let synchronous = false;
-    for (const result of await Promise.allSettled(requests)) {
+    const synchronous = new Set<string>();
+    const results = await Promise.allSettled(
+        requests.map(async ({ libraryId, request }) => ({ libraryId, response: await request })),
+    );
+    for (const result of results) {
         if (result.status === "rejected") {
             failures.push(result.reason);
             continue;
         }
         try {
-            const data = unwrap(result.value);
+            const data = unwrap(result.value.response);
             if (data && "operation" in data) operations.push(data.operation);
-            else synchronous = true;
+            else synchronous.add(result.value.libraryId);
         } catch (error) {
             failures.push(error);
         }
     }
-    if (synchronous) await refreshLibrary(client, libraryId);
+    await Promise.all([...synchronous].map((libraryId) => refreshLibrary(client, libraryId)));
     if (failures.length) throw new DeleteEntriesError(failures, operations, requests.length - failures.length);
     return operations;
 }

@@ -12,6 +12,7 @@ vi.mock("../api/client", async (original) => ({
 afterEach(() => get.mockReset());
 
 const item = (name: string, contentType = "image/png") => ({
+    libraryId: "photos",
     entry: {
         path: `/${name}`,
         name,
@@ -30,19 +31,19 @@ const signal = () => new AbortController().signal;
 
 it("finds the opened entry among the loaded entries without paging from the start", async () => {
     get.mockResolvedValueOnce(reply(["b.png", "c.png"], { previous: "p", next: "n" }));
-    const store = new TimelineStore("photos", { kind: "around", path: "/c.png" });
-    const found = await findEntry(store, "/", "c.png", signal());
+    const store = new TimelineStore(["photos"], { kind: "around", path: "/photos/c.png" });
+    const found = await findEntry(store, "/", "photos/c.png", signal());
     expect(found?.index).toBe(TIMELINE_BASE + 1);
     expect(found?.entry.name).toBe("c.png");
     expect(get).toHaveBeenCalledTimes(1);
-    expect(await findEntry(store, "/", "missing.png", signal())).toBeUndefined();
+    expect(await findEntry(store, "/", "photos/missing.png", signal())).toBeUndefined();
     expect(get).toHaveBeenCalledTimes(1);
 });
 
 it("moves to newer and older images by reading further, skipping videos", async () => {
     get.mockResolvedValueOnce(reply(["c.png"], { previous: "p", next: "n" }));
-    const store = new TimelineStore("photos", { kind: "around", path: "/c.png" });
-    const opened = await findEntry(store, "/", "c.png", signal());
+    const store = new TimelineStore(["photos"], { kind: "around", path: "/photos/c.png" });
+    const opened = await findEntry(store, "/", "photos/c.png", signal());
     const index = opened?.index ?? -1;
     expect(loadedNeighbor(store, index, 1)).toBe("unread");
     expect(loadedNeighbor(store, index, -1)).toBe("unread");
@@ -61,8 +62,8 @@ it("moves to newer and older images by reading further, skipping videos", async 
 
 it("ends at the newest and oldest entries once nothing further remains", async () => {
     get.mockResolvedValueOnce(reply(["only.png"]));
-    const store = new TimelineStore("photos", { kind: "around", path: "/only.png" });
-    const opened = await findEntry(store, "/", "only.png", signal());
+    const store = new TimelineStore(["photos"], { kind: "around", path: "/photos/only.png" });
+    const opened = await findEntry(store, "/", "photos/only.png", signal());
     const index = opened?.index ?? -1;
     expect(loadedNeighbor(store, index, 1)).toBeUndefined();
     expect(loadedNeighbor(store, index, -1)).toBeUndefined();

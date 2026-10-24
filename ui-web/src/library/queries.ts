@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 
 import { api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
+import { entryAddress } from "../location";
 
 export type MediaInfo = components["schemas"]["MediaInfo"];
 
@@ -24,7 +25,8 @@ export function folderQuery(libraryId: string, path: string) {
 }
 
 /// 画像か動画のメディア情報。動画の再生と情報パネルが同じキーで共有し、同時の要求と結果をまとめる。
-export function mediaInfoQuery(libraryId: string, path: string) {
+export function mediaInfoQuery(scope: string, scopedPath: string) {
+    const { libraryId, path } = entryAddress(scope, scopedPath);
     return queryOptions({
         queryKey: ["media-info", libraryId, path],
         queryFn: async ({ signal }): Promise<MediaInfo> =>

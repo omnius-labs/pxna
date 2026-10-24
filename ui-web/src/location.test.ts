@@ -4,6 +4,8 @@ import {
     type BrowseLocation,
     browseHref,
     browseLocation,
+    entryAddress,
+    groupByLibrary,
     parentPath,
     relativePath,
     type SearchLocation,
@@ -11,8 +13,10 @@ import {
     searchBrowseLocation,
     searchHref,
     searchLocation,
+    TIMELINE_SCOPE,
     timelineEntryPath,
     timelineHref,
+    timelineKey,
     timelineLocation,
 } from "./location";
 import { loadRouterAt } from "./testing/router";
@@ -123,25 +127,44 @@ it.each([
 
 describe("timeline location", () => {
     it("round-trips the month and the opened entry through a URL", async () => {
-        for (const location of [
-            { libraryId: "photos" },
-            { libraryId: "photos", month: "2024-05" },
-            { libraryId: "my.lib-1_x", month: "2024-05", view: "a b/日本語#?%.jpg" },
-        ]) {
+        for (const location of [{}, { month: "2024-05" }, { month: "2024-05", view: "my.lib-1_x/a b/日本語#?%.jpg" }]) {
             const router = await loadRouterAt(timelineHref(location));
-            const match = router.state.matches.at(-1);
-            const params = match?.params as { libraryId: string };
             const search = router.state.location.search as { month?: string; view?: string };
-            expect(timelineLocation(params.libraryId, search)).toEqual(location);
+            expect(timelineLocation(search)).toEqual(location);
         }
     });
 
     it("drops a month that is not YYYY-MM", () => {
-        expect(timelineHref({ libraryId: "p", month: "2024-13" })).toBe("/timeline/p");
-        expect(timelineLocation("p", { month: "2024-5" })).toEqual({ libraryId: "p" });
-        expect(timelineHref({ libraryId: "p", month: "2024-05", view: "a/b.jpg" })).toBe(
-            "/timeline/p?month=2024-05&view=a%2Fb.jpg",
+        expect(timelineHref({ month: "2024-13" })).toBe("/timeline");
+        expect(timelineLocation({ month: "2024-5" })).toEqual({});
+        expect(timelineHref({ month: "2024-05", view: "p/a/b.jpg" })).toBe(
+            "/timeline?month=2024-05&view=p%2Fa%2Fb.jpg",
         );
+    });
+
+    it("splits a timeline key into the Library and the Library path", () => {
+        expect(timelineKey("my.lib", "/a/b.jpg")).toBe("/my.lib/a/b.jpg");
+        expect(entryAddress(TIMELINE_SCOPE, "/my.lib/a/b.jpg")).toEqual({ libraryId: "my.lib", path: "/a/b.jpg" });
+        expect(entryAddress("photos", "/a/b.jpg")).toEqual({ libraryId: "photos", path: "/a/b.jpg" });
+        expect(entryAddress(TIMELINE_SCOPE, "/root")).toEqual({ libraryId: "root", path: "/" });
+        const groups = groupByLibrary(
+            TIMELINE_SCOPE,
+            new Map([
+                ["/a/1", 1],
+                ["/b/2", 2],
+                ["/a/3", 3],
+            ]),
+        );
+        expect([...groups].map(([id, group]) => [id, [...group]])).toEqual([
+            [
+                "a",
+                [
+                    ["/1", 1],
+                    ["/3", 3],
+                ],
+            ],
+            ["b", [["/2", 2]]],
+        ]);
     });
 
     it("maps an opened entry back to a Library path and finds its parent", () => {

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { AppShell } from "../components/AppShell";
@@ -28,12 +28,22 @@ import {
     refreshTimeline,
     startTimelineScan,
     type TimelineAnchor,
+    timelineLibraryIds,
     timelineMonthsQuery,
     timelineStatusQuery,
     useTimelineStore,
 } from "../library/timeline";
 import type { SelectionProgress } from "../library/useEntryInteraction";
-import { browseHref, parentPath, relativePath, timelineHref, timelineLocation } from "../location";
+import {
+    browseHref,
+    entryAddress,
+    parentPath,
+    relativePath,
+    TIMELINE_SCOPE,
+    timelineEntryPath,
+    timelineHref,
+    timelineLocation,
+} from "../location";
 import { fileContentUrl } from "../viewer/urls";
 
 /// 見ている月を、URL に載せるまでの待ち。スクロールの間に履歴の置き換えが続かないようにする。
@@ -44,19 +54,46 @@ const STATUS_POLL_MS = 2_000;
 const MONTHS_POLL_MS = 10_000;
 
 export function TimelinePage() {
-    const { libraryId } = useParams({ from: "/authed/timeline/$libraryId" });
-    const search = useSearch({ from: "/authed/timeline/$libraryId" });
-    // Library を切り替えたら、状態をすべて作り直す。
-    return <TimelineScreen key={libraryId} libraryId={libraryId} search={search} />;
+    const search = useSearch({ from: "/authed/timeline" });
+    const libraries = useQuery(librariesQuery);
+    const { preferences } = usePreferences();
+    const libraryIds = useMemo(
+        () => timelineLibraryIds(libraries.data ?? [], preferences.timelineLibraries),
+        [libraries.data, preferences.timelineLibraries],
+    );
+    if (libraries.data === undefined || libraryIds.length === 0) {
+        return (
+            <AppShell timeline>
+                <p className="p-4 text-muted-foreground">
+                    {libraries.isError
+                        ? "Library を読めませんでした。"
+                        : libraries.data === undefined
+                          ? "Library を読み込み中…"
+                          : "Library がありません。"}
+                </p>
+            </AppShell>
+        );
+    }
+    // 並べる Library を変えたら、状態をすべて作り直す。
+    return <TimelineScreen key={libraryIds.join("\n")} libraryIds={libraryIds} search={search} />;
 }
 
-function TimelineScreen({ libraryId, search }: { libraryId: string; search: { month?: string; view?: string } }) {
-    const location = timelineLocation(libraryId, search);
+function TimelineScreen({
+    libraryIds,
+    search,
+}: {
+    libraryIds: readonly string[];
+    search: { month?: string; view?: string };
+}) {
+    const location = timelineLocation(search);
     const navigate = useNavigate();
     const client = useQueryClient();
     const libraries = useQuery(librariesQuery);
-    const libraryReadonly = libraries.data?.find((library) => library.id === libraryId)?.readonly ?? true;
-    const { set, narrow } = usePreferences();
+    const readonlyLibraries = new Set(
+        (libraries.data ?? []).filter((library) => library.readonly).map((library) => library.id),
+    );
+    const isReadonlyLibrary = (libraryId: string) => !libraries.data || readonlyLibraries.has(libraryId);
+    const { set, narrow, updateTimelineLibraries } = usePreferences();
     const infoPanel = useInfoPanel();
     const clipboard = useClipboard();
 
@@ -72,24 +109,26 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
     }
     const anchor: TimelineAnchor =
         anchorMonth === undefined ? { kind: "newest" } : { kind: "month", month: anchorMonth, nonce: jump };
-    const store = useTimelineStore(libraryId, anchor);
+    const store = useTimelineStore(libraryIds, anchor);
 
+    // 並べている Library のどれかが集計中なら集計中とし、処理したファイルの数は和を出す。
     const status = useQuery({
-        ...timelineStatusQuery(libraryId),
-        refetchInterval: (query) => (query.state.data?.running ? STATUS_POLL_MS : false),
+        ...timelineStatusQuery(libraryIds),
+        refetchInterval: (query) => (query.state.data?.some((library) => library.running) ? STATUS_POLL_MS : false),
     });
-    const running = status.data?.running ?? false;
+    const running = status.data?.some((library) => library.running) ?? false;
+    const processedFiles = status.data?.reduce((sum, library) => sum + library.processedFiles, 0) ?? 0;
     useQuery({
-        ...timelineMonthsQuery(libraryId),
+        ...timelineMonthsQuery(libraryIds),
         refetchInterval: running ? MONTHS_POLL_MS : false,
     });
     // 集計が終わったら、月ごとの件数を最後に 1 回読み直す。
     const wasRunning = useRef(running);
     useEffect(() => {
         if (wasRunning.current && !running)
-            void client.invalidateQueries({ queryKey: timelineMonthsQuery(libraryId).queryKey });
+            void client.invalidateQueries({ queryKey: timelineMonthsQuery(libraryIds).queryKey });
         wasRunning.current = running;
-    }, [running, client, libraryId]);
+    }, [running, client, libraryIds]);
 
     const [selection, setSelection] = useState<Selection>(emptySelection);
     const [editing, setEditing] = useState<EntryEditing>();
@@ -120,17 +159,22 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
         if (visibleMonth === undefined || visibleMonth === location.month) return;
         const timer = setTimeout(() => {
             written.current = visibleMonth;
-            void navigate({ href: timelineHref({ libraryId, month: visibleMonth, view }), replace: true });
+            void navigate({ href: timelineHref({ month: visibleMonth, view }), replace: true });
         }, MONTH_WRITE_DELAY_MS);
         return () => clearTimeout(timer);
-    }, [visibleMonth, location.month, libraryId, view, navigate]);
+    }, [visibleMonth, location.month, view, navigate]);
 
     const selectMonth = (month: string) => {
         setAnchorMonth(month);
         setJump((count) => count + 1);
-        void navigate({ href: timelineHref({ libraryId, month }) });
+        void navigate({ href: timelineHref({ month }) });
     };
 
+    // 選択の鍵は Library を含むので、選んだ Entry のどれかが読み取り専用の Library にあれば、変更の操作を出さない。
+    // 選択が複数の Library にまたがるときは、操作を Library ごとの要求に分ける。
+    const libraryReadonly = [...selection.items.keys()].some((key) =>
+        isReadonlyLibrary(entryAddress(TIMELINE_SCOPE, key).libraryId),
+    );
     const canRename =
         !narrow &&
         !libraryReadonly &&
@@ -147,24 +191,25 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
         selection.items.size > 0 &&
         [...selection.items.values()].every((item) => !item.readonly);
     const requestDelete = useCallback(() => {
-        if (canDelete) setDeletion({ libraryId, items: new Map(selection.items) });
-    }, [canDelete, libraryId, selection.items]);
+        if (canDelete) setDeletion({ libraryId: TIMELINE_SCOPE, items: new Map(selection.items) });
+    }, [canDelete, selection.items]);
     const cut = useCallback(() => {
-        if (canDelete) clipboard.store?.write("cut", libraryId, selection.items);
-    }, [canDelete, clipboard.store, libraryId, selection.items]);
+        if (canDelete) clipboard.store?.write("cut", TIMELINE_SCOPE, selection.items);
+    }, [canDelete, clipboard.store, selection.items]);
     const copy = useCallback(
-        () => clipboard.store?.write("copy", libraryId, selection.items),
-        [clipboard.store, libraryId, selection.items],
+        () => clipboard.store?.write("copy", TIMELINE_SCOPE, selection.items),
+        [clipboard.store, selection.items],
     );
 
     // 選んだ 1 件の親フォルダを、フォルダ表示で開き、その Entry を選んで見せる。archive の中の Entry では、archive の中のフォルダを開く。
     const reveal = useCallback(() => {
         const only = selection.items.size === 1 ? [...selection.items.keys()][0] : undefined;
         if (only === undefined) return;
+        const { libraryId, path } = entryAddress(TIMELINE_SCOPE, only);
         void navigate({
-            href: browseHref({ libraryId, path: parentPath(only), reveal: only.split("/").at(-1) }),
+            href: browseHref({ libraryId, path: parentPath(path), reveal: path.split("/").at(-1) }),
         });
-    }, [selection.items, libraryId, navigate]);
+    }, [selection.items, navigate]);
 
     useEffect(() => {
         const keyDown = (event: globalThis.KeyboardEvent) => {
@@ -200,10 +245,10 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
 
     const selectedFile = selection.items.size === 1 ? [...selection.items][0] : undefined;
     const downloadHref =
-        selectedFile && !selectedFile[1].folder ? fileContentUrl(libraryId, selectedFile[0]) : undefined;
+        selectedFile && !selectedFile[1].folder ? fileContentUrl(TIMELINE_SCOPE, selectedFile[0]) : undefined;
     const selectedBytes = selectionBytes(selection);
 
-    // 画像と動画はビューアで開く。ビューアを開くときは履歴に積み、前後へ移ったり閉じたりするときは積まない。
+    // 画像と動画はビューアで開く。ビューアを開くときは履歴に積み、前後へ移ったり閉じたりするときは積まない。`view` は Library を含む鍵である。
     const open = (entry: Entry) => {
         const kind = entryKind(entry);
         if (kind === "image" || kind === "video")
@@ -214,8 +259,8 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
 
     const refresh = async () => {
         try {
-            await startTimelineScan(libraryId);
-            await refreshTimeline(client, libraryId);
+            await startTimelineScan(libraryIds);
+            await refreshTimeline(client, libraryIds);
         } catch {
             toast.error("更新できませんでした。");
         }
@@ -224,7 +269,7 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
     return (
         <EntryActionContext.Provider
             value={{
-                libraryId,
+                libraryId: TIMELINE_SCOPE,
                 libraryReadonly,
                 narrow,
                 canCreate: false,
@@ -243,10 +288,11 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
             }}
         >
             <AppShell
-                timelineLibraryId={libraryId}
+                timeline
                 sidebar={(close) => (
                     <TimelineSidebar
-                        libraryId={libraryId}
+                        libraryIds={libraryIds}
+                        onChangeLibraries={updateTimelineLibraries}
                         activeMonth={activeMonth}
                         onSelectMonth={(month) => {
                             close();
@@ -271,7 +317,7 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
                         <SettingsDialog />
                     </>
                 }
-                panel={infoPanel.open ? <InfoPanel libraryId={libraryId} selection={selection} /> : undefined}
+                panel={infoPanel.open ? <InfoPanel libraryId={TIMELINE_SCOPE} selection={selection} /> : undefined}
                 footer={
                     <StatusBar
                         totalCount={store.loadedItems.length}
@@ -282,40 +328,33 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
                     />
                 }
             >
-                {libraries.data === undefined ? (
-                    <p className="p-4 text-muted-foreground">
-                        {libraries.isError ? "Library を読めませんでした。" : "Library を読み込み中…"}
-                    </p>
-                ) : (
-                    <div className="flex h-full flex-col">
-                        {running && (
-                            <p role="status" className="shrink-0 border-b p-2 text-sm text-muted-foreground">
-                                集計中… {status.data?.processedFiles ?? 0} 件を処理しました。
-                            </p>
-                        )}
-                        <div className="min-h-0 flex-1">
-                            <TimelineGrid
-                                key={`${anchorMonth ?? "newest"}:${jump}`}
-                                store={store}
-                                libraryId={libraryId}
-                                libraryReadonly={libraryReadonly}
-                                tileSize={set.tileSize}
-                                shape={set.thumbnailShape}
-                                narrow={narrow}
-                                selection={selection}
-                                onSelectionChange={setSelection}
-                                onProgress={setProgress}
-                                onVisibleMonth={setVisibleMonth}
-                                onOpen={open}
-                                emptyMessage={
-                                    running
-                                        ? "集計中です。画像と動画が見つかると、ここに並びます。"
-                                        : "画像と動画がありません。"
-                                }
-                            />
-                        </div>
+                <div className="flex h-full flex-col">
+                    {running && (
+                        <p role="status" className="shrink-0 border-b p-2 text-sm text-muted-foreground">
+                            集計中… {processedFiles} 件を処理しました。
+                        </p>
+                    )}
+                    <div className="min-h-0 flex-1">
+                        <TimelineGrid
+                            key={`${anchorMonth ?? "newest"}:${jump}`}
+                            store={store}
+                            libraryId={TIMELINE_SCOPE}
+                            tileSize={set.tileSize}
+                            shape={set.thumbnailShape}
+                            narrow={narrow}
+                            selection={selection}
+                            onSelectionChange={setSelection}
+                            onProgress={setProgress}
+                            onVisibleMonth={setVisibleMonth}
+                            onOpen={open}
+                            emptyMessage={
+                                running
+                                    ? "集計中です。画像と動画が見つかると、ここに並びます。"
+                                    : "画像と動画がありません。"
+                            }
+                        />
                     </div>
-                )}
+                </div>
             </AppShell>
             <EntryNameDialog />
             <DeleteDialog
@@ -325,11 +364,11 @@ function TimelineScreen({ libraryId, search }: { libraryId: string; search: { mo
             />
             {view !== undefined && (
                 <TimelineViewer
-                    libraryId={libraryId}
+                    libraryIds={libraryIds}
                     view={view}
                     originalImage={set.originalImage}
                     narrow={narrow}
-                    libraryReadonly={libraryReadonly}
+                    libraryReadonly={isReadonlyLibrary(entryAddress(TIMELINE_SCOPE, timelineEntryPath(view)).libraryId)}
                     onChange={changeView}
                 />
             )}

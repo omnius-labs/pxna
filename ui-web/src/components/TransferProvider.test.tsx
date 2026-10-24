@@ -137,11 +137,15 @@ it("混在した移動は先に受理した項目だけ除き、拒否された�
         );
         await h.capture("cut");
         const { promise } = await h.begin();
-        await flush(() => expect(h.state.value!.entries.map((entry) => entry.path)).toEqual(["/dir"]));
+        await flush(() =>
+            expect(h.state.value!.sources.flatMap((source) => source.entries).map((entry) => entry.path)).toEqual([
+                "/dir",
+            ]),
+        );
         expect(show).toHaveBeenCalledWith([operation]);
         finish({ error: { kind: "Forbidden" }, response: new Response(null, { status: 403 }) });
         await act(async () => promise);
-        expect(h.state.value!.entries.map((entry) => entry.path)).toEqual(["/dir"]);
+        expect(h.state.value!.sources.flatMap((source) => source.entries).map((entry) => entry.path)).toEqual(["/dir"]);
         expect(notify).toHaveBeenCalled();
     } finally {
         await h.dispose();
@@ -189,7 +193,7 @@ it.each(["置き換える", "両方残す", "スキップ", "中止"])(
                         choice
                     ],
                 );
-            expect(h.state.value?.entries.length).toBe(2);
+            expect(h.state.value?.sources.flatMap((source) => source.entries).length).toBe(2);
         } finally {
             await h.dispose();
         }
@@ -236,7 +240,7 @@ it("読み取り専用の宛先、照合失敗、狭い画面への切り替え�
         await act(async () => promise);
         expect(document.querySelector("[role=alertdialog]")).toBeNull();
         expect(post).not.toHaveBeenCalled();
-        expect(h.state.value?.entries.length).toBe(2);
+        expect(h.state.value?.sources.flatMap((source) => source.entries).length).toBe(2);
     } finally {
         await h.dispose();
     }

@@ -72,10 +72,6 @@ where
         .route("/api/v1/libraries/{library_id}/rating", get(get_rating::<I, A, E, C>).put(put_rating::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/tags", get(get_entry_tags::<I, A, E, C>).put(put_entry_tags::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/thumbnails", get(get_thumbnail::<I, A, E, C>))
-        .route("/api/v1/libraries/{library_id}/timeline/entries", get(list_timeline_entries::<I, A, E, C>))
-        .route("/api/v1/libraries/{library_id}/timeline/months", get(list_timeline_months::<I, A, E, C>))
-        .route("/api/v1/libraries/{library_id}/timeline/refresh", post(refresh_timeline::<I, A, E, C>))
-        .route("/api/v1/libraries/{library_id}/timeline/status", get(get_timeline_status::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/uploads", post(create_upload::<I, A, E, C>))
         .route(
             "/api/v1/libraries/{library_id}/uploads/{upload_id}",
@@ -100,6 +96,10 @@ where
         .route("/api/v1/setup", post(create_initial_setup::<I, A, E>))
         .route("/api/v1/setup/status", get(get_setup_status::<I, A, E>))
         .route("/api/v1/tags", get(list_tags::<I, A, E, C>))
+        .route("/api/v1/timeline/entries", get(list_timeline_entries::<I, A, E, C>))
+        .route("/api/v1/timeline/months", get(list_timeline_months::<I, A, E, C>))
+        .route("/api/v1/timeline/refresh", post(refresh_timeline::<I, A, E, C>))
+        .route("/api/v1/timeline/status", get(get_timeline_status::<I, A, E, C>))
         .with_state(api_impl)
 }
 
@@ -5987,19 +5987,19 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-fn get_timeline_status_validation(path_params: models::GetTimelineStatusPathParams) -> std::result::Result<(models::GetTimelineStatusPathParams,), ValidationErrors> {
-    path_params.validate()?;
+fn get_timeline_status_validation(query_params: models::GetTimelineStatusQueryParams) -> std::result::Result<(models::GetTimelineStatusQueryParams,), ValidationErrors> {
+    query_params.validate()?;
 
-    Ok((path_params,))
+    Ok((query_params,))
 }
-/// GetTimelineStatus - GET /api/v1/libraries/{libraryId}/timeline/status
+/// GetTimelineStatus - GET /api/v1/timeline/status
 #[tracing::instrument(skip_all)]
 async fn get_timeline_status<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    Path(path_params): Path<models::GetTimelineStatusPathParams>,
+    QueryExtra(query_params): QueryExtra<models::GetTimelineStatusQueryParams>,
     State(api_impl): State<I>,
 ) -> Result<Response, StatusCode>
 where
@@ -6019,23 +6019,40 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_timeline_status_validation(path_params)).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || get_timeline_status_validation(query_params)).await.unwrap();
 
-    let Ok((path_params,)) = validation else {
+    let Ok((query_params,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().get_timeline_status(&method, &host, &cookies, &claims, &path_params).await;
+    let result = api_impl.as_ref().get_timeline_status(&method, &host, &cookies, &claims, &query_params).await;
 
     let mut response = Response::builder();
 
     let resp = match result {
         Ok(rsp) => match rsp {
-            apis::timeline::GetTimelineStatusResponse::Status200_StateOfTheScan(body) => {
+            apis::timeline::GetTimelineStatusResponse::Status200_StateOfTheScans(body) => {
                 let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::timeline::GetTimelineStatusResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -6117,23 +6134,18 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-fn list_timeline_entries_validation(
-    path_params: models::ListTimelineEntriesPathParams,
-    query_params: models::ListTimelineEntriesQueryParams,
-) -> std::result::Result<(models::ListTimelineEntriesPathParams, models::ListTimelineEntriesQueryParams), ValidationErrors> {
-    path_params.validate()?;
+fn list_timeline_entries_validation(query_params: models::ListTimelineEntriesQueryParams) -> std::result::Result<(models::ListTimelineEntriesQueryParams,), ValidationErrors> {
     query_params.validate()?;
 
-    Ok((path_params, query_params))
+    Ok((query_params,))
 }
-/// ListTimelineEntries - GET /api/v1/libraries/{libraryId}/timeline/entries
+/// ListTimelineEntries - GET /api/v1/timeline/entries
 #[tracing::instrument(skip_all)]
 async fn list_timeline_entries<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    Path(path_params): Path<models::ListTimelineEntriesPathParams>,
     QueryExtra(query_params): QueryExtra<models::ListTimelineEntriesQueryParams>,
     State(api_impl): State<I>,
 ) -> Result<Response, StatusCode>
@@ -6154,21 +6166,16 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || list_timeline_entries_validation(path_params, query_params))
-        .await
-        .unwrap();
+    let validation = tokio::task::spawn_blocking(move || list_timeline_entries_validation(query_params)).await.unwrap();
 
-    let Ok((path_params, query_params)) = validation else {
+    let Ok((query_params,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl
-        .as_ref()
-        .list_timeline_entries(&method, &host, &cookies, &claims, &path_params, &query_params)
-        .await;
+    let result = api_impl.as_ref().list_timeline_entries(&method, &host, &cookies, &claims, &query_params).await;
 
     let mut response = Response::builder();
 
@@ -6274,19 +6281,19 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-fn list_timeline_months_validation(path_params: models::ListTimelineMonthsPathParams) -> std::result::Result<(models::ListTimelineMonthsPathParams,), ValidationErrors> {
-    path_params.validate()?;
+fn list_timeline_months_validation(query_params: models::ListTimelineMonthsQueryParams) -> std::result::Result<(models::ListTimelineMonthsQueryParams,), ValidationErrors> {
+    query_params.validate()?;
 
-    Ok((path_params,))
+    Ok((query_params,))
 }
-/// ListTimelineMonths - GET /api/v1/libraries/{libraryId}/timeline/months
+/// ListTimelineMonths - GET /api/v1/timeline/months
 #[tracing::instrument(skip_all)]
 async fn list_timeline_months<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    Path(path_params): Path<models::ListTimelineMonthsPathParams>,
+    QueryExtra(query_params): QueryExtra<models::ListTimelineMonthsQueryParams>,
     State(api_impl): State<I>,
 ) -> Result<Response, StatusCode>
 where
@@ -6306,16 +6313,16 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || list_timeline_months_validation(path_params)).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || list_timeline_months_validation(query_params)).await.unwrap();
 
-    let Ok((path_params,)) = validation else {
+    let Ok((query_params,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().list_timeline_months(&method, &host, &cookies, &claims, &path_params).await;
+    let result = api_impl.as_ref().list_timeline_months(&method, &host, &cookies, &claims, &query_params).await;
 
     let mut response = Response::builder();
 
@@ -6323,6 +6330,23 @@ where
         Ok(rsp) => match rsp {
             apis::timeline::ListTimelineMonthsResponse::Status200_EntryCountsPerMonth(body) => {
                 let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::timeline::ListTimelineMonthsResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -6403,21 +6427,29 @@ where
     })
 }
 
-#[tracing::instrument(skip_all)]
-fn refresh_timeline_validation(path_params: models::RefreshTimelinePathParams) -> std::result::Result<(models::RefreshTimelinePathParams,), ValidationErrors> {
-    path_params.validate()?;
-
-    Ok((path_params,))
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct RefreshTimelineBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::TimelineRefreshRequest,
 }
-/// RefreshTimeline - POST /api/v1/libraries/{libraryId}/timeline/refresh
+
+#[tracing::instrument(skip_all)]
+fn refresh_timeline_validation(body: models::TimelineRefreshRequest) -> std::result::Result<(models::TimelineRefreshRequest,), ValidationErrors> {
+    let b = RefreshTimelineBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// RefreshTimeline - POST /api/v1/timeline/refresh
 #[tracing::instrument(skip_all)]
 async fn refresh_timeline<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    Path(path_params): Path<models::RefreshTimelinePathParams>,
     State(api_impl): State<I>,
+    Json(body): Json<models::TimelineRefreshRequest>,
 ) -> Result<Response, StatusCode>
 where
     I: AsRef<A> + Send + Sync,
@@ -6436,23 +6468,40 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || refresh_timeline_validation(path_params)).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || refresh_timeline_validation(body)).await.unwrap();
 
-    let Ok((path_params,)) = validation else {
+    let Ok((body,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().refresh_timeline(&method, &host, &cookies, &claims, &path_params).await;
+    let result = api_impl.as_ref().refresh_timeline(&method, &host, &cookies, &claims, &body).await;
 
     let mut response = Response::builder();
 
     let resp = match result {
         Ok(rsp) => match rsp {
-            apis::timeline::RefreshTimelineResponse::Status202_TheScanIsRunning(body) => {
+            apis::timeline::RefreshTimelineResponse::Status202_TheScansAreRunning(body) => {
                 let mut response = response.status(202);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::timeline::RefreshTimelineResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));

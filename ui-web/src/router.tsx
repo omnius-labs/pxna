@@ -11,7 +11,7 @@ import {
 import { ApiError } from "./api/client";
 import { currentUserQuery, fetchSetupInitialized } from "./auth/session";
 import { AuthedOutlet } from "./components/PreferencesGate";
-import { joinPath, parseRatingFilter, pathSegments, searchHref } from "./location";
+import { joinPath, parseRatingFilter, pathSegments, searchHref, timelineHref } from "./location";
 import { BrowsePage } from "./pages/BrowsePage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
@@ -129,15 +129,36 @@ const searchRoute = createRoute({
     component: SearchPage,
 });
 
+const timelineSearch = (search: Record<string, unknown>): { month?: string; view?: string } => {
+    const month = optionalString(search.month);
+    const view = optionalString(search.view);
+    return { ...(month === undefined ? {} : { month }), ...(view === undefined ? {} : { view }) };
+};
+
 const timelineRoute = createRoute({
     getParentRoute: () => authedRoute,
-    path: "timeline/$libraryId",
-    validateSearch: (search: Record<string, unknown>): { month?: string; view?: string } => {
-        const month = optionalString(search.month);
-        const view = optionalString(search.view);
-        return { ...(month === undefined ? {} : { month }), ...(view === undefined ? {} : { view }) };
-    },
+    path: "timeline",
+    validateSearch: timelineSearch,
     component: TimelinePage,
+});
+
+/// Library ごとだったころのタイムラインの URL。Library を横断するタイムラインへ置き換える。月は残し、Library 相対パスの `view` は鍵へ直す。
+const legacyTimelineRoute = createRoute({
+    getParentRoute: () => authedRoute,
+    path: "timeline/$libraryId",
+    validateSearch: timelineSearch,
+    beforeLoad: ({ params, search }) => {
+        throw redirect({
+            href: timelineHref({
+                month: search.month,
+                view:
+                    search.view === undefined
+                        ? undefined
+                        : `${params.libraryId}/${pathSegments(search.view).join("/")}`,
+            }),
+            replace: true,
+        });
+    },
 });
 
 const redirectSearch = (search: Record<string, unknown>): { redirect?: string } => {
@@ -160,7 +181,7 @@ const loginRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
-    authedRoute.addChildren([homeRoute, browseRoute, searchRoute, timelineRoute]),
+    authedRoute.addChildren([homeRoute, browseRoute, searchRoute, timelineRoute, legacyTimelineRoute]),
     setupRoute,
     loginRoute,
 ]);

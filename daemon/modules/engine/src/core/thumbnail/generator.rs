@@ -1187,14 +1187,25 @@ mod tests {
             ("rot90.avif", include_bytes!("../../../tests/fixtures/rot90.avif"), 90),
             ("rot180.avif", include_bytes!("../../../tests/fixtures/rot180.avif"), 180),
         ];
-        for (name, bytes, rotation) in rotated {
-            let file = fixture.dir.path().join(name);
-            std::fs::write(&file, bytes)?;
-            let source = fixture.generator.inner.fs.resolve_entry(&nested(&file)).await?;
+        for (name, bytes, _) in rotated {
+            std::fs::write(fixture.dir.path().join(name), bytes)?;
+        }
+        // 確かめた範囲では、ffmpeg 8.1.1 は `irot` を読み、5.1、6.1、7.1 は回転を返さず、デコードでも回さない。
+        // 返す回転は、サムネイルを作るデコードが適用する回転と一致していればよいので、90 度の画像のサムネイルが縦長かで期待値を決める。
+        let (width, height) = size(
+            &fixture
+                .generator
+                .generate(&nested(&fixture.dir.path().join("rot90.avif")), &thumbnail_request(128, 128))
+                .await?,
+        )?;
+        let applies_irot = height > width;
+        for (name, _, rotation) in rotated {
+            let source = fixture.generator.inner.fs.resolve_entry(&nested(&fixture.dir.path().join(name))).await?;
             let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source).await? else {
                 return Err("a rotated AVIF must be recognized as an image".into());
             };
-            assert_eq!((info.width, info.height, info.rotation), (64, 32, rotation), "{name}");
+            let expected = if applies_irot { rotation } else { 0 };
+            assert_eq!((info.width, info.height, info.rotation), (64, 32, expected), "{name} (applies irot: {applies_irot})");
         }
         Ok(())
     }

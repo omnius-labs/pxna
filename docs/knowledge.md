@@ -35,7 +35,7 @@ For items whose source is `Literature only`, reread the primary sources every 3 
 | [Chromium shows a leave confirmation when a beforeunload is canceled after an operation](./knowledge/chromium-beforeunload.md) | Chromium 155.0.8059.39 | Verified | 2026-10-07 |
 | [Chromium's modal dialog cannot be made full screen, and elements drawn outside the dialog cannot be operated](./knowledge/chromium-modal-dialog-fullscreen.md) | Chromium 154.0.8037.98 | Verified | 2026-10-10 |
 | [Radix's confirmation dialog and menu propagate the Esc keydown, and a Tab in a Portal child reaches React ancestors](./knowledge/radix-nested-layer-events.md) | radix-ui 1.6.7 | Verified | 2026-10-10 |
-| [ffprobe reports the AVIF irot as the Display Matrix rotation, and the width and height stay as encoded](./knowledge/ffprobe-heif-rotation.md) | ffmpeg 8.1.1 | Verified | 2026-10-11 |
+| [ffmpeg 8.1.1 reports the AVIF irot as the Display Matrix rotation and applies it when decoding, and ffmpeg 5.1 to 7.1 ignore irot](./knowledge/ffprobe-heif-rotation.md) | ffmpeg 5.1.9, 6.1.1, 7.1.5, 8.1.1 | Verified | 2026-10-24 |
 | [SQLite's FTS5 trigram tokenizer matches only substrings of 3 or more characters through the index](./knowledge/sqlite-fts5-trigram.md) | SQLite FTS5 documentation, libsqlite3-sys 0.30.1 (SQLite 3.46.0) | Literature only | 2026-10-23 |
 
 The first 2 items, the WebP size item, and the webp crate item are the premises of the decision to output thumbnails as lossy WebP.

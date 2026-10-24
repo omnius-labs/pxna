@@ -63,12 +63,13 @@ impl TimelineConfig {
 /// Library の集計の状態。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelineStatus {
+    pub library_id: String,
     pub running: bool,
     pub processed_files: u64,
     pub completed_at: Option<DateTime<Utc>>,
 }
 
-/// Library ごとのタイムラインの索引を集計し、ページ、月ごとの件数、状態を返す。
+/// Library ごとのタイムラインの索引を集計し、Library を横断したページと月ごとの件数、Library ごとの状態を返す。
 pub struct TimelineService {
     libraries: Vec<LibraryConfig>,
     index: Arc<TimelineIndex>,
@@ -206,20 +207,28 @@ impl TimelineService {
         let library = self.library(library_id)?;
         let progress = self.running.lock().get(&library.id).cloned();
         Ok(TimelineStatus {
+            library_id: library.id.clone(),
             running: progress.is_some(),
             processed_files: progress.map(|progress| progress.load(Ordering::Relaxed)).unwrap_or(0),
             completed_at: self.index.completed_at(&library.id).await?,
         })
     }
 
-    pub async fn page(&self, library_id: &str, anchor: &TimelineAnchor, limit: usize) -> Result<TimelinePage> {
-        let library = self.library(library_id)?;
-        self.index.page(&library.id, anchor, limit).await
+    /// `library_ids` の Entry を 1 本の並びにしたページ。どれかの Library がなければ `NotFound` にする。
+    pub async fn page(&self, library_ids: &[String], anchor: &TimelineAnchor, limit: usize) -> Result<TimelinePage> {
+        self.libraries(library_ids)?;
+        self.index.page(library_ids, anchor, limit).await
     }
 
-    pub async fn months(&self, library_id: &str) -> Result<Vec<(String, u64)>> {
-        let library = self.library(library_id)?;
-        self.index.months(&library.id).await
+    /// `library_ids` の月ごとの件数の和。どれかの Library がなければ `NotFound` にする。
+    pub async fn months(&self, library_ids: &[String]) -> Result<Vec<(String, u64)>> {
+        self.libraries(library_ids)?;
+        self.index.months(library_ids).await
+    }
+
+    /// `library_ids` の Library をすべて返す。1 つでもなければ `NotFound` にする。
+    pub fn libraries(&self, library_ids: &[String]) -> Result<Vec<&LibraryConfig>> {
+        library_ids.iter().map(|library_id| self.library(library_id)).collect()
     }
 
     pub fn library(&self, library_id: &str) -> Result<&LibraryConfig> {
@@ -493,8 +502,12 @@ mod tests {
     }
 
     async fn listed(service: &Arc<TimelineService>) -> TestResult<Vec<(String, String, TimelineDateSource)>> {
-        let page = service.page(LIBRARY, &TimelineAnchor::Newest, 100).await?;
-        Ok(page.rows.iter().map(|row| (row.path.clone(), row.date.text(), row.date.source)).collect())
+        let page = service.page(&[LIBRARY.to_string()], &TimelineAnchor::Newest, 100).await?;
+        Ok(page
+            .rows
+            .iter()
+            .map(|listed| (listed.row.path.clone(), listed.row.date.text(), listed.row.date.source))
+            .collect())
     }
 
     async fn paths(service: &Arc<TimelineService>) -> TestResult<Vec<String>> {
@@ -529,7 +542,7 @@ mod tests {
                 ("/c.7z/y.png".to_string(), "2023-07-07T00:00:00".to_string(), TimelineDateSource::ArchiveModified),
             ]
         );
-        let months = service.months(LIBRARY).await?;
+        let months = service.months(&[LIBRARY.to_string()]).await?;
         assert_eq!(
             months,
             [
@@ -539,7 +552,7 @@ mod tests {
                 ("2023-07".to_string(), 1)
             ]
         );
-        let total = service.page(LIBRARY, &TimelineAnchor::Newest, 100).await?.rows.len() as u64;
+        let total = service.page(&[LIBRARY.to_string()], &TimelineAnchor::Newest, 100).await?.rows.len() as u64;
         assert_eq!(months.iter().map(|(_, count)| count).sum::<u64>(), total);
         Ok(())
     }
@@ -578,7 +591,7 @@ mod tests {
         write_7z(&archive, &[("a.jpg", exif_jpeg("2024:01:01 00:00:00"))])?;
         wait_scan(&service).await?;
         assert_eq!(paths(&service).await?, ["/c.7z/a.jpg"]);
-        assert_eq!(service.months(LIBRARY).await?, [("2024-01".to_string(), 1)]);
+        assert_eq!(service.months(&[LIBRARY.to_string()]).await?, [("2024-01".to_string(), 1)]);
         Ok(())
     }
 
@@ -590,14 +603,14 @@ mod tests {
         write_7z(&fixture.path("big.7z"), &entries)?;
         let service = fixture.service("UTC", 0).await?;
         wait_scan(&service).await?;
-        assert_eq!(service.months(LIBRARY).await?, [("2024-03".to_string(), 450)]);
-        let page = service.page(LIBRARY, &TimelineAnchor::Newest, 1000).await?;
+        assert_eq!(service.months(&[LIBRARY.to_string()]).await?, [("2024-03".to_string(), 450)]);
+        let page = service.page(&[LIBRARY.to_string()], &TimelineAnchor::Newest, 1000).await?;
         assert_eq!(page.rows.len(), 450);
 
         std::fs::remove_file(fixture.path("big.7z"))?;
         wait_scan(&service).await?;
         assert!(paths(&service).await?.is_empty());
-        assert!(service.months(LIBRARY).await?.is_empty());
+        assert!(service.months(&[LIBRARY.to_string()]).await?.is_empty());
         Ok(())
     }
 
@@ -631,7 +644,7 @@ mod tests {
         }
         let service = fixture.service("Asia/Tokyo", 0).await?;
         assert_eq!(listed(&service).await?[0].1, "2024-01-02T12:04:05", "UTC の更新日時を 9 時間進める");
-        assert_eq!(service.months(LIBRARY).await?, [("2024-01".to_string(), 1)]);
+        assert_eq!(service.months(&[LIBRARY.to_string()]).await?, [("2024-01".to_string(), 1)]);
         Ok(())
     }
 
@@ -648,7 +661,7 @@ mod tests {
         std::fs::remove_file(fixture.path("b.png"))?;
         service.changed(&changes(&["/b.png"])).await;
         assert_eq!(paths(&service).await?, ["/a.png"]);
-        assert_eq!(service.months(LIBRARY).await?, [("2024-01".to_string(), 1)]);
+        assert_eq!(service.months(&[LIBRARY.to_string()]).await?, [("2024-01".to_string(), 1)]);
         Ok(())
     }
 
@@ -669,7 +682,7 @@ mod tests {
         assert!(!right_away.contains(&"/c.7z/old.jpg".to_string()), "上書きされた archive の旧 Entry は応答の前に消える");
         assert!(!right_away.contains(&"/p.png".to_string()), "上書きされた画像の旧い行も消える");
         wait_until(|| async { Ok(paths(&service).await? == ["/c.7z/new.jpg", "/p.png"] || paths(&service).await? == ["/p.png", "/c.7z/new.jpg"]) }).await?;
-        assert_eq!(service.months(LIBRARY).await?.iter().map(|(_, count)| count).sum::<u64>(), 2);
+        assert_eq!(service.months(&[LIBRARY.to_string()]).await?.iter().map(|(_, count)| count).sum::<u64>(), 2);
         Ok(())
     }
 
@@ -699,7 +712,7 @@ mod tests {
             service.renamed(LIBRARY, "/dir/renamed.png", relative).await?;
             service.changed(&changes(&["/dir/renamed.png", relative])).await;
             wait_until(|| async { Ok(paths(&service).await? == ["/keep.png"]) }).await?;
-            assert_eq!(service.months(LIBRARY).await?, [("2025-01".to_string(), 1)]);
+            assert_eq!(service.months(&[LIBRARY.to_string()]).await?, [("2025-01".to_string(), 1)]);
             std::fs::rename(fixture.path(to), fixture.path("dir/renamed.png"))?;
             service.renamed(LIBRARY, relative, "/dir/renamed.png").await?;
             service.changed(&changes(&[relative, "/dir/renamed.png"])).await;
@@ -711,7 +724,7 @@ mod tests {
         service.renamed(LIBRARY, "/dir", "/.secret/dir").await?;
         service.changed(&changes(&["/dir", "/.secret/dir"])).await;
         wait_until(|| async { Ok(paths(&service).await? == ["/keep.png"]) }).await?;
-        assert_eq!(service.months(LIBRARY).await?, [("2025-01".to_string(), 1)]);
+        assert_eq!(service.months(&[LIBRARY.to_string()]).await?, [("2025-01".to_string(), 1)]);
         Ok(())
     }
 
@@ -727,7 +740,7 @@ mod tests {
         std::fs::rename(fixture.path("src.7z"), fixture.path("dst.7z"))?;
         service.renamed(LIBRARY, "/src.7z", "/dst.7z").await?;
         assert_eq!(paths(&service).await?, ["/dst.7z/a.jpg"], "置き換えられた宛先の Entry は応答の前に消える");
-        assert_eq!(service.months(LIBRARY).await?, [("2024-01".to_string(), 1)]);
+        assert_eq!(service.months(&[LIBRARY.to_string()]).await?, [("2024-01".to_string(), 1)]);
 
         // 付け替えた archive の identity は新しい path から決まるので、範囲の集計は読み直さずに世代だけを記録する。
         service.changed(&changes(&["/src.7z", "/dst.7z"])).await;
