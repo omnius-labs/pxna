@@ -167,6 +167,8 @@ Violations of the path length and entry count limits are `LimitExceeded`, and ot
 
 If `a/b/c.txt` exists and there are no parent directory entries, `a` and `a/b` are synthesized as readonly directories when the index is built.
 The total entry count after synthesis must also be at most `max_entry_count`.
+The count is checked on every insertion, including synthetic parents, so building the index never holds more than `max_entry_count` entries.
+Synthesis walks each path's ancestors from the deepest one up and stops at the first existing one, so its work is proportional to the number of entries inserted, not to the square of the path depth.
 
 ### 4.4 Symlinks and Special Entries
 
