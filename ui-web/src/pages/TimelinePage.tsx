@@ -36,13 +36,13 @@ import {
 import type { SelectionProgress } from "../library/useEntryInteraction";
 import {
     browseHref,
+    CROSS_LIBRARY_SCOPE,
     entryAddress,
     parentPath,
     relativePath,
-    TIMELINE_SCOPE,
-    timelineEntryPath,
     timelineHref,
     timelineLocation,
+    viewKey,
 } from "../location";
 import { fileContentUrl } from "../viewer/urls";
 
@@ -173,7 +173,7 @@ function TimelineScreen({
     // 選択の鍵は Library を含むので、選んだ Entry のどれかが読み取り専用の Library にあれば、変更の操作を出さない。
     // 選択が複数の Library にまたがるときは、操作を Library ごとの要求に分ける。
     const libraryReadonly = [...selection.items.keys()].some((key) =>
-        isReadonlyLibrary(entryAddress(TIMELINE_SCOPE, key).libraryId),
+        isReadonlyLibrary(entryAddress(CROSS_LIBRARY_SCOPE, key).libraryId),
     );
     const canRename =
         !narrow &&
@@ -191,13 +191,13 @@ function TimelineScreen({
         selection.items.size > 0 &&
         [...selection.items.values()].every((item) => !item.readonly);
     const requestDelete = useCallback(() => {
-        if (canDelete) setDeletion({ libraryId: TIMELINE_SCOPE, items: new Map(selection.items) });
+        if (canDelete) setDeletion({ libraryId: CROSS_LIBRARY_SCOPE, items: new Map(selection.items) });
     }, [canDelete, selection.items]);
     const cut = useCallback(() => {
-        if (canDelete) clipboard.store?.write("cut", TIMELINE_SCOPE, selection.items);
+        if (canDelete) clipboard.store?.write("cut", CROSS_LIBRARY_SCOPE, selection.items);
     }, [canDelete, clipboard.store, selection.items]);
     const copy = useCallback(
-        () => clipboard.store?.write("copy", TIMELINE_SCOPE, selection.items),
+        () => clipboard.store?.write("copy", CROSS_LIBRARY_SCOPE, selection.items),
         [clipboard.store, selection.items],
     );
 
@@ -205,7 +205,7 @@ function TimelineScreen({
     const reveal = useCallback(() => {
         const only = selection.items.size === 1 ? [...selection.items.keys()][0] : undefined;
         if (only === undefined) return;
-        const { libraryId, path } = entryAddress(TIMELINE_SCOPE, only);
+        const { libraryId, path } = entryAddress(CROSS_LIBRARY_SCOPE, only);
         void navigate({
             href: browseHref({ libraryId, path: parentPath(path), reveal: path.split("/").at(-1) }),
         });
@@ -245,7 +245,7 @@ function TimelineScreen({
 
     const selectedFile = selection.items.size === 1 ? [...selection.items][0] : undefined;
     const downloadHref =
-        selectedFile && !selectedFile[1].folder ? fileContentUrl(TIMELINE_SCOPE, selectedFile[0]) : undefined;
+        selectedFile && !selectedFile[1].folder ? fileContentUrl(CROSS_LIBRARY_SCOPE, selectedFile[0]) : undefined;
     const selectedBytes = selectionBytes(selection);
 
     // 画像と動画はビューアで開く。ビューアを開くときは履歴に積み、前後へ移ったり閉じたりするときは積まない。`view` は Library を含む鍵である。
@@ -269,7 +269,7 @@ function TimelineScreen({
     return (
         <EntryActionContext.Provider
             value={{
-                libraryId: TIMELINE_SCOPE,
+                libraryId: CROSS_LIBRARY_SCOPE,
                 libraryReadonly,
                 narrow,
                 canCreate: false,
@@ -283,7 +283,7 @@ function TimelineScreen({
                 downloadHref,
                 delete: requestDelete,
                 finish,
-                timeline: true,
+                crossLibrary: true,
                 reveal,
             }}
         >
@@ -317,7 +317,7 @@ function TimelineScreen({
                         <SettingsDialog />
                     </>
                 }
-                panel={infoPanel.open ? <InfoPanel libraryId={TIMELINE_SCOPE} selection={selection} /> : undefined}
+                panel={infoPanel.open ? <InfoPanel libraryId={CROSS_LIBRARY_SCOPE} selection={selection} /> : undefined}
                 footer={
                     <StatusBar
                         totalCount={store.loadedItems.length}
@@ -338,7 +338,7 @@ function TimelineScreen({
                         <TimelineGrid
                             key={`${anchorMonth ?? "newest"}:${jump}`}
                             store={store}
-                            libraryId={TIMELINE_SCOPE}
+                            libraryId={CROSS_LIBRARY_SCOPE}
                             tileSize={set.tileSize}
                             shape={set.thumbnailShape}
                             narrow={narrow}
@@ -368,7 +368,7 @@ function TimelineScreen({
                     view={view}
                     originalImage={set.originalImage}
                     narrow={narrow}
-                    libraryReadonly={isReadonlyLibrary(entryAddress(TIMELINE_SCOPE, timelineEntryPath(view)).libraryId)}
+                    libraryReadonly={isReadonlyLibrary(entryAddress(CROSS_LIBRARY_SCOPE, viewKey(view)).libraryId)}
                     onChange={changeView}
                 />
             )}

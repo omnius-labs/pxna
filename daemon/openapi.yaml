@@ -64,6 +64,8 @@ tags:
       description: Progress tracking for long-running mutations.
     - name: Timeline
       description: Images and videos of Libraries ordered by their timeline date.
+    - name: Search
+      description: Name, rating, and tag search across one or more Libraries.
     - name: Rating
       description: The current user's good or bad rating of an image or video.
     - name: Tags
@@ -564,12 +566,6 @@ paths:
                 Lists direct children by default. Set `recursive=true` only for an
                 explicit recursive traversal within the selected Library.
 
-                `rating` and `tag` keep only the images and videos that the
-                current user has rated or tagged that way; they combine with the
-                other filters. While one of them is set, `snapshot` also changes
-                whenever the user rates or tags anything, so a client that pages
-                through the result re-reads from the start instead of mixing
-                pages from before and after the change.
             operationId: listFolderEntries
             parameters:
                 - $ref: "#/components/parameters/LibraryIdPath"
@@ -583,8 +579,6 @@ paths:
                 - $ref: "#/components/parameters/IncludeHiddenQuery"
                 - $ref: "#/components/parameters/FoldersFirstQuery"
                 - $ref: "#/components/parameters/FoldersOnlyQuery"
-                - $ref: "#/components/parameters/RatingFilterQuery"
-                - $ref: "#/components/parameters/TagFilterQuery"
             responses:
                 "200":
                     description: Folder entries.
@@ -602,6 +596,70 @@ paths:
                     $ref: "#/components/responses/NotFound"
                 "409":
                     $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /search/entries:
+        get:
+            tags:
+                - Search
+            summary: Search entries across Libraries
+            description: |
+                Applies the name, rating, and tag conditions to the listing of
+                the start in each of `libraryIds`, and returns the matches as one
+                sequence ordered by `sort`, `order`, and `foldersFirst`. Entries
+                that compare equal, which only happens for the same path in
+                different Libraries, follow the order of `libraryIds`.
+
+                `path` may name a start other than `/` only when `libraryIds`
+                has one Library; with several, every Library is searched from
+                its root. Hidden entries are never returned.
+
+                `rating` and `tag` keep only the images and videos that the
+                current user has rated or tagged that way; several `tag` values
+                must all be present. While one of them is set, `snapshot` also
+                changes whenever the user rates or tags anything, so a client
+                that pages through the result re-reads from the start instead of
+                mixing pages from before and after the change.
+
+                `recursive` traversal is cut off per Library at the configured
+                entry limit, and the Libraries cut off are listed in
+                `truncatedLibraryIds`.
+            operationId: listSearchEntries
+            parameters:
+                - $ref: "#/components/parameters/SearchLibraryIdsQuery"
+                - name: path
+                  in: query
+                  required: false
+                  description: Start relative to the Library. Only with one Library.
+                  schema:
+                      $ref: "#/components/schemas/RelativePath"
+                - $ref: "#/components/parameters/RecursiveQuery"
+                - $ref: "#/components/parameters/NameFilterQuery"
+                - $ref: "#/components/parameters/RatingFilterQuery"
+                - $ref: "#/components/parameters/TagFiltersQuery"
+                - $ref: "#/components/parameters/SortQuery"
+                - $ref: "#/components/parameters/OrderQuery"
+                - $ref: "#/components/parameters/FoldersFirstQuery"
+                - $ref: "#/components/parameters/ListOffsetQuery"
+                - $ref: "#/components/parameters/ListLimitQuery"
+            responses:
+                "200":
+                    description: Matching entries of the Libraries.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/SearchListing"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
                 "504":
@@ -1835,6 +1893,22 @@ components:
                 items:
                     $ref: "#/components/schemas/LibraryId"
 
+        SearchLibraryIdsQuery:
+            name: libraryIds
+            in: query
+            required: true
+            description: |
+                Libraries to search, repeated as `libraryIds=a&libraryIds=b`.
+                Every id must name a Library; an unknown id is 404.
+            style: form
+            explode: true
+            schema:
+                type: array
+                minItems: 1
+                maxItems: 64
+                items:
+                    $ref: "#/components/schemas/LibraryId"
+
         PathQuery:
             name: path
             in: query
@@ -1960,17 +2034,22 @@ components:
                     - bad
                     - none
 
-        TagFilterQuery:
+        TagFiltersQuery:
             name: tag
             in: query
             required: false
             description: |
-                Return only images and videos that have this tag of the current
-                user. The word is trimmed like a tag being set; a word the user
-                has never used selects nothing. `totalCount` counts the entries
-                after this filter.
+                Return only images and videos that have all of these tags of the
+                current user, repeated as `tag=a&tag=b`. Each word is trimmed
+                like a tag being set; a word the user has never used selects
+                nothing. `totalCount` counts the entries after this filter.
+            style: form
+            explode: true
             schema:
-                $ref: "#/components/schemas/TagName"
+                type: array
+                maxItems: 32
+                items:
+                    $ref: "#/components/schemas/TagName"
 
         RangeHeader:
             name: Range
@@ -2904,6 +2983,45 @@ components:
                 truncated:
                     type: boolean
                     description: True when recursive traversal reached its entry limit.
+
+        SearchEntry:
+            type: object
+            required:
+                - libraryId
+                - entry
+            properties:
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                entry:
+                    $ref: "#/components/schemas/FileSystemEntry"
+
+        SearchListing:
+            type: object
+            required:
+                - entries
+                - totalCount
+                - snapshot
+                - truncatedLibraryIds
+            properties:
+                entries:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/SearchEntry"
+                totalCount:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Sum of the per-Library counts after filtering.
+                snapshot:
+                    type: string
+                    description: |
+                        Opaque identifier of the merged listing. It changes when
+                        the listing of any searched Library is rebuilt.
+                truncatedLibraryIds:
+                    type: array
+                    description: Libraries whose recursive traversal reached the entry limit.
+                    items:
+                        $ref: "#/components/schemas/LibraryId"
 
         Capabilities:
             type: object

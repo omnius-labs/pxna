@@ -13,9 +13,11 @@ use omnius_pxna_interface::{models, types::Nullable};
 
 use crate::{prelude::*, service::library::EntryConverter};
 
+mod search;
 mod snapshot;
 mod summary;
 
+pub use search::*;
 pub use snapshot::*;
 pub use summary::*;
 
@@ -44,7 +46,23 @@ impl ListOptions {
             folders_only: query.folders_only.unwrap_or(false),
             sort: ListSort::parse(query.sort.as_deref(), query.order.as_deref(), query.folders_first.unwrap_or(false))?,
             filter: NameFilter::new(query.query.as_deref().unwrap_or_default()),
-            marks: MarkFilter::parse(query.rating.as_deref(), query.tag.as_deref())?,
+            marks: MarkFilter::default(),
+            selection: MarkSelection::default(),
+            offset: query.offset.unwrap_or(0),
+            limit: Self::parse_limit(query.limit)?,
+        })
+    }
+
+    /// 検索の条件。隠し Entry は含めず、フォルダ扱いの Entry だけに絞る指定は受け付けない。
+    pub fn from_search(query: &models::ListSearchEntriesQueryParams) -> Result<Self> {
+        let tags = query.tag.iter().map(|tag| tag.0.as_str()).collect::<Vec<_>>();
+        Ok(Self {
+            recursive: query.recursive.unwrap_or(false),
+            include_hidden: false,
+            folders_only: false,
+            sort: ListSort::parse(query.sort.as_deref(), query.order.as_deref(), query.folders_first.unwrap_or(false))?,
+            filter: NameFilter::new(query.query.as_deref().unwrap_or_default()),
+            marks: MarkFilter::parse(query.rating.as_deref(), &tags)?,
             selection: MarkSelection::default(),
             offset: query.offset.unwrap_or(0),
             limit: Self::parse_limit(query.limit)?,
@@ -91,7 +109,7 @@ impl ListOptions {
         let mut page = Vec::new();
         for &index in indices {
             let listed = &entries.entries[index];
-            if (self.folders_only && !EntryPosition::is_folder_like(&listed.entry)) || !self.filter.matches(&listed.name) || !self.selection.matches(&listed.entry) {
+            if !self.matches(listed) {
                 continue;
             }
             if total >= self.offset && page.len() < self.limit {
@@ -101,13 +119,23 @@ impl ListOptions {
         }
         models::FolderListing::new(page, total, self.selection.snapshot_id(snapshot), entries.truncated)
     }
+
+    /// 並べ方の順の位置のうち、絞り込みの条件に合うものだけを、順を保って返す。
+    pub fn matching(&self, entries: &ListingEntries, indices: &[usize]) -> Vec<usize> {
+        indices.iter().copied().filter(|&index| self.matches(&entries.entries[index])).collect()
+    }
+
+    fn matches(&self, listed: &ListedEntry) -> bool {
+        (!self.folders_only || EntryPosition::is_folder_like(&listed.entry)) && self.filter.matches(&listed.name) && self.selection.matches(&listed.entry)
+    }
 }
 
 /// 評価とタグでの絞り込みの指定。指定がなければ何も絞らない。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MarkFilter {
     rating: Option<RatingFilter>,
-    tag: Option<String>,
+    /// すべてを持つ Entry を選ぶタグ。重複はない。
+    tags: Vec<String>,
 }
 
 /// 評価での絞り込み。未評価は、評価していない画像と動画を選ぶ。
@@ -118,7 +146,7 @@ enum RatingFilter {
 }
 
 impl MarkFilter {
-    pub fn parse(rating: Option<&str>, tag: Option<&str>) -> Result<Self> {
+    pub fn parse(rating: Option<&str>, tags: &[&str]) -> Result<Self> {
         let rating = match rating {
             None => None,
             Some("good") => Some(RatingFilter::Rated(Rating::Good)),
@@ -126,14 +154,18 @@ impl MarkFilter {
             Some("none") => Some(RatingFilter::Unrated),
             Some(other) => return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("rating must be good, bad or none: {other}"))),
         };
-        let tag = tag
-            .map(|tag| omnius_pxna_engine::model::TagName::parse(tag).map(|tag| tag.as_str().to_string()))
-            .transpose()?;
-        Ok(Self { rating, tag })
+        let mut parsed = Vec::<String>::new();
+        for tag in tags {
+            let tag = omnius_pxna_engine::model::TagName::parse(tag)?.as_str().to_string();
+            if !parsed.contains(&tag) {
+                parsed.push(tag);
+            }
+        }
+        Ok(Self { rating, tags: parsed })
     }
 
     pub fn is_active(&self) -> bool {
-        self.rating.is_some() || self.tag.is_some()
+        self.rating.is_some() || !self.tags.is_empty()
     }
 
     /// ユーザの評価とタグで引いて、一覧の Entry の照合に使う集合を作る。
@@ -149,10 +181,14 @@ impl MarkFilter {
             Some(RatingFilter::Rated(rating)) => Some(RatingMatch::Among(marks.rated_paths(user_id, library_id, rating).await?)),
             Some(RatingFilter::Unrated) => Some(RatingMatch::Outside(marks.all_rated_paths(user_id, library_id).await?)),
         };
-        let tagged = match &self.tag {
-            None => None,
-            Some(tag) => Some(marks.tagged_paths(user_id, library_id, tag).await?),
-        };
+        let mut tagged: Option<HashSet<String>> = None;
+        for tag in &self.tags {
+            let paths = marks.tagged_paths(user_id, library_id, tag).await?;
+            tagged = Some(match tagged {
+                None => paths,
+                Some(previous) => previous.intersection(&paths).cloned().collect(),
+            });
+        }
         Ok(MarkSelection {
             active: Some(version),
             rating,
@@ -289,6 +325,14 @@ impl ListingEntries {
         Self {
             entries: entries.into_iter().map(ListedEntry::new).collect(),
             truncated: false,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn truncated_from_entries(entries: Vec<models::FileSystemEntry>) -> Self {
+        Self {
+            truncated: true,
+            ..Self::from_entries(entries)
         }
     }
 }
@@ -447,8 +491,6 @@ pub(crate) mod tests {
             include_hidden: None,
             folders_first: None,
             folders_only: None,
-            rating: None,
-            tag: None,
         }
     }
     fn list(query: &models::ListFolderEntriesQueryParams, entries: Vec<models::FileSystemEntry>) -> Result<models::FolderListing> {

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
-import { entryAddress, TIMELINE_SCOPE, timelineKey } from "../location";
+import { CROSS_LIBRARY_SCOPE, entryAddress, scopedKey } from "../location";
 import type { Entry } from "./entries";
 import { type Listing, ListingSnapshotChanged, type PageStatus } from "./listing";
 
@@ -81,7 +81,7 @@ export type TimelineAnchor =
     | { kind: "newest" }
     /// `YYYY-MM` の月の、最も新しい Entry から。`nonce` は、同じ月を選び直したときに、読み直した別の範囲として扱うための番号である。
     | { kind: "month"; month: string; nonce?: number }
-    /// 鍵（`timelineKey`）の Entry を中央に含む範囲。
+    /// 鍵（`scopedKey`）の Entry を中央に含む範囲。
     | { kind: "around"; path: string };
 
 /// タイムラインに並べる Entry。`entry.path` は Library の id を含む鍵で、選択、ビューア、範囲の中の位置はこの鍵で Entry を区別する。
@@ -212,7 +212,7 @@ export class TimelineStore implements Listing {
         this.emit();
     }
 
-    /// 再読み込みで、見えている位置の近くから読み直すための目印。鍵（`timelineKey`）で渡す。
+    /// 再読み込みで、見えている位置の近くから読み直すための目印。鍵（`scopedKey`）で渡す。
     setFocus(path: string | undefined) {
         this.focus = path;
     }
@@ -356,7 +356,7 @@ export class TimelineStore implements Listing {
     private async fetchInitial(anchor: TimelineAnchor) {
         if (anchor.kind !== "around")
             return fetchPage(this.libraryIds, anchor.kind === "month" ? { month: anchor.month } : {});
-        const { libraryId, path } = entryAddress(TIMELINE_SCOPE, anchor.path);
+        const { libraryId, path } = entryAddress(CROSS_LIBRARY_SCOPE, anchor.path);
         return fetchPage(this.libraryIds, { around: path, aroundLibraryId: libraryId });
     }
 
@@ -414,7 +414,7 @@ async function fetchPage(
     );
     return {
         items: listing.entries.map((item) => ({
-            entry: { ...item.entry, path: timelineKey(item.libraryId, item.entry.path) },
+            entry: { ...item.entry, path: scopedKey(item.libraryId, item.entry.path) },
             libraryId: item.libraryId,
             path: item.entry.path,
             date: item.timelineDate,

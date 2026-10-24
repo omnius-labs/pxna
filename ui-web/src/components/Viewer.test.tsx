@@ -132,6 +132,7 @@ async function harness(
                 <QueryClientProvider client={client}>
                     <Viewer
                         location={{ libraryId: "big", path, view }}
+                        source={{ kind: "folder", libraryId: "big", path }}
                         sort={{ key: "name", order: "asc" }}
                         originalImage={originalImage}
                         narrow={nextNarrow}

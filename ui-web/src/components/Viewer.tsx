@@ -4,11 +4,11 @@ import { type PointerEvent, useCallback, useEffect, useRef, useState } from "rea
 import { toast } from "sonner";
 import { type Entry, entryKind } from "../library/entries";
 import { canMutate } from "../library/entryActions";
-import { type Listing, locationFilter, useFolderListing } from "../library/listing";
+import { type Listing, type ListingSource, useListing } from "../library/listing";
 import type { SortPreference } from "../library/preferences";
 import { putRating, RATING_LABELS, type Rating, ratingQuery } from "../library/ratingTags";
 import { keepRange, reachablePages, useTimelineStore } from "../library/timeline";
-import { type BrowseLocation, relativePath, TIMELINE_SCOPE, timelineEntryPath } from "../location";
+import { type BrowseLocation, CROSS_LIBRARY_SCOPE, relativePath, viewKey } from "../location";
 import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { FILMSTRIP_ITEM_WIDTH } from "../viewer/filmstrip";
 import { displayImageUrl, fileContentUrl, originalImageUrl } from "../viewer/urls";
@@ -39,7 +39,10 @@ import { Toaster } from "./ui/sonner";
 import { VideoPlayer } from "./VideoPlayer";
 
 interface ViewerProps {
+    /// ビューアの範囲と、前後へ移る基準のフォルダと、開いている Entry。検索では範囲が `CROSS_LIBRARY_SCOPE` で、基準は `/` である。
     location: BrowseLocation;
+    /// 前後へ移る一覧の出どころ。
+    source: ListingSource;
     /// 一覧の並べ替え。前後の Entry への移動は、グリッドと同じ並び順に従う。
     sort: SortPreference;
     /// 元の画像へ差し替える時機の表示設定。今の画面の幅の区分の組の値を渡す。
@@ -64,21 +67,20 @@ function useWantedPages() {
 }
 
 /// フォルダの一覧から前後へ移る、画像と動画のビューア。
-export function Viewer({ sort, ...props }: ViewerProps) {
-    const { location } = props;
+export function Viewer({ sort, source, ...props }: ViewerProps) {
     const { wantedPages, changeWantedPages } = useWantedPages();
-    const listing = useFolderListing(location.libraryId, location.path, sort, wantedPages, locationFilter(location));
+    const listing = useListing(source, sort, wantedPages);
     return (
         <ViewerView
             {...props}
             listing={listing}
-            scope={[sort.key, sort.order, location.query, location.recursive, location.rating, location.tag]}
+            scope={[sort.key, sort.order, JSON.stringify(source)]}
             onPages={changeWantedPages}
         />
     );
 }
 
-interface TimelineViewerProps extends Omit<ViewerProps, "location" | "sort"> {
+interface TimelineViewerProps extends Omit<ViewerProps, "location" | "sort" | "source"> {
     /// タイムラインに並べている Library の id。
     libraryIds: readonly string[];
     /// 開く Entry の鍵（先頭の `/` を除く）。Library の id を含む。
@@ -89,9 +91,9 @@ interface TimelineViewerProps extends Omit<ViewerProps, "location" | "sort"> {
 /// Entry は Library を横断するので、所在はタイムラインの範囲の鍵から求める。
 export function TimelineViewer({ libraryIds, view, ...props }: TimelineViewerProps) {
     const [opened] = useState(view);
-    const store = useTimelineStore(libraryIds, { kind: "around", path: timelineEntryPath(opened) });
+    const store = useTimelineStore(libraryIds, { kind: "around", path: viewKey(opened) });
     const { wantedPages, changeWantedPages } = useWantedPages();
-    const path = timelineEntryPath(view);
+    const path = viewKey(view);
     // フィルムストリップを遠くへ送っても、開いている Entry から離れすぎたページは読まない。
     const current = store.locate(path);
     const reachable = reachablePages(current, wantedPages);
@@ -120,7 +122,7 @@ export function TimelineViewer({ libraryIds, view, ...props }: TimelineViewerPro
     return (
         <ViewerView
             {...props}
-            location={{ libraryId: TIMELINE_SCOPE, path: "/", view }}
+            location={{ libraryId: CROSS_LIBRARY_SCOPE, path: "/", view }}
             listing={store}
             scope={["timeline"]}
             onPages={changeWantedPages}
@@ -128,7 +130,7 @@ export function TimelineViewer({ libraryIds, view, ...props }: TimelineViewerPro
     );
 }
 
-interface ViewerViewProps extends Omit<ViewerProps, "sort"> {
+interface ViewerViewProps extends Omit<ViewerProps, "sort" | "source"> {
     listing: Listing;
     /// 一覧の条件。変わったら、開いている Entry の位置を探し直す。
     scope: readonly unknown[];

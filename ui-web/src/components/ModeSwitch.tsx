@@ -1,22 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Clock, FolderTree } from "lucide-react";
+import { Clock, FolderTree, Search } from "lucide-react";
 import type { MouseEvent } from "react";
 
 import { lastFolderLocation } from "../library/folderReturn";
 import { librariesQuery } from "../library/queries";
-import { browseHref, timelineHref } from "../location";
+import { lastSearchLocation } from "../library/searchReturn";
+import { browseHref, EMPTY_SEARCH, searchHref, timelineHref } from "../location";
 
 interface ModeSwitchProps {
-    /// フォルダ表示へ移るときの Library。タイムラインでは `undefined` で、最後に開いていたフォルダ（なければ先頭の Library のルート）へ移る。
+    /// フォルダ表示へ移るときの Library。タイムラインと検索モードでは `undefined` で、最後に開いていたフォルダ（なければ先頭の Library のルート）へ移る。
     libraryId: string | undefined;
-    /// 今の表示。検索モードでは、どちらも強調しない。
+    /// 今の表示。強調して出す。
     mode: "folder" | "timeline" | "search";
     /// アイコンだけで出す。狭い画面のヘッダーで使う。
     compact?: boolean;
 }
 
-/// フォルダ表示とタイムラインを行き来する切り替え。タイムラインは Library を横断し、並べる Library を変えない。
+/// フォルダ表示、タイムライン、検索モードを行き来する、横に並べた 3 つの切り替え。
+/// タイムラインは並べる Library を変えず、検索は最後に使った条件（なければ条件のない、すべての Library）で開く。
 export function ModeSwitch({ libraryId, mode, compact = false }: ModeSwitchProps) {
     const navigate = useNavigate();
     const libraries = useQuery(librariesQuery);
@@ -37,6 +39,12 @@ export function ModeSwitch({ libraryId, mode, compact = false }: ModeSwitchProps
             label: "タイムライン",
             href: timelineHref({}),
             icon: <Clock className="size-4" />,
+        },
+        {
+            mode: "search",
+            label: "検索",
+            href: searchHref(lastSearchLocation() ?? EMPTY_SEARCH),
+            icon: <Search className="size-4" />,
         },
     ] as const;
     const click = (event: MouseEvent<HTMLAnchorElement>, href: string) => {

@@ -26,7 +26,6 @@ export function useTreeListing(expanded: ReadonlySet<string>, wanted: string) {
                                 key.slice(0, separator),
                                 key.slice(separator + 1),
                                 { key: "name", order: "asc" },
-                                undefined,
                                 true,
                             ),
                         ] as const;

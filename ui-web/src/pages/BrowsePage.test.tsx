@@ -164,88 +164,15 @@ it("preserves selected paths and clears only the anchor on sorting", async () =>
     }
 });
 
-it("ビューアを開き、移り、閉じても検索の条件を残す", async () => {
-    const h = await harness("/search/photos?q=clip&path=%2Fvideos");
+it("フォルダ表示で / を押すと、そのフォルダを起点に条件のない検索を開く", async () => {
+    const h = await harness("/browse/photos/videos");
     try {
-        await act(async () =>
-            h.host.querySelector("[data-grid]")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })),
-        );
-        await wait(() =>
-            expect(h.router.state.location.search).toEqual({ q: "clip", path: "/videos", view: "clip.mp4" }),
-        );
-        await act(async () => h.host.querySelector<HTMLButtonElement>("[data-next]")!.click());
-        await wait(() =>
-            expect(h.router.state.location.search).toEqual({ q: "clip", path: "/videos", view: "sub/clip.mp4" }),
-        );
-        await act(async () => h.host.querySelector<HTMLButtonElement>("[data-close]")!.click());
-        await wait(() => expect(h.router.state.location.search).toEqual({ q: "clip", path: "/videos" }));
+        await act(async () => {
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true }));
+        });
+        await wait(() => expect(h.router.state.location.href).toBe("/search?lib=photos&path=%2Fvideos"));
     } finally {
         await h.dispose();
-    }
-});
-
-it("検索語、範囲、検索の終了では選択を外し、view の変更では残す", async () => {
-    const h = await harness("/search/photos?q=clip&path=%2Fvideos");
-    const select = async () => {
-        await act(async () => h.host.querySelector<HTMLButtonElement>("[data-grid]")!.click());
-        expect(h.host.querySelector("footer")?.textContent).toBe("1");
-    };
-    const go = async (href: string) => {
-        await act(async () => h.router.navigate({ href }));
-        await wait(() => expect(h.router.state.location.href).toBe(href));
-    };
-    try {
-        await select();
-        await go("/search/photos?q=clip&path=%2Fvideos&flat=1");
-        expect(h.host.querySelector("footer")?.textContent).toBe("0");
-        await select();
-        await go("/search/photos?q=clip&path=%2Fvideos&flat=1&view=clip.mp4");
-        expect(h.host.querySelector("footer")?.textContent).toBe("1");
-        await go("/search/photos?q=other&path=%2Fvideos&flat=1");
-        expect(h.host.querySelector("footer")?.textContent).toBe("0");
-        await select();
-        await go("/browse/photos/videos");
-        expect(h.host.querySelector("footer")?.textContent).toBe("0");
-    } finally {
-        await h.dispose();
-    }
-});
-
-it("検索語がないときは一覧を要求せず、入力を促す", async () => {
-    const h = await harness("/search/photos?path=%2Fvideos");
-    try {
-        expect(h.host.querySelector("[data-grid]")).toBeNull();
-        expect(h.host.textContent).toContain("検索語を入力するか、評価かタグを選んでください。");
-    } finally {
-        await h.dispose();
-    }
-});
-
-it.each(["rating=good", "tag=trip", "rating=none&tag=trip"])(
-    "評価かタグだけで絞った検索は、検索語がなくても一覧を出す（%s）",
-    async (filter) => {
-        const h = await harness(`/search/photos?path=%2Fvideos&${filter}`);
-        try {
-            expect(h.host.querySelector("[data-grid]")).not.toBeNull();
-            expect(h.host.textContent).not.toContain("評価かタグを選んでください");
-        } finally {
-            await h.dispose();
-        }
-    },
-);
-
-it("旧来の検索の URL を、検索モードの対応する起点と範囲へ置き換える", async () => {
-    const direct = await harness("/browse/photos/videos?q=clip");
-    try {
-        await wait(() => expect(direct.router.state.location.href).toBe("/search/photos?q=clip&path=%2Fvideos&flat=1"));
-    } finally {
-        await direct.dispose();
-    }
-    const deep = await harness("/browse/photos?q=clip&deep=1&view=a.mp4");
-    try {
-        await wait(() => expect(deep.router.state.location.href).toBe("/search/photos?q=clip&view=a.mp4"));
-    } finally {
-        await deep.dispose();
     }
 });
 

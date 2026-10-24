@@ -14,13 +14,13 @@ This work answers recursive listings with name, rating, or tag conditions from t
 | [Listing and Search Design §8.1](../design/listing.md#name-index) | The decisions on the index, attributes, matching, and walking while it is not usable |
 | [Rating and Tag Design §7.1](../design/rating-tags.md#71-filtering-listings) | Rating and tag conditions in listings answered from the index |
 | [Client Design §3.6](../design/client.md#36-search) | The notice for walked results |
-| [openapi.yaml#L2807](../../daemon/openapi.yaml#L2807) | The `FolderListing` schema that gains `indexed` |
+| [openapi.yaml#L2998](../../daemon/openapi.yaml#L2998) | The `SearchListing` schema that gains `indexed` |
 
 [design.md](../design.md#11-division-of-responsibility-between-documents) holds the map of the document family.
 
 ### 1.2 Creation Date and Target Commit
 
-Created 2026-10-23 / Target commit `47b81b0`
+Created 2026-10-23 / Target commit `47b81b0`. Current State and the steps were rewritten on 2026-10-25 for the search API of `search-condition-panel` at commit `1773c4a` plus that work.
 
 ## 2. Purpose and Completion Conditions
 
@@ -28,8 +28,8 @@ A search from the root of a Library of 10 million Entries returns its first page
 
 ### 2.1 Completion Conditions
 
-1. A recursive listing with conditions, `includeHidden=false`, a local start, and a usable index returns `indexed: true` and the same set of Entries as a walk of the same tree with no external changes since the last aggregation
-2. A recursive listing whose index is not usable, whose start is an archive, or whose `includeHidden` is true returns `indexed: false` and the walked result
+1. A recursive search with conditions and a local start in a Library with a usable index returns `indexed: true` for it and the same set of Entries as a walk of the same tree with no external changes since the last aggregation
+2. A recursive search whose index is not usable, or whose start is an archive, returns `indexed: false` and the walked result; with several Libraries, `indexed` is true only when every Library was answered from its index
 3. A listing answered from the index drops a match whose Entry was deleted externally after aggregation, and returns current sizes and times
 4. With good, bad, tag, and unrated conditions, with and without name terms, a listing answered from the index returns the same Entries as the walk, and a rating write changes its snapshot id
 5. `truncated` is set by the number of matches, so a search from the root whose matches are fewer than `recursive_max_entries` is not truncated on a Library larger than that
@@ -45,21 +45,22 @@ A search from the root of a Library of 10 million Entries returns its first page
 
 ## 3. Current State
 
-[library.rs#L66](../../daemon/entrypoints/daemon/src/service/library.rs#L66) builds every listing with `ListingEntries::scan` at [listing.rs#L250](../../daemon/entrypoints/daemon/src/service/listing.rs#L250), which walks and stops at `recursive_max_entries` walked Entries.
-Name terms are matched at [listing.rs#L223](../../daemon/entrypoints/daemon/src/service/listing.rs#L223) and rating and tag sets are read at [listing.rs#L140](../../daemon/entrypoints/daemon/src/service/listing.rs#L140) when cutting the page.
-The response schema `FolderListing` at [openapi.yaml#L2807](../../daemon/openapi.yaml#L2807) has no field telling how it was answered.
-The web client shows the truncation notice at [Grid.tsx#L160](../../ui-web/src/components/Grid.tsx#L160) and [List.tsx#L153](../../ui-web/src/components/List.tsx#L153).
+[library.rs#L183](../../daemon/entrypoints/daemon/src/service/library.rs#L183) builds every listing, including each Library's listing of `search_entries` at [library.rs#L74](../../daemon/entrypoints/daemon/src/service/library.rs#L74), with `ListingEntries::scan`, which walks and stops at `recursive_max_entries` walked Entries.
+Name terms are matched at [listing.rs#L259](../../daemon/entrypoints/daemon/src/service/listing.rs#L259) and rating and tag sets are read at [listing.rs#L172](../../daemon/entrypoints/daemon/src/service/listing.rs#L172) when cutting the page.
+The response schema `SearchListing` at [openapi.yaml#L2998](../../daemon/openapi.yaml#L2998) has no field telling how it was answered.
+The web client shows the truncation notice at [Grid.tsx#L163](../../ui-web/src/components/Grid.tsx#L163) and [List.tsx#L150](../../ui-web/src/components/List.tsx#L150).
 A search from the root of a large Library therefore waits for the walk and is cut off by its size.
 
 ## 4. Change Policy
 
-Branch in `LibraryBrowser::list_folder_entries` by the conditions of Listing and Search Design §5.2, build the snapshot from an index query plus attribute reads of the matches, and report the branch in the response.
+Branch in `LibraryBrowser::snapshot` by the conditions of Listing and Search Design §5.2, build the snapshot from an index query plus attribute reads of the matches, and report the branch in the response.
 
 ### 4.1 Decisions Assumed
 
 | Decision | Source |
 | --- | --- |
 | `name-index-store` is complete | [name-index-store](./name-index-store.md) |
+| `search-condition-panel` is complete | [search-condition-panel](./search-condition-panel.md) |
 | When to answer from the index, the snapshot of matches, rating and tag candidates | [Listing and Search Design §5.2](../design/listing.md#52-answering-recursive-listings-with-conditions) |
 | Reading the attributes of matches from the file system | [Listing and Search Design §8.1](../design/listing.md#read-the-attributes-of-matching-entries-from-the-file-system) |
 | Trigram matching for terms of 3 or more characters, direct comparison for shorter terms | [Listing and Search Design §8.1](../design/listing.md#match-names-in-the-index-with-trigrams-and-compare-short-terms-directly) |
@@ -70,7 +71,7 @@ Branch in `LibraryBrowser::list_folder_entries` by the conditions of Listing and
 ### 4.2 Scope of Impact
 
 The daemon's listing service, `openapi.yaml`, the generated interface, the web client's generated schema, and its Grid and List change.
-`FolderListing` gains a required response field `indexed`. Clients that ignore unknown fields keep working; the generated clients are regenerated in this work.
+`SearchListing` gains a required response field `indexed`. Clients that ignore unknown fields keep working; the generated clients are regenerated in this work.
 The term `indexed` is already in [terms.md](../terms.md#2-term-list).
 
 ## 5. Steps
@@ -88,10 +89,10 @@ The term `indexed` is already in [terms.md](../terms.md#2-term-list).
 ### Step 1. Add `indexed` to the Listing Contract
 
 **Locations to change**
-[openapi.yaml#L2807](../../daemon/openapi.yaml#L2807), [listing.rs#L102](../../daemon/entrypoints/daemon/src/service/listing.rs#L102), generated `daemon/entrypoints/interface` and `ui-web/src/api/schema.d.ts`
+[openapi.yaml#L2998](../../daemon/openapi.yaml#L2998), [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs), generated `daemon/entrypoints/interface` and `ui-web/src/api/schema.d.ts`
 
 **What to do**
-Add the required boolean `indexed` to `FolderListing`, described as true when the listing was answered from the name index. Regenerate with `daemon/entrypoints/gen-interface.sh` and `npm run gen:api`, and return `false` from the existing walk.
+Add the required boolean `indexed` to `SearchListing`, described as true when every searched Library was answered from its name index, and have the merge in `search.rs` combine the per-Library flags. Regenerate with `daemon/entrypoints/gen-interface.sh` and `npm run gen:api`, and return `false` from the existing walk.
 
 **Completion condition**
 CI's check that the generated interface has no diff passes, and existing listing tests assert `indexed == false`.
@@ -112,7 +113,7 @@ Unit tests show the same matches as `NameFilter` at [listing.rs#L210](../../daem
 ### Step 3. Build Snapshots of Matches
 
 **Locations to change**
-[library.rs#L66](../../daemon/entrypoints/daemon/src/service/library.rs#L66), [snapshot.rs#L242](../../daemon/entrypoints/daemon/src/service/listing/snapshot.rs#L242)
+[library.rs#L183](../../daemon/entrypoints/daemon/src/service/library.rs#L183), [snapshot.rs#L242](../../daemon/entrypoints/daemon/src/service/listing/snapshot.rs#L242)
 
 **What to do**
 When Listing and Search Design §5.2 applies, build a snapshot keyed by the conditions from the index query, read the attributes of the matches with the detail batch's workers, drop missing Entries, stop at `recursive_max_entries` matches, and set `indexed: true`. Otherwise keep the walk.
@@ -124,7 +125,7 @@ Tests show conditions 1, 2, 3, and 5 against a temporary Library aggregated once
 ### Step 4. Start from Ratings and Tags
 
 **Locations to change**
-[listing.rs#L140](../../daemon/entrypoints/daemon/src/service/listing.rs#L140)
+[listing.rs#L172](../../daemon/entrypoints/daemon/src/service/listing.rs#L172)
 
 **What to do**
 For listings answered from the index, pass the rated or tagged paths under the start as candidates, or for unrated the index's images and videos minus the rated paths, and include the version of ratings and tags in the snapshot's key.
@@ -136,7 +137,7 @@ Tests show condition 4.
 ### Step 5. Show the Notice for Walked Results
 
 **Locations to change**
-[Grid.tsx#L160](../../ui-web/src/components/Grid.tsx#L160), [List.tsx#L153](../../ui-web/src/components/List.tsx#L153)
+[Grid.tsx#L163](../../ui-web/src/components/Grid.tsx#L163), [List.tsx#L150](../../ui-web/src/components/List.tsx#L150)
 
 **What to do**
 In search mode with a recursive scope and a start outside archives, display the notice of Client Design §3.6 when the first page's `indexed` is false.

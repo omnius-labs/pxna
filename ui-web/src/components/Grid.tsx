@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { useDragScroll } from "../library/dnd";
-import { type Entry, entryPlace, isFolderLike, isThumbnailable } from "../library/entries";
+import { type Entry, isFolderLike, isThumbnailable } from "../library/entries";
 import { gridLayout, PLACE_HEIGHT, rowHeight, TILE_GAP } from "../library/grid";
-import { isFiltering, locationFilter, useFolderListing } from "../library/listing";
+import { type ListingSource, sourceScope, useListing } from "../library/listing";
 import type { DisplaySet, SortPreference } from "../library/preferences";
 import { type Selection, selectionItem, selectionValue } from "../library/selection";
 import { type SelectionProgress, useEntryInteraction } from "../library/useEntryInteraction";
 import { useListingRows } from "../library/useListingRows";
 import { useRevealEntry } from "../library/useRevealEntry";
-import type { BrowseLocation } from "../location";
 import { type ScrollDirection, tilePriority, wantedPagesForRows, wantedRows } from "../thumbnails/range";
 import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { EntryMenu } from "./EntryMenu";
@@ -16,7 +15,10 @@ import { LoadFailure } from "./LoadFailure";
 import { Tile } from "./Tile";
 
 interface GridProps {
-    location: BrowseLocation;
+    /// 一覧の出どころ。フォルダの直下か、検索である。
+    source: ListingSource;
+    /// 検索の結果に出す場所。省略すると場所を出さない。
+    place?: (entry: Entry) => string;
     libraryReadonly?: boolean;
     /// タイルサイズの段階（1 から 5）。
     tileSize: number;
@@ -36,7 +38,8 @@ interface GridProps {
 
 /// 全件の高さを先に確保し、見えている範囲と先読みのページだけを読む。
 export function Grid({
-    location,
+    source,
+    place,
     libraryReadonly = false,
     tileSize,
     shape,
@@ -50,11 +53,12 @@ export function Grid({
     reveal,
     onRevealed,
 }: GridProps) {
-    const filter = locationFilter(location);
-    const searching = isFiltering(filter);
-    const recursive = searching && !!location.recursive;
+    const searching = source.kind === "search";
+    const recursive = place !== undefined;
+    const libraryId = sourceScope(source);
+    const folderPath = source.kind === "folder" ? source.path : "/";
     const [wantedPages, setWantedPages] = useState<ReadonlySet<number>>(new Set());
-    const listing = useFolderListing(location.libraryId, location.path, sort, wantedPages, filter);
+    const listing = useListing(source, sort, wantedPages);
     const { totalCount, version } = listing;
 
     // スクロール領域は、一覧を読み終えるまで描画されない。要素を state に持ち、現れたときに幅を測り始める。
@@ -82,7 +86,7 @@ export function Grid({
         listing,
         columns,
         virtualizer,
-        folderPath: location.path,
+        folderPath,
         name: reveal,
         onSelect: (entry, index) =>
             onSelectionChange({
@@ -95,7 +99,6 @@ export function Grid({
     // サムネイルの要求のキュー。見えているタイルと、スクロールの方向へ画面 1 枚分の先読みのタイルだけを、画面の中央に近い順に要求する。
     // 大きさと形は、タイルサイズか形を変えたときに決め直し、サムネイルとスプライトシートに同じ値を使う。
     // 一覧の幅が変わっただけでは決め直さない。幅を変えている間に、要求が続けて出ないようにするためである。
-    const { libraryId } = location;
     const { queue, size } = useThumbnailQueue(libraryId, tileSize, narrow, shape);
 
     // スクロールが止まると方向は null に戻るので、最後にスクロールした方向を覚える。
@@ -159,7 +162,7 @@ export function Grid({
 
     const notice = listing.truncated ? (
         <p role="status" className="shrink-0 border-b p-3 text-sm text-muted-foreground">
-            結果の一部を表示しています。起点のフォルダを下げて探し直してください。
+            結果の一部を表示しています。Library を絞るか、場所を下げて探し直してください。
         </p>
     ) : null;
     if (totalCount === undefined && listing.pageStatus(0) === "error") {
@@ -200,7 +203,7 @@ export function Grid({
                     className="min-h-0 flex-1 overflow-auto"
                     role="listbox"
                     aria-multiselectable="true"
-                    aria-label={location.path}
+                    aria-label={folderPath}
                 >
                     <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
                         {virtualRows.map((row) => (
@@ -233,7 +236,7 @@ export function Grid({
                                                 <Tile
                                                     key={entry.path}
                                                     entry={entry}
-                                                    place={recursive ? entryPlace(location.path, entry) : undefined}
+                                                    place={place?.(entry)}
                                                     index={index}
                                                     selected={selection.items.has(entry.path)}
                                                     queue={queue}

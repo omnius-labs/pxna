@@ -32,8 +32,8 @@ If you want to know what works now, read §9 first.
 ## 2. Responsibilities and Boundaries
 
 This document covers the span from receiving the inside of a folder or archive that a checked `NestedPath` points to, to returning the Entries of the requested range as a response.
-`listFolderEntries` returns detail listings and recursive name search. The advance display of direct children's names and kinds uses the summary listing.
-Search is handled as a listing with a name condition (§5).
+`listFolderEntries` returns detail listings. The advance display of direct children's names and kinds uses the summary listing.
+Search is handled as a listing with conditions (§5), and `listSearchEntries` merges the listings of one or more Libraries into one sequence (§5.3).
 A recursive listing with conditions is answered from the name index without walking the file system (§5.1, §5.2).
 
 The client jumps to any position by the scrollbar even for a large folder, and reads only the page at that position ([Client Design §3.5](./client.md#35-loading-listings)).
@@ -77,6 +77,8 @@ A listing is a sequence of Entries determined by the target (Library and `path`)
 
 `totalCount` is the count after applying `foldersOnly`, `includeHidden`, and `query`.
 With this value the client decides the overall height of the listing from the first page.
+
+The search API takes the same specifications except `includeHidden` and `foldersOnly`, applies them to the listing of each Library, and also takes rating and tag conditions (§5.3).
 
 ## 4. Snapshots
 
@@ -223,6 +225,26 @@ With the unrated condition, the candidates are the image and video rows of the i
 A rated path whose Entry has been deleted externally is not in the index and does not appear in the results.
 The version of ratings and tags is part of the combination, so a snapshot with a rating or tag condition is rebuilt from the index when they are written ([Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings)).
 
+### 5.3 Searching Across Libraries
+
+`listSearchEntries` searches the Libraries named by `libraryIds` and returns their matching Entries as one sequence, each with its Library id.
+For each Library, the listing of its start with the given `recursive`, `query`, rating, and tag conditions is built by the rules of §4, §5, and the two sections above, and the server merges these listings in the order of `sort`, `order`, and `foldersFirst`.
+Entries are told apart by path within a Library, so two Entries compare as equal only when they have the same path in different Libraries, and those are ordered by the position of their Library in `libraryIds`.
+
+The start is given by `path` only when `libraryIds` names one Library.
+With several Libraries, the root of each Library is the start, and a `path` other than `/` is `InvalidInput`.
+Hidden Entries are always excluded, and `includeHidden` and `foldersOnly` are not accepted.
+An id that names no Library is `NotFound`.
+
+The merged sequence is not kept as a snapshot of its own.
+Each Library's listing comes from the snapshot of §4.1 for that combination, which is shared with folder listings of the same target, and each page request merges the per-Library orders again from the head.
+The cost of cutting a page therefore grows with `offset` and the number of Libraries, but no memory beyond the per-Library snapshots is held.
+The response's snapshot id joins the identifiers of the per-Library listings, including the version of ratings and tags while a rating or tag condition is given ([Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings)).
+When any one of them is rebuilt, the id changes, and the client rereads as with other listings (§4.2).
+
+`totalCount` is the sum of the per-Library counts.
+The recursion limit of §6 applies to each Library separately, and the response lists the Libraries whose listing was cut off in `truncatedLibraryIds`.
+
 ## 6. Recursion Limit
 
 A recursive walk is cut off when the Entries put in the snapshot reach `recursive_max_entries`.
@@ -233,11 +255,13 @@ The limit is there to hold down memory and the wait until the first page.
 In a subtree search from the Library root, the snapshot would hold the Entries of the whole Library.
 Without the limit, one search would use memory and wait time proportional to the size of the Library.
 
+In a search across Libraries, the limit is counted for each Library separately, so the memory and the wait until the first page can reach as many times the single-Library amount as there are Libraries (§5.3).
+
 For a listing answered from the name index, the same `recursive_max_entries` limits the number of matching Entries put in the snapshot (§5.2).
 Matching Entries are a part of the Entries underneath, so a search from the Library root is not cut off unless the conditions themselves match that many.
 There is no walk to bound, and the query is stopped when all requests waiting for it disconnect, as with a scan (§4.1).
 
-When the client receives `truncated`, it indicates that the result is partial and urges moving the starting point down ([Client Design §3.6](./client.md#36-search)).
+When the client receives `truncated`, or a non-empty `truncatedLibraryIds` from the search API, it indicates that the result is partial and urges narrowing the Libraries or moving the start down ([Client Design §3.6](./client.md#36-search)).
 
 ## 7. Configuration
 
@@ -335,8 +359,9 @@ It also needs no stat on every request, but external changes would not be visibl
 #### Treat Name Search as a Listing Condition
 
 **Decision**
-Name search is done with `query` of `listFolderEntries`, and search underneath is done in combination with `recursive=true`.
-There is no dedicated search API.
+Name search is a condition on listings, and search underneath is the combination with `recursive=true`.
+`listFolderEntries` accepts `query`, and `listSearchEntries`, which search mode uses, applies the same conditions to the listing of each Library and merges them (§5.3).
+Search has no mechanism of its own apart from listings.
 
 **Reason**
 Search results can also use snapshots, sorting, `totalCount`, and extracting a page at any position as they are.
@@ -352,6 +377,26 @@ The first results appear immediately, but the order changes as they arrive, so v
 **Rejected alternative 2**
 Keeping a search API (`searchEntries`) that waits until the scan finishes or `limit` items are reached and returns in scan order.
 The previous implementation took this form, and no server change is needed, but there is no way to fetch the continuation and sorting is left to the client, so we rejected it.
+
+#### Search Several Libraries by Merging Per-Library Listings on the Server
+
+**Decision**
+`listSearchEntries` accepts several Libraries, builds the listing of each with the snapshots of §4.1, and merges them on the server for every page.
+The recursion limit is counted for each Library (§5.3, §6).
+
+**Reason**
+The client's virtual scrolling needs one sequence with `totalCount` and pages at any `offset` ([Client Design §3.5](./client.md#35-loading-listings)), and only the server can cut such a page out of several Libraries without reading all of them.
+Per-Library snapshots are shared with folder listings, and the name index also answers per Library (§5.2), so building the merged search on them needs no second kind of snapshot.
+Counting the limit per Library keeps each Library's result the same as when it is searched alone.
+The cost is that a search across many large Libraries can hold as many truncated snapshots and wait as many walks as there are Libraries while the name index is not usable.
+
+**Rejected alternative 1**
+A method in which the client calls the single-Library listing of each Library and joins the results.
+No server change would be needed, but there is no overall order or `totalCount` for the joined sequence, so a page in the middle could not be read without reading everything before it, and we rejected it.
+
+**Rejected alternative 2**
+A method that counts the recursion limit over all the Libraries together.
+The memory bound would stay that of one search, but a Library walked later would lose its results depending on the order of the walk, so we rejected it.
 
 <a id="name-index"></a>
 #### Answer Recursive Searches from a Library-Wide Name Index Updated by Aggregation
@@ -555,7 +600,9 @@ A listing with `query` uses the same snapshots.
 The `[listing]` configuration, checking freshness by the target's version and elapsed time, sharing the scan among concurrent requests, stopping the scan when all requests have disconnected, and discarding by capacity and expiry work according to the rules of §4 through §7.
 `LibraryBrowser` reads snapshots, and `LibraryMutation` and `OperationService` discard ancestors' snapshots after the daemon's own changes.
 
-The name index of §5.1 and §5.2 is not implemented. Recursive listings with conditions always walk the file system and are cut off by the number of walked Entries.
+`listSearchEntries` is implemented by [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) and `LibraryBrowser::search_entries`: each Library's listing comes from the same snapshots as `listFolderEntries`, and `SearchResults` merges their sorted, filtered orders on every page (§5.3). `listFolderEntries` accepts only the name condition; rating and tag conditions are accepted only by the search API.
+
+The name index of §5.1 and §5.2 is not implemented. Recursive listings with conditions, including the search API's, always walk the file system and are cut off by the number of walked Entries for each Library.
 
 ### 9.2 Roadmap
 

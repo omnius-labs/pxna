@@ -29,9 +29,9 @@ describe("router", () => {
     });
 });
 
-it("検索モードの値を文字列として検証し、flat は 1 だけを通す", async () => {
-    const leaf = await leafAt("/search/photos?q=1e3&path=%2Fa&flat=1&view=a%2Fb.png");
-    expect(leaf?.fullPath).toBe("/search/$libraryId");
-    expect(leaf?.search).toEqual({ q: "1e3", path: "/a", flat: "1", view: "a/b.png" });
-    expect((await leafAt("/search/photos?q=a&flat=true"))?._strictSearch).toEqual({ q: "a" });
+it("検索モードの値を文字列として検証し、flat は 1 だけを通し、繰り返したキーは配列にする", async () => {
+    const leaf = await leafAt("/search?q=1e3&lib=a&lib=b&tag=x&tag=y&flat=1&view=a%2Fb.png");
+    expect(leaf?.fullPath).toBe("/search");
+    expect(leaf?.search).toEqual({ q: "1e3", lib: ["a", "b"], tag: ["x", "y"], flat: "1", view: "a/b.png" });
+    expect((await leafAt("/search?q=a&flat=true"))?._strictSearch).toEqual({ q: "a" });
 });

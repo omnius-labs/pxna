@@ -6,6 +6,9 @@ import { actionAvailability, EntryActionContext, type EntryActionState } from ".
 import { testEntry } from "../testing/entries";
 import { EntryMenu, EntryToolbar } from "./EntryMenu";
 
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }));
+
 const state = (): EntryActionState => ({
     libraryId: "ops",
     libraryReadonly: false,
@@ -224,3 +227,65 @@ it.each([false, true])(
         }
     },
 );
+
+async function openMenu(actions: EntryActionState, entry?: Parameters<typeof EntryMenu>[0]["entry"]) {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () =>
+        root.render(
+            <EntryActionContext.Provider value={actions}>
+                <EntryMenu entry={entry}>
+                    <span>entry</span>
+                </EntryMenu>
+            </EntryActionContext.Provider>,
+        ),
+    );
+    await act(async () =>
+        host
+            .querySelector('[data-slot="context-menu-trigger"]')!
+            .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, button: 2 })),
+    );
+    const items = () => [...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent);
+    return {
+        items,
+        select: (label: string) =>
+            act(async () => {
+                [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+                    .find((item) => item.textContent === label)
+                    ?.click();
+            }),
+        dispose: async () => {
+            await act(async () => root.unmount());
+            host.remove();
+        },
+    };
+}
+it("フォルダ表示の空き領域のメニューは、そのフォルダを起点にした検索を開く", async () => {
+    navigate.mockReset();
+    const menu = await openMenu({ ...state(), folderPath: "/a/b" });
+    try {
+        expect(menu.items()).toContain("このフォルダ内を検索");
+        await menu.select("このフォルダ内を検索");
+        expect(navigate).toHaveBeenCalledWith({ href: "/search?lib=ops&path=%2Fa%2Fb" });
+    } finally {
+        await menu.dispose();
+    }
+});
+it("Entry のメニューと、Library を横断する画面のメニューには、フォルダ内の検索を出さない", async () => {
+    const entry = { path: "/a", name: "a", kind: "file" as const, metadata: { size: 1, readonly: false } };
+    const onEntry = await openMenu({ ...state(), folderPath: "/" }, entry);
+    try {
+        expect(onEntry.items()).not.toContain("このフォルダ内を検索");
+    } finally {
+        await onEntry.dispose();
+    }
+    const cross = await openMenu({ ...state(), libraryId: "*", crossLibrary: true });
+    try {
+        expect(cross.items()).not.toContain("このフォルダ内を検索");
+        expect(cross.items()).toContain("フォルダで表示");
+    } finally {
+        await cross.dispose();
+    }
+});

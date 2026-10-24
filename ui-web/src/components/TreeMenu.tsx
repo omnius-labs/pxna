@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { folderListingStore } from "../library/listing";
 import { folderQuery } from "../library/queries";
 import { useTransfer } from "../library/transfer";
 import type { TreeNode } from "../library/tree";
+import { searchHref } from "../location";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "./ui/context-menu";
 
 export function TreeMenu({
@@ -22,6 +24,7 @@ export function TreeMenu({
     onDelete(): void;
 }) {
     const transfer = useTransfer();
+    const navigate = useNavigate();
     const [open, setOpen] = useState(false);
     const preserveFocus = useRef(false);
     const client = useQueryClient();
@@ -29,14 +32,7 @@ export function TreeMenu({
     useEffect(() => {
         if (!open || narrow || node.path === "/") return;
         const parent = node.path.slice(0, node.path.lastIndexOf("/")) || "/";
-        const store = folderListingStore(
-            client,
-            node.libraryId,
-            parent,
-            { key: "name", order: "asc" },
-            undefined,
-            true,
-        );
+        const store = folderListingStore(client, node.libraryId, parent, { key: "name", order: "asc" }, true);
         store.setDetailPriority(detailOwner, [node.path]);
         return () => store.releaseDetailPriority(detailOwner);
     }, [open, narrow, node.libraryId, node.path, client, detailOwner]);
@@ -70,6 +66,13 @@ export function TreeMenu({
                     }}
                 >
                     貼り付け
+                </ContextMenuItem>
+                <ContextMenuItem
+                    onSelect={() =>
+                        void navigate({ href: searchHref({ libraryIds: [node.libraryId], path: node.path, tags: [] }) })
+                    }
+                >
+                    このフォルダ内を検索
                 </ContextMenuItem>
                 {node.path !== "/" && (
                     <>

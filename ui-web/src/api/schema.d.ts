@@ -333,15 +333,47 @@ export interface paths {
          * List folder entries
          * @description Lists direct children by default. Set `recursive=true` only for an
          *     explicit recursive traversal within the selected Library.
-         *
-         *     `rating` and `tag` keep only the images and videos that the
-         *     current user has rated or tagged that way; they combine with the
-         *     other filters. While one of them is set, `snapshot` also changes
-         *     whenever the user rates or tags anything, so a client that pages
-         *     through the result re-reads from the start instead of mixing
-         *     pages from before and after the change.
          */
         get: operations["listFolderEntries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search entries across Libraries
+         * @description Applies the name, rating, and tag conditions to the listing of
+         *     the start in each of `libraryIds`, and returns the matches as one
+         *     sequence ordered by `sort`, `order`, and `foldersFirst`. Entries
+         *     that compare equal, which only happens for the same path in
+         *     different Libraries, follow the order of `libraryIds`.
+         *
+         *     `path` may name a start other than `/` only when `libraryIds`
+         *     has one Library; with several, every Library is searched from
+         *     its root. Hidden entries are never returned.
+         *
+         *     `rating` and `tag` keep only the images and videos that the
+         *     current user has rated or tagged that way; several `tag` values
+         *     must all be present. While one of them is set, `snapshot` also
+         *     changes whenever the user rates or tags anything, so a client
+         *     that pages through the result re-reads from the start instead of
+         *     mixing pages from before and after the change.
+         *
+         *     `recursive` traversal is cut off per Library at the configured
+         *     entry limit, and the Libraries cut off are listed in
+         *     `truncatedLibraryIds`.
+         */
+        get: operations["listSearchEntries"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1331,6 +1363,25 @@ export interface components {
             /** @description True when recursive traversal reached its entry limit. */
             truncated: boolean;
         };
+        SearchEntry: {
+            libraryId: components["schemas"]["LibraryId"];
+            entry: components["schemas"]["FileSystemEntry"];
+        };
+        SearchListing: {
+            entries: components["schemas"]["SearchEntry"][];
+            /**
+             * Format: int64
+             * @description Sum of the per-Library counts after filtering.
+             */
+            totalCount: number;
+            /**
+             * @description Opaque identifier of the merged listing. It changes when
+             *     the listing of any searched Library is rebuilt.
+             */
+            snapshot: string;
+            /** @description Libraries whose recursive traversal reached the entry limit. */
+            truncatedLibraryIds: components["schemas"]["LibraryId"][];
+        };
         Capabilities: {
             summaryListing: boolean;
             entryDetails: boolean;
@@ -1834,6 +1885,11 @@ export interface components {
          */
         TimelineLibraryIdsQuery: components["schemas"]["LibraryId"][];
         /**
+         * @description Libraries to search, repeated as `libraryIds=a&libraryIds=b`.
+         *     Every id must name a Library; an unknown id is 404.
+         */
+        SearchLibraryIdsQuery: components["schemas"]["LibraryId"][];
+        /**
          * @description Path relative to the selected Library.
          * @example /photos/2026
          */
@@ -1874,12 +1930,12 @@ export interface components {
          */
         RatingFilterQuery: "good" | "bad" | "none";
         /**
-         * @description Return only images and videos that have this tag of the current
-         *     user. The word is trimmed like a tag being set; a word the user
-         *     has never used selects nothing. `totalCount` counts the entries
-         *     after this filter.
+         * @description Return only images and videos that have all of these tags of the
+         *     current user, repeated as `tag=a&tag=b`. Each word is trimmed
+         *     like a tag being set; a word the user has never used selects
+         *     nothing. `totalCount` counts the entries after this filter.
          */
-        TagFilterQuery: components["schemas"]["TagName"];
+        TagFiltersQuery: components["schemas"]["TagName"][];
         /**
          * @description Single HTTP byte range as defined by RFC 7233, including suffix
          *     ranges such as `bytes=-500`. The daemon parses this header itself,
@@ -2448,20 +2504,6 @@ export interface operations {
                  *     true. `totalCount` counts the entries after this filter.
                  */
                 foldersOnly?: components["parameters"]["FoldersOnlyQuery"];
-                /**
-                 * @description Return only images and videos with this rating of the current
-                 *     user. `none` selects the images and videos that have not been
-                 *     rated. Folders and other files never match. `totalCount` counts
-                 *     the entries after this filter.
-                 */
-                rating?: components["parameters"]["RatingFilterQuery"];
-                /**
-                 * @description Return only images and videos that have this tag of the current
-                 *     user. The word is trimmed like a tag being set; a word the user
-                 *     has never used selects nothing. `totalCount` counts the entries
-                 *     after this filter.
-                 */
-                tag?: components["parameters"]["TagFilterQuery"];
             };
             header?: never;
             path: {
@@ -2486,6 +2528,75 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listSearchEntries: {
+        parameters: {
+            query: {
+                /**
+                 * @description Libraries to search, repeated as `libraryIds=a&libraryIds=b`.
+                 *     Every id must name a Library; an unknown id is 404.
+                 */
+                libraryIds: components["parameters"]["SearchLibraryIdsQuery"];
+                /** @description Start relative to the Library. Only with one Library. */
+                path?: components["schemas"]["RelativePath"];
+                /** @description Whether to include descendants below the requested folder. */
+                recursive?: components["parameters"]["RecursiveQuery"];
+                /**
+                 * @description Whitespace-separated terms that must all occur in an entry name.
+                 *     Names and terms are normalized with NFKC and converted to lowercase.
+                 */
+                query?: components["parameters"]["NameFilterQuery"];
+                /**
+                 * @description Return only images and videos with this rating of the current
+                 *     user. `none` selects the images and videos that have not been
+                 *     rated. Folders and other files never match. `totalCount` counts
+                 *     the entries after this filter.
+                 */
+                rating?: components["parameters"]["RatingFilterQuery"];
+                /**
+                 * @description Return only images and videos that have all of these tags of the
+                 *     current user, repeated as `tag=a&tag=b`. Each word is trimmed
+                 *     like a tag being set; a word the user has never used selects
+                 *     nothing. `totalCount` counts the entries after this filter.
+                 */
+                tag?: components["parameters"]["TagFiltersQuery"];
+                /** @description Sort key for folder entries. */
+                sort?: components["parameters"]["SortQuery"];
+                /** @description Sort direction. */
+                order?: components["parameters"]["OrderQuery"];
+                /**
+                 * @description Place folders, and files whose `file.archive` hint is true,
+                 *     before the other entries. `sort` and `order` apply within each
+                 *     of the two groups.
+                 */
+                foldersFirst?: components["parameters"]["FoldersFirstQuery"];
+                /** @description Offset in the sorted and filtered listing. */
+                offset?: components["parameters"]["ListOffsetQuery"];
+                /** @description Maximum number of entries to return. */
+                limit?: components["parameters"]["ListLimitQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matching entries of the Libraries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchListing"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
             504: components["responses"]["GatewayTimeout"];
         };

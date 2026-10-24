@@ -20,21 +20,13 @@ import { type Entry, entryKind, isFolderLike } from "../library/entries";
 import { canMutate } from "../library/entryActions";
 import { rememberFolder } from "../library/folderReturn";
 import { useInfoPanel } from "../library/infoPanel";
-import { isFiltering, locationFilter } from "../library/listing";
 import { usePreferences } from "../library/preferences";
 import { folderQuery, librariesQuery } from "../library/queries";
 import { emptySelection, type Selection, selectionBytes } from "../library/selection";
 import { clipboardCommand, isTypingTarget } from "../library/shortcuts";
 import { useTransfer } from "../library/transfer";
 import type { SelectionProgress } from "../library/useEntryInteraction";
-import {
-    type BrowseLocation,
-    browseHref,
-    browseLocation,
-    relativePath,
-    type SearchLocation,
-    searchHref,
-} from "../location";
+import { type BrowseLocation, browseHref, browseLocation, relativePath, searchHref } from "../location";
 import { fileContentUrl } from "../viewer/urls";
 
 export function BrowsePage() {
@@ -46,16 +38,9 @@ export function BrowsePage() {
     return <BrowseScreen location={location} />;
 }
 
-interface BrowseScreenProps {
-    location: BrowseLocation;
-    /// 検索モードの位置。あれば、`location` は検索の起点と条件で、一覧の要求とビューアの移動を検索の URL で行う。
-    search?: SearchLocation;
-}
-
-/// フォルダ表示と検索モードが共有する画面。
-export function BrowseScreen({ location, search }: BrowseScreenProps) {
+/// フォルダ表示の画面。
+function BrowseScreen({ location }: { location: BrowseLocation }) {
     const { libraryId } = location;
-    const searching = search !== undefined;
     const navigate = useNavigate();
     const libraries = useQuery(librariesQuery);
     const libraryReadonly = libraries.data?.find((library) => library.id === libraryId)?.readonly ?? true;
@@ -63,8 +48,7 @@ export function BrowseScreen({ location, search }: BrowseScreenProps) {
     const infoPanel = useInfoPanel();
 
     const folder = useQuery(folderQuery(libraryId, location.path));
-    const canCreate =
-        !narrow && !searching && folder.isSuccess && canMutate({ readonly: libraryReadonly }, folder.data);
+    const canCreate = !narrow && folder.isSuccess && canMutate({ readonly: libraryReadonly }, folder.data);
     const [deletion, setDeletion] = useState<DeleteTarget>();
     const [editing, setEditing] = useState<EntryEditing>();
     const finish = useCallback(() => setEditing(undefined), []);
@@ -82,17 +66,9 @@ export function BrowseScreen({ location, search }: BrowseScreenProps) {
     const [totalCount, setTotalCount] = useState<number>();
     const [progress, setProgress] = useState<SelectionProgress>();
 
-    /// フォルダ、一覧の表示、検索の条件を変えたら、選択と読み込み済みの一覧を捨てる。画面の外枠とツリーは残し、展開の状態とフォーカスを保つ。
+    /// フォルダと一覧の表示を変えたら、選択と読み込み済みの一覧を捨てる。画面の外枠とツリーは残し、展開の状態とフォーカスを保つ。
     // 位置を移すたびに effect で状態を直すと再描画が重なるので、描画の中で前の位置と比べて直す。
-    const viewKey = JSON.stringify([
-        location.libraryId,
-        location.path,
-        set.view,
-        location.query,
-        !!location.recursive,
-        location.rating,
-        location.tag,
-    ]);
+    const viewKey = JSON.stringify([location.libraryId, location.path, set.view]);
     const [seenView, setSeenView] = useState(viewKey);
     if (viewKey !== seenView) {
         setSeenView(viewKey);
@@ -144,6 +120,12 @@ export function BrowseScreen({ location, search }: BrowseScreenProps) {
                 document.querySelector('[role="dialog"], [role="alertdialog"]')
             )
                 return;
+            // `/` は、このフォルダを起点に、条件のない検索モードを開く。
+            if (event.key === "/" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+                event.preventDefault();
+                void navigate({ href: searchHref({ libraryIds: [libraryId], path: location.path, tags: [] }) });
+                return;
+            }
             const command = clipboardCommand(event);
             if (command === "paste" && canCreate && transfer?.canPaste) {
                 event.preventDefault();
@@ -201,6 +183,7 @@ export function BrowseScreen({ location, search }: BrowseScreenProps) {
         transfer,
         libraryId,
         location.path,
+        navigate,
     ]);
 
     const selectedFile = selection.items.size === 1 ? [...selection.items][0] : undefined;
@@ -214,13 +197,12 @@ export function BrowseScreen({ location, search }: BrowseScreenProps) {
         if (isFolderLike(entry)) {
             void navigate({ href: browseHref({ libraryId: location.libraryId, path: entry.path }) });
         } else if (entryKind(entry) === "image" || entryKind(entry) === "video") {
-            const view = relativePath(location.path, entry.path);
-            void navigate({ href: search ? searchHref({ ...search, view }) : browseHref({ ...location, view }) });
+            void navigate({ href: browseHref({ ...location, view: relativePath(location.path, entry.path) }) });
         }
     };
     const changeView = (name: string | undefined) =>
         void navigate({
-            href: search ? searchHref({ ...search, view: name }) : browseHref({ ...location, view: name }),
+            href: browseHref({ ...location, view: name }),
             replace: true,
         });
     // タイムラインの「フォルダで表示」で開いたときは、その Entry を選んで見せた後に、URL から名前を外す。
@@ -248,7 +230,6 @@ export function BrowseScreen({ location, search }: BrowseScreenProps) {
         >
             <AppShell
                 location={location}
-                search={search}
                 actions={
                     <>
                         <EntryToolbar />
@@ -280,13 +261,11 @@ export function BrowseScreen({ location, search }: BrowseScreenProps) {
                     ) : (
                         <p className="p-4 text-muted-foreground">Library を読み込み中…</p>
                     )
-                ) : searching && !isFiltering(locationFilter(location)) ? (
-                    <p className="p-4 text-muted-foreground">検索語を入力するか、評価かタグを選んでください。</p>
                 ) : set.view === "list" ? (
                     <List
                         key={`${viewKey}:${sortKey}`}
                         libraryReadonly={libraryReadonly}
-                        location={location}
+                        source={{ kind: "folder", libraryId, path: location.path }}
                         shape={set.thumbnailShape}
                         narrow={narrow}
                         sort={sort}
@@ -303,7 +282,7 @@ export function BrowseScreen({ location, search }: BrowseScreenProps) {
                     <Grid
                         key={`${viewKey}:${sortKey}`}
                         libraryReadonly={libraryReadonly}
-                        location={location}
+                        source={{ kind: "folder", libraryId, path: location.path }}
                         tileSize={set.tileSize}
                         shape={set.thumbnailShape}
                         narrow={narrow}
@@ -324,9 +303,10 @@ export function BrowseScreen({ location, search }: BrowseScreenProps) {
                 onClose={() => setDeletion(undefined)}
                 onDeleted={() => setSelection(emptySelection)}
             />
-            {location.view !== undefined && (!searching || isFiltering(locationFilter(location))) && (
+            {location.view !== undefined && (
                 <Viewer
                     location={location}
+                    source={{ kind: "folder", libraryId, path: location.path }}
                     sort={sort}
                     originalImage={set.originalImage}
                     narrow={narrow}
