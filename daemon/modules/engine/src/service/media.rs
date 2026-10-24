@@ -113,7 +113,7 @@ impl MediaInfoService {
                 .map_err(|error| Error::from_error(error, ErrorKind::TaskError))??;
                 Ok(to_info(image(width, height), 0, exif))
             }
-            Some(MediaKind::FfmpegImage) => {
+            Some(MediaKind::FfmpegImage | MediaKind::HeifImage) => {
                 let (width, height, rotation) = self.tools.probe_image_size(file).await?;
                 let path = file.to_path_buf();
                 let exif = tokio::task::spawn_blocking(move || ImageInspector::read_exif(&path))

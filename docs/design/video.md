@@ -73,9 +73,11 @@ An Entry in an archive is made a physical file with `materialize_file` and then 
 
 For the dimensions of an image, whether the orientation is applied differs by format.
 For formats read with the `image` crate, they are the width and height after applying the EXIF orientation, obtained from the file header.
-For formats decided to be read with ffmpeg (HEIC, AVIF, and so on), they are the width and height as encoded that ffprobe returns, and are not swapped.
+For formats decided to be read with ffmpeg or heif-dec (HEIC, AVIF, and so on), they are the width and height as encoded that ffprobe returns, and are not swapped.
+For an image encoded as a tile grid, they are the width and height of the assembled image in the Tile Grid stream group, not those of one tile ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)).
+An ffprobe that does not know the option that outputs stream groups fails (5.1 and 6.1 among the versions checked), so the server runs it again without the option and uses the first video stream.
 
-For the rotation of formats read with ffmpeg, the rotation ffprobe returns (the `rotation` of the Display Matrix in `side_data_list`) is returned separately as `rotation`.
+For the rotation of these formats, the rotation ffprobe returns (the `rotation` of the Display Matrix in `side_data_list` of the Tile Grid or of the stream) is returned separately as `rotation`.
 The value is the counterclockwise angle by which the stored image is rotated for display, and the server internally normalizes it to one of 0, 90, 180, or 270 degrees. A value that is not a multiple of 90 is treated as 0.
 In the response, `rotation` is omitted when it is 0.
 Formats read with the `image` crate already have the orientation reflected in the width and height, so `rotation` is not returned (§7.1).
@@ -238,8 +240,8 @@ When `rotation` is 90 or 270 degrees, the client swaps the width and height for 
 **Reason**
 ffprobe of ffmpeg 8.1.1 returns AVIF's `irot` as the `rotation` of the Display Matrix in `side_data_list`, separately from the width and height, and the width and height stay as encoded.
 ffmpeg 8.1.1's decoding applies the rotation, and ffmpeg 5.1 to 7.1 neither report nor apply it ([Measurements of ffprobe](../knowledge/ffprobe-heif-rotation.md)).
-Thumbnails and display images are made from images decoded by the same ffmpeg, so the returned rotation and their orientation agree with either version, although of the versions checked, the rotation takes effect only with ffmpeg 8.1.1.
-HEIC has `irot` through the same HEIF mechanism as AVIF, so the same result is expected, but we have not confirmed it with a real file.
+For a HEIC tile grid, ffprobe of ffmpeg 9.0.2 returns `irot` on the Tile Grid, and ffprobe of 8.1.3 does not ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)).
+The Docker image bundles ffmpeg 9.0 ([design.md](../design.md#bundle-a-pinned-static-build-of-ffmpeg)), where the rotation ffprobe returns and the rotation that decoding by ffmpeg and heif-dec applies to thumbnails and display images agree for both AVIF and HEIC.
 Dimensions and rotation are separate facts, so if they are returned as is, the server does not need a rule for interpreting an image's orientation, and the client can handle it to suit the display.
 
 **Rejected alternative 1**
@@ -327,7 +329,7 @@ Media info is returned from the cache shared with thumbnail generation, and tran
 Seeking far ahead and backward, the concurrency limit, expiry, the body's lease, and resource reclamation are confirmed with real ffmpeg and HTTP tests.
 The media info response is split into images and videos by `kind`.
 For images, it returns the MIME type decided from the extension, the dimensions with the EXIF orientation applied, and the shooting info read by kamadak-exif, and does not return location information.
-For formats read with ffmpeg such as HEIC, the dimensions are obtained from ffprobe as the width and height as encoded, and the rotation is returned separately as `rotation` (§7.1).
+For formats read with ffmpeg or heif-dec such as HEIC, the dimensions are obtained from ffprobe as the width and height as encoded, preferring the Tile Grid of a tiled image, and the rotation is returned separately as `rotation` (§7.1).
 Images and videos share the same LRU and the upper limit on concurrent ffprobe runs.
 
 ### 8.2 Roadmap

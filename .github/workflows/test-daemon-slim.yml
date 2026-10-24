@@ -142,10 +142,11 @@ jobs:
           workspaces: |
             daemon -> target
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install ffmpeg and libheif
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libheif-examples libheif-plugin-libde265
 
       - name: Test
         env:
           PXNA_REQUIRE_FFMPEG: "1"
+          PXNA_REQUIRE_HEIF_DEC: "1"
         run: cargo make test

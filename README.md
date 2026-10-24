@@ -16,7 +16,7 @@ Pxna is a self-hosted remote file manager. A Rust daemon serves files from direc
 - Ratings and tags, with filtering in search
 - Upload, rename, move, copy, and delete files
 - Single-owner authentication with server-side sessions
-- Docker image with ffmpeg included
+- Docker image with ffmpeg and libheif included
 
 The design documents are in [docs/design.md](docs/design.md).
 
@@ -100,7 +100,7 @@ cp .env.example .env
 
 The image build fails with a message if the submodules are empty, for example when you run `docker compose up` directly without `start.sh`.
 
-Open `http://localhost:6050` and create the owner account. The image includes the SPA, ffmpeg, and ffprobe.
+Open `http://localhost:6050` and create the owner account. The image includes the SPA, ffmpeg, ffprobe, and libheif's heif-dec.
 The container listens on `127.0.0.1` only. Change the address with `PXNA_BIND` and the port with `PXNA_PORT`.
 Setting `PXNA_BIND=0.0.0.0` exposes pxna to your network. Authentication is a single owner password, so use it only on a trusted network or behind an HTTPS reverse proxy.
 The container runs as `PXNA_UID:PXNA_GID` (default `1000:1000`), so match them to the owner of the library (`id -u`, `id -g`) when you want to modify files.

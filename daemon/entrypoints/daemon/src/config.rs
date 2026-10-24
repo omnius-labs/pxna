@@ -129,12 +129,13 @@ struct ThumbnailConfigToml {
     pub video_timeout_secs: Option<u64>,
 }
 
-/// ffmpeg と ffprobe の場所。サムネイルと動画の再生が共有する。
+/// ffmpeg、ffprobe、heif-dec の場所。サムネイルと動画の再生が共有する。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MediaConfigToml {
     pub ffmpeg_path: Option<String>,
     pub ffprobe_path: Option<String>,
+    pub heif_dec_path: Option<String>,
 }
 
 impl MediaConfigToml {
@@ -143,6 +144,7 @@ impl MediaConfigToml {
         MediaOptions {
             ffmpeg_path: self.ffmpeg_path.map(PathBuf::from).unwrap_or(defaults.ffmpeg_path),
             ffprobe_path: self.ffprobe_path.map(PathBuf::from).unwrap_or(defaults.ffprobe_path),
+            heif_dec_path: self.heif_dec_path.map(PathBuf::from).unwrap_or(defaults.heif_dec_path),
         }
     }
 }
@@ -486,6 +488,7 @@ mod tests {
         let config = load(&toml).await?;
         assert_eq!(config.media.ffmpeg_path, PathBuf::from("/opt/ffmpeg/bin/ffmpeg"));
         assert_eq!(config.media.ffprobe_path, PathBuf::from("ffprobe"));
+        assert_eq!(config.media.heif_dec_path, PathBuf::from("heif-dec"));
         assert_eq!(config.thumbnail.video_timeout, std::time::Duration::from_secs(5));
         assert_eq!(config.thumbnail.max_concurrent_videos, 1);
 

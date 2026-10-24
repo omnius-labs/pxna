@@ -107,6 +107,9 @@ impl ImageInspector {
 #[derive(Deserialize)]
 struct ProbeImageOutput {
     streams: Vec<ProbeImageStream>,
+    /// タイルに分けて符号化された画像の、タイルを束ねる group。`-show_stream_groups` を付けたときだけ出力される。
+    #[serde(default)]
+    stream_groups: Vec<ProbeStreamGroup>,
 }
 
 #[derive(Deserialize)]
@@ -119,15 +122,32 @@ struct ProbeImageStream {
 }
 
 #[derive(Deserialize)]
+struct ProbeStreamGroup {
+    #[serde(rename = "type")]
+    group_type: Option<String>,
+    #[serde(default)]
+    components: Vec<ProbeTileGrid>,
+}
+
+/// Tile Grid の group の component。組み立てた後の画像の幅と高さと、回転を持つ。
+#[derive(Deserialize)]
+struct ProbeTileGrid {
+    width: Option<u32>,
+    height: Option<u32>,
+    #[serde(default)]
+    side_data_list: Vec<ProbeSideData>,
+}
+
+#[derive(Deserialize)]
 struct ProbeSideData {
     side_data_type: Option<String>,
     rotation: Option<f64>,
 }
 
-impl ProbeImageStream {
+impl ProbeSideData {
     /// Display Matrix の回転を、反時計回りの 0、90、180、270 度に直す。ないときと、90 の倍数でないときは 0 にする。
-    fn display_rotation(&self) -> u16 {
-        self.side_data_list
+    fn display_rotation(side_data_list: &[Self]) -> u16 {
+        side_data_list
             .iter()
             .filter(|side_data| side_data.side_data_type.as_deref() == Some("Display Matrix"))
             .find_map(|side_data| side_data.rotation)
@@ -136,16 +156,39 @@ impl ProbeImageStream {
     }
 }
 
+impl ProbeImageOutput {
+    /// 最初の Tile Grid の寸法。タイルの stream はタイル 1 枚の寸法しか持たないので、こちらを優先する。
+    fn tile_grid_size(&self) -> Option<(u32, u32, u16)> {
+        self.stream_groups
+            .iter()
+            .filter(|group| group.group_type.as_deref() == Some("Tile Grid"))
+            .flat_map(|group| &group.components)
+            .find_map(|grid| {
+                grid.width
+                    .zip(grid.height)
+                    .map(|(width, height)| (width, height, ProbeSideData::display_rotation(&grid.side_data_list)))
+            })
+    }
+
+    fn first_video_stream_size(&self) -> Option<(u32, u32, u16)> {
+        self.streams.iter().find(|stream| stream.codec_type.as_deref() == Some("video")).and_then(|stream| {
+            stream
+                .width
+                .zip(stream.height)
+                .map(|(width, height)| (width, height, ProbeSideData::display_rotation(&stream.side_data_list)))
+        })
+    }
+}
+
 impl ImageInfo {
-    /// ffprobe の出力から、最初の映像 stream の幅と高さと、回転（反時計回りの 0、90、180、270 度）を得る。幅と高さは入れ替えない。
+    /// ffprobe の出力から、画像の幅と高さと、回転（反時計回りの 0、90、180、270 度）を得る。幅と高さは入れ替えない。
+    /// Tile Grid があればその寸法を、なければ最初の映像 stream の寸法を使う。
     pub fn parse_probe_size(bytes: &[u8]) -> Result<(u32, u32, u16)> {
         let probe: ProbeImageOutput =
             serde_json::from_slice(bytes).map_err(|error| Error::from_error(error, ErrorKind::UnsupportedType).with_message("invalid image information"))?;
         probe
-            .streams
-            .iter()
-            .find(|stream| stream.codec_type.as_deref() == Some("video"))
-            .and_then(|stream| stream.width.zip(stream.height).map(|(width, height)| (width, height, stream.display_rotation())))
+            .tile_grid_size()
+            .or_else(|| probe.first_video_stream_size())
             .filter(|(width, height, _)| *width > 0 && *height > 0)
             .ok_or_else(|| Error::new(ErrorKind::UnsupportedType).with_message("image size is unavailable"))
     }
@@ -379,6 +422,21 @@ mod tests {
         }
         let without_side_data = br#"{"streams":[{"codec_type":"video","width":64,"height":32}]}"#;
         assert_eq!(ImageInfo::parse_probe_size(without_side_data)?, (64, 32, 0));
+        Ok(())
+    }
+
+    #[test]
+    fn a_tile_grid_gives_the_size_of_the_assembled_image_test() -> TestResult {
+        // ffprobe 9.0 が、512×512 のタイル 6 枚で 1280×960 を符号化し、`irot` で 90 度回す HEIC に返す形。
+        let bytes = br#"{"streams":[{"codec_type":"video","width":512,"height":512},{"codec_type":"video","width":512,"height":512}],
+            "stream_groups":[{"type":"Tile Grid","components":[{"nb_tiles":6,"coded_width":1536,"coded_height":1024,"width":1280,"height":960,
+            "side_data_list":[{"side_data_type":"Display Matrix","rotation":90}]}]}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(bytes)?, (1280, 960, 90));
+
+        let other_group = br#"{"streams":[{"codec_type":"video","width":64,"height":32}],"stream_groups":[{"type":"LCEVC","components":[{"width":128,"height":64}]}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(other_group)?, (64, 32, 0));
+        let no_groups = br#"{"streams":[{"codec_type":"video","width":64,"height":32}],"stream_groups":[]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(no_groups)?, (64, 32, 0));
         Ok(())
     }
 }

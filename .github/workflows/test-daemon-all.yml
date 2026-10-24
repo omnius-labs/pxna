@@ -120,9 +120,9 @@ jobs:
           workspaces: |
             daemon -> target
 
-      - name: Install ffmpeg (Linux)
+      - name: Install ffmpeg and libheif (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libheif-examples libheif-plugin-libde265
 
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
@@ -142,6 +142,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           PXNA_REQUIRE_FFMPEG: "1"
+          PXNA_REQUIRE_HEIF_DEC: "1"
         run: cargo make test
 
       - name: Test (macOS and Windows)
