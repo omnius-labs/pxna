@@ -1,16 +1,41 @@
+# Bundled configuration for the container. The image bakes it in as /config/pxna.toml,
+# and compose.yaml mounts ./config/pxna.toml over it. Paths are inside the container.
+
 [core]
-listen_addr = "0.0.0.0:6050"
-state_dir = "/state"
+listen_addr = "0.0.0.0:6050" # Inside the container. compose.yaml publishes it on ${PXNA_BIND:-127.0.0.1}:${PXNA_PORT:-6050}
+state_dir = "/state"         # compose.yaml mounts ./.pxna/state here
 
 [logging]
-level = "info"
+level = "info" # "trace" | "debug" | "info" | "warn" | "error"
 json = true
 
 [web]
-dir = "/opt/pxna/web"
+dir = "/opt/pxna/web" # The web UI built into the image
+# The compose setup is reached over plain HTTP, so drop Secure and __Host- from the session cookie.
+# Keep the path protected by other means, such as a trusted LAN or Tailscale. The daemon's default is false
+insecure_cookie = true
+
+# [media]
+# ffmpeg_path = "ffmpeg"   # Installed in the image
+# ffprobe_path = "ffprobe"
+
+# [video]
+# max_concurrent_transcodes = 1
+# segment_secs = 6
+# restart_threshold_segments = 3
+# max_height = 1080
+# encoder = "libx264"
+# encoder_args = ["-preset", "veryfast", "-crf", "23"]
+# session_idle_timeout_secs = 300
+
+# [timeline]
+# time_zone = "Asia/Tokyo"       # If omitted, TZ is used. compose.yaml sets TZ (default Asia/Tokyo)
+# scan_interval_secs = 86400     # Seconds from the end of the last aggregation to the next one. 0 disables periodic aggregation
+# max_concurrent_extractions = 1 # Concurrent archive extractions during aggregation
+# max_concurrent_probes = 1      # Concurrent ffprobe runs during aggregation
 
 [[libraries]]
 id = "library"
 name = "Library"
-path = "/libraries"
+path = "/libraries" # compose.yaml mounts PXNA_LIBRARY_DIR here
 readonly = false
