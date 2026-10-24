@@ -1,18 +1,22 @@
-# ffprobe Reports the AVIF irot as the Display Matrix rotation, and the Width and Height Stay as Encoded
+# ffmpeg 8.1.1 Reports the AVIF irot as the Display Matrix Rotation and Applies It When Decoding, and ffmpeg 5.1 to 7.1 Ignore irot
 
-**Source: Verified** (ffmpeg 8.1.1 / 2026-10-11)
+**Source: Verified** (ffmpeg 8.1.1 / 2026-10-11, ffmpeg 5.1.9, 6.1.1, 7.1.5 / 2026-10-24)
 
 One item of [knowledge.md](../knowledge.md).
 
 ## Fact
 
-With ffmpeg 8.1.1 on macOS (AVIF created with libsvtav1), we confirmed the following about the AVIF `irot` box.
+With ffmpeg 8.1.1 on macOS (AVIF created with libsvtav1), we confirmed the following about the AVIF `irot` box. These three hold for ffmpeg 8.1.1 only.
 
 - For a 640×360 AVIF without `irot`, `ffprobe -show_streams` gave a `width` of 640 and a `height` of 360 and had no `side_data_list`.
 - When `irot` was added to the same image, `width` and `height` stayed at 640 and 360, `side_data_list` gained a `Display Matrix`, and `rotation` was returned according to the angle of `irot`. For `irot` values 1, 3, and 2, `rotation` was 90, -90, and -180.
 - When ffmpeg decoded an AVIF with `irot` to PNG, the default auto-rotation produced an image with the rotation applied. It was 360×640 for `irot` values 1 and 3, and 640×360 for value 2.
 
-We did not check HEIC, the mirroring `imir`, other versions of ffmpeg, or images whose Exif orientation disagrees with `irot`.
+ffmpeg 5.1.9 (Debian bookworm), 6.1.1 (Ubuntu 24.04), and 7.1.5 (Debian trixie) ignore `irot`.
+For the 64×32 AVIF with `irot` value 1, `ffprobe -show_streams` gave a `width` of 64 and a `height` of 32 and had no `side_data_list`, and decoding to PNG gave 64×32 without the rotation.
+The rotation ffprobe reports and the rotation decoding applies therefore agree in every version we checked: both are present in 8.1.1, and both are absent in 5.1.9, 6.1.1, and 7.1.5.
+
+We did not check HEIC, the mirroring `imir`, ffmpeg versions other than the four above, or images whose Exif orientation disagrees with `irot`.
 HEIC could not be checked because the ffmpeg at hand cannot write HEIC and we have no real file. AVIF and HEIC have `irot` through the same HEIF mechanism, so the same result is expected. This is a conjecture.
 
 ## Basis
@@ -77,8 +81,22 @@ ffmpeg -i plain-irot90.avif decoded.png && ffprobe -v error -show_entries stream
 
 The result was that `ffprobe` returned `width` 640, `height` 360, and `rotation` 90, and the decoded PNG was 360×640. `plain-irot270.avif` had a `rotation` of -90 and 360×640, and `plain-irot180.avif` had -180 and 640×360. For the 64×32 AVIF as well, `irot` value 1 gave 32×64 and value 2 gave 64×32.
 
+The older versions were checked with the distribution packages in containers, running the same two commands on the 64×32 AVIF with `irot` value 1 (`daemon/modules/engine/tests/fixtures/rot90.avif`).
+
+```sh
+for image in debian:bookworm-slim ubuntu:24.04 debian:trixie-slim; do
+  docker run --rm -v "$PWD":/f:ro "$image" bash -c 'apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null
+    ffprobe -v error -show_streams -of json /f/rot90.avif
+    ffmpeg -v error -i /f/rot90.avif -frames:v 1 /tmp/o.png && ffprobe -v error -show_entries stream=width,height -of csv=p=0 /tmp/o.png'
+done
+```
+
 ## Implication
 
 This is the premise of the decision in [Video Playback Design §7.1](../design/video.md#return-the-rotation-of-images-read-with-ffmpeg-as-an-attribute-without-swapping-the-dimensions).
 The server decides the media info `rotation` depending on the `rotation` in the `side_data_list` of the video stream, in the `-show_streams` JSON that `probe_image_size` in [ffmpeg.rs](../../daemon/modules/engine/src/core/media/ffmpeg.rs#L58) receives.
 An image without `irot` has no `side_data_list`, so it can be treated as having no rotation.
+
+With the checked ffmpeg 5.1.9, 6.1.1, and 7.1.5, an image with `irot` is returned with no rotation and its thumbnails and display images come out unrotated, so the media info and the images still agree.
+The Docker image is based on Debian bookworm and installs its ffmpeg 5.1, so the rotation of `irot` does not take effect there. Of the versions checked, it takes effect only with ffmpeg 8.1.1.
+CI installs the ffmpeg 6.1 of Ubuntu 24.04, so the test in [generator.rs](../../daemon/modules/engine/src/core/thumbnail/generator.rs#L1180) decides the expected rotation from whether the thumbnail of the 90-degree image comes out portrait.

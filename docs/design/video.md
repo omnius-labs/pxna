@@ -236,9 +236,9 @@ For images of formats decided to be read with ffmpeg, the width and height are r
 When `rotation` is 90 or 270 degrees, the client swaps the width and height for display.
 
 **Reason**
-ffprobe returns AVIF's `irot` as the `rotation` of the Display Matrix in `side_data_list`, separately from the width and height, and the width and height stay as encoded.
-ffmpeg's decoding applies the rotation ([Measurements of ffprobe](../knowledge/ffprobe-heif-rotation.md)).
-Thumbnails and display images are made from images decoded by ffmpeg, so they are expected to come out in the rotated orientation.
+ffprobe of ffmpeg 8.1.1 returns AVIF's `irot` as the `rotation` of the Display Matrix in `side_data_list`, separately from the width and height, and the width and height stay as encoded.
+ffmpeg 8.1.1's decoding applies the rotation, and ffmpeg 5.1 to 7.1 neither report nor apply it ([Measurements of ffprobe](../knowledge/ffprobe-heif-rotation.md)).
+Thumbnails and display images are made from images decoded by the same ffmpeg, so the returned rotation and their orientation agree with either version, although of the versions checked, the rotation takes effect only with ffmpeg 8.1.1.
 HEIC has `irot` through the same HEIF mechanism as AVIF, so the same result is expected, but we have not confirmed it with a real file.
 Dimensions and rotation are separate facts, so if they are returned as is, the server does not need a rule for interpreting an image's orientation, and the client can handle it to suit the display.
 
