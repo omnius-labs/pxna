@@ -38,6 +38,6 @@ Bookworm has no `libheif-plugin-libde265` package, and `ldd` shows that its `lib
 
 ## Implication
 
-This is the premise of the decision to decode HEIC with heif-dec ([Thumbnail Design §10.1](../design/thumbnail.md#read-heif-with-libheifs-heif-dec-and-fall-back-to-ffmpeg)).
-`decode_heif` in [ffmpeg.rs](../../daemon/modules/engine/src/core/media/ffmpeg.rs#L112) passes only the input and output paths, so `heif-convert` of 1.15.1 and 1.17.6 can be configured as `[media] heif_dec_path`, and the tests use whichever of the two is on `PATH`.
-The Docker image installs `libheif-examples` and `libheif-plugin-libde265` of Debian trixie.
+This is the premise of using heif-dec for HEIC/HEIF/AVIF images with alpha and as a fallback, while ffmpeg reads the primary image ([Thumbnail Design §10.1](../design/thumbnail.md#read-heif-and-avif-as-ppm-and-use-heif-dec-for-alpha)).
+`decode_heif` in [heif.rs](../../daemon/modules/engine/src/core/media/heif.rs#L10) passes only the input and output paths, so `heif-convert` of 1.15.1 and 1.17.6 can be configured as `[media] heif_dec_path`, and the tests use whichever of the two is on `PATH`.
+The Docker image installs `libheif-examples`, `libheif-plugin-libde265`, and `libheif-plugin-dav1d` of Debian trixie, so heif-dec can also read AVIF with alpha.

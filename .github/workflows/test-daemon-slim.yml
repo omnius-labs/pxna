@@ -142,8 +142,15 @@ jobs:
           workspaces: |
             daemon -> target
 
-      - name: Install ffmpeg and libheif
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg libheif-examples libheif-plugin-libde265
+      - name: Install libheif and ffmpeg 9
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libheif-examples libheif-plugin-libde265 libheif-plugin-dav1d
+          curl -fsSL -o /tmp/ffmpeg.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz"
+          echo "68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269  /tmp/ffmpeg.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/ffmpeg"
+          tar -xJf /tmp/ffmpeg.tar.xz -C "$RUNNER_TEMP/ffmpeg" --strip-components=1
+          echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
 
       - name: Test
         env:

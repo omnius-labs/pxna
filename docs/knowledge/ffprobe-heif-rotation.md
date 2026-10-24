@@ -97,7 +97,7 @@ ffmpeg 9.0.2 was `ffmpeg-n9.0.2-17-g2a571b6068-linuxarm64-gpl-9.0.tar.xz` of the
 ## Implication
 
 This is the premise of the decision in [Video Playback Design §7.1](../design/video.md#return-the-rotation-of-images-read-with-ffmpeg-as-an-attribute-without-swapping-the-dimensions).
-For an image without a tile grid, the server decides the media info `rotation` depending on the `rotation` in the `side_data_list` of the video stream, in the JSON that `probe_image_size` in [ffmpeg.rs](../../daemon/modules/engine/src/core/media/ffmpeg.rs#L63) receives.
+For an image without a tile grid, the server decides the media info `rotation` depending on the `rotation` in the `side_data_list` of the video stream, in the JSON that `probe_image_size` in [ffmpeg.rs](../../daemon/modules/engine/src/core/media/ffmpeg.rs#L28) receives.
 An image without `irot` has no `side_data_list`, so it can be treated as having no rotation.
 
 With the checked ffmpeg 5.1.9, 6.1.1, and 7.1.5, an image with `irot` is returned with no rotation and its thumbnails and display images come out unrotated, so the media info and the images still agree.

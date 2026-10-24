@@ -7,6 +7,7 @@ mod db;
 mod error;
 mod executor;
 mod interface;
+mod media_check;
 mod prelude;
 mod result;
 mod service;

@@ -175,6 +175,7 @@ Only the responses for file content, thumbnails, and HLS are returned by hand-wr
 This is because the generated router cannot return the response body as a stream or vary the response's `Content-Type` according to the request.
 Authentication and Library boundary checks go through the same daemon-layer processing as other paths.
 ffmpeg, ffprobe, and libheif's heif-dec are not linked into the daemon and are started as external processes.
+ffmpeg decodes HEIC/HEIF and the other ffmpeg-read images; heif-dec is used for images with alpha and as a fallback.
 
 ## 4. Internal Structure of the Daemon
 
@@ -680,7 +681,8 @@ This is so that engine tests can create the same tables without going through th
 ### 9.3 Distribution
 
 The daemon is distributed as a Docker image.
-The image is built for two architectures, amd64 and arm64, on Debian trixie, and contains the daemon's executable, the web build output, ffmpeg and ffprobe, and libheif's heif-dec.
+The image is built for two architectures, amd64 and arm64, on Debian trixie, and contains the daemon's executable, the web build output, a pinned ffmpeg 9 and ffprobe, and libheif's heif-dec for images with alpha.
+The daemon checks at startup that ffmpeg and ffprobe are version 9 or newer.
 
 | What is passed in from outside the container | How it is passed |
 | --- | --- |
@@ -1084,7 +1086,7 @@ The implementation is small, but it would rewrite the generated output's respons
 #### Make the Docker Image the Basis of Distribution
 
 **Decision**
-The daemon is distributed as a Docker image containing ffmpeg, ffprobe, heif-dec, and the web build output, for amd64 and arm64 (§9.3).
+The daemon is distributed as a Docker image containing ffmpeg 9, ffprobe, heif-dec for images with alpha, and the web build output, for amd64 and arm64 (§9.3).
 
 **Reason**
 Thumbnails and video transcoding call ffmpeg as an external process ([Thumbnail Design](./design/thumbnail.md#call-ffmpeg-as-an-external-process)), so the execution environment needs ffmpeg.

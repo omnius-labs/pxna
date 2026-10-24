@@ -53,7 +53,7 @@ The boundaries with other concerns are as follows.
   This avoids having to follow changes and generating files nobody looks at.
 - Compatibility with Susie plugins (loading Windows DLLs) is not provided.
   This avoids having a per-OS plugin mechanism.
-  Formats the `image` crate cannot read are left to libheif or ffmpeg (§3).
+  Formats the `image` crate cannot read are left to ffmpeg, with libheif only for images with alpha (§3).
 - For animated GIFs and animated WebPs, only the first still frame becomes the thumbnail.
   This avoids having a path that extracts a frame sequence per image format.
 - Delivering the original image for the viewer is not covered.
@@ -68,8 +68,8 @@ The set of supported extensions is a property of the server, and the client is n
 | Kind | Determination | Generation method |
 | --- | --- | --- |
 | Image | An extension the `image` crate can read | Shrunk with `ImageConverter` |
-| HEIF images | The extensions `heic` and `heif` | Decode the primary image with libheif's heif-dec and then shrink. If heif-dec cannot be started or fails, read it in the same way as other images |
-| Other images | Extensions such as AVIF that are not read by the `image` crate but are decided to be read with ffmpeg | Extract one image with ffmpeg's default stream selection and then shrink |
+| HEIF images | The extensions `heic` and `heif` | Decode with ffmpeg 9 to a PPM and then shrink. If it has alpha, decode it with libheif's heif-dec instead |
+| Other images | Extensions such as AVIF that are not read by the `image` crate but are decided to be read with ffmpeg | AVIF is decoded to a PPM and shrunk; AVIF with alpha uses heif-dec. JXL and JP2 keep the PNG path |
 | Video | Video extensions decided to be read with ffmpeg | Extract the frame sequence with ffmpeg (§6) |
 | Folders and archives | The Entry's kind and the archive flag | Return the representative thumbnail (§5) |
 
@@ -82,9 +82,10 @@ It is not put on files that match none of them.
 
 An image encoded as a tile grid has one stream per tile, and the image is assembled from the stream group that bundles them.
 Pointing at the first stream gives only one tile, so ffmpeg is not given a stream for images and is left to its default selection, which assembles the grid in ffmpeg 9.0 ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)).
-heif-dec assembles the grid and applies the rotation of `irot` ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
+ffmpeg 9 also applies the rotation of `irot`.
+heif-dec assembles the grid and applies the rotation and alpha for HEIC/HEIF/AVIF with alpha ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
 
-ffmpeg and heif-dec are started by the daemon as external processes.
+ffmpeg, ffprobe, and heif-dec are started by the daemon as external processes.
 The path of a physical file is passed to them.
 For an entry in an archive, it is made a physical file with `materialize_file` and then passed, and the lease is held until generation finishes.
 If the lease were released, a file being read could be deleted by the extraction cache's LRU.
@@ -300,11 +301,11 @@ Byte sizes, counts, times, and parallelism allow only positive values and are va
 | `[thumbnail] cache_capacity_bytes` | 2 GiB | Capacity budget for thumbnails and sprite sheets |
 | `[thumbnail] display_cache_capacity_bytes` | 2 GiB | Capacity budget for display images |
 | `[thumbnail] max_concurrent_images` | 4 | Number of image conversions running at the same time |
-| `[thumbnail] max_concurrent_videos` | 2 | Number of ffmpeg and heif-dec runs at the same time |
+| `[thumbnail] max_concurrent_videos` | 2 | Number of ffmpeg and heif-dec runs at the same time (heif-dec is used for alpha and as a fallback) |
 | `[thumbnail] video_timeout_secs` | 60 | Deadline for one frame extraction |
 | `[media] ffmpeg_path` | `ffmpeg` | The ffmpeg executable |
 | `[media] ffprobe_path` | `ffprobe` | The ffprobe executable |
-| `[media] heif_dec_path` | `heif-dec` | libheif's heif-dec executable. `heif-convert` of libheif before 1.17 takes the same arguments |
+| `[media] heif_dec_path` | `heif-dec` | libheif's heif-dec executable, used for HEIC/HEIF/AVIF with alpha and as a fallback. `heif-convert` of libheif before 1.17 takes the same arguments |
 
 The defaults of `[media]` are names searched from `PATH`.
 The Docker image for distribution bundles all three ([design.md §9.3](../design.md#93-distribution)).
@@ -380,30 +381,48 @@ The cost of needing ffmpeg in the execution environment is paid by making the Do
 A method that links ffmpeg as a library with bindings such as `ffmpeg-next`.
 The dependency on the execution environment goes away, but the 3-OS CI would have to prepare ffmpeg's development libraries, and decoder anomalies would spread to the daemon's process, so we rejected it.
 
-#### Read HEIF with libheif's heif-dec, and Fall Back to ffmpeg
+#### Read HEIF and AVIF as PPM, and Use heif-dec for Alpha
 
 **Decision**
-HEIC and HEIF images are decoded with libheif's heif-dec, started as an external process like ffmpeg.
-If heif-dec cannot be started or exits with an error, the cause is logged and the image is read with ffmpeg.
-AVIF and the other formats decided to be read with ffmpeg stay with ffmpeg.
+HEIC/HEIF and AVIF are decoded by ffmpeg 9 to a PPM (P6, 8-bit RGB) on stdout, then resized and encoded in Rust.
+JXL and JP2 keep the PNG path, because ffmpeg's JXL decode carries the alpha channel in the primary stream and the current PNG path preserves it.
+HEIC/HEIF/AVIF images with alpha are decoded with libheif's heif-dec instead, so the alpha channel is kept.
+If ffmpeg fails for a HEIC/HEIF/AVIF image, the cause is logged and heif-dec reads it.
+If alpha was detected and heif-dec fails, the request fails instead of silently dropping the transparency.
+If the alpha probe fails, HEIC/HEIF/AVIF are decoded with heif-dec rather than risk dropping alpha.
+ffmpeg and ffprobe must be version 9 or newer at startup. heif-dec is required at startup on Linux and macOS; on Windows it is only needed when an image with alpha is requested.
 
 **Reason**
-HEIC written by macOS's `sips` is encoded as a tile grid of 512×512 tiles, and the heif-dec and heif-convert of the libheif versions packaged by Debian and Ubuntu assemble the grid and apply `irot` ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
-The ffmpeg in Debian before trixie cannot open HEIC at all, and the one in trixie reads only one tile ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)), so reading HEIC well with ffmpeg alone depends on its version.
-Falling back to ffmpeg keeps HEIC readable in development environments without libheif when their ffmpeg assembles grids.
-AVIF was left to ffmpeg because its rotation behavior was already verified there ([Measurements of ffprobe](../knowledge/ffprobe-heif-rotation.md)) and changing its path was not needed to show HEIC.
+heif-dec writes the decoded image as a PNG. In the measured workload, heif-dec took 0.61 to 0.74 seconds, while ffmpeg's PPM extraction took 0.13 to 0.20 seconds; the difference includes writing and reading the intermediate PNG. Avoiding it makes a first display image about 2.3 times faster and a thumbnail about 3.5 times faster ([measurement](../measurements/2026-10-24-heif-ppm.md)).
+ffmpeg 9 assembles tile grids, applies `irot`, and writes PPM with the dimensions after rotation ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)). PPM is uncompressed pixels with a small header, so it is as fast as raw output and does not need a separate size probe.
+JXL keeps the PNG path because its alpha is in the primary stream and already preserved there; moving it to PPM would drop the transparency for no benefit to the formats this change is about.
+ffmpeg's default selection does not read the auxiliary alpha image of HEIC/AVIF, while libheif does, including tiled and rotated images. That is why alpha is the one case that stays with heif-dec ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
+A gray video stream next to another video stream is treated as alpha. A tiled grayscale image without alpha is therefore also routed to heif-dec; it is slower but still correct.
+Requiring ffmpeg 9 at startup keeps an older ffmpeg from silently reading only one tile of a tile grid.
 
 **Rejected alternative 1**
-A method that reads HEIC only with ffmpeg 9.0.
-It keeps one tool, but how HEIC is read would depend entirely on the ffmpeg version of the environment, and environments with the ffmpeg packaged by Debian or Ubuntu could not show HEIC, so we rejected it.
+Keeping heif-dec as the primary decoder.
+It works on old libheif and ffmpeg versions, but the intermediate PNG dominates the time and makes HEIF about 3 to 4 times slower than JPEG, so we rejected it.
 
 **Rejected alternative 2**
 A method that links libheif as a library through bindings.
-For the same reason as ffmpeg (§10.1 "Call ffmpeg as an External Process"), a decoder anomaly would spread to the daemon's process, so we rejected it.
+It removes the PNG and the process boundary, but a decoder anomaly would spread to the daemon's process, and the 3-OS CI would need libheif's development files, so we rejected it (same reason as §10.1 "Call ffmpeg as an External Process").
 
 **Rejected alternative 3**
-A method that reads HEIC with heif-dec and also routes AVIF to libheif.
-The HEIF family would be handled by one tool, but it would change the verified AVIF path without a need, so we rejected it.
+Having ffmpeg write WebP directly instead of PPM.
+It is faster only when the request is WebP and no resizing is needed (0.27 to 0.32 seconds). For JPEG/PNG requests, images larger than the display step, and thumbnails, it needs a second decode and encode and loses quality twice. PPM keeps one path for all formats and sizes.
+
+**Rejected alternative 4**
+Merging the alpha stream with ffmpeg's `alphamerge`.
+It preserves alpha for an untiled image, but for a tile grid it produces only one tile. libheif already handles the grid and the alpha together, so we rejected it.
+
+**Rejected alternative 5**
+Keeping AVIF on the old PNG path.
+The same PPM path is faster and the rotation behavior is unchanged. We unified it with HEIC/HEIF.
+
+**Rejected alternative 6**
+Moving JXL and JP2 to PPM for a single ffmpeg path.
+ffmpeg's JXL decode carries alpha in the primary stream, and the current PNG path preserves it. PPM would drop that transparency. JXL is not the target of this change, so it keeps the PNG path.
 
 #### Announce Images and Videos with the Listing's contentType
 
@@ -610,7 +629,7 @@ Grid and List target only the folders and archives of visible rows, and wait 200
 Representative selection, candidate attributes, the lookup, read, and LRU update of the image cache, and generation are recorded at separate measurement points. Connection acquisition and execution of the LRU update are also distinguished. The format and keys of the image cache are not changed, and LRU updates are taken out of the response and written together as in [§8.2](#82-capacity-budgets-and-lru). The comparison is in the [measurement record](../measurements/2026-10-15-browse-thumbnails.md).
 
 `ThumbnailGenerator` generates according to the rules of §3 through §8.
-It handles images, HEIF images read with heif-dec, images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
+It handles images, HEIF images read with ffmpeg (or heif-dec for alpha), images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
 The cache is a SQLite index and real files in `state_dir/thumbnail/`, with a budget for thumbnails and sprite sheets and a budget for display images.
 The thumbnail API is returned by a hand-written route outside the generated router ([design.md §11.1](../design.md#return-thumbnail-responses-outside-the-generated-router)).
 Responses for folders and archives carry the same `Cache-Control: private, max-age=86400` as files, and the web client does not request the tiles again after the daemon's own changes, so the revalidation of §5 is not in place.
@@ -624,8 +643,8 @@ A video's duration is obtained from the media info service shared with video pla
 
 In environments where ffmpeg and ffprobe are not on `PATH`, the tests for videos and images read with ffmpeg are skipped with the reason printed.
 The tests that assemble tile grids with ffmpeg are also skipped when ffmpeg is older than 8, and the test that reads the rotation of a tile grid with ffprobe when it is older than 9.
-The HEIF tests use heif-dec or heif-convert from `PATH`, and are skipped without either.
-Linux CI installs ffmpeg and libheif, and makes these tests mandatory with `PXNA_REQUIRE_FFMPEG=1` and `PXNA_REQUIRE_HEIF_DEC=1`.
+The HEIF tests use ffmpeg 9 and heif-dec or heif-convert from `PATH`, and are skipped without them.
+Linux CI installs a pinned ffmpeg 9 and libheif, and makes these tests mandatory with `PXNA_REQUIRE_FFMPEG=1` and `PXNA_REQUIRE_HEIF_DEC=1`.
 
 ### 11.2 Roadmap
 
