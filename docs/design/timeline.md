@@ -2,7 +2,7 @@
 
 ## 1. About This Document
 
-This document covers the server side of the timeline, which lists a Library's images and videos in the order of their timeline dates, and defines what is listed, how timeline dates are decided, the timeline index, aggregation, reading, and the reasons for adopting them.
+This document covers the server side of the timeline, which lists the images and videos of the chosen Libraries in one sequence in the order of their timeline dates, and defines what is listed, how timeline dates are decided, the timeline index, aggregation, reading, and the reasons for adopting them.
 The intended readers are developers and AI agents who implement or review this concern.
 It assumes the vocabulary of [terms.md](../terms.md).
 The definitions of words are not in this document.
@@ -31,7 +31,7 @@ If you want to know what works now, read §10 first.
 
 ## 2. Responsibilities and Boundaries
 
-The timeline is a listing for viewing a Library's photos and videos in the order they were taken, without following folder hierarchy.
+The timeline is a listing for viewing the photos and videos of the chosen Libraries in one sequence in the order they were taken, without following folder hierarchy.
 Folder listings return the result of scanning the target after receiving a request, and recursive searches with conditions are answered from the name index ([Listing and Search Design §4](./listing.md#4-snapshots), [§5.2](./listing.md#52-answering-recursive-listings-with-conditions)).
 The timeline is returned from the timeline index that the daemon has aggregated in advance.
 If the whole Library were scanned on every request, the wait until the first page would be proportional to the size of the Library, and images and videos would have to be opened one by one to obtain the timeline dates (§9.1).
@@ -57,8 +57,6 @@ The boundaries with other concerns are as follows.
 - The timeline index is not used for name search or listings.
   The index holds only images and videos, so it cannot produce search results that include folders and other files.
   Instead, the walk passes the names it enumerates to the name index ([Listing and Search Design §5.1](./listing.md#51-name-index)).
-- A timeline spanning Libraries is not provided.
-  By having a Library per Entry, determining changeability does not need to be split per Entry.
 - External changes to files are not followed by notifications.
   External changes are reflected by the next aggregation.
 
@@ -180,12 +178,12 @@ A Library that has never finished a full aggregation is treated as the interval 
 If `scan_interval_secs` is 0, only this periodic aggregation is absent.
 The name index then reflects external changes only through manual aggregation.
 
-From the web client, a full aggregation can be started with `POST /libraries/{libraryId}/timeline/refresh`.
+From the web client, full aggregations of the given Libraries can be started with `POST /timeline/refresh`.
 Only one full aggregation of the same Library runs at a time, and a request received while one is running returns the current state.
 Including range aggregations (§6.4), only one aggregation runs on the same Library, and aggregation yields its turn to the next aggregation each time it finishes reading one folder.
 Aggregations of different Libraries run at the same time and write to the same index, so each write transaction takes the write lock from its start and waits for the others instead of failing.
 
-The progress of aggregation is returned by `GET /libraries/{libraryId}/timeline/status`.
+The progress of aggregation is returned per Library by `GET /timeline/status`.
 It is not made an Operation (§9.1).
 
 ### 6.4 The Daemon's Own Changes
@@ -215,14 +213,17 @@ Range aggregation also performs the check just before writing (§6.1) and record
 
 ## 7. Reading
 
-Timeline pages are ordered by timeline date, newest first, and Entries with the same timeline date are ordered by Library-relative path.
-The position of a page is pointed at by a pair of the timeline date and Library-relative path of the Entry at the page's edge (a cursor), and the Entries before or after it are returned.
-Instead of a cursor, specifying a month returns from that month's newest Entry, and specifying a Library-relative path returns a range containing that Entry in the center.
+Every read names the set of Libraries to list, and the Entries of those Libraries are returned as one sequence.
+Timeline pages are ordered by timeline date, newest first, and Entries with the same timeline date are ordered by Library id and then by Library-relative path.
+The position of a page is pointed at by the timeline date, Library id, and Library-relative path of the Entry at the page's edge (a cursor), and the Entries before or after it are returned.
+A cursor carries no set of Libraries, so it keeps its meaning only when read again with the same set.
+Instead of a cursor, specifying a month returns from that month's newest Entry, and specifying a Library and a Library-relative path returns a range containing that Entry in the center.
+To read in this order across Libraries, the index orders Entry rows by timeline date first, not by Library.
 
-The Entries of a page are returned as the same `FileSystemEntry` as listings, with the timeline date and the timeline date source added.
+The Entries of a page are returned as the same `FileSystemEntry` as listings, with the Library, the timeline date, and the timeline date source added.
 The Entry of a file that vanished externally is also returned until the next aggregation.
 
-The per-month counts are returned as a sequence in newest-month-first order.
+The per-month counts are returned as a sequence in newest-month-first order, summed over the named Libraries.
 
 ## 8. Configuration
 
@@ -347,23 +348,26 @@ The date boundaries would be decided by the device's time zone, so the per-month
 A method with no configuration that regards the Exif shooting date and time as UTC and mixes them.
 The configuration does not grow, but Entries without Exif would be listed at positions shifted by the time difference and could cross dates, so we rejected it.
 
-#### Hold a Timeline per Library
+#### List the Chosen Libraries in One Timeline
 
 **Decision**
-The timeline is held per Library, and a timeline spanning Libraries is not provided.
+The timeline lists the Entries of the Libraries named in each read as one sequence (§7).
+Choosing a single Library gives the listing of that Library, so there is no separate per-Library timeline.
+Aggregation, the index rows, and the per-month counts stay per Library, and only reading combines them.
 
 **Reason**
-It becomes the same unit as the URL, the API namespace, and the determination of `readonly`.
-A Library of photos and a Library gathering other images do not get mixed into one sequence.
-The index holds the Library's id, so a display spanning Libraries can be added later (§9.2).
+Photos are often spread over several Libraries, for example per device or per storage, and the user wants to see them in the order they were taken without switching Libraries.
+A Library of photos and a Library gathering other images are kept apart by not naming the latter, so they do not get mixed into one sequence against the user's wish.
+Because the index already held the Library on every row, combining at read time needed no change to aggregation or to the reflection of the daemon's own changes.
+The cost is that changeability is decided per Entry, since `readonly` belongs to the Library of each Entry, and that a selection spanning Libraries is sent as one request per Library.
 
 **Rejected alternative 1**
-A method that makes one timeline across all Libraries.
-It is closest to a photo app, but each Entry would have a Library, determining changeability would be split per Entry, and URLs not containing the Library would also be needed, so we rejected it.
+A method that holds the timeline per Library, with the Library in the URL and the API path.
+It was adopted first and matched the unit of `readonly`, but photos spread over Libraries could only be viewed one Library at a time, so we rejected it.
 
 **Rejected alternative 2**
-A method that has both per-Library timelines and an all-Library timeline.
-They could be used selectively, but the API and the screen would have two entrances, so we rejected it.
+A method that has both per-Library timelines and a timeline across all Libraries.
+They could be used selectively, but the API and the screen would have two entrances, and a set of one Library already gives the per-Library listing, so we rejected it.
 
 #### Start Aggregation Periodically and Manually
 
@@ -542,18 +546,6 @@ Even if only metadata is throttled, load remains if aggregation's content readin
 
 ### 9.2 Deferred
 
-#### A Timeline Spanning Libraries
-
-**Current state**
-The timeline is held only per Library.
-
-**Why not decide now**
-When Libraries are used separately for photos and everything else, a combined display would only mix them.
-Whether a combined display is needed cannot be known until the per-Library timeline has been used.
-
-**Conditions for deciding**
-When situations in which one wants to browse the photos of multiple Libraries in one sequence arise repeatedly in actual use.
-
 #### Whether to Use Exif's Time Zone Fields
 
 **Current state**
@@ -591,7 +583,7 @@ For archives, `FileStorageArchive::block_groups` and `extract_group` extract eac
 `TimelineIndex` holds the SQLite index and the triggers that increase and decrease the per-month counts, and `TimelineService` handles periodic aggregation, manual aggregation, state, and the reflection of the daemon's own changes.
 `LibraryMutation`, at the same point as discarding listing snapshots, tells `TimelineService` the changed Entry's path via `apply_changes`.
 For renames and moves within the same Library, `renamed` reassigns the rows' paths.
-The API has 4 endpoints: `GET /libraries/{libraryId}/timeline/entries`, `.../months`, `.../status`, and `POST .../refresh`.
+The API has 4 endpoints: `GET /timeline/entries`, `GET /timeline/months`, `GET /timeline/status`, and `POST /timeline/refresh`, each taking a set of Libraries.
 A video's `creation_time` is read by `MediaTools::probe_creation_time`.
 Aggregation does not pass enumerated names to the name index, and startup does not look at whether the name index is usable. This is part of L1 in [Listing and Search Design §9.2](./listing.md#92-roadmap).
 

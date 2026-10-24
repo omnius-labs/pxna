@@ -115,11 +115,13 @@ it("広い画面のフォルダには検索ボタンだけを置き、検索モ�
         router.history.destroy();
     }
 });
-it("タイムラインの検索ボタンは、Library 全体を起点にした検索モードへ移る", async () => {
-    const router = await render(false, "/timeline/photos");
+it("タイムラインは Library を横断するので、検索ボタンを出さず、最後に開いていたフォルダへ戻る切り替えを出す", async () => {
+    (await render(false, "/browse/photos/sub")).history.destroy();
+    const router = await render(false, "/timeline");
     try {
-        await act(async () => host.querySelector<HTMLButtonElement>('header button[aria-label="検索"]')!.click());
-        await vi.waitFor(() => expect(router.state.location.href).toBe("/search/photos"));
+        expect(host.querySelector('header button[aria-label="検索"]')).toBeNull();
+        const folder = host.querySelector<HTMLAnchorElement>('nav[aria-label="表示の切り替え"] a[title="フォルダ"]');
+        expect(folder?.getAttribute("href")).toBe("/browse/photos/sub");
     } finally {
         router.history.destroy();
     }

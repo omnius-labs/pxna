@@ -63,7 +63,7 @@ tags:
     - name: Operations
       description: Progress tracking for long-running mutations.
     - name: Timeline
-      description: Images and videos of a Library ordered by their timeline date.
+      description: Images and videos of Libraries ordered by their timeline date.
     - name: Rating
       description: The current user's good or bad rating of an image or video.
     - name: Tags
@@ -281,6 +281,164 @@ paths:
                     $ref: "#/components/responses/InvalidRequest"
                 "401":
                     $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /timeline/entries:
+        get:
+            tags:
+                - Timeline
+            summary: List timeline entries
+            description: |
+                Lists the images and videos of the given Libraries, including
+                those inside archives, from newest to oldest timeline date, as
+                one sequence. Entries with the same timeline date are ordered
+                by Library id and then by path. The result comes from the
+                timeline index that the daemon builds in the background, not
+                from a traversal at request time.
+
+                At most one of `after`, `before`, `month` and `around` selects
+                where the page starts. Without any of them the page starts at
+                the newest entry. `around` needs `aroundLibraryId`, which must
+                be one of `libraryIds`. `previous` and `next` are cursors for
+                the pages before and after the returned entries and are absent
+                when there is nothing further in that direction. A cursor is
+                only meaningful with the same `libraryIds`.
+            operationId: listTimelineEntries
+            parameters:
+                - $ref: "#/components/parameters/TimelineLibraryIdsQuery"
+                - name: after
+                  in: query
+                  required: false
+                  description: Cursor from `next`. Returns the entries older than the cursor.
+                  schema:
+                      type: string
+                - name: before
+                  in: query
+                  required: false
+                  description: Cursor from `previous`. Returns the entries newer than the cursor.
+                  schema:
+                      type: string
+                - name: month
+                  in: query
+                  required: false
+                  description: Starts at the newest entry of this month (`YYYY-MM`), or of the next older month that has entries.
+                  schema:
+                      type: string
+                      pattern: "^[0-9]{4}-[0-9]{2}$"
+                - name: around
+                  in: query
+                  required: false
+                  description: Returns a page that has this entry of `aroundLibraryId` near its middle.
+                  schema:
+                      $ref: "#/components/schemas/RelativePath"
+                - name: aroundLibraryId
+                  in: query
+                  required: false
+                  description: The Library of `around`. Given exactly when `around` is given.
+                  schema:
+                      $ref: "#/components/schemas/LibraryId"
+                - $ref: "#/components/parameters/ListLimitQuery"
+            responses:
+                "200":
+                    description: Timeline entries.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TimelineListing"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /timeline/months:
+        get:
+            tags:
+                - Timeline
+            summary: List the months that have timeline entries
+            description: |
+                Returns the number of entries of the given Libraries per
+                month, newest month first. The counts are kept up to date
+                together with the timeline index, so they always equal the
+                number of entries `entries` returns for that month with the
+                same `libraryIds`.
+            operationId: listTimelineMonths
+            parameters:
+                - $ref: "#/components/parameters/TimelineLibraryIdsQuery"
+            responses:
+                "200":
+                    description: Entry counts per month.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TimelineMonths"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /timeline/status:
+        get:
+            tags:
+                - Timeline
+            summary: Get the state of the timeline scans
+            description: Returns the state of the scan of each given Library, in the given order.
+            operationId: getTimelineStatus
+            parameters:
+                - $ref: "#/components/parameters/TimelineLibraryIdsQuery"
+            responses:
+                "200":
+                    description: State of the scans.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TimelineStatuses"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /timeline/refresh:
+        post:
+            tags:
+                - Timeline
+            summary: Start full timeline scans
+            description: |
+                Starts a scan of each given whole Library in the background
+                and returns the current states. For a Library whose full scan
+                is already running, nothing is started.
+            operationId: refreshTimeline
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/TimelineRefreshRequest"
+            responses:
+                "202":
+                    description: The scans are running.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TimelineStatuses"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
@@ -599,142 +757,6 @@ paths:
                     $ref: "#/components/responses/InternalServerError"
                 "501":
                     description: Child probes are not provided; childProbes is false. No response body.
-
-    /libraries/{libraryId}/timeline/entries:
-        get:
-            tags:
-                - Timeline
-            summary: List timeline entries
-            description: |
-                Lists the images and videos of a Library, including those inside
-                archives, from newest to oldest timeline date. The result comes
-                from the timeline index that the daemon builds in the
-                background, not from a traversal at request time.
-
-                At most one of `after`, `before`, `month` and `around` selects
-                where the page starts. Without any of them the page starts at
-                the newest entry. `previous` and `next` are cursors for the
-                pages before and after the returned entries and are absent
-                when there is nothing further in that direction.
-            operationId: listTimelineEntries
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - name: after
-                  in: query
-                  required: false
-                  description: Cursor from `next`. Returns the entries older than the cursor.
-                  schema:
-                      type: string
-                - name: before
-                  in: query
-                  required: false
-                  description: Cursor from `previous`. Returns the entries newer than the cursor.
-                  schema:
-                      type: string
-                - name: month
-                  in: query
-                  required: false
-                  description: Starts at the newest entry of this month (`YYYY-MM`), or of the next older month that has entries.
-                  schema:
-                      type: string
-                      pattern: "^[0-9]{4}-[0-9]{2}$"
-                - name: around
-                  in: query
-                  required: false
-                  description: Returns a page that has this entry near its middle.
-                  schema:
-                      $ref: "#/components/schemas/RelativePath"
-                - $ref: "#/components/parameters/ListLimitQuery"
-            responses:
-                "200":
-                    description: Timeline entries.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/TimelineListing"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/timeline/months:
-        get:
-            tags:
-                - Timeline
-            summary: List the months that have timeline entries
-            description: |
-                Returns the number of entries per month, newest month first.
-                The counts are kept up to date together with the timeline
-                index, so they always equal the number of entries `entries`
-                returns for that month.
-            operationId: listTimelineMonths
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            responses:
-                "200":
-                    description: Entry counts per month.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/TimelineMonths"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/timeline/status:
-        get:
-            tags:
-                - Timeline
-            summary: Get the state of the timeline scan
-            operationId: getTimelineStatus
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            responses:
-                "200":
-                    description: State of the scan.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/TimelineStatus"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/timeline/refresh:
-        post:
-            tags:
-                - Timeline
-            summary: Start a full timeline scan
-            description: |
-                Starts a scan of the whole Library in the background and
-                returns the current state. When a full scan is already
-                running, nothing is started.
-            operationId: refreshTimeline
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            responses:
-                "202":
-                    description: The scan is running.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/TimelineStatus"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
 
     /libraries/{libraryId}/folders/copy:
         post:
@@ -1797,6 +1819,22 @@ components:
             schema:
                 $ref: "#/components/schemas/LibraryId"
 
+        TimelineLibraryIdsQuery:
+            name: libraryIds
+            in: query
+            required: true
+            description: |
+                Libraries to list, repeated as `libraryIds=a&libraryIds=b`.
+                Every id must name a Library; an unknown id is 404.
+            style: form
+            explode: true
+            schema:
+                type: array
+                minItems: 1
+                maxItems: 64
+                items:
+                    $ref: "#/components/schemas/LibraryId"
+
         PathQuery:
             name: path
             in: query
@@ -2276,7 +2314,8 @@ components:
             additionalProperties: false
             description: |
                 Display preferences. `wide` and `narrow` are chosen by the
-                width of the screen (768 CSS px); `sort` does not depend on it.
+                width of the screen (768 CSS px); `sort` and `timelineLibraries`
+                do not depend on it.
             required: [wide, narrow, sort]
             properties:
                 wide:
@@ -2285,6 +2324,16 @@ components:
                     $ref: "#/components/schemas/DisplaySet"
                 sort:
                     $ref: "#/components/schemas/SortPreference"
+                timelineLibraries:
+                    type: array
+                    minItems: 1
+                    maxItems: 64
+                    description: |
+                        Libraries the timeline shows. Absent means every
+                        Library. Ids of Libraries that no longer exist are kept
+                        as saved, and clients ignore them.
+                    items:
+                        $ref: "#/components/schemas/LibraryId"
         DisplaySet:
             type: object
             additionalProperties: false
@@ -2740,10 +2789,13 @@ components:
         TimelineEntry:
             type: object
             required:
+                - libraryId
                 - entry
                 - timelineDate
                 - timelineDateSource
             properties:
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
                 entry:
                     $ref: "#/components/schemas/FileSystemEntry"
                 timelineDate:
@@ -2785,12 +2837,25 @@ components:
                     format: int64
                     minimum: 1
 
+        TimelineStatuses:
+            type: object
+            required:
+                - libraries
+            properties:
+                libraries:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/TimelineStatus"
+
         TimelineStatus:
             type: object
             required:
+                - libraryId
                 - running
                 - processedFiles
             properties:
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
                 running:
                     type: boolean
                     description: True while a full scan of the Library is running.
@@ -2803,6 +2868,18 @@ components:
                     type: string
                     format: date-time
                     description: When the last full scan finished. Absent before the first one.
+
+        TimelineRefreshRequest:
+            type: object
+            required:
+                - libraryIds
+            properties:
+                libraryIds:
+                    type: array
+                    minItems: 1
+                    maxItems: 64
+                    items:
+                        $ref: "#/components/schemas/LibraryId"
 
         FolderListing:
             type: object

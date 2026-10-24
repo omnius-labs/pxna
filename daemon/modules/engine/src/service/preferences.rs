@@ -87,7 +87,7 @@ mod tests {
         let reopened = PreferencesService::new(pool(&dir).await?).await?;
         assert_eq!(reopened.get().await?, preferences);
 
-        let mut replaced = preferences;
+        let mut replaced = preferences.clone();
         replaced.wide.tile_size = 1;
         reopened.put(&replaced).await?;
         assert_eq!(reopened.get().await?, replaced, "保存は全体の置き換え");
@@ -104,7 +104,7 @@ mod tests {
         saved.wide.tile_size = 4;
         service.put(&saved).await?;
 
-        let mut invalid = saved;
+        let mut invalid = saved.clone();
         invalid.narrow.tile_size = 6;
         assert_eq!(*service.put(&invalid).await.unwrap_err().kind(), ErrorKind::InvalidInput);
         assert_eq!(service.get().await?, saved);

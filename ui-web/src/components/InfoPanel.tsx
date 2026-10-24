@@ -16,9 +16,10 @@ import {
 } from "../library/format";
 import { INFO_PANEL_THUMBNAIL_SIDE } from "../library/infoPanel";
 import { retryEntryDetails } from "../library/listing";
-import { type MediaInfo, mediaInfoQuery } from "../library/queries";
+import { librariesQuery, type MediaInfo, mediaInfoQuery } from "../library/queries";
 import { type Selection, selectionBytes } from "../library/selection";
 import { useSettled } from "../library/useSettled";
+import { entryAddress, TIMELINE_SCOPE } from "../location";
 import type { ThumbnailState } from "../thumbnails/queue";
 import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { EntryIcon } from "./EntryIcon";
@@ -127,6 +128,10 @@ function EntryDetail({
 }) {
     const kind = entryKind(entry);
     const hasSize = kind !== "folder" && kind !== "archive";
+    // タイムラインの Entry は Library を横断するので、Library の名前と、Library 相対パスを分けて出す。
+    const address = entryAddress(libraryId, entry.path);
+    const libraries = useQuery({ ...librariesQuery, enabled: libraryId === TIMELINE_SCOPE });
+    const libraryName = libraries.data?.find((library) => library.id === address.libraryId)?.name ?? address.libraryId;
     return (
         <>
             <div className="p-4">
@@ -146,7 +151,8 @@ function EntryDetail({
                 <InfoRow label="種類" value={ENTRY_KIND_LABELS[kind]} />
                 {hasSize && <InfoRow label="サイズ" value={formatBytes(entry.metadata?.size)} />}
                 <InfoRow label="更新日時" value={formatModifiedAt(entry.metadata?.modifiedAt)} />
-                <InfoRow label="場所" value={entry.path} />
+                {libraryId === TIMELINE_SCOPE && <InfoRow label="Library" value={libraryName} />}
+                <InfoRow label="場所" value={address.path} />
             </dl>
             {entry.detailError && (
                 <p role="alert" className="px-4 pb-3 text-xs text-muted-foreground">

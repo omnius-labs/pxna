@@ -1,4 +1,5 @@
 import type { paths } from "../api/schema";
+import { entryAddress } from "../location";
 
 type DisplayQuery = NonNullable<paths["/libraries/{libraryId}/thumbnails"]["get"]["parameters"]["query"]>;
 
@@ -7,8 +8,9 @@ function apiUrl(libraryId: string, resource: string, query: Record<string, strin
     return `/api/v1/libraries/${encodeURIComponent(libraryId)}/${resource}?${params.toString()}`;
 }
 
-/// ビューアが最初に出す、縦横比を保った表示用画像の URL。
-export function displayImageUrl(libraryId: string, path: string, size: { width: number; height: number }): string {
+/// ビューアが最初に出す、縦横比を保った表示用画像の URL。`scope` は Library の id か、タイムラインの範囲である。
+export function displayImageUrl(scope: string, scopedPath: string, size: { width: number; height: number }): string {
+    const { libraryId, path } = entryAddress(scope, scopedPath);
     const query = {
         path,
         variant: "display",
@@ -20,11 +22,12 @@ export function displayImageUrl(libraryId: string, path: string, size: { width: 
 }
 
 /// 拡大したときに差し替える、元の画像の URL。
-export function originalImageUrl(libraryId: string, path: string): string {
-    return fileContentUrl(libraryId, path);
+export function originalImageUrl(scope: string, path: string): string {
+    return fileContentUrl(scope, path);
 }
 
 /// 単一ファイルの内容。ビューアとダウンロードで同じ URL を使う。
-export function fileContentUrl(libraryId: string, path: string): string {
+export function fileContentUrl(scope: string, scopedPath: string): string {
+    const { libraryId, path } = entryAddress(scope, scopedPath);
     return apiUrl(libraryId, "files/content", { path });
 }

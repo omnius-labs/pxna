@@ -346,8 +346,8 @@ The transcode sessions, output, concurrency, configuration, and reasons for adop
 
 ### 6.3 Timeline
 
-The timeline lists a Library's images and videos in descending order of timeline date, decided from the shooting date and time (or else the modification time), without folder hierarchy.
-The daemon aggregates the Library periodically, writes the timeline dates to the timeline index, and answers page requests from the web client from the index.
+The timeline lists the images and videos of the chosen Libraries in one sequence in descending order of timeline date, decided from the shooting date and time (or else the modification time), without folder hierarchy.
+The daemon aggregates each Library periodically, writes the timeline dates to the timeline index, and answers page requests from the web client from the index.
 Images and videos inside archives are also extracted and their timeline dates read, and the extraction for aggregation is done in a concurrency budget separate from browsing.
 The daemon's own mutating operations immediately reflect only the range they changed in the index.
 

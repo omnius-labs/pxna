@@ -20,8 +20,8 @@ interface AppShellProps {
     location?: BrowseLocation;
     /// 検索モードの位置。あれば、パンくずの代わりに検索の操作を出す。
     search?: SearchLocation;
-    /// タイムラインを開いている Library。あれば、パンくずと検索の代わりに Library の名前を出す。
-    timelineLibraryId?: string;
+    /// タイムラインか。パンくずと検索の代わりに「タイムライン」と出す。
+    timeline?: boolean;
     /// 左の領域。省略するとツリーを出す。狭い画面では、ドロワーの中に出す。引数で、ドロワーを閉じられる。
     sidebar?: (close: () => void) => ReactNode;
     /// ツールバーの右に並べる操作。
@@ -38,7 +38,7 @@ interface AppShellProps {
 export function AppShell({
     location,
     search,
-    timelineLibraryId,
+    timeline = false,
     sidebar,
     actions,
     children,
@@ -67,7 +67,7 @@ export function AppShell({
                 <NarrowHeader
                     location={location}
                     search={search}
-                    timelineLibraryId={timelineLibraryId}
+                    timeline={timeline}
                     actions={actions}
                     onOpenTree={() => setDrawerOpen(true)}
                 />
@@ -75,10 +75,10 @@ export function AppShell({
                 <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
                     <SheetContent side="left" className="w-72 p-0">
                         <SheetHeader className="border-b">
-                            <SheetTitle>{timelineLibraryId ? "年と月" : "フォルダ"}</SheetTitle>
+                            <SheetTitle>{timeline ? "Library と年月" : "フォルダ"}</SheetTitle>
                             <SheetDescription className="sr-only">
-                                {timelineLibraryId
-                                    ? "表示する年と月を選んで移ります。"
+                                {timeline
+                                    ? "並べる Library と、表示する年と月を選びます。"
                                     : "Library のフォルダを選んで移ります。"}
                             </SheetDescription>
                         </SheetHeader>
@@ -93,7 +93,7 @@ export function AppShell({
 
     return (
         <div className="flex h-dvh flex-col bg-background text-sm text-foreground">
-            <Toolbar location={location} search={search} timelineLibraryId={timelineLibraryId} actions={actions} />
+            <Toolbar location={location} search={search} timeline={timeline} actions={actions} />
             <div className="flex min-h-0 flex-1">
                 <nav
                     aria-label="Library"

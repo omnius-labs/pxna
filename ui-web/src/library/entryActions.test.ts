@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
+import { TIMELINE_SCOPE } from "../location";
 import { canMutate, createFolder, DeleteEntriesError, deleteEntries, renameEntry, validateName } from "./entryActions";
 
 const { post, refresh } = vi.hoisted(() => ({ post: vi.fn(), refresh: vi.fn() }));
@@ -191,4 +192,36 @@ it("同期転送の一覧更新が失敗しても受理の記録を失わない"
     expect(accepted).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ acceptedPaths: ["/a"] }));
     expect(transferred.acceptedPaths).toEqual(["/a"]);
     expect(transferred.failures).toHaveLength(2);
+});
+it("タイムラインの選択は Library ごとに削除し、一部の Library の失敗でもほかの Library の削除を進める", async () => {
+    post.mockResolvedValueOnce(result({ entries: [] })).mockResolvedValueOnce({
+        error: { kind: "Forbidden" },
+        response: new Response(null, { status: 403 }),
+    });
+    const error = await deleteEntries(
+        new QueryClient(),
+        TIMELINE_SCOPE,
+        new Map([
+            ["/a/x.jpg", { folder: false }],
+            ["/b/y.jpg", { folder: false }],
+            ["/a/z.jpg", { folder: false }],
+        ]),
+    ).catch((caught: unknown) => caught);
+    expect(post.mock.calls.map((call) => [call[1].params.path.libraryId, call[1].body.srcPaths])).toEqual([
+        ["a", ["/x.jpg", "/z.jpg"]],
+        ["b", ["/y.jpg"]],
+    ]);
+    expect(refresh).toHaveBeenCalledWith(expect.anything(), "a");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(error).toBeInstanceOf(DeleteEntriesError);
+    expect((error as DeleteEntriesError).acceptedCount).toBe(1);
+});
+it("タイムラインの鍵の名前を変えるときは、Library 相対パスで要求する", async () => {
+    post.mockResolvedValueOnce(result({ entries: [entry] }));
+    await renameEntry(new QueryClient(), TIMELINE_SCOPE, { path: "/a/dir/x.jpg", folder: false }, "y.jpg");
+    expect(post.mock.calls[0]![1]).toEqual({
+        params: { path: { libraryId: "a" } },
+        body: { srcPaths: ["/dir/x.jpg"], dstPath: "/dir/y.jpg" },
+    });
+    expect(refresh).toHaveBeenCalledWith(expect.anything(), "a");
 });

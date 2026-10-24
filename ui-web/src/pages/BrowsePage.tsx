@@ -18,6 +18,7 @@ import { EntryActionContext, type EntryEditing } from "../library/actionContext"
 import { useClipboard } from "../library/clipboard";
 import { type Entry, entryKind, isFolderLike } from "../library/entries";
 import { canMutate } from "../library/entryActions";
+import { rememberFolder } from "../library/folderReturn";
 import { useInfoPanel } from "../library/infoPanel";
 import { isFiltering, locationFilter } from "../library/listing";
 import { usePreferences } from "../library/preferences";
@@ -39,7 +40,10 @@ import { fileContentUrl } from "../viewer/urls";
 export function BrowsePage() {
     const { libraryId, _splat } = useParams({ from: "/authed/browse/$libraryId/$" });
     const search = useSearch({ from: "/authed/browse/$libraryId/$" });
-    return <BrowseScreen location={browseLocation(libraryId, _splat, search)} />;
+    const location = browseLocation(libraryId, _splat, search);
+    // タイムラインからフォルダ表示へ戻るときの行き先にする。
+    useEffect(() => rememberFolder({ libraryId, path: location.path }), [libraryId, location.path]);
+    return <BrowseScreen location={location} />;
 }
 
 interface BrowseScreenProps {

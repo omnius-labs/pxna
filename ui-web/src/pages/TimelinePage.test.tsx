@@ -15,11 +15,12 @@ import { loadRouterAt } from "../testing/router";
 const mock = vi.hoisted(() => ({
     get: vi.fn(),
     post: vi.fn(),
+    put: vi.fn(),
     status: { running: false, processedFiles: 0 } as Record<string, unknown>,
 }));
 vi.mock("../api/client", async (original) => ({
     ...(await original<typeof import("../api/client")>()),
-    api: { GET: mock.get, POST: mock.post },
+    api: { GET: mock.get, POST: mock.post, PUT: mock.put },
 }));
 vi.mock("../components/AppShell", () => ({
     AppShell: ({
@@ -86,12 +87,19 @@ vi.mock("../components/TimelineGrid", () => ({
 }));
 vi.mock("../components/Viewer", () => ({
     Viewer: () => null,
-    TimelineViewer: ({ libraryId, view }: { libraryId: string; view: string }) => (
-        <span data-viewer>{`${libraryId}:${view}`}</span>
-    ),
+    TimelineViewer: ({
+        libraryIds,
+        view,
+        libraryReadonly,
+    }: {
+        libraryIds: string[];
+        view: string;
+        libraryReadonly: boolean;
+    }) => <span data-viewer>{`${libraryIds.join(",")}:${view}:${libraryReadonly}`}</span>,
 }));
 
-const entry = (path: string) => ({
+const entry = (path: string, libraryId = "photos") => ({
+    libraryId,
     entry: testEntry(path, { metadata: { contentType: "image/png" } }),
     timelineDate: "2024-05-01T00:00:00",
     timelineDateSource: "exif",
@@ -100,11 +108,15 @@ const entry = (path: string) => ({
 beforeEach(() => {
     mock.status = { running: false, processedFiles: 0 };
     mock.get.mockImplementation((path: string, options: { params: { query?: Record<string, string> } }) => {
-        if (path.endsWith("/timeline/entries"))
-            return Promise.resolve({
-                data: { entries: [entry(options.params.query?.month === "2024-04" ? "/old.png" : "/dir/a.png")] },
-                response: new Response(),
-            });
+        if (path.endsWith("/timeline/entries")) {
+            const libraryIds = (options.params.query?.libraryIds ?? []) as unknown as string[];
+            const entries = libraryIds.flatMap((libraryId) =>
+                libraryId === "photos"
+                    ? [entry(options.params.query?.month === "2024-04" ? "/old.png" : "/dir/a.png")]
+                    : [entry("/b.png", libraryId)],
+            );
+            return Promise.resolve({ data: { entries }, response: new Response() });
+        }
         if (path.endsWith("/timeline/months"))
             return Promise.resolve({
                 data: {
@@ -115,17 +127,33 @@ beforeEach(() => {
                 },
                 response: new Response(),
             });
-        if (path.endsWith("/timeline/status")) return Promise.resolve({ data: mock.status, response: new Response() });
+        if (path.endsWith("/timeline/status"))
+            return Promise.resolve({
+                data: {
+                    libraries: ((options.params.query?.libraryIds ?? []) as unknown as string[]).map((libraryId) => ({
+                        libraryId,
+                        ...mock.status,
+                    })),
+                },
+                response: new Response(),
+            });
         return new Promise(() => {});
     });
-    mock.post.mockResolvedValue({ data: { running: true, processedFiles: 0 }, response: new Response() });
+    mock.post.mockResolvedValue({
+        data: { libraries: [{ libraryId: "photos", running: true, processedFiles: 0 }] },
+        response: new Response(),
+    });
+    mock.put.mockImplementation((_path: string, options: { body: unknown }) =>
+        Promise.resolve({ data: options.body, response: new Response() }),
+    );
 });
 afterEach(() => {
     mock.get.mockReset();
     mock.post.mockReset();
+    mock.put.mockReset();
 });
 
-async function harness(href = "/timeline/photos", libraries = [{ id: "photos", name: "Photos", readonly: false }]) {
+async function harness(href = "/timeline", libraries = [{ id: "photos", name: "Photos", readonly: false }]) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     const host = document.createElement("div");
     document.body.append(host);
@@ -147,7 +175,7 @@ async function harness(href = "/timeline/photos", libraries = [{ id: "photos", n
         host,
         router,
         entryQueries: () =>
-            mock.get.mock.calls.filter(([path]) => path.endsWith("/timeline/entries")).map(([, o]) => o.params.query),
+            mock.get.mock.calls.filter(([path]) => path === "/timeline/entries").map(([, o]) => o.params.query),
         dispose: async () => {
             await act(async () => root.unmount());
             host.remove();
@@ -182,7 +210,7 @@ it("reads again from a month when it is pressed and puts the month in the URL", 
             link.getAttribute("href")?.includes("month=2024-04"),
         );
         await act(async () => april?.click());
-        await vi.waitFor(() => expect(h.host.querySelector("[data-tile='/old.png']")).not.toBeNull());
+        await vi.waitFor(() => expect(h.host.querySelector("[data-tile='/photos/old.png']")).not.toBeNull());
         expect(h.router.state.location.search).toMatchObject({ month: "2024-04" });
         expect(h.entryQueries()).toContainEqual(expect.objectContaining({ month: "2024-04" }));
         expect(JSON.parse(h.host.querySelector("[data-grid]")?.getAttribute("data-anchor") ?? "")).toMatchObject({
@@ -215,7 +243,7 @@ it("does not read again when the visible month is written to the URL", async () 
 });
 
 it("reads again from the month when the month that is already shown is pressed", async () => {
-    const h = await harness("/timeline/photos?month=2024-05");
+    const h = await harness("/timeline?month=2024-05");
     try {
         await vi.waitFor(() => expect(h.host.textContent).toContain("5月"));
         const before = h.entryQueries().length;
@@ -255,13 +283,15 @@ it("keeps the month that was pressed even when the old range reported its visibl
 it("opens an image in the viewer and the parent folder with the entry revealed", async () => {
     const h = await harness();
     try {
-        const tile = h.host.querySelector<HTMLElement>("[data-tile='/dir/a.png']");
+        const tile = h.host.querySelector<HTMLElement>("[data-tile='/photos/dir/a.png']");
         await act(async () => tile?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
-        expect(h.router.state.location.href).toBe("/timeline/photos?view=dir%2Fa.png");
-        await vi.waitFor(() => expect(h.host.querySelector("[data-viewer]")?.textContent).toBe("photos:dir/a.png"));
-        await act(async () => h.router.navigate({ href: "/timeline/photos" }));
+        expect(h.router.state.location.href).toBe("/timeline?view=photos%2Fdir%2Fa.png");
+        await vi.waitFor(() =>
+            expect(h.host.querySelector("[data-viewer]")?.textContent).toBe("photos:photos/dir/a.png:false"),
+        );
+        await act(async () => h.router.navigate({ href: "/timeline" }));
 
-        await act(async () => h.host.querySelector<HTMLElement>("[data-tile='/dir/a.png']")?.click());
+        await act(async () => h.host.querySelector<HTMLElement>("[data-tile='/photos/dir/a.png']")?.click());
         const reveal = h.host.querySelector<HTMLButtonElement>("button[aria-label='フォルダで表示']");
         expect(reveal?.disabled).toBe(false);
         await act(async () => reveal?.click());
@@ -278,9 +308,7 @@ it("shows that a scan is running and starts one on request", async () => {
         await vi.waitFor(() => expect(h.host.textContent).toContain("集計中… 42 件を処理しました。"));
         expect(h.host.querySelector("[data-grid]")?.getAttribute("data-empty")).toContain("集計中");
         await act(async () => h.host.querySelector<HTMLElement>("button[aria-label='今すぐ更新']")?.click());
-        expect(mock.post).toHaveBeenCalledWith("/libraries/{libraryId}/timeline/refresh", {
-            params: { path: { libraryId: "photos" } },
-        });
+        expect(mock.post).toHaveBeenCalledWith("/timeline/refresh", { body: { libraryIds: ["photos"] } });
     } finally {
         await h.dispose();
     }
@@ -292,6 +320,60 @@ it("hides the operations that need a current folder", async () => {
         expect(h.host.querySelector("button[aria-label='新しいフォルダ']")).toBeNull();
         expect(h.host.querySelector("button[aria-label='貼り付け']")).toBeNull();
         expect(h.host.querySelector("button[aria-label='削除']")).not.toBeNull();
+    } finally {
+        await h.dispose();
+    }
+});
+
+const twoLibraries = [
+    { id: "photos", name: "Photos", readonly: false },
+    { id: "shared", name: "Shared", readonly: true },
+];
+
+it("lists the entries of every Library in one timeline and narrows them with the Library filter", async () => {
+    const h = await harness("/timeline", twoLibraries);
+    try {
+        await vi.waitFor(() => expect(h.host.querySelector("[data-tile='/shared/b.png']")).not.toBeNull());
+        expect(h.host.querySelector("[data-tile='/photos/dir/a.png']")).not.toBeNull();
+        expect(h.entryQueries().at(-1)).toMatchObject({ libraryIds: ["photos", "shared"] });
+
+        const shared = h.host.querySelector<HTMLButtonElement>("#timeline-library-shared");
+        expect(shared?.getAttribute("aria-checked")).toBe("true");
+        await act(async () => shared?.click());
+        await vi.waitFor(() => expect(h.host.querySelector("[data-tile='/shared/b.png']")).toBeNull());
+        expect(h.entryQueries().at(-1)).toMatchObject({ libraryIds: ["photos"] });
+        // 最後の 1 つは外せない。
+        expect(h.host.querySelector<HTMLButtonElement>("#timeline-library-photos")?.disabled).toBe(true);
+        await vi.waitFor(() =>
+            expect(mock.put).toHaveBeenCalledWith(
+                "/preferences",
+                expect.objectContaining({ body: expect.objectContaining({ timelineLibraries: ["photos"] }) }),
+            ),
+        );
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("does not offer changes for an entry of a read-only Library", async () => {
+    const h = await harness("/timeline", twoLibraries);
+    try {
+        await vi.waitFor(() => expect(h.host.querySelector("[data-tile='/shared/b.png']")).not.toBeNull());
+        await act(async () => h.host.querySelector<HTMLElement>("[data-tile='/shared/b.png']")?.click());
+        expect(h.host.querySelector<HTMLButtonElement>("button[aria-label='削除']")?.disabled).toBe(true);
+        await act(async () => h.host.querySelector<HTMLElement>("[data-tile='/photos/dir/a.png']")?.click());
+        expect(h.host.querySelector<HTMLButtonElement>("button[aria-label='削除']")?.disabled).toBe(false);
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("moves the timeline URL of a Library to the timeline across Libraries", async () => {
+    const h = await harness("/timeline/photos?month=2024-05&view=dir%2Fa.png");
+    try {
+        await vi.waitFor(() =>
+            expect(h.router.state.location.href).toBe("/timeline?month=2024-05&view=photos%2Fdir%2Fa.png"),
+        );
     } finally {
         await h.dispose();
     }

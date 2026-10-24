@@ -624,37 +624,20 @@ pub struct GetThumbnailQueryParams {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetTimelineStatusPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_GETTIMELINESTATUSPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_GETTIMELINESTATUSPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct ListTimelineEntriesPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_LISTTIMELINEENTRIESPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_LISTTIMELINEENTRIESPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+pub struct GetTimelineStatusQueryParams {
+    /// Libraries to list, repeated as `libraryIds=a&libraryIds=b`. Every id must name a Library; an unknown id is 404.
+    #[serde(rename = "libraryIds")]
+    #[validate(length(min = 1, max = 64))]
+    pub library_ids: Vec<models::LibraryId>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct ListTimelineEntriesQueryParams {
+    /// Libraries to list, repeated as `libraryIds=a&libraryIds=b`. Every id must name a Library; an unknown id is 404.
+    #[serde(rename = "libraryIds")]
+    #[validate(length(min = 1, max = 64))]
+    pub library_ids: Vec<models::LibraryId>,
     /// Cursor from `next`. Returns the entries older than the cursor.
     #[serde(rename = "after")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -670,11 +653,19 @@ pub struct ListTimelineEntriesQueryParams {
               )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub month: Option<String>,
-    /// Returns a page that has this entry near its middle.
+    /// Returns a page that has this entry of `aroundLibraryId` near its middle.
     #[serde(rename = "around")]
     #[validate(length(min = 1, max = 4096))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub around: Option<String>,
+    /// The Library of `around`. Given exactly when `around` is given.
+    #[serde(rename = "aroundLibraryId")]
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_LISTTIMELINEENTRIESQUERYPARAMS_AROUND_LIBRARY_ID),
+              )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub around_library_id: Option<String>,
     /// Maximum number of entries to return.
     #[serde(rename = "limit")]
     #[validate(range(min = 1u32, max = 1000u32))]
@@ -685,35 +676,17 @@ pub struct ListTimelineEntriesQueryParams {
 lazy_static::lazy_static! {
     static ref RE_LISTTIMELINEENTRIESQUERYPARAMS_MONTH: regex::Regex = regex::Regex::new("^[0-9]{4}-[0-9]{2}$").unwrap();
 }
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct ListTimelineMonthsPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_LISTTIMELINEMONTHSPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
 lazy_static::lazy_static! {
-    static ref RE_LISTTIMELINEMONTHSPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+    static ref RE_LISTTIMELINEENTRIESQUERYPARAMS_AROUND_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct RefreshTimelinePathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_REFRESHTIMELINEPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_REFRESHTIMELINEPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+pub struct ListTimelineMonthsQueryParams {
+    /// Libraries to list, repeated as `libraryIds=a&libraryIds=b`. Every id must name a Library; an unknown id is 404.
+    #[serde(rename = "libraryIds")]
+    #[validate(length(min = 1, max = 64))]
+    pub library_ids: Vec<models::LibraryId>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -6911,7 +6884,7 @@ impl std::ops::DerefMut for Password {
     }
 }
 
-/// Display preferences. `wide` and `narrow` are chosen by the width of the screen (768 CSS px); `sort` does not depend on it.
+/// Display preferences. `wide` and `narrow` are chosen by the width of the screen (768 CSS px); `sort` and `timelineLibraries` do not depend on it.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct Preferences {
@@ -6926,12 +6899,23 @@ pub struct Preferences {
     #[serde(rename = "sort")]
     #[validate(nested)]
     pub sort: models::SortPreference,
+
+    /// Libraries the timeline shows. Absent means every Library. Ids of Libraries that no longer exist are kept as saved, and clients ignore them.
+    #[serde(rename = "timelineLibraries")]
+    #[validate(length(min = 1, max = 64), nested)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline_libraries: Option<Vec<models::LibraryId>>,
 }
 
 impl Preferences {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
     pub fn new(wide: models::DisplaySet, narrow: models::DisplaySet, sort: models::SortPreference) -> Preferences {
-        Preferences { wide, narrow, sort }
+        Preferences {
+            wide,
+            narrow,
+            sort,
+            timeline_libraries: None,
+        }
     }
 }
 
@@ -6946,7 +6930,13 @@ impl std::fmt::Display for Preferences {
             // Skipping narrow in query parameter serialization
 
             // Skipping sort in query parameter serialization
-
+            self.timeline_libraries.as_ref().map(|timeline_libraries| {
+                [
+                    "timelineLibraries".to_string(),
+                    timeline_libraries.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","),
+                ]
+                .join(",")
+            }),
         ];
 
         write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
@@ -6967,6 +6957,7 @@ impl std::str::FromStr for Preferences {
             pub wide: Vec<models::DisplaySet>,
             pub narrow: Vec<models::DisplaySet>,
             pub sort: Vec<models::SortPreference>,
+            pub timeline_libraries: Vec<Vec<models::LibraryId>>,
         }
 
         let mut intermediate_rep = IntermediateRep::default();
@@ -6996,6 +6987,7 @@ impl std::str::FromStr for Preferences {
                     "sort" => intermediate_rep
                         .sort
                         .push(<models::SortPreference as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    "timelineLibraries" => return std::result::Result::Err("Parsing a container in this style is not supported in Preferences".to_string()),
                     _ => return std::result::Result::Err("Unexpected key while parsing Preferences".to_string()),
                 }
             }
@@ -7009,6 +7001,7 @@ impl std::str::FromStr for Preferences {
             wide: intermediate_rep.wide.into_iter().next().ok_or_else(|| "wide missing in Preferences".to_string())?,
             narrow: intermediate_rep.narrow.into_iter().next().ok_or_else(|| "narrow missing in Preferences".to_string())?,
             sort: intermediate_rep.sort.into_iter().next().ok_or_else(|| "sort missing in Preferences".to_string())?,
+            timeline_libraries: intermediate_rep.timeline_libraries.into_iter().next(),
         })
     }
 }
@@ -8358,6 +8351,15 @@ impl std::str::FromStr for ThumbnailVariant {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct TimelineEntry {
+    /// Library identifier chosen by the operator in the daemon configuration file. Unlike the daemon-issued identifiers in this API it is a readable name, not a generated token. It is what the API uses in place of a host path, so the physical location of a Library is never exposed.  Because the value is used as a URL path segment, the character set is restricted. The daemon rejects a configuration that violates it at startup.
+    #[serde(rename = "libraryId")]
+    #[validate(
+            length(min = 1, max = 64),
+            regex(path = *RE_TIMELINEENTRY_LIBRARY_ID),
+          custom(function = "check_xss_string"),
+    )]
+    pub library_id: String,
+
     #[serde(rename = "entry")]
     #[validate(nested)]
     pub entry: models::FileSystemEntry,
@@ -8374,10 +8376,15 @@ pub struct TimelineEntry {
     pub timeline_date_source: String,
 }
 
+lazy_static::lazy_static! {
+    static ref RE_TIMELINEENTRY_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
 impl TimelineEntry {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(entry: models::FileSystemEntry, timeline_date: String, timeline_date_source: String) -> TimelineEntry {
+    pub fn new(library_id: String, entry: models::FileSystemEntry, timeline_date: String, timeline_date_source: String) -> TimelineEntry {
         TimelineEntry {
+            library_id,
             entry,
             timeline_date,
             timeline_date_source,
@@ -8391,6 +8398,8 @@ impl TimelineEntry {
 impl std::fmt::Display for TimelineEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
+            Some("libraryId".to_string()),
+            Some(self.library_id.to_string()),
             // Skipping entry in query parameter serialization
             Some("timelineDate".to_string()),
             Some(self.timeline_date.to_string()),
@@ -8413,6 +8422,7 @@ impl std::str::FromStr for TimelineEntry {
         #[derive(Default)]
         #[allow(dead_code)]
         struct IntermediateRep {
+            pub library_id: Vec<String>,
             pub entry: Vec<models::FileSystemEntry>,
             pub timeline_date: Vec<String>,
             pub timeline_date_source: Vec<String>,
@@ -8433,6 +8443,8 @@ impl std::str::FromStr for TimelineEntry {
             if let Some(key) = key_result {
                 #[allow(clippy::match_single_binding)]
                 match key {
+                    #[allow(clippy::redundant_clone)]
+                    "libraryId" => intermediate_rep.library_id.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "entry" => intermediate_rep
                         .entry
@@ -8455,6 +8467,11 @@ impl std::str::FromStr for TimelineEntry {
 
         // Use the intermediate representation to return the struct
         std::result::Result::Ok(TimelineEntry {
+            library_id: intermediate_rep
+                .library_id
+                .into_iter()
+                .next()
+                .ok_or_else(|| "libraryId missing in TimelineEntry".to_string())?,
             entry: intermediate_rep.entry.into_iter().next().ok_or_else(|| "entry missing in TimelineEntry".to_string())?,
             timeline_date: intermediate_rep
                 .timeline_date
@@ -8861,7 +8878,124 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<TimelineMont
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct TimelineRefreshRequest {
+    #[serde(rename = "libraryIds")]
+    #[validate(length(min = 1, max = 64), nested)]
+    pub library_ids: Vec<models::LibraryId>,
+}
+
+impl TimelineRefreshRequest {
+    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
+    pub fn new(library_ids: Vec<models::LibraryId>) -> TimelineRefreshRequest {
+        TimelineRefreshRequest { library_ids }
+    }
+}
+
+/// Converts the TimelineRefreshRequest value to the Query Parameters representation (style=form, explode=false)
+/// specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde serializer
+impl std::fmt::Display for TimelineRefreshRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<Option<String>> = vec![
+            Some("libraryIds".to_string()),
+            Some(self.library_ids.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+        ];
+
+        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
+    }
+}
+
+/// Converts Query Parameters representation (style=form, explode=false) to a TimelineRefreshRequest value
+/// as specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde deserializer
+impl std::str::FromStr for TimelineRefreshRequest {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        /// An intermediate representation of the struct to use for parsing.
+        #[derive(Default)]
+        #[allow(dead_code)]
+        struct IntermediateRep {
+            pub library_ids: Vec<Vec<models::LibraryId>>,
+        }
+
+        let mut intermediate_rep = IntermediateRep::default();
+
+        // Parse into intermediate representation
+        let mut string_iter = s.split(',');
+        let mut key_result = string_iter.next();
+
+        while key_result.is_some() {
+            let val = match string_iter.next() {
+                Some(x) => x,
+                None => return std::result::Result::Err("Missing value while parsing TimelineRefreshRequest".to_string()),
+            };
+
+            if let Some(key) = key_result {
+                #[allow(clippy::match_single_binding)]
+                match key {
+                    "libraryIds" => return std::result::Result::Err("Parsing a container in this style is not supported in TimelineRefreshRequest".to_string()),
+                    _ => return std::result::Result::Err("Unexpected key while parsing TimelineRefreshRequest".to_string()),
+                }
+            }
+
+            // Get the next key
+            key_result = string_iter.next();
+        }
+
+        // Use the intermediate representation to return the struct
+        std::result::Result::Ok(TimelineRefreshRequest {
+            library_ids: intermediate_rep
+                .library_ids
+                .into_iter()
+                .next()
+                .ok_or_else(|| "libraryIds missing in TimelineRefreshRequest".to_string())?,
+        })
+    }
+}
+
+// Methods for converting between header::IntoHeaderValue<TimelineRefreshRequest> and HeaderValue
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<header::IntoHeaderValue<TimelineRefreshRequest>> for HeaderValue {
+    type Error = String;
+
+    fn try_from(hdr_value: header::IntoHeaderValue<TimelineRefreshRequest>) -> std::result::Result<Self, Self::Error> {
+        let hdr_value = hdr_value.to_string();
+        match HeaderValue::from_str(&hdr_value) {
+            std::result::Result::Ok(value) => std::result::Result::Ok(value),
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for TimelineRefreshRequest - value: {hdr_value} is invalid {e}"#)),
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<TimelineRefreshRequest> {
+    type Error = String;
+
+    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
+        match hdr_value.to_str() {
+            std::result::Result::Ok(value) => match <TimelineRefreshRequest as std::str::FromStr>::from_str(value) {
+                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
+                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into TimelineRefreshRequest - {err}"#)),
+            },
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct TimelineStatus {
+    /// Library identifier chosen by the operator in the daemon configuration file. Unlike the daemon-issued identifiers in this API it is a readable name, not a generated token. It is what the API uses in place of a host path, so the physical location of a Library is never exposed.  Because the value is used as a URL path segment, the character set is restricted. The daemon rejects a configuration that violates it at startup.
+    #[serde(rename = "libraryId")]
+    #[validate(
+            length(min = 1, max = 64),
+            regex(path = *RE_TIMELINESTATUS_LIBRARY_ID),
+          custom(function = "check_xss_string"),
+    )]
+    pub library_id: String,
+
     /// True while a full scan of the Library is running.
     #[serde(rename = "running")]
     pub running: bool,
@@ -8877,10 +9011,15 @@ pub struct TimelineStatus {
     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+lazy_static::lazy_static! {
+    static ref RE_TIMELINESTATUS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
 impl TimelineStatus {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(running: bool, processed_files: u64) -> TimelineStatus {
+    pub fn new(library_id: String, running: bool, processed_files: u64) -> TimelineStatus {
         TimelineStatus {
+            library_id,
             running,
             processed_files,
             completed_at: None,
@@ -8894,6 +9033,8 @@ impl TimelineStatus {
 impl std::fmt::Display for TimelineStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
+            Some("libraryId".to_string()),
+            Some(self.library_id.to_string()),
             Some("running".to_string()),
             Some(self.running.to_string()),
             Some("processedFiles".to_string()),
@@ -8916,6 +9057,7 @@ impl std::str::FromStr for TimelineStatus {
         #[derive(Default)]
         #[allow(dead_code)]
         struct IntermediateRep {
+            pub library_id: Vec<String>,
             pub running: Vec<bool>,
             pub processed_files: Vec<u64>,
             pub completed_at: Vec<chrono::DateTime<chrono::Utc>>,
@@ -8937,6 +9079,8 @@ impl std::str::FromStr for TimelineStatus {
                 #[allow(clippy::match_single_binding)]
                 match key {
                     #[allow(clippy::redundant_clone)]
+                    "libraryId" => intermediate_rep.library_id.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
                     "running" => intermediate_rep.running.push(<bool as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "processedFiles" => intermediate_rep.processed_files.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
@@ -8954,6 +9098,11 @@ impl std::str::FromStr for TimelineStatus {
 
         // Use the intermediate representation to return the struct
         std::result::Result::Ok(TimelineStatus {
+            library_id: intermediate_rep
+                .library_id
+                .into_iter()
+                .next()
+                .ok_or_else(|| "libraryId missing in TimelineStatus".to_string())?,
             running: intermediate_rep.running.into_iter().next().ok_or_else(|| "running missing in TimelineStatus".to_string())?,
             processed_files: intermediate_rep
                 .processed_files
@@ -8989,6 +9138,114 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<TimelineStat
             std::result::Result::Ok(value) => match <TimelineStatus as std::str::FromStr>::from_str(value) {
                 std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
                 std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into TimelineStatus - {err}"#)),
+            },
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct TimelineStatuses {
+    #[serde(rename = "libraries")]
+    #[validate(nested)]
+    pub libraries: Vec<models::TimelineStatus>,
+}
+
+impl TimelineStatuses {
+    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
+    pub fn new(libraries: Vec<models::TimelineStatus>) -> TimelineStatuses {
+        TimelineStatuses { libraries }
+    }
+}
+
+/// Converts the TimelineStatuses value to the Query Parameters representation (style=form, explode=false)
+/// specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde serializer
+impl std::fmt::Display for TimelineStatuses {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<Option<String>> = vec![
+            // Skipping libraries in query parameter serialization
+
+        ];
+
+        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
+    }
+}
+
+/// Converts Query Parameters representation (style=form, explode=false) to a TimelineStatuses value
+/// as specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde deserializer
+impl std::str::FromStr for TimelineStatuses {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        /// An intermediate representation of the struct to use for parsing.
+        #[derive(Default)]
+        #[allow(dead_code)]
+        struct IntermediateRep {
+            pub libraries: Vec<Vec<models::TimelineStatus>>,
+        }
+
+        let mut intermediate_rep = IntermediateRep::default();
+
+        // Parse into intermediate representation
+        let mut string_iter = s.split(',');
+        let mut key_result = string_iter.next();
+
+        while key_result.is_some() {
+            let val = match string_iter.next() {
+                Some(x) => x,
+                None => return std::result::Result::Err("Missing value while parsing TimelineStatuses".to_string()),
+            };
+
+            if let Some(key) = key_result {
+                #[allow(clippy::match_single_binding)]
+                match key {
+                    "libraries" => return std::result::Result::Err("Parsing a container in this style is not supported in TimelineStatuses".to_string()),
+                    _ => return std::result::Result::Err("Unexpected key while parsing TimelineStatuses".to_string()),
+                }
+            }
+
+            // Get the next key
+            key_result = string_iter.next();
+        }
+
+        // Use the intermediate representation to return the struct
+        std::result::Result::Ok(TimelineStatuses {
+            libraries: intermediate_rep
+                .libraries
+                .into_iter()
+                .next()
+                .ok_or_else(|| "libraries missing in TimelineStatuses".to_string())?,
+        })
+    }
+}
+
+// Methods for converting between header::IntoHeaderValue<TimelineStatuses> and HeaderValue
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<header::IntoHeaderValue<TimelineStatuses>> for HeaderValue {
+    type Error = String;
+
+    fn try_from(hdr_value: header::IntoHeaderValue<TimelineStatuses>) -> std::result::Result<Self, Self::Error> {
+        let hdr_value = hdr_value.to_string();
+        match HeaderValue::from_str(&hdr_value) {
+            std::result::Result::Ok(value) => std::result::Result::Ok(value),
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for TimelineStatuses - value: {hdr_value} is invalid {e}"#)),
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<TimelineStatuses> {
+    type Error = String;
+
+    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
+        match hdr_value.to_str() {
+            std::result::Result::Ok(value) => match <TimelineStatuses as std::str::FromStr>::from_str(value) {
+                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
+                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into TimelineStatuses - {err}"#)),
             },
             std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
         }

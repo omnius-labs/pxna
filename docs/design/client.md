@@ -282,8 +282,7 @@ The search mode screen uses the same tree, grid or list, info panel, status bar,
 When input has stopped for 300 ms, a listing with `query` is requested ([Listing and Search Design §5](./listing.md#5-name-search)). When searching underneath, `recursive=true` is attached.
 The results line up in the same grid and list as ordinary listings. When none of the search terms, rating, or tag is present, a listing is not requested and input is prompted.
 
-The entrance to search is the search button on the toolbars of folder view and the timeline. The entrance passes only the default start, and the search mode screen is the same whichever it is opened from.
-From folder view it opens with the current folder as the start, and from the timeline with the whole Library as the start. On a wide screen, pressing `/` outside input fields and dialogs also moves to search mode. In search mode, `/` focuses the search terms field. Rate mode (§3.4) can also be used in search mode's viewer, which allows narrowing to "未評価" (Unrated) and rating one after another.
+The entrance to search is the search button on the toolbar of folder view, and it opens with the current folder as the start. The start of a search is inside one Library, so the timeline, which spans Libraries (§3.10), has no entrance to search. On a wide screen, pressing `/` outside input fields and dialogs also moves to search mode. In search mode, `/` focuses the search terms field. Rate mode (§3.4) can also be used in search mode's viewer, which allows narrowing to "未評価" (Unrated) and rating one after another.
 The choice of start is made from the current start, its ancestor folders, and the whole Library. Choosing replaces only the start while keeping the terms and scope.
 Opening an old URL form (`/browse/...` with `q` and `deep=1` attached) replaces it with the corresponding search mode URL. Those without `deep=1` correspond to `flat=1`.
 
@@ -447,15 +446,22 @@ There is one owner, and situations of changing display preferences in succession
 
 ### 3.10 Timeline
 
-Apart from folder view, the web client has a timeline that lists the Library's images and videos in descending order of timeline date.
-What is listed, the timeline dates, and the server's aggregation are authoritative in [Timeline Design](./timeline.md).
+Apart from folder view, the web client has a timeline that lists the images and videos of the chosen Libraries in one sequence in descending order of timeline date.
+What is listed, the timeline dates, the order across Libraries, and the server's aggregation are authoritative in [Timeline Design](./timeline.md).
 
-The timeline is placed at the URL `/timeline/{libraryId}`, and carries the month being viewed in the `month` query (`YYYY-MM`) and the Entry open in the viewer in the `view` query.
-The timeline has no current folder, so `view` carries the Library-relative path with the leading `/` removed.
-The toolbar's "フォルダ / タイムライン" (Folder / Timeline) switch moves to the other of the same Library.
-Moving from the timeline to folder view opens that Library's root.
+The timeline is placed at the URL `/timeline`, and carries the month being viewed in the `month` query (`YYYY-MM`) and the Entry open in the viewer in the `view` query.
+The timeline has no current folder and spans Libraries, so `view` carries the Library id followed by the Library-relative path, with the leading `/` removed (`photos/2025/a.jpg`).
+The old URL `/timeline/{libraryId}` is replaced by `/timeline`, keeping `month` and putting that Library in front of `view`.
 
-On a wide screen, instead of the tree, it lines up the Library switch at the top and below it the years and months with counts.
+Which Libraries to list is not put in the URL; it is saved in the display preferences (`timelineLibraries`).
+While nothing is saved, every Library is listed. Saved ids of Libraries that no longer exist are ignored, and when none of the saved Libraries exists, every Library is listed.
+Changing the choice rereads from the newest Entry and discards the selection.
+
+The toolbar's "フォルダ / タイムライン" (Folder / Timeline) switch moves from folder view to the timeline without changing the choice of Libraries.
+Moving from the timeline to folder view opens the folder last opened in folder view while the tab is open, or else the root of the first Library.
+
+On a wide screen, instead of the tree, it lines up a checkbox per Library at the top and below it the years and months with counts summed over the chosen Libraries.
+The last chosen Library cannot be unchecked, so at least one Library is always listed.
 Pressing a month rereads from that month's newest Entry. Pressing the month being displayed again also rereads.
 The month being viewed by scrolling is highlighted, and `month` is put in the URL without pushing onto history.
 On a narrow screen, this list goes in the same drawer as the tree.
@@ -472,14 +478,18 @@ When the continuation above is added and when distant Entries are discarded, the
 When a month is chosen and when opened from the URL's `month`, the range already read is discarded and reread from that month.
 Thumbnails are requested under the same queue rules as folder view (§4).
 
-While the server is aggregating, "集計中" (Aggregating) and the number of files processed are shown, and the per-month counts are reread every 10 seconds.
+While the server is aggregating any of the chosen Libraries, "集計中" (Aggregating) and the number of files processed, summed over them, are shown, and the per-month counts are reread every 10 seconds.
 Entries added by aggregation are not automatically inserted into the already loaded grid. Added Entries appear when "今すぐ更新" (Update now) is pressed and on the reread when a month is chosen again.
-The "今すぐ更新" button makes the server start aggregation.
+The "今すぐ更新" button makes the server start aggregation of the chosen Libraries.
 
 On a wide screen, delete, download, cut, copy, and rename can be done from the tile's context menu, the toolbar, and key operations (§3.7).
 There is no current folder, so new folder, paste, upload, and move by drag are not shown.
+Changeability is decided per Entry from the `readonly` of its Library and of the Entry, and an operation is not offered when any selected Entry cannot be changed.
+A selection spanning Libraries is deleted with one request per Library, and a failure in one Library does not stop the others.
+Cut and copy keep the Entries grouped by Library, and pasting in folder view sends one group after another.
+The info panel shows the Library name in addition to the Library-relative path.
 Range selection is limited to the loaded range, and Ctrl or ⌘ plus A is not provided.
-When it finishes changing Entries, that Library's timeline and per-month counts are reread.
+When it finishes changing Entries, the timelines that list a changed Library and their per-month counts are reread.
 "フォルダで表示" (Show in folder) opens the selected Entry's parent folder in folder view, selects that Entry, and scrolls to the display position.
 For an Entry inside an archive, it opens the folder inside that archive.
 
@@ -648,7 +658,7 @@ It would cause the mistaken operation of deleting thinking everything was select
 Search is done in a search mode that belongs to neither folder view nor the timeline. The start (the whole Library, or under a folder) and the scope (include descendants, or only direct children) are chosen within search mode, and the entrances pass only the default start. The default scope includes descendants (§3.6).
 
 **Reason**
-If the search field were coupled to folder view, a search with the same experience could not be offered from the timeline, and the screen implementation would also be duplicated.
+If the search field were coupled to folder view, a search with the same experience could not be offered from another entrance, and the screen implementation would also be duplicated.
 With a dedicated URL, reload and the back operation can return to the same search's results.
 If the start can be chosen within search mode, a separate search need not be built for each entrance.
 Filtering direct children gives the same result as a search with the scope set to direct children only.
@@ -1134,10 +1144,10 @@ The implementation is the simplest, but a user who wants to use it collapsed wou
 #### Put the Timeline on a Separate Route and Switch with the Toolbar
 
 **Decision**
-The timeline is placed at `/timeline/{libraryId}`, and the toolbar's "フォルダ / タイムライン" (Folder / Timeline) switch goes back and forth with the same Library's folder view (§3.10).
+The timeline is placed at `/timeline`, and the toolbar's "フォルダ / タイムライン" (Folder / Timeline) switch goes back and forth with folder view (§3.10).
 
 **Reason**
-Reload, bookmarks, and the browser's back operation can return to the same month of the same timeline.
+Reload, bookmarks, and the browser's back operation can return to the same month of the timeline.
 The timeline has no current folder, so the URL can omit a folder path.
 
 **Rejected alternative 1**
@@ -1147,6 +1157,26 @@ Routes would not increase, but a folder path that the timeline does not use woul
 **Rejected alternative 2**
 A method that saves in the display preferences whether to open in folder view or the timeline.
 It would be convenient for a user who always views the timeline, but the display could not be known from the URL, and the results of shared URLs and the back operation would change with the settings, so we rejected it.
+
+#### Save the Timeline's Libraries in the Display Preferences as the Chosen Ones
+
+**Decision**
+The Libraries the timeline lists are chosen with checkboxes in the timeline's left area and saved in the display preferences as the list of chosen Libraries, not put in the URL (§3.10).
+While nothing is saved, every Library is listed.
+
+**Reason**
+Which Libraries hold photos rarely changes, so the choice is made once and kept across reloads and devices.
+With the choice only in the preferences, there is no state in which the URL and the saved value disagree, and Pxna has a single owner, so a URL that reproduces someone else's choice is not needed.
+Saving the chosen Libraries rather than the excluded ones keeps a newly added Library out of the timeline until it is chosen, so a Library of other images does not get mixed in unnoticed.
+The cost is that a newly added Library of photos has to be checked once.
+
+**Rejected alternative 1**
+A method that carries the chosen Libraries in the URL query and uses the saved value only when the query is absent.
+A narrowed timeline could be bookmarked, but which of the URL and the saved value wins, and when the saved value is updated, would have to be decided, so we rejected it.
+
+**Rejected alternative 2**
+A method that saves the excluded Libraries.
+A newly added Library would appear without any operation, but a Library of other images would also be mixed in until excluded, so we rejected it.
 
 #### Line Up Years and Months in the Timeline's Left Area and Jump to the Chosen Month
 
@@ -1445,10 +1475,11 @@ Size is not shown for folders and archives.
 When multiple items are selected, the count and total size are shown.
 The larger thumbnail and media info are requested only when the selection has not changed for 200 ms, and when the selection changes, the request already sent is canceled.
 For images, it shows the dimensions with the rotation applied and the items of shooting info that Exif has, and for videos the duration, resolution, and codecs.
-The timeline (§3.10) places at `/timeline/{libraryId}` a grid with daily headings ([TimelineGrid.tsx](../../ui-web/src/components/TimelineGrid.tsx)) and a list of years and months ([TimelineSidebar.tsx](../../ui-web/src/components/TimelineSidebar.tsx)).
+The timeline (§3.10) places at `/timeline` a grid with daily headings ([TimelineGrid.tsx](../../ui-web/src/components/TimelineGrid.tsx)) and a list of years and months ([TimelineSidebar.tsx](../../ui-web/src/components/TimelineSidebar.tsx)).
 Loading is held by `TimelineStore` in [library/timeline.ts](../../ui-web/src/library/timeline.ts), which points to Entries by absolute positions based on the start of the range first read, so even when reading is added toward the front, the positions of the selection and the viewer do not move.
 The viewer and filmstrip run on a `TimelineStore` that has the same `Listing` shape, and use the same parts as the folder view listing.
-The switch between folder view and the timeline is [ModeSwitch.tsx](../../ui-web/src/components/ModeSwitch.tsx), and "フォルダで表示" (Show in folder) is received by `reveal` in the folder view URL.
+The switch between folder view and the timeline is [ModeSwitch.tsx](../../ui-web/src/components/ModeSwitch.tsx), which goes back to the folder remembered by [folderReturn.ts](../../ui-web/src/library/folderReturn.ts), and "フォルダで表示" (Show in folder) is received by `reveal` in the folder view URL.
+Timeline Entries carry `/{libraryId}{Library-relative path}` as their path, so the selection, the viewer, and the positions in the range tell Entries of different Libraries apart without change; the API helpers turn that path back into the Library and the Library-relative path with `entryAddress` in [location.ts](../../ui-web/src/location.ts).
 Ratings and tags are read and written by the queries and saving in [ratingTags.ts](../../ui-web/src/library/ratingTags.ts). In the info panel, [EntryTags.tsx](../../ui-web/src/components/EntryTags.tsx) handles displaying the rating and attaching and detaching tags. The viewer's rate mode is handled by [Viewer.tsx](../../ui-web/src/components/Viewer.tsx), shared by the viewers of folder view, search mode, and the timeline.
 The tree subscribes with [useTreeListing.ts](../../ui-web/src/library/useTreeListing.ts) to levels that are expanded and whose ancestors are not closed, and shares the page and generation management of [listing.ts](../../ui-web/src/library/listing.ts).
 It generates only the rows in the visible range, and makes unfetched positions frames that have height. For key operations toward off-screen, it reads the destination page and then focuses.

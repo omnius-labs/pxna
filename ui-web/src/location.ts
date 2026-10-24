@@ -34,11 +34,51 @@ export function parseRatingFilter(value: unknown): RatingFilter | undefined {
     return value === "good" || value === "bad" || value === "none" ? value : undefined;
 }
 
-/// web が URL で表すタイムラインの位置。`month` は見ている月（`YYYY-MM`）、`view` はビューアで開いている Entry の Library 相対パス（先頭の `/` を除く）である。
+/// web が URL で表すタイムラインの位置。`month` は見ている月（`YYYY-MM`）、`view` はビューアで開いている Entry の鍵（先頭の `/` を除く）である。
+/// タイムラインは Library を横断するので、並べる Library は URL に載せず、表示設定に保存する。
 export interface TimelineLocation {
-    libraryId: string;
     month?: string;
     view?: string;
+}
+
+/// Entry の所在。Library の id と Library 相対パスの組である。
+export interface EntryAddress {
+    libraryId: string;
+    path: string;
+}
+
+/// Library を横断するタイムラインの範囲。Library の id に使えない文字なので、どの Library の id とも重ならない。
+/// この範囲の Entry の path は、`timelineKey` が作る鍵である。
+export const TIMELINE_SCOPE = "*";
+
+/// タイムラインの Entry の鍵。先頭の `/` の後に Library の id と Library 相対パスを続ける。
+/// Library の id は `/` を含まないので、2 つ目の `/` から後が Library 相対パスである。
+export function timelineKey(libraryId: string, path: string): string {
+    return `/${libraryId}${path}`;
+}
+
+/// 範囲（Library の id か `TIMELINE_SCOPE`）と、その範囲での path から、Entry の所在を求める。
+export function entryAddress(scope: string, path: string): EntryAddress {
+    if (scope !== TIMELINE_SCOPE) return { libraryId: scope, path };
+    const slash = path.indexOf("/", 1);
+    return slash < 0
+        ? { libraryId: path.slice(1), path: "/" }
+        : { libraryId: path.slice(1, slash), path: path.slice(slash) };
+}
+
+/// 範囲での path を、Library ごとの Library 相対パスに分ける。タイムラインの選択は、複数の Library にまたがる。
+export function groupByLibrary<T>(scope: string, items: ReadonlyMap<string, T>): Map<string, Map<string, T>> {
+    const groups = new Map<string, Map<string, T>>();
+    for (const [scopedPath, item] of items) {
+        const { libraryId, path } = entryAddress(scope, scopedPath);
+        let group = groups.get(libraryId);
+        if (!group) {
+            group = new Map();
+            groups.set(libraryId, group);
+        }
+        group.set(path, item);
+    }
+    return groups;
 }
 
 /// Library 相対パスをセグメントに分ける。空のセグメントは捨てる。
@@ -140,12 +180,12 @@ export function timelineHref(location: TimelineLocation): string {
     if (location.month !== undefined && isMonth(location.month)) params.set("month", location.month);
     if (location.view !== undefined) params.set("view", location.view);
     const search = params.size === 0 ? "" : `?${params.toString()}`;
-    return `/timeline/${encodeURIComponent(location.libraryId)}${search}`;
+    return `/timeline${search}`;
 }
 
-/// ルータが復号したパスとクエリから、タイムラインの位置を作る。月の形が違えば月を持たないものとして扱う。
-export function timelineLocation(libraryId: string, search: { month?: string; view?: string }): TimelineLocation {
-    const location: TimelineLocation = { libraryId };
+/// ルータが復号したクエリから、タイムラインの位置を作る。月の形が違えば月を持たないものとして扱う。
+export function timelineLocation(search: { month?: string; view?: string }): TimelineLocation {
+    const location: TimelineLocation = {};
     if (search.month !== undefined && isMonth(search.month)) location.month = search.month;
     if (search.view !== undefined) location.view = search.view;
     return location;
@@ -156,7 +196,7 @@ export function isMonth(value: string): boolean {
     return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
 
-/// タイムラインで開いた Entry の、Library 相対パス（先頭の `/` を除く）から、Library 相対パスへ戻す。
+/// タイムラインで開いた Entry の鍵（先頭の `/` を除く）から、鍵へ戻す。
 export function timelineEntryPath(view: string): string {
     return joinPath(pathSegments(view));
 }

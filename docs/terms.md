@@ -28,7 +28,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | Session | all | `Session` | `AuthSession` | The server-side authentication state created by login or initial setup and referenced by a cookie or a bearer token | login state |
 | Session token | all | `SessionToken` | `accessToken`, `__Host-pxna_session` | The unguessable random string a client sends to refer to its session | access token |
 | Thumbnail | all | `ThumbnailGenerator` | `thumbnail`, `variant=thumbnail` | A reduced image generated from an Entry for a tile in a listing. For a video, it is made from the first frame | preview |
-| [Timeline](#t-timeline) | all | `TimelineService` | `/timeline/{libraryId}`, `timeline`, "Timeline" | A listing of a Library's images and videos in descending order of timeline date without folder hierarchy, and the screen showing it | flat view, chronological view |
+| [Timeline](#t-timeline) | all | `TimelineService` | `/timeline`, `timeline`, "Timeline" | A listing of the chosen Libraries' images and videos in one sequence in descending order of timeline date without folder hierarchy, and the screen showing it | flat view, chronological view |
 | Upload | all | `Upload` | `upload` | A server-side session for sending a large file in parts | transfer |
 | Owner | all | `UserRole::Owner` | `owner` | Pxna's only user, registered once by initial setup | administrator |
 | Natural order | all | - | - | A name ordering that compares runs of digits as numbers and everything else without distinguishing case | - |
@@ -59,7 +59,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | Name index | listing | `NameIndex` | `indexed` (whether a listing was answered from it) | Derived state, updated by aggregation and the daemon's own changes, that holds the normalized names of a Library's non-hidden Entries outside archives and answers recursive listings with conditions | search index |
 | Child probe | listing | `ChildProbe` | `probeFolderChildren` | An operation that checks the expansion hint of a visible row with a shallow enumeration that stops at the first folder-like child | recursive check |
 | Subtree search | listing | - | `recursive=true` with `query`, the default scope of search mode | A listing that covers everything under a starting folder and returns Entries whose names match the condition, from the name index or by walking | global search |
-| Search mode | client | - | `/search/{libraryId}`, `q`, `path`, `flat=1`, `rating`, `tag` | The web screen where you choose, within the screen, a start (the whole Library or under a folder) and a scope (include descendants or only direct children), and search by name, rating, and tag. Both folder view and the timeline enter the same screen | search box, search page |
+| Search mode | client | - | `/search/{libraryId}`, `q`, `path`, `flat=1`, `rating`, `tag` | The web screen where you choose, within the screen, a start (the whole Library or under a folder) and a scope (include descendants or only direct children), and search by name, rating, and tag. Folder view enters it, and the timeline, which spans Libraries, does not | search box, search page |
 | Activity panel | client | - | - | A list, overlaid at the bottom right of the web client, of the progress and results of Operations and uploads | transfer panel |
 | Info panel | client | - | `pxna.infoPanelOpen` (a `localStorage` key) | The web display, placed to the right of a listing, of the details and media info of the selected Entry | inspector |
 | Narrow screen | client | - | - | A web screen whose width is under 768 CSS px | mobile layout |
@@ -241,7 +241,7 @@ The API uses `RelativePath`, and the daemon uses `LibraryRelativePath`, which is
 #### Timeline
 
 **Names by layer**
-The daemon uses `TimelineService`, the API uses paths under `/libraries/{libraryId}/timeline/`, and the web client uses the URL `/timeline/{libraryId}` and the screen "Timeline".
+The daemon uses `TimelineService`, the API uses paths under `/timeline/`, and the web client uses the URL `/timeline` and the screen "Timeline".
 
 **Why this name**
 "Flat view" was rejected because it expresses only that folder hierarchy was removed, and the name does not show that Entries are ordered by timeline date.

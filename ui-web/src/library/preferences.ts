@@ -47,6 +47,11 @@ export function replaceSort(preferences: Preferences, patch: Partial<SortPrefere
     return { ...preferences, sort: { ...preferences.sort, ...patch } };
 }
 
+/// タイムラインに並べる Library を置き換える。空の選択は保存せず、今の値のままにする。
+export function replaceTimelineLibraries(preferences: Preferences, libraryIds: readonly string[]): Preferences {
+    return libraryIds.length === 0 ? preferences : { ...preferences, timelineLibraries: [...libraryIds] };
+}
+
 interface WriterOptions {
     delayMs?: number;
     /// サーバへ全体を書き戻す。失敗したら例外を投げる。
@@ -179,5 +184,8 @@ export function usePreferences() {
         updateSetFor: (forNarrow: boolean, patch: Partial<DisplaySet>) =>
             writer.update((current) => replaceSet(current, forNarrow, patch)),
         updateSort: (patch: Partial<SortPreference>) => writer.update((current) => replaceSort(current, patch)),
+        /// タイムラインに並べる Library を保存する。空にはしない。
+        updateTimelineLibraries: (libraryIds: readonly string[]) =>
+            writer.update((current) => replaceTimelineLibraries(current, libraryIds)),
     };
 }
