@@ -2,16 +2,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Ellipsis, Maximize, Minimize, Pause, Play, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { type PointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { clientTimings } from "../api/clientTimings";
 import { type Entry, entryKind } from "../library/entries";
 import { canMutate } from "../library/entryActions";
 import { type Listing, type ListingSource, useListing } from "../library/listing";
 import type { SortPreference } from "../library/preferences";
 import { putRating, RATING_LABELS, type Rating, ratingQuery } from "../library/ratingTags";
 import { keepRange, reachablePages, useTimelineStore } from "../library/timeline";
-import { type BrowseLocation, CROSS_LIBRARY_SCOPE, relativePath, viewKey } from "../location";
+import { type BrowseLocation, CROSS_LIBRARY_SCOPE, entryAddress, relativePath, viewKey } from "../location";
 import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { FILMSTRIP_ITEM_WIDTH } from "../viewer/filmstrip";
-import { logImageTiming } from "../viewer/perf";
 import { displayImageUrl, fileContentUrl, originalImageUrl } from "../viewer/urls";
 import { useFullscreen } from "../viewer/useFullscreen";
 import { type SlideshowStep, useSlideshow } from "../viewer/useSlideshow";
@@ -686,6 +686,10 @@ interface ViewerImageProps {
 
 /// 1 枚の画像と、その拡大と移動。Entry が変わると作り直し、拡大と元の画像の状態を捨てる。
 function ViewerImage({ libraryId, entry, size, timing, onSettled }: ViewerImageProps) {
+    // Entry ごとに作り直すので、作った時刻が、この Entry へ移った時刻になる。
+    const [shownFrom] = useState(() => performance.now());
+    // 元の画像を要求し始めた時刻。
+    const originalFrom = useRef(0);
     // 画像を出す領域の要素と大きさ。ウィンドウの大きさが変わっても追う。
     const [stage, setStage] = useState<HTMLDivElement | null>(null);
     const [container, setContainer] = useState({ width: 0, height: 0 });
@@ -736,6 +740,9 @@ function ViewerImage({ libraryId, entry, size, timing, onSettled }: ViewerImageP
     // 直後に差し替える画像は、表示用画像が出てから要求する。
     const wantsOriginal =
         !originalFailed && (timing === "immediate" ? natural !== undefined : timing === "onZoom" && originalRequested);
+    if (wantsOriginal && originalFrom.current === 0) {
+        originalFrom.current = performance.now();
+    }
 
     const pointerDown = (event: PointerEvent) => {
         if (zoom > 1) {
@@ -778,7 +785,13 @@ function ViewerImage({ libraryId, entry, size, timing, onSettled }: ViewerImageP
                     draggable={false}
                     className="absolute inset-0 h-full w-full object-contain"
                     onLoad={(event) => {
-                        logImageTiming(`display ${entry.name}`, event.currentTarget.currentSrc);
+                        const url = event.currentTarget.currentSrc;
+                        clientTimings.recordResource("display_image", url, libraryId, entry.path, shownFrom);
+                        clientTimings.record({
+                            ...entryAddress(libraryId, entry.path),
+                            operation: "viewer_display",
+                            durationMs: Math.round((performance.now() - shownFrom) * 10) / 10,
+                        });
                         setNatural({
                             width: event.currentTarget.naturalWidth,
                             height: event.currentTarget.naturalHeight,
@@ -800,7 +813,13 @@ function ViewerImage({ libraryId, entry, size, timing, onSettled }: ViewerImageP
                         data-original=""
                         className={`absolute inset-0 h-full w-full object-contain ${originalReady ? "" : "invisible"}`}
                         onLoad={(event) => {
-                            logImageTiming(`original ${entry.name}`, event.currentTarget.currentSrc);
+                            clientTimings.recordResource(
+                                "original_image",
+                                event.currentTarget.currentSrc,
+                                libraryId,
+                                entry.path,
+                                originalFrom.current,
+                            );
                             setOriginalReady(true);
                         }}
                         onError={() => setOriginalFailed(true)}

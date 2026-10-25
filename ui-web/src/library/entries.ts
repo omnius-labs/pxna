@@ -23,7 +23,7 @@ export const capabilitiesQuery = queryOptions({
             return unwrap(await api.GET("/capabilities"));
         } catch (error) {
             if (error instanceof ApiError && [404, 405, 501].includes(error.status)) {
-                return { summaryListing: false, entryDetails: false, childProbes: false };
+                return { summaryListing: false, entryDetails: false, childProbes: false, performanceLogging: false };
             }
             throw error;
         }

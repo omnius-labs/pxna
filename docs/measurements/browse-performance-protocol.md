@@ -88,6 +88,7 @@ The measurement points kept in the implementation are as follows.
 | `thumbnail_production` | The generation itself: `thumbnail_materialize`, `thumbnail_convert`, and `thumbnail_store` |
 | `thumbnail_source_read`, `thumbnail_external_decode` | Reading the source file, and the ffmpeg or heif-dec decode, with the byte count |
 | `image_convert`, `image_decode`, `image_resize`, `image_encode` | The image conversion and its stages, with the sizes and the output bytes |
+| `client_timing` | A time the web client measured, with `client_operation`, the path, `duration_ms`, and the Resource Timing phases in milliseconds. It is an event, not a span, and has no `request` |
 
 A span closes when its work ends, including on failure and cancellation. The result fields such as `entry_count` are recorded only on success, so a line without them is not interpreted as a completed operation.
 Nested spans overlap, so they are not added together. Attribute fetching means the query of the symlink itself, and does not include the query of the target's kind or reading the link.
@@ -206,4 +207,4 @@ python3 tools/performance/display.py --origin http://127.0.0.1:16061 \
   --label D1-r1-initial --output "$AGENT_TEMP_DIR/pxna-display-run/r1/initial.json"
 ```
 
-Run `--case cached` and `--case flip` in the same form. Pass authentication with the environment variable `PXNA_PERF_TOKEN`. Browser decoding and painting and real network lines are not measured. When browser-side time is needed, read the display image and original image requests separately with Resource Timing.
+Run `--case cached` and `--case flip` in the same form. Pass authentication with the environment variable `PXNA_PERF_TOKEN`. Browser decoding and painting and real network lines are not measured. When browser-side time is needed, use the `client_timing` lines that the web client writes while the measurement is on.

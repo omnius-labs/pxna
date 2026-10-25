@@ -70,6 +70,8 @@ tags:
       description: The current user's good or bad rating of an image or video.
     - name: Tags
       description: The current user's tags on images and videos, and the words the user has created.
+    - name: Performance
+      description: Client-side timings written to the daemon's performance log.
 
 security:
     - cookieAuth: []
@@ -682,6 +684,34 @@ paths:
                         application/json:
                             schema:
                                 $ref: "#/components/schemas/Capabilities"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /performance/client-timings:
+        post:
+            tags:
+                - Performance
+            summary: Record client-side timings
+            description: |
+                Writes the timings a client measured to the daemon's
+                performance log, next to the daemon's own measurements. A
+                client sends them only while `performanceLogging` of
+                `/capabilities` is true. While it is false, the daemon
+                accepts and discards them.
+            operationId: reportClientTimings
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/ClientTimingReport"
+            responses:
+                "204":
+                    description: The timings were accepted.
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
                 "401":
                     $ref: "#/components/responses/Unauthorized"
                 "500":
@@ -3025,7 +3055,7 @@ components:
 
         Capabilities:
             type: object
-            required: [summaryListing, entryDetails, childProbes]
+            required: [summaryListing, entryDetails, childProbes, performanceLogging]
             properties:
                 summaryListing:
                     type: boolean
@@ -3033,6 +3063,75 @@ components:
                     type: boolean
                 childProbes:
                     type: boolean
+                performanceLogging:
+                    type: boolean
+                    description: Whether the daemon writes the performance log, so a client should send its timings to `/performance/client-timings`.
+
+        ClientTimingReport:
+            type: object
+            required: [timings]
+            properties:
+                timings:
+                    type: array
+                    minItems: 1
+                    maxItems: 200
+                    items:
+                        $ref: "#/components/schemas/ClientTiming"
+
+        ClientTimingOperation:
+            type: string
+            description: |
+                `display_image`, `original_image`, and `thumbnail_image` are the
+                loads of those images. `viewer_display` is the time from moving
+                the viewer to an entry until its display image is loaded.
+            enum:
+                - display_image
+                - original_image
+                - thumbnail_image
+                - viewer_display
+
+        ClientTiming:
+            type: object
+            description: |
+                One timing in milliseconds. The phases come from the browser's
+                Resource Timing and are omitted when the browser does not
+                report them.
+            required: [operation, durationMs]
+            properties:
+                operation:
+                    $ref: "#/components/schemas/ClientTimingOperation"
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                durationMs:
+                    type: number
+                    minimum: 0
+                    description: The whole time, from the start of the request or the move until the load.
+                queuedMs:
+                    type: number
+                    minimum: 0
+                    description: From the start of the request until the browser sent it.
+                waitingMs:
+                    type: number
+                    minimum: 0
+                    description: From sending the request until the first byte of the response.
+                downloadMs:
+                    type: number
+                    minimum: 0
+                    description: From the first byte until the last byte of the response.
+                afterResponseMs:
+                    type: number
+                    minimum: 0
+                    description: From the last byte until the load event, including decoding.
+                bytes:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: The encoded body size.
+                cached:
+                    type: boolean
+                    description: Whether the browser served the response from its cache.
 
         FileSystemEntrySummary:
             type: object

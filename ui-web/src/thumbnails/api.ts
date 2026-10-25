@@ -1,4 +1,5 @@
 import { api, unwrap } from "../api/client";
+import { clientTimings } from "../api/clientTimings";
 import type { DisplaySet } from "../library/preferences";
 import { entryAddress } from "../location";
 
@@ -28,12 +29,14 @@ export async function fetchThumbnail(
     signal: AbortSignal,
 ): Promise<FetchedThumbnail> {
     const { libraryId, path } = entryAddress(scope, scopedPath);
+    const startedAt = performance.now();
     const result = await api.GET("/libraries/{libraryId}/thumbnails", {
         params: { path: { libraryId }, query: { path, variant, width: size, height: size, resize: resizeFor(shape) } },
         parseAs: "blob",
         signal,
     });
     const blob = unwrap(result);
+    clientTimings.recordResource("thumbnail_image", result.response.url, scope, scopedPath, startedAt);
     const header = result.response.headers.get("Pxna-Frame-Count");
     return { blob, frameCount: header === null ? 1 : Math.max(1, Number.parseInt(header, 10) || 1) };
 }
