@@ -111,6 +111,9 @@ struct Inner {
     display_quality: u8,
     image_permits: Arc<Semaphore>,
     video_permits: Arc<Semaphore>,
+    /// 表示用画像の専用枠。一覧のサムネイル生成の待ち行列に、プレビューを並ばせない。
+    display_image_permits: Arc<Semaphore>,
+    display_video_permits: Arc<Semaphore>,
     flights: SingleFlight<ThumbnailKey, Produced>,
     #[cfg(test)]
     conversions: std::sync::atomic::AtomicUsize,
@@ -182,6 +185,8 @@ impl ThumbnailGenerator {
                 display_quality: options.display_quality,
                 image_permits: Arc::new(Semaphore::new(options.max_concurrent_images)),
                 video_permits: Arc::new(Semaphore::new(options.max_concurrent_videos)),
+                display_image_permits: Arc::new(Semaphore::new(options.max_concurrent_images)),
+                display_video_permits: Arc::new(Semaphore::new(options.max_concurrent_videos)),
                 flights: SingleFlight::new(),
                 #[cfg(test)]
                 conversions: std::sync::atomic::AtomicUsize::new(0),
@@ -265,7 +270,7 @@ impl ThumbnailGenerator {
             sprite_key: if shares_a_run { key_of(ThumbnailVariant::Sprite) } else { None },
         };
         let flight_key = job.primary_key.clone();
-        let semaphore = inner.semaphore_for(kind);
+        let semaphore = inner.semaphore_for(kind, request.variant);
 
         // 生成枠と同じ key の生成を待つ時間も含む。生成そのものは `thumbnail_production` が測る。
         let generating = Instant::now();
@@ -368,10 +373,13 @@ impl Inner {
     }
 
     /// 画像の変換と、外部プロセスの ffmpeg は、別の同時実行数の上限で数える。
-    fn semaphore_for(&self, kind: MediaKind) -> Arc<Semaphore> {
-        match kind {
-            MediaKind::Image => self.image_permits.clone(),
-            MediaKind::FfmpegImage | MediaKind::HeifImage | MediaKind::Video => self.video_permits.clone(),
+    /// 表示用画像は、ユーザーが待っているため、サムネイルとは別の枠で数える。
+    fn semaphore_for(&self, kind: MediaKind, variant: ThumbnailVariant) -> Arc<Semaphore> {
+        match (kind, variant == ThumbnailVariant::Display) {
+            (MediaKind::Image, false) => self.image_permits.clone(),
+            (MediaKind::Image, true) => self.display_image_permits.clone(),
+            (_, false) => self.video_permits.clone(),
+            (_, true) => self.display_video_permits.clone(),
         }
     }
 
