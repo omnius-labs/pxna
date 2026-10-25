@@ -54,6 +54,7 @@ backtrace = { workspace = true }
 async-stream = { workspace = true }
 image = { workspace = true }
 libwebp-sys = { workspace = true }
+fast_image_resize = { workspace = true }
 kamadak-exif = { workspace = true }
 async_zip = { workspace = true }
 sevenz-rust2 = { workspace = true }
