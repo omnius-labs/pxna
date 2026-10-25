@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { rememberFolder } from "../library/folderReturn";
+import { LAST_FOLDER_KEY } from "../library/folderReturn";
 import { librariesQuery } from "../library/queries";
 import { rememberSearch } from "../library/searchReturn";
 import { ModeSwitch } from "./ModeSwitch";
@@ -18,6 +18,7 @@ let client: QueryClient;
 
 beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    window.localStorage.clear();
     document.body.append(host);
     client = new QueryClient();
     client.setQueryData(librariesQuery.queryKey, [{ id: "photos", name: "Photos", readonly: false }]);
@@ -86,7 +87,7 @@ it("フォルダは最後に開いたフォルダへ、なければ先頭の Lib
     await render("search");
     const folder = () => links().find((link) => link.title === "フォルダ")!;
     expect(folder().getAttribute("href")).toMatch(/^\/browse\/(photos|photos\/.+)$/);
-    rememberFolder({ libraryId: "photos", path: "/a/b" });
+    window.localStorage.setItem(LAST_FOLDER_KEY, JSON.stringify({ libraryId: "photos", path: "/a/b" }));
     await render("search");
     expect(folder().getAttribute("href")).toBe("/browse/photos/a/b");
 });

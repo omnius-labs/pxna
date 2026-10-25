@@ -96,7 +96,7 @@ At the top level of the tree, the Libraries that `GET /libraries` returns are li
 The current position is represented by a URL of `/browse/{libraryId}/{Library-relative path}`, and the Entry open in the viewer is put in the `view` query as a path relative to the current folder. For a direct child Entry, it is its name.
 Search is done at the dedicated `/search` URL, and the Libraries, the start, the scope, the conditions, and the Entry open in the viewer are put in the query (§3.6). Search results span Libraries, so `view` carries the Library id followed by the Library-relative path, as in the timeline.
 Library-relative paths are percent-encoded per segment, and positions inside archives are also put in with the paths joined as they are ([design.md §11.1](../design.md#represent-paths-inside-archives-by-joining-paths)).
-At `/`, before a Library is chosen, only the Libraries are listed in the tree and nothing is listed in the listing.
+At `/`, the client opens the folder last opened in folder view, by redirecting with `replace` to that folder's `/browse/...` URL. The last folder is saved per device in the browser's `localStorage` under `pxna.lastFolder` as the Library id and the Library-relative path, on every folder view, without the viewer's `view` or `reveal`. When nothing is saved, or the saved Library no longer exists, it opens the root of the first Library that `GET /libraries` returns. When `GET /libraries/{libraryId}/folders` answers `404` for the saved path other than `/`, it opens that Library's root; any other failure keeps the saved path and leaves the retry to folder view. When there is no Library, or the list cannot be read, `/` shows only the Libraries in the tree and nothing in the listing.
 
 On a narrow screen, the tree is folded into a drawer, and the info panel and the activity panel are not shown.
 Tapping a tile once moves into a folder or archive, and opens an image or video in the viewer.
@@ -466,7 +466,7 @@ While nothing is saved, every Library is listed. Saved ids of Libraries that no 
 Changing the choice rereads from the newest Entry and discards the selection.
 
 The toolbar's switch moves from folder view to the timeline without changing the choice of Libraries.
-Moving from the timeline or search mode to folder view opens the folder last opened in folder view while the tab is open, or else the root of the first Library.
+Moving from the timeline or search mode to folder view opens the folder last opened in folder view on this device, or else the root of the first Library.
 
 On a wide screen, instead of the tree, it lines up a checkbox per Library at the top and below it the years and months with counts summed over the chosen Libraries.
 The last chosen Library cannot be unchecked, so at least one Library is always listed.
@@ -1561,7 +1561,7 @@ For images, it shows the dimensions with the rotation applied and the items of s
 The timeline (§3.10) places at `/timeline` a grid with daily headings ([TimelineGrid.tsx](../../ui-web/src/components/TimelineGrid.tsx)) and a list of years and months ([TimelineSidebar.tsx](../../ui-web/src/components/TimelineSidebar.tsx)).
 Loading is held by `TimelineStore` in [library/timeline.ts](../../ui-web/src/library/timeline.ts), which points to Entries by absolute positions based on the start of the range first read, so even when reading is added toward the front, the positions of the selection and the viewer do not move.
 The viewer and filmstrip run on a `TimelineStore` that has the same `Listing` shape, and use the same parts as the folder view listing.
-The switch between folder view and the timeline is [ModeSwitch.tsx](../../ui-web/src/components/ModeSwitch.tsx), which goes back to the folder remembered by [folderReturn.ts](../../ui-web/src/library/folderReturn.ts), and "フォルダで表示" (Show in folder) is received by `reveal` in the folder view URL.
+The switch between folder view and the timeline is [ModeSwitch.tsx](../../ui-web/src/components/ModeSwitch.tsx), which goes back to the folder saved by [folderReturn.ts](../../ui-web/src/library/folderReturn.ts) in `localStorage`, and "フォルダで表示" (Show in folder) is received by `reveal` in the folder view URL.
 Timeline Entries carry `/{libraryId}{Library-relative path}` as their path, so the selection, the viewer, and the positions in the range tell Entries of different Libraries apart without change; the API helpers turn that path back into the Library and the Library-relative path with `entryAddress` in [location.ts](../../ui-web/src/location.ts).
 Ratings and tags are read and written by the queries and saving in [ratingTags.ts](../../ui-web/src/library/ratingTags.ts). In the info panel, [EntryTags.tsx](../../ui-web/src/components/EntryTags.tsx) handles displaying the rating and attaching and detaching tags. The viewer's rate mode is handled by [Viewer.tsx](../../ui-web/src/components/Viewer.tsx), shared by the viewers of folder view, search mode, and the timeline.
 The tree subscribes with [useTreeListing.ts](../../ui-web/src/library/useTreeListing.ts) to levels that are expanded and whose ancestors are not closed, and shares the page and generation management of [listing.ts](../../ui-web/src/library/listing.ts).
