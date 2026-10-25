@@ -6,17 +6,13 @@ export interface Crumb {
     location: BrowseLocation;
 }
 
-/// Library のルートから今のフォルダまでの経路。先頭は Library で、最後が今いるフォルダである。
-export function breadcrumbs(location: BrowseLocation, libraryName: string): Crumb[] {
+/// Library の直下から今のフォルダまでの経路。Library はツリーで分かるので含めず、ルートでは空になる。最後が今いるフォルダである。
+export function breadcrumbs(location: BrowseLocation): Crumb[] {
     const segments = pathSegments(location.path);
-    const crumbs: Crumb[] = [{ label: libraryName, location: { libraryId: location.libraryId, path: "/" } }];
-    segments.forEach((segment, index) => {
-        crumbs.push({
-            label: segment,
-            location: { libraryId: location.libraryId, path: joinPath(segments.slice(0, index + 1)) },
-        });
-    });
-    return crumbs;
+    return segments.map((segment, index) => ({
+        label: segment,
+        location: { libraryId: location.libraryId, path: joinPath(segments.slice(0, index + 1)) },
+    }));
 }
 
 /// 1 つ上のフォルダ。Library のルートより上へは辿らないので、ルートでは `undefined` を返す。
