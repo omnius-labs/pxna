@@ -11,6 +11,7 @@ import { putRating, RATING_LABELS, type Rating, ratingQuery } from "../library/r
 import { keepRange, reachablePages, useTimelineStore } from "../library/timeline";
 import { type BrowseLocation, CROSS_LIBRARY_SCOPE, entryAddress, relativePath, viewKey } from "../location";
 import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
+import { DisplayImages, loadDisplayImage, revokeDisplayImage } from "../viewer/displayImages";
 import { FILMSTRIP_ITEM_WIDTH } from "../viewer/filmstrip";
 import { displayImageUrl, fileContentUrl, originalImageUrl } from "../viewer/urls";
 import { useFullscreen } from "../viewer/useFullscreen";
@@ -214,28 +215,29 @@ function ViewerView({
         [screen, originalImage],
     );
 
-    /// 読み込み済みの隣の画像を先に要求し、移ったときの待ちを減らす。読み込み中の Image は保持する。
-    const prefetched = useRef(new Map<string, HTMLImageElement>());
+    /// 表示中の画像と、読み込み済みの隣の画像の要求。隣は先に要求し、移ったときの待ちを減らす。
+    /// どちらでもなくなった画像の要求は中止し、サーバで待っている生成を始めさせない。
+    const [displayImages] = useState(() => new DisplayImages(loadDisplayImage, revokeDisplayImage));
+    useEffect(() => () => displayImages.dispose(), [displayImages]);
     useEffect(() => {
+        const kept: string[] = [];
+        if (current !== undefined && entryKind(current) === "image") {
+            kept.push(displayImageUrl(location.libraryId, current.path, sizeOf(current)));
+        }
         for (const neighborEntry of [previous, next]) {
-            if (neighborEntry === undefined || neighborEntry === "unread") {
+            if (
+                neighborEntry === undefined ||
+                neighborEntry === "unread" ||
+                entryKind(neighborEntry.entry) !== "image"
+            ) {
                 continue;
             }
             const url = displayImageUrl(location.libraryId, neighborEntry.entry.path, sizeOf(neighborEntry.entry));
-            if (!prefetched.current.has(url)) {
-                const image = new Image();
-                image.src = url;
-                prefetched.current.set(url, image);
-            }
+            displayImages.prefetch(url);
+            kept.push(url);
         }
-        while (prefetched.current.size > 6) {
-            const oldest = prefetched.current.keys().next().value;
-            if (oldest === undefined) {
-                break;
-            }
-            prefetched.current.delete(oldest);
-        }
-    }, [previous, next, location.libraryId, sizeOf]);
+        displayImages.retain(kept);
+    }, [current, previous, next, location.libraryId, sizeOf, displayImages]);
 
     // スライドショーの自動の移動。停止したときに、読み込み中のものも取り消す。
     const autoMovement = useRef<AbortController | undefined>(undefined);
@@ -452,6 +454,7 @@ function ViewerView({
                 ) : (
                     <ViewerImage
                         key={current.path}
+                        images={displayImages}
                         libraryId={location.libraryId}
                         entry={current}
                         size={sizeOf(current)}
@@ -676,6 +679,7 @@ function HeaderActions({
 }
 
 interface ViewerImageProps {
+    images: DisplayImages;
     libraryId: string;
     entry: Entry;
     size: { width: number; height: number };
@@ -685,7 +689,7 @@ interface ViewerImageProps {
 }
 
 /// 1 枚の画像と、その拡大と移動。Entry が変わると作り直し、拡大と元の画像の状態を捨てる。
-function ViewerImage({ libraryId, entry, size, timing, onSettled }: ViewerImageProps) {
+function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: ViewerImageProps) {
     // Entry ごとに作り直すので、作った時刻が、この Entry へ移った時刻になる。
     const [shownFrom] = useState(() => performance.now());
     // 元の画像を要求し始めた時刻。
@@ -699,6 +703,29 @@ function ViewerImage({ libraryId, entry, size, timing, onSettled }: ViewerImageP
     const [originalFailed, setOriginalFailed] = useState(false);
     const [displayFailed, setDisplayFailed] = useState(false);
     const drag = useRef<{ x: number; y: number } | undefined>(undefined);
+    const settle = useRef(onSettled);
+    settle.current = onSettled;
+
+    // 表示用画像を interactive で取得する。先読みを読み終えていれば、それを使う。
+    const displayUrl = displayImageUrl(libraryId, entry.path, size);
+    const [displaySource, setDisplaySource] = useState<string | undefined>(undefined);
+    useEffect(() => {
+        let active = true;
+        images.show(displayUrl).then(
+            (source) => {
+                if (active) setDisplaySource(source);
+            },
+            () => {
+                if (active) {
+                    setDisplayFailed(true);
+                    settle.current();
+                }
+            },
+        );
+        return () => {
+            active = false;
+        };
+    }, [images, displayUrl]);
 
     useEffect(() => {
         if (!stage) {
@@ -779,30 +806,31 @@ function ViewerImage({ libraryId, entry, size, timing, onSettled }: ViewerImageP
                 className="absolute inset-0"
                 style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${clampZoom(zoom)})` }}
             >
-                <img
-                    src={displayImageUrl(libraryId, entry.path, size)}
-                    alt={entry.name}
-                    draggable={false}
-                    className="absolute inset-0 h-full w-full object-contain"
-                    onLoad={(event) => {
-                        const url = event.currentTarget.currentSrc;
-                        clientTimings.recordResource("display_image", url, libraryId, entry.path, shownFrom);
-                        clientTimings.record({
-                            ...entryAddress(libraryId, entry.path),
-                            operation: "viewer_display",
-                            durationMs: Math.round((performance.now() - shownFrom) * 10) / 10,
-                        });
-                        setNatural({
-                            width: event.currentTarget.naturalWidth,
-                            height: event.currentTarget.naturalHeight,
-                        });
-                        onSettled();
-                    }}
-                    onError={() => {
-                        setDisplayFailed(true);
-                        onSettled();
-                    }}
-                />
+                {displaySource !== undefined && (
+                    <img
+                        src={displaySource}
+                        alt={entry.name}
+                        draggable={false}
+                        className="absolute inset-0 h-full w-full object-contain"
+                        onLoad={(event) => {
+                            clientTimings.recordResource("display_image", displayUrl, libraryId, entry.path, shownFrom);
+                            clientTimings.record({
+                                ...entryAddress(libraryId, entry.path),
+                                operation: "viewer_display",
+                                durationMs: Math.round((performance.now() - shownFrom) * 10) / 10,
+                            });
+                            setNatural({
+                                width: event.currentTarget.naturalWidth,
+                                height: event.currentTarget.naturalHeight,
+                            });
+                            onSettled();
+                        }}
+                        onError={() => {
+                            setDisplayFailed(true);
+                            onSettled();
+                        }}
+                    />
+                )}
                 {wantsOriginal && (
                     // ブラウザが表示できない形式なら、差し替えずに表示用画像のまま拡大する。読み込み中は見せない。
                     <img
