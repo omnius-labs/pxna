@@ -50,6 +50,7 @@ tokio-util = { version = "0.7.18", features = ["full"] }
 tokio-stream = "0.1.18"
 tokio-postgres = { version = "0.7.17", features = ["with-chrono-0_4"] }
 tracing = "0.1.44"
+tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 unicode-normalization = "0.1.25"
 uuid = { version = "1.23.2", features = ["serde", "v4"] }

@@ -45,6 +45,12 @@ struct CoreConfigToml {
 struct LoggingConfigToml {
     pub level: String,
     pub json: bool,
+    /// 標準出力に加えて追記するログ file。設定 directory が基準で、省略すると file には出さない。
+    #[serde(default)]
+    pub file: Option<String>,
+    /// 処理時間の計測ログ（`pxna::performance`）を debug で出す。`level` が info でも、この計測だけを有効にする。
+    #[serde(default)]
+    pub performance: bool,
 }
 
 /// `dir` を省略すると、daemon は web を配信せず API だけを提供する。
@@ -216,6 +222,8 @@ pub struct CoreConfig {
 pub struct LoggingConfig {
     pub level: String,
     pub json: bool,
+    pub file: Option<PathBuf>,
+    pub performance: bool,
 }
 
 /// daemon が配信する web の成果物の置き場（design.md §10.1）。
@@ -344,6 +352,8 @@ impl DaemonConfig {
             logging: LoggingConfig {
                 level: toml.logging.level,
                 json: toml.logging.json,
+                file: toml.logging.file.map(|file| dir.join(file)),
+                performance: toml.logging.performance,
             },
             libraries,
             storage: StorageConfig {
@@ -532,6 +542,17 @@ mod tests {
 
         let toml = format!("{BASE_TOML}\n[thumbnail]\nunknown_key = 1\n");
         load(&toml).await.expect_err("unknown key should be rejected");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn logging_file_and_performance_default_off_and_override_test() -> TestResult {
+        let logging = load(BASE_TOML).await?.logging;
+        assert_eq!((logging.file, logging.performance), (None, false));
+
+        let config = load(&BASE_TOML.replace("json = false", "json = false\nfile = \"logs/pxna.log\"\nperformance = true")).await?;
+        assert!(config.logging.performance);
+        assert!(config.logging.file.is_some_and(|file| file.ends_with("logs/pxna.log")));
         Ok(())
     }
 

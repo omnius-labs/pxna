@@ -30,11 +30,13 @@ fn main() -> ExitCode {
     // spawn_blocking は中断できないため、runtime の Drop による無期限の終了待ちを避ける。
     runtime.shutdown_timeout(Duration::from_secs(1));
 
-    match result {
+    let code = match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             error!(error = ?e, "unexpected error");
             ExitCode::FAILURE
         }
-    }
+    };
+    Executor::shutdown_logging();
+    code
 }

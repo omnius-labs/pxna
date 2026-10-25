@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::{io::Cursor, time::Instant};
 
 use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
 use image::{DynamicImage, ImageDecoder as _, ImageReader, Rgba, RgbaImage, codecs::jpeg::JpegEncoder, imageops};
@@ -29,8 +29,34 @@ pub struct ImageConverter;
 impl ImageConverter {
     pub fn convert(input: &[u8], opts: &ImageConvertOptions) -> Result<Vec<u8>> {
         Self::validate(opts)?;
-        let image = Self::resize(Self::decode(input)?, opts)?;
-        Self::encode(&image, opts.format_type, opts.quality)
+        let started = Instant::now();
+        let decoded = Self::decode(input)?;
+        let decode_sec = started.elapsed().as_secs_f64();
+        let (source_width, source_height) = (decoded.width(), decoded.height());
+
+        let resizing = Instant::now();
+        let image = Self::resize(decoded, opts)?;
+        let resize_sec = resizing.elapsed().as_secs_f64();
+
+        let encoding = Instant::now();
+        let output = Self::encode(&image, opts.format_type, opts.quality)?;
+        tracing::debug!(
+            target: "pxna::performance",
+            operation = "image_convert",
+            input_bytes = input.len(),
+            source_width,
+            source_height,
+            output_width = image.width(),
+            output_height = image.height(),
+            output_bytes = output.len(),
+            format = ?opts.format_type,
+            decode_sec,
+            resize_sec,
+            encode_sec = encoding.elapsed().as_secs_f64(),
+            total_sec = started.elapsed().as_secs_f64(),
+            "image converted"
+        );
+        Ok(output)
     }
 
     /// EXIF の向きを反映して読む。反映しないと、縦に撮った写真が横向きのまま並ぶ。

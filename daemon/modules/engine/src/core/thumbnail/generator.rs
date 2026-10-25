@@ -255,10 +255,10 @@ impl ThumbnailGenerator {
         if let Some(key) = &requested_key
             && let Some(hit) = inner.cache.get(key).await?
         {
-            tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = true, "thumbnail image cache checked");
+            tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = true, variant = ?request.variant, "thumbnail image cache checked");
             return Ok(plan.thumbnail(hit, Some(key)));
         }
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = false, eligible = requested_key.is_some(), "thumbnail image cache checked");
+        tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = false, variant = ?request.variant, name, eligible = requested_key.is_some(), "thumbnail image cache checked");
 
         // 動画のサムネイルとスプライトシートは 1 回の ffmpeg の実行で両方を作るため、同じ flight にまとめる。
         let shares_a_run = kind == MediaKind::Video && request.variant != ThumbnailVariant::Display;
@@ -271,6 +271,19 @@ impl ThumbnailGenerator {
         };
         let flight_key = job.primary_key.clone();
         let semaphore = inner.semaphore_for(kind, request.variant);
+        let file_name = name.to_string();
+        let gate = {
+            let inner = inner.clone();
+            let file_name = file_name.clone();
+            let variant = request.variant;
+            async move {
+                let available = semaphore.available_permits();
+                let waiting = Instant::now();
+                let permit = inner.acquire(semaphore).await?;
+                tracing::debug!(target: "pxna::performance", operation = "thumbnail_permit_wait", elapsed_sec = waiting.elapsed().as_secs_f64(), available_when_requested = available, variant = ?variant, kind = ?kind, name = file_name, "thumbnail permit acquired");
+                Ok(permit)
+            }
+        };
 
         // 生成枠と同じ key の生成を待つ時間も含む。生成そのものは `thumbnail_production` が測る。
         let generating = Instant::now();
@@ -279,17 +292,17 @@ impl ThumbnailGenerator {
                 let work = inner.clone();
                 let produced = inner
                     .flights
-                    .run_gated(flight_key, inner.acquire(semaphore), move |permit| async move { work.produce(job, permit).await })
+                    .run_gated(flight_key, gate, move |permit| async move { work.produce(job, permit).await })
                     .await?;
                 (*produced).clone()
             }
             None => {
-                let permit = inner.acquire(semaphore).await?;
+                let permit = gate.await?;
                 inner.clone().produce(job, permit).await?
             }
         };
 
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_generation", elapsed_sec = generating.elapsed().as_secs_f64(), variant = ?request.variant, "thumbnail generation completed");
+        tracing::debug!(target: "pxna::performance", operation = "thumbnail_generation", elapsed_sec = generating.elapsed().as_secs_f64(), variant = ?request.variant, kind = ?kind, name = file_name, "thumbnail generation completed");
         let image = match request.variant {
             ThumbnailVariant::Sprite => produced
                 .sprite
@@ -402,14 +415,18 @@ impl Inner {
         let converting = Instant::now();
         let produced = match job.kind {
             MediaKind::Image => {
+                let reading = Instant::now();
                 let input = tokio::fs::read(file.path()).await?;
+                tracing::debug!(target: "pxna::performance", operation = "thumbnail_source_read", elapsed_sec = reading.elapsed().as_secs_f64(), bytes = input.len(), "source file read");
                 Produced {
                     image: self.convert_one(input, &job.plan).await?,
                     sprite: None,
                 }
             }
             MediaKind::FfmpegImage | MediaKind::HeifImage => {
+                let decoding = Instant::now();
                 let input = self.decode_ffmpeg_image(&job.source, file.path(), job.kind).await?;
+                tracing::debug!(target: "pxna::performance", operation = "thumbnail_external_decode", elapsed_sec = decoding.elapsed().as_secs_f64(), kind = ?job.kind, bytes = input.len(), "external decoder finished");
                 Produced {
                     image: self.convert_one(input, &job.plan).await?,
                     sprite: None,
