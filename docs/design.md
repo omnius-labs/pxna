@@ -1183,6 +1183,22 @@ The unit of limiting (the source or the username) and the rules that do not lock
 **Conditions for deciding**
 When the daemon is exposed beyond the LAN and a VPN, or when brute-force logins are actually observed.
 
+#### Validating the Host Header for Setup and Login
+
+**Current state**
+`POST /setup` and `POST /auth/login` accept any `Host`.
+On an uninitialized daemon, a page that passes DNS rebinding to a local address can therefore create the first owner with its own credentials.
+`OriginCheck` does not help: it compares `Origin` with `Host`, and both belong to the attacker under rebinding.
+
+**Why not decide now**
+The right rule depends on how the daemon is reached.
+An allowlist of the configured listen address and `localhost` is simple but breaks access through a reverse proxy or a tunnel, where the browser sends the proxy's name.
+Requiring a one-time setup token shifts the problem to how the owner learns the token.
+Requiring `Origin` on these two endpoints is weaker than either, because the browser omits it for some requests.
+
+**Conditions for deciding**
+When the setup window is exposed beyond the host itself, or when the first deployment guide names a proxy or tunnel as the supported way to reach the daemon.
+
 #### Multi-User and Permission Model
 
 **Current state**
