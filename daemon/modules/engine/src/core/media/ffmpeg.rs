@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tokio::process::Command;
 
-use super::process;
+use super::{ProcessPriority, process};
 use crate::prelude::*;
 
 impl super::MediaTools {
@@ -59,7 +59,7 @@ impl super::MediaTools {
     ///
     /// PPM は raw 画素に寸法のヘッダを付けるだけなので、PNG の圧縮より速い。stream を指定せず、ffmpeg の既定の選択に任せる。
     /// タイルの組み立てと `irot` の回転は ffmpeg が反映する（確かめた範囲では ffmpeg 9.0）。
-    pub async fn extract_image_pixels(&self, file: &Path) -> Result<Vec<u8>> {
+    pub async fn extract_image_pixels(&self, file: &Path, priority: ProcessPriority) -> Result<Vec<u8>> {
         let mut command = Command::new(&self.options.ffmpeg_path);
         command.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"]).arg(file).args([
             "-frames:v",
@@ -74,13 +74,13 @@ impl super::MediaTools {
             "ppm",
             "-",
         ]);
-        self.run(command).await
+        self.run_with(command, priority).await
     }
 
     /// ffmpeg で読む画像（HEIC、AVIF など）を、1 枚の PNG として取り出す。
     ///
     /// JXL のように、ffmpeg が主画像のアルファをそのまま返す形式で使う。stream を指定せず、ffmpeg の既定の選択に任せる。
-    pub async fn extract_image(&self, file: &Path) -> Result<Vec<u8>> {
+    pub async fn extract_image(&self, file: &Path, priority: ProcessPriority) -> Result<Vec<u8>> {
         let output_dir = tempfile::tempdir()?;
         let output_path = output_dir.path().join("image.png");
 
@@ -90,7 +90,7 @@ impl super::MediaTools {
             .arg(file)
             .args(["-frames:v", "1", "-an", "-sn"])
             .arg(&output_path);
-        self.run(command).await?;
+        self.run_with(command, priority).await?;
         process::read_output(&output_path, file).await
     }
 
@@ -98,7 +98,7 @@ impl super::MediaTools {
     ///
     /// 位置ごとに `-ss` を付けた入力を並べ、キーフレーム単位で移る。一覧で眺めるためのフレームに正確な時刻は要らず、デコードする量が少ないほど速い。
     /// 動画の終わりを超えた位置など、取り出せなかったフレームは結果から除く。
-    pub async fn extract_frames(&self, file: &Path, positions_secs: &[f64]) -> Result<Vec<Vec<u8>>> {
+    pub async fn extract_frames(&self, file: &Path, positions_secs: &[f64], priority: ProcessPriority) -> Result<Vec<Vec<u8>>> {
         let output_dir = tempfile::tempdir()?;
         let frame_path = |index: usize| output_dir.path().join(format!("{index}.png"));
 
@@ -114,7 +114,7 @@ impl super::MediaTools {
                 .args(["-frames:v", "1", "-an", "-sn"])
                 .arg(frame_path(index));
         }
-        self.run(command).await?;
+        self.run_with(command, priority).await?;
 
         let mut frames = Vec::new();
         for index in 0..positions_secs.len() {
@@ -208,11 +208,11 @@ mod tests {
         );
         let error = tools.probe_duration_secs(Path::new("a.mp4")).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
-        let error = tools.extract_frames(Path::new("a.mp4"), &[1.0]).await.unwrap_err();
+        let error = tools.extract_frames(Path::new("a.mp4"), &[1.0], ProcessPriority::Foreground).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
-        let error = tools.extract_image_pixels(Path::new("a.avif")).await.unwrap_err();
+        let error = tools.extract_image_pixels(Path::new("a.avif"), ProcessPriority::Foreground).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
-        let error = tools.decode_heif(Path::new("a.heic")).await.unwrap_err();
+        let error = tools.decode_heif(Path::new("a.heic"), ProcessPriority::Foreground).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
     }
 }
