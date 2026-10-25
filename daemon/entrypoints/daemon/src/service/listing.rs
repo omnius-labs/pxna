@@ -1,12 +1,14 @@
 use std::{cmp::Ordering, path::Path, time::Instant};
 
 use futures::StreamExt as _;
+use tracing::{Instrument as _, Span, field::Empty};
 use unicode_normalization::UnicodeNormalization as _;
 
 use std::collections::HashSet;
 
 use omnius_pxna_engine::{
     model::{FsEntryDetail, NaturalOrder, Rating},
+    perf_span,
     service::{MediaKind, RatingTagService, ResolvedStoragePath},
 };
 use omnius_pxna_interface::{models, types::Nullable};
@@ -282,9 +284,20 @@ pub struct ListingEntries {
 }
 
 impl ListingEntries {
-    #[tracing::instrument(level = "debug", skip_all, fields(recursive, include_hidden, max_entries))]
     pub async fn scan(folder: &ResolvedStoragePath, library_root: &Path, recursive: bool, include_hidden: bool, max_entries: usize) -> Result<Self> {
-        let started = Instant::now();
+        let span = perf_span!(
+            "listing_scan",
+            recursive,
+            include_hidden,
+            max_entries,
+            entry_count = Empty,
+            conversion_sec = Empty,
+            truncated = Empty
+        );
+        Self::scan_traced(folder, library_root, recursive, include_hidden, max_entries).instrument(span).await
+    }
+
+    async fn scan_traced(folder: &ResolvedStoragePath, library_root: &Path, recursive: bool, include_hidden: bool, max_entries: usize) -> Result<Self> {
         let mut conversion_sec = 0.0;
         let converter = EntryConverter::new(library_root);
         let mut entries = Vec::new();
@@ -305,14 +318,18 @@ impl ListingEntries {
                 entries.push(ListedEntry::new(entry));
                 conversion_sec += conversion_started.elapsed().as_secs_f64();
                 if recursive && entries.len() >= max_entries {
-                    tracing::debug!(target: "pxna::performance", operation = "listing_scan", entry_count = entries.len(),
-                        conversion_sec, elapsed_sec = started.elapsed().as_secs_f64(), truncated = true, "listing scan completed");
+                    Span::current()
+                        .record("entry_count", entries.len())
+                        .record("conversion_sec", conversion_sec)
+                        .record("truncated", true);
                     return Ok(Self { entries, truncated: true });
                 }
             }
         }
-        tracing::debug!(target: "pxna::performance", operation = "listing_scan", entry_count = entries.len(),
-            conversion_sec, elapsed_sec = started.elapsed().as_secs_f64(), truncated = false, "listing scan completed");
+        Span::current()
+            .record("entry_count", entries.len())
+            .record("conversion_sec", conversion_sec)
+            .record("truncated", false);
         Ok(Self { entries, truncated: false })
     }
 
@@ -443,12 +460,10 @@ impl ListSort {
 
 impl ListSort {
     pub fn indices(&self, entries: &ListingEntries) -> Vec<usize> {
-        let started = Instant::now();
+        let _span = perf_span!("listing_sort", entry_count = entries.len()).entered();
         let positions: Vec<_> = entries.entries.iter().map(|entry| self.position(&entry.entry)).collect();
         let mut indices: Vec<_> = (0..positions.len()).collect();
         indices.sort_by(|&a, &b| self.compare(&positions[a], &positions[b]));
-        tracing::debug!(target: "pxna::performance", operation = "listing_sort", entry_count = entries.len(),
-            elapsed_sec = started.elapsed().as_secs_f64(), "listing sort completed");
         indices
     }
 }

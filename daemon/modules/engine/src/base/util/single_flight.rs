@@ -12,6 +12,7 @@ use futures::{
     FutureExt as _,
     future::{BoxFuture, Shared},
 };
+use tracing::Instrument as _;
 
 use crate::prelude::*;
 
@@ -106,10 +107,14 @@ where
                         };
                         let work = work(permit);
                         // task は `flights` の lock を取って終わるため、lock を持ったまま起動して登録を済ませる。
-                        let handle = tokio::spawn(async move {
-                            let _cleanup = cleanup;
-                            work.await
-                        });
+                        // 処理は最初の呼び出し元の span の中で記録する。
+                        let handle = tokio::spawn(
+                            async move {
+                                let _cleanup = cleanup;
+                                work.await
+                            }
+                            .in_current_span(),
+                        );
                         let shared = async move {
                             match handle.await {
                                 Ok(Ok(value)) => Ok(Arc::new(value)),

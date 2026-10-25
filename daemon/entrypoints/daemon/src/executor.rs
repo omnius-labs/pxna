@@ -1,30 +1,20 @@
 use std::{
     future::Future,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::Duration,
 };
 
 use clap::Parser as _;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing_appender::{non_blocking::WorkerGuard, rolling};
-use tracing_subscriber::{EnvFilter, Layer as _, Registry, fmt, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use omnius_core_base::file_lock::FileLock;
 
-use crate::{
-    config::{DaemonConfig, LoggingConfig},
-    interface::ApiServer,
-    prelude::*,
-    state::DaemonState,
-};
+use crate::{config::DaemonConfig, interface::ApiServer, logging::Logging, prelude::*, state::DaemonState};
 
 const LOCK_FILE_NAME: &str = "pxna.lock";
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// file のログを書く thread の guard。落とすと書き切って thread が止まる。
-static LOG_GUARD: Mutex<Option<WorkerGuard>> = Mutex::new(None);
 
 #[derive(clap::Parser)]
 #[command(name = "pxna-daemon", about = "xxx", version = env!("GIT_TAG"))]
@@ -62,44 +52,6 @@ impl Executor {
     pub async fn run() -> Result<()> {
         let args = Args::parse();
         Self::execute(args).await
-    }
-
-    /// 標準出力と、設定されていれば file へ出す。file の書き込みは別 thread で行うため、guard は `shutdown_logging` まで保つ。
-    fn tracing_config(conf: &LoggingConfig) -> Result<()> {
-        let directives = if conf.performance {
-            format!("{},pxna::performance=debug,sqlx=off", conf.level)
-        } else {
-            format!("{},sqlx=off", conf.level)
-        };
-        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(directives));
-
-        let mut layers: Vec<Box<dyn tracing_subscriber::Layer<Registry> + Send + Sync>> = Vec::new();
-        layers.push(if conf.json { fmt::layer().json().boxed() } else { fmt::layer().boxed() });
-
-        let mut guard = None;
-        if let Some(file) = &conf.file {
-            let name = file
-                .file_name()
-                .ok_or_else(|| Error::new(ErrorKind::InvalidInput).with_message(format!("logging.file has no file name: {}", file.display())))?;
-            let dir = file.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
-            std::fs::create_dir_all(dir)?;
-            let (writer, worker) = tracing_appender::non_blocking(rolling::never(dir, name));
-            guard = Some(worker);
-            layers.push(if conf.json {
-                fmt::layer().json().with_ansi(false).with_writer(writer).boxed()
-            } else {
-                fmt::layer().with_ansi(false).with_writer(writer).boxed()
-            });
-        }
-
-        tracing_subscriber::registry().with(layers).with(filter).init();
-        *LOG_GUARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = guard;
-        Ok(())
-    }
-
-    /// file への未書き込みのログを書き切る。終了前の最後のログ（`main` が出す失敗）まで残すため、`main` の最後に呼ぶ。
-    pub fn shutdown_logging() {
-        drop(LOG_GUARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take());
     }
 
     async fn execute(args: Args) -> Result<()> {
@@ -175,7 +127,7 @@ impl Executor {
                 eprintln!("failed to load daemon config from {}: {error:?}", config_dir.display());
             })?;
 
-            Self::tracing_config(&conf.logging)?;
+            Logging::init(&conf.logging)?;
 
             crate::media_check::MediaEnvironment::verify(&conf.media).await?;
 
