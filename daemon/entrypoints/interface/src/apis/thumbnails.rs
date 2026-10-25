@@ -51,6 +51,7 @@ pub trait Thumbnails<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Er
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
+        header_params: &models::GetThumbnailHeaderParams,
         path_params: &models::GetThumbnailPathParams,
         query_params: &models::GetThumbnailQueryParams,
     ) -> Result<GetThumbnailResponse, E>;

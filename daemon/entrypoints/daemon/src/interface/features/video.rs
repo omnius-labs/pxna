@@ -3,6 +3,7 @@ use axum_extra::extract::CookieJar;
 use headers::Host;
 use http::Method;
 
+use omnius_pxna_engine::service::WorkClass;
 use omnius_pxna_interface::{apis, models, types::ByteArray};
 
 use crate::{
@@ -63,6 +64,8 @@ impl apis::video::Video for ApiServer {
         path_params: &models::GetMediaInfoPathParams,
         query_params: &models::GetMediaInfoQueryParams,
     ) -> std::result::Result<apis::video::GetMediaInfoResponse, ()> {
+        // 再生と情報パネルが開いた 1 件の情報なので、ユーザーが待っているものとして数える。
+        let _waiting = self.state.pools.processes.occupy(WorkClass::Interactive);
         let result = async {
             let source = self.state.mutation.source(&path_params.library_id, &query_params.path, false, false).await?;
             Ok::<_, Error>(MediaInfoModel::from(self.state.media_info.probe(&source).await?))

@@ -22,6 +22,7 @@ impl apis::thumbnails::Thumbnails for ApiServer {
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
+        header_params: &models::GetThumbnailHeaderParams,
         path_params: &models::GetThumbnailPathParams,
         query_params: &models::GetThumbnailQueryParams,
     ) -> std::result::Result<apis::thumbnails::GetThumbnailResponse, ()> {
@@ -133,6 +134,20 @@ mod tests {
             ("thumbnail_store", "thumbnail_production"),
         ] {
             assert_eq!(span(name)["parent"].as_str(), Some(parent), "spawn した生成も同じ要求に入る: {name}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn display_priority_header_selects_prefetch_or_rejects_unknown_values_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        write_png(&fixture._dir.path().join("library/photos/wide.png"), 600, 300)?;
+        let router = router(&fixture);
+        let cookie = owner_cookie(&router).await?;
+        let uri = thumbnail_uri("path=/photos/wide.png&variant=display");
+        for (priority, status) in [("prefetch", StatusCode::OK), ("interactive", StatusCode::OK), ("urgent", StatusCode::BAD_REQUEST)] {
+            let response = send(&router, Method::GET, &uri, &[("cookie", &cookie), ("pxna-priority", priority)], None).await?;
+            assert_eq!(response.status, status, "{priority}");
         }
         Ok(())
     }

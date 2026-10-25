@@ -294,12 +294,13 @@ mod tests {
                 })
                 .await
         }));
-        // A foreground slot remains usable while archive waits for its resource slot.
-        let _foreground = budget.acquire(WorkClass::Foreground, WorkKind::Listing).await.unwrap();
         while budget.counts(WorkKind::Archive).0 == 0 {
             tokio::task::yield_now().await;
         }
+        // A foreground slot remains usable while archive waits for its resource slot.
+        let foreground = budget.acquire(WorkClass::Foreground, WorkKind::Listing).await.unwrap();
         assert!(budget.try_probe().is_none());
+        drop(foreground);
         drop(held);
         ready.await.unwrap();
         work.abort();
