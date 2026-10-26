@@ -102,7 +102,7 @@ ed25519-dalek = { version = "=3.0.0-rc.0", features = [
   "serde",
   "pkcs8",
 ] }
-yamux = "0.13.10"
+yamux = "0.14.1"
 toml = "1.0.1"
 backtrace = "0.3.76"
 async-stream = "0.3.6"
