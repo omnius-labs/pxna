@@ -5,3 +5,4 @@ buildServer.json
 /.serena
 /compose.override.yaml
 /config/pxna.toml
+.DS_Store
