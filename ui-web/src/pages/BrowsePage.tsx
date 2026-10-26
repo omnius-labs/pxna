@@ -9,10 +9,9 @@ import { InfoPanel, InfoPanelToggle } from "../components/InfoPanel";
 import { List } from "../components/List";
 import { LoadFailure } from "../components/LoadFailure";
 import { EntryNameDialog } from "../components/NameDialog";
-import { SettingsDialog } from "../components/SettingsDialog";
+import { SettingsMenu } from "../components/SettingsMenu";
 import { StatusBar } from "../components/StatusBar";
 import { UploadButton } from "../components/UploadButton";
-import { ViewControls } from "../components/ViewControls";
 import { Viewer } from "../components/Viewer";
 import { EntryActionContext, type EntryEditing } from "../library/actionContext";
 import { useClipboard } from "../library/clipboard";
@@ -234,9 +233,8 @@ function BrowseScreen({ location }: { location: BrowseLocation }) {
                     <>
                         <EntryToolbar />
                         <UploadButton />
-                        <ViewControls />
                         {!narrow && <InfoPanelToggle open={infoPanel.open} onToggle={infoPanel.toggle} />}
-                        <SettingsDialog />
+                        <SettingsMenu />
                     </>
                 }
                 panel={infoPanel.open ? <InfoPanel libraryId={libraryId} selection={selection} /> : undefined}

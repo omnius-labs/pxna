@@ -68,7 +68,7 @@ On a wide screen, one screen is divided into the following regions.
 
 ```text
 +--------------------------------------------------------------------+
-| Toolbar (mode switch, breadcrumb, view menu, operations)            |
+| Toolbar (mode switch, breadcrumb, operations, settings menu)       |
 +------------+----------------------------------------+--------------+
 | Tree       | Grid or list                           | Info panel   |
 |  Library   |  [tile] [tile] [tile] [tile]           |  thumbnail   |
@@ -128,17 +128,17 @@ The size of tiles is chosen from 5 levels by the display preferences' tile size.
 On a wide screen, the minimum length of a tile's side is 96, 128, 176, 240, and 320 CSS px for each level, the number of columns that fit in the listing's width is found with that minimum, and then the columns are widened to fill the listing's width.
 On a narrow screen, the levels are treated as numbers of columns (6, 5, 4, 3, 2 columns), and the tile's side is decided from the screen width.
 Phone screen widths differ by model, so with a fixed size the number of columns and the right-edge margin would vary by model.
-The tile size is switched with the slider in the "表示" (View) menu, and on a wide screen also with Ctrl or ⌘ plus the wheel, and with the `+` and `-` keys.
+The tile size is switched with the slider in the settings menu (§3.9), and on a wide screen also with Ctrl or ⌘ plus the wheel, and with the `+` and `-` keys.
 
 The listing can be switched between grid and list.
 A list is a sequence of rows with columns for a small thumbnail, name, modification date, size, and kind, and can be sorted by the column headings.
 Pressing a heading sorts ascending by that key, and pressing the current key reverses the direction.
-A narrow screen's list uses rows with a small thumbnail and two lines of text. The name goes on the upper line and the modification date and size on the lower, and column headings are not shown. Sorting is chosen in the "表示" (View) popover.
+A narrow screen's list uses rows with a small thumbnail and two lines of text. The name goes on the upper line and the modification date and size on the lower, and column headings are not shown. Sorting is chosen in the settings menu.
 While a search covers descendants or several Libraries, a "場所" (Location) column is added to a wide screen's list, and on a narrow screen's list the location is shown at the start of the second line (§3.6). The "場所" column does not sort.
 A list has no tiles, so the tile size operations (the menu slider, wheel, and keys) are not shown. The thumbnail shape is applied to the rows' small thumbnails.
 When switching between grid and list, as when moving between folders, the selection is cleared and the display returns to starting from the top of the listing.
 The default sort order is the natural order of names, with folder-like Entries placed first.
-Sorting can be chosen in the "表示" (View) menu, and the grid and list use the same order.
+Sorting can be chosen in the settings menu, and the grid and list use the same order.
 Separating and sorting are left to the server (`foldersFirst`, `sort`, `order`).
 The web client's tree has the server narrow to only folder-like Entries (`foldersOnly`) and lists them.
 
@@ -441,10 +441,11 @@ Only sorting does not depend on the screen width, so it is held once outside the
 | Sorting (key and direction) | No | Name ascending |
 
 The key and direction of sorting are the same as the values the listing API's `sort` and `order` take.
-The tile size, shape, display switch, and sorting in the "表示" (View) menu directly change the values of the set currently in use.
-The settings screen shows the two sets side by side and indicates the set currently in use.
-The settings screen shows only the choices of values that are in effect at that point.
-For the set whose listing display is the list, the tile size choice is not shown.
+The values are changed in the settings menu, a popover opened from the gear button at the right end of the toolbar.
+The menu shows the listing display, tile size, thumbnail shape, and swapping to the original image of the set currently in use, and sorting, each under a heading, and directly changes those values.
+The other set is changed from a screen of that width. The menu does not show which set it changes.
+The menu shows only the choices of values that are in effect at that point.
+When the listing display is the list, the tile size choice is not shown.
 Making ineffective values selectable would show the user an operation that does nothing when changed.
 Values that are not shown also round-trip as the saved values when written back.
 Writing back is sent together when operations have stopped for 500 ms.
@@ -477,7 +478,7 @@ On a narrow screen, this list goes in the same drawer as the tree.
 The listing is the grid only, and the order is fixed to newest first.
 Every time the day changes, a heading with the date and day of the week (2025年5月3日（土）, Saturday, May 3, 2025) is inserted and the row is broken.
 Tile size and thumbnail shape use the same display preference values as folder view.
-The toolbar's "表示" (View) menu does not show the switch between grid and list or sorting.
+The settings menu does not show the switch between grid and list or sorting.
 
 The timeline does not reserve the overall height in advance.
 If the visible rows and the rows in the margin of one screen above and below have not yet been read, the continuation in that direction is read 200 items at a time.
@@ -873,18 +874,23 @@ The implementation is small, but in folders containing videos, only the videos w
 A method that advances videos to the next in 5 seconds too.
 They could not be seen to the end, which does not suit the slideshow's purpose, so we rejected it.
 
-#### Gather View Operations into One "表示" (View) Menu
+#### Gather Display Preferences into One Settings Menu
 
 **Decision**
-The listing display (grid and list), tile size, thumbnail shape, and sorting are placed in a single "表示" (View) menu on the toolbar, on both wide and narrow screens (§3.2).
+The listing display (grid and list), tile size, thumbnail shape, swapping to the original image, and sorting are placed in a single settings menu opened from the toolbar's gear button, on both wide and narrow screens. The menu changes only the set currently in use (§3.9).
 
 **Reason**
 When operations line up on the toolbar, they compete for width with the mode switch, the breadcrumb, and the operations. Display settings are not changed often, so folding them into a menu is not a problem.
 Wide and narrow screens use the same part, so implementations per screen width need not be separated.
+A separate view menu and settings screen showed the same values in two places, and the user had to know which entrance held which value.
 
-**Rejected alternative**
-A method that lines them up on the bar on wide screens and makes a menu only on narrow screens (the previous method).
+**Rejected alternative 1**
+A method that lines them up on the bar on wide screens and makes a menu only on narrow screens.
 Operation would take one step, but the bar gets crowded and the parts are kept in two ways, so we rejected it.
+
+**Rejected alternative 2**
+A method that keeps, next to the menu, a settings screen that shows the wide and narrow sets side by side (the previous method).
+The other set could be changed from any device, but the menu and the screen overlapped in most values, so we rejected it.
 
 #### Change the Width of the Tree and Info Panel by Dragging, and Save It per Device
 
@@ -1532,7 +1538,7 @@ It has initial setup and login, the toolbar (mode switch, breadcrumb, user menu)
 The video viewer chooses direct playback or HLS from media info, and on closing ends playback and the transcode session.
 The screen skeleton lines up the toolbar, tree, listing, and status bar on a wide screen (the tree and info panel change width with [ResizeHandle.tsx](../../ui-web/src/components/ResizeHandle.tsx)), and folds the tree into a drawer on a narrow screen. The color scheme follows the OS's light and dark setting.
 Display preferences wait for loading at the entrance of authenticated screens, and run with defaults if they cannot be read. Changes are written back as a whole when they have stopped for 500 ms, and on failure return to the saved values.
-From the toolbar's "表示" (View) menu and the settings screen, the listing display, the grid's tile size, the thumbnail shape, and sorting can be chosen. Wide and narrow screens are separate sets, and they switch when the screen width crosses 768 CSS px. The list's set does not show the tile size choice.
+From the toolbar's settings menu ([SettingsMenu.tsx](../../ui-web/src/components/SettingsMenu.tsx)), the listing display, the grid's tile size, the thumbnail shape, swapping to the original image, and sorting can be chosen for the set currently in use. Wide and narrow screens are separate sets, and they switch when the screen width crosses 768 CSS px. The list's set does not show the tile size choice.
 The listing's data is held per page by [library/listing.ts](../../ui-web/src/library/listing.ts). It reserves the overall height from the first page's `totalCount`, and reads the pages containing the visible rows and one screen of prefetch rows in the scrolling direction, 200 items at a time by `offset`. It shows frames at unread positions and cancels requests for pages that left the targets.
 The grid lines up square tiles following the tile size level. The list, on a wide screen, has the 5 columns of small thumbnail, name, modification date, size, and kind with sort headings, and on a narrow screen shows no headings and lines up two-line rows of the name and "更新日時 · サイズ" (modification date · size).
 When the folder, sorting, listing display, or search conditions change, the display returns to starting from the top. When a page with a different snapshot id arrives, the other pages are discarded and the needed range is reread, keeping the scroll position.
@@ -1541,7 +1547,7 @@ Search is handled by search mode in [SearchPage.tsx](../../ui-web/src/pages/Sear
 The paged listing store in [listing.ts](../../ui-web/src/library/listing.ts) reads either a folder or a search (`ListingSource`), and a search is requested with `listSearchEntries` through `fetchSearchPage` in [entries.ts](../../ui-web/src/library/entries.ts), which turns each Entry's path into the keyed path. Grid, List, and the viewer take the source; the viewer moves among the search results. For subtree results, the parent folder is shown below the name in the grid, in the "場所" (Location) column in a wide screen's list, and at the start of the second line in a narrow screen's list; direct children of the start are shown as ".". During a subtree search, "検索中…" (Searching…) is displayed, and if the search results are 0, "一致する項目がありません。" (No matching items.) is displayed, and on truncation of any Library it guides narrowing the Libraries or moving the start down and searching again. Opening a folder or archive result moves to that position in folder view and ends the search.
 The tree reads folder-like Entries in order by `offset` and shows children after fetching all pages. When the snapshot's id changes, it rereads from the start.
 The image and video viewer also uses the same listing data, and reads pages in order until the Entry of the relative path that `view` of a directly opened URL points to is found. Moving to the previous and next images skips non-images, and moves in one operation after finishing reading unread pages too. The display images of one before and one after in the loaded range are prefetched. The original image is fetched at a timing decided from the format, size, and the display preferences' value for swapping to the original image, and the size of the display image request is also decided by the same result ([viewer.ts](../../ui-web/src/viewer/viewer.ts)). Zoom is done only with the wheel.
-The wide-screen image viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), and the header's slideshow, full-screen, download, and delete buttons. On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1). The settings screen has the choice of swapping to the original image in each of the wide and narrow sets.
+The wide-screen image viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), and the header's slideshow, full-screen, download, and delete buttons. On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1).
 Parts are built with Tailwind, the shadcn/ui parts in `ui-web/src/components/ui`, and in-house code.
 On a wide screen, from the listing's context menu and the toolbar, one can create folders, rename, delete, and download a single file. Creating, renaming, and deleting can also use key operations. In the tree too, one can create inside, rename, and delete the right-clicked folder. Creating and renaming are done in the modal dialog of [NameDialog.tsx](../../ui-web/src/components/NameDialog.tsx), which shows the target's path. Whether something can be changed is decided by the logical OR of the Library's `readonly` and the Entry's or the current folder's `metadata.readonly`. After success, that Library's listing and tree are reread.
 [clipboard.ts](../../ui-web/src/library/clipboard.ts) holds the targets of cut and copy across authenticated screens. They can be operated with the menu and Ctrl or ⌘ X, C, and V, and during cut the targets in the grid and list are shown faintly. Paste targets the current folder, or a tile or tree folder, and transfer to another Library is also possible.

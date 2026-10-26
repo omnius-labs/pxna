@@ -137,7 +137,7 @@ export class PreferencesWriter {
 
 const writers = new WeakMap<QueryClient, PreferencesWriter>();
 
-/// `QueryClient` ごとに 1 つの書き戻し。ツールバーと設定の画面など、複数の場所から変えても、まとめと巻き戻しの基準を 1 つにするために共有する。
+/// `QueryClient` ごとに 1 つの書き戻し。設定のメニューとタイムラインの Library の選択など、複数の場所から変えても、まとめと巻き戻しの基準を 1 つにするために共有する。
 /// 画面を閉じるときに、保留中の書き戻しを送る。
 export function preferencesWriterFor(client: QueryClient): PreferencesWriter {
     let writer = writers.get(client);
@@ -180,9 +180,6 @@ export function usePreferences() {
         sort: preferences.sort,
         /// 今使っている組の一部を変える。
         updateSet: (patch: Partial<DisplaySet>) => writer.update((current) => replaceSet(current, narrow, patch)),
-        /// 画面の幅の区分を指定して、組の一部を変える。設定の画面が使う。
-        updateSetFor: (forNarrow: boolean, patch: Partial<DisplaySet>) =>
-            writer.update((current) => replaceSet(current, forNarrow, patch)),
         updateSort: (patch: Partial<SortPreference>) => writer.update((current) => replaceSort(current, patch)),
         /// タイムラインに並べる Library を保存する。空にはしない。
         updateTimelineLibraries: (libraryIds: readonly string[]) =>

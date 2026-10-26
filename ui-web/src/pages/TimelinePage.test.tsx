@@ -47,10 +47,9 @@ vi.mock("../components/StatusBar", () => ({
         <footer data-status>{`${totalCount}:${selectedCount}`}</footer>
     ),
 }));
-vi.mock("../components/ViewControls", () => ({
-    ViewControls: ({ timeline }: { timeline?: boolean }) => <i data-controls={String(!!timeline)} />,
+vi.mock("../components/SettingsMenu", () => ({
+    SettingsMenu: ({ timeline }: { timeline?: boolean }) => <i data-controls={String(!!timeline)} />,
 }));
-vi.mock("../components/SettingsDialog", () => ({ SettingsDialog: () => null }));
 vi.mock("../components/InfoPanel", () => ({ InfoPanel: () => <aside data-info />, InfoPanelToggle: () => null }));
 vi.mock("../components/TimelineGrid", () => ({
     TimelineGrid: ({
