@@ -157,6 +157,7 @@ export function Grid({
         onProgress,
         onFocus: focusTile,
         onOpen,
+        openOnClick: narrow,
     });
     const { focusedIndex, click, keyDown } = interaction;
 
