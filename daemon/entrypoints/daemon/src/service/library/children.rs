@@ -238,9 +238,10 @@ mod tests {
         tokio::select! { _ = ready => {}, _ = &mut probe => panic!("worker must start") }
         assert_eq!(probe.await.has_children, Nullable::Null);
         assert!(budget.try_probe().is_none());
-        let _foreground = budget.acquire(WorkClass::Foreground, WorkKind::Listing).await?;
+        let foreground = budget.acquire(WorkClass::Foreground, WorkKind::Listing).await?;
         release.send(())?;
         ended.await?;
+        drop(foreground);
         let _finished = budget.acquire(WorkClass::Background, WorkKind::Exif).await?;
         assert_eq!(budget.counts(WorkKind::ChildProbe), (1, 1));
         Ok(())

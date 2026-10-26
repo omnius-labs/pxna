@@ -2,19 +2,18 @@ use std::{path::Path, process::Stdio, time::Duration};
 
 use tokio::process::Command;
 
-use super::ProcessPriority;
-use crate::prelude::*;
+use crate::{core::work::WorkClass, prelude::*};
 
-/// `Background` の外部プロセスに足す nice 値。
+/// Background の処理が起動する外部プロセスに足す nice 値。
 #[cfg(unix)]
 const BACKGROUND_NICE: i32 = 10;
 
 /// 期限付きで実行し、標準出力を返す。失敗したときは、外部プロセスの標準エラーを message に残す。
 // omnius-lint:allow(free-fn) Wraps the process boundary shared by the ffmpeg and heif-dec tools
-pub(super) async fn run(mut command: Command, timeout: Duration, priority: ProcessPriority) -> Result<Vec<u8>> {
+pub(super) async fn run(mut command: Command, timeout: Duration, class: WorkClass) -> Result<Vec<u8>> {
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     #[cfg(unix)]
-    if priority == ProcessPriority::Background {
+    if class == WorkClass::Background {
         // SAFETY: fork と exec の間で呼ぶため、async-signal-safe な nice(2) の呼び出しだけを行う。
         unsafe {
             command.pre_exec(|| {
@@ -25,7 +24,7 @@ pub(super) async fn run(mut command: Command, timeout: Duration, priority: Proce
         }
     }
     #[cfg(not(unix))]
-    let _ = priority;
+    let _ = class;
     let program = command.as_std().get_program().to_string_lossy().into_owned();
     let child = command.spawn().map_err(|error| {
         // 実行ファイルがないのは、利用者のファイルの問題ではなく、daemon の環境の問題である。
@@ -61,16 +60,17 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
-    async fn niceness(priority: ProcessPriority) -> i32 {
-        let output = run(Command::new("nice"), Duration::from_secs(10), priority).await.unwrap();
+    async fn niceness(class: WorkClass) -> i32 {
+        let output = run(Command::new("nice"), Duration::from_secs(10), class).await.unwrap();
         String::from_utf8_lossy(&output).trim().parse().unwrap()
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn background_runs_nicer_than_foreground_test() {
-        let foreground = niceness(ProcessPriority::Foreground).await;
-        let background = niceness(ProcessPriority::Background).await;
+        let foreground = niceness(WorkClass::Foreground).await;
+        assert_eq!(niceness(WorkClass::Interactive).await, foreground);
+        let background = niceness(WorkClass::Background).await;
         assert_eq!(background, (foreground + BACKGROUND_NICE).min(19));
     }
 }

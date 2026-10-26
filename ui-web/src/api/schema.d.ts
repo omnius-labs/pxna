@@ -730,6 +730,12 @@ export interface paths {
          *     returns that entry's thumbnail; `NotFound` means there is none.
          *
          *     The response `Content-Type` follows `format`.
+         *
+         *     `Pxna-Priority` orders the generation of `display` images. The
+         *     image a viewer shows now is `interactive` and starts before
+         *     prefetched images and grid thumbnails; a prefetched image is
+         *     `prefetch`. A request the client abandons while it waits for
+         *     a generation slot starts nothing.
          */
         get: operations["getThumbnail"];
         put?: never;
@@ -2037,6 +2043,12 @@ export interface components {
         ResamplerQuery: components["schemas"]["ImageResampler"];
         /** @description Anchor position used when resizing and cropping. */
         AnchorQuery: components["schemas"]["ImageAnchor"];
+        /**
+         * @description Priority of a `display` image: `interactive` for the image
+         *     shown now, the default, and `prefetch` for an image prepared
+         *     ahead. Other variants ignore it.
+         */
+        PriorityHeader: "interactive" | "prefetch";
         /** @description How to resolve an existing entry at the target path. */
         ConflictQuery: components["schemas"]["ConflictPolicy"];
         /** @description Opaque identifier of an upload session. */
@@ -3255,7 +3267,14 @@ export interface operations {
                 /** @description Anchor position used when resizing and cropping. */
                 anchor?: components["parameters"]["AnchorQuery"];
             };
-            header?: never;
+            header?: {
+                /**
+                 * @description Priority of a `display` image: `interactive` for the image
+                 *     shown now, the default, and `prefetch` for an image prepared
+                 *     ahead. Other variants ignore it.
+                 */
+                "Pxna-Priority"?: components["parameters"]["PriorityHeader"];
+            };
             path: {
                 /** @description Opaque identifier of a Library owned by the owner. */
                 libraryId: components["parameters"]["LibraryIdPath"];
