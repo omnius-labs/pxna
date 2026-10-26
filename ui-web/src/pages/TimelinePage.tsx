@@ -9,12 +9,11 @@ import { DeleteDialog, type DeleteTarget } from "../components/DeleteDialog";
 import { EntryToolbar } from "../components/EntryMenu";
 import { InfoPanel, InfoPanelToggle } from "../components/InfoPanel";
 import { EntryNameDialog } from "../components/NameDialog";
-import { SettingsDialog } from "../components/SettingsDialog";
+import { SettingsMenu } from "../components/SettingsMenu";
 import { StatusBar } from "../components/StatusBar";
 import { TimelineGrid } from "../components/TimelineGrid";
 import { TimelineSidebar } from "../components/TimelineSidebar";
 import { Button } from "../components/ui/button";
-import { ViewControls } from "../components/ViewControls";
 import { TimelineViewer } from "../components/Viewer";
 import { EntryActionContext, type EntryEditing } from "../library/actionContext";
 import { useClipboard } from "../library/clipboard";
@@ -312,9 +311,8 @@ function TimelineScreen({
                         >
                             <RefreshCw />
                         </Button>
-                        <ViewControls timeline />
                         {!narrow && <InfoPanelToggle open={infoPanel.open} onToggle={infoPanel.toggle} />}
-                        <SettingsDialog />
+                        <SettingsMenu timeline />
                     </>
                 }
                 panel={infoPanel.open ? <InfoPanel libraryId={CROSS_LIBRARY_SCOPE} selection={selection} /> : undefined}
