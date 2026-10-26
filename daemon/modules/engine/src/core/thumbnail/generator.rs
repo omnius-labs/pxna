@@ -1,6 +1,5 @@
 use std::{path::Path, sync::Arc, time::Duration};
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::bytes::Bytes;
 use tracing::{Instrument as _, Span, field::Empty};
 
@@ -8,7 +7,8 @@ use crate::{
     base::util::SingleFlight,
     core::{
         image::{ImageConvertOptions, ImageConverter, SizeSteps},
-        media::{FrameSpec, MediaKind, MediaOptions, MediaTools, ProcessPriority},
+        media::{FrameSpec, MediaKind, MediaOptions, MediaTools},
+        schedule::{MediaPools, ScheduleOptions, SchedulePermit, Scheduler},
         thumbnail::{
             cache::{CacheBucket, CachedImage, ThumbnailCache, ThumbnailCacheOptions},
             key::{ThumbnailKey, ThumbnailKeyHasher},
@@ -40,9 +40,6 @@ pub struct ThumbnailOptions {
     pub display_quality: u8,
     pub cache_capacity_bytes: u64,
     pub display_cache_capacity_bytes: u64,
-    pub max_concurrent_images: usize,
-    /// 同時に走る ffmpeg の数。
-    pub max_concurrent_videos: usize,
     /// 1 回の ffmpeg の実行の期限。
     pub video_timeout: Duration,
 }
@@ -57,8 +54,6 @@ impl Default for ThumbnailOptions {
             display_quality: 90,
             cache_capacity_bytes: 2 * GIB,
             display_cache_capacity_bytes: 2 * GIB,
-            max_concurrent_images: 4,
-            max_concurrent_videos: 2,
             video_timeout: Duration::from_secs(60),
         }
     }
@@ -71,11 +66,7 @@ impl ThumbnailOptions {
     }
 
     fn steps(&self) -> Result<(SizeSteps, SizeSteps)> {
-        let positive = self.cache_capacity_bytes > 0
-            && self.display_cache_capacity_bytes > 0
-            && self.max_concurrent_images > 0
-            && self.max_concurrent_videos > 0
-            && !self.video_timeout.is_zero();
+        let positive = self.cache_capacity_bytes > 0 && self.display_cache_capacity_bytes > 0 && !self.video_timeout.is_zero();
         if !positive {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("thumbnail capacities, concurrency, and the timeout must be greater than zero"));
         }
@@ -107,11 +98,7 @@ struct Inner {
     display_sizes: SizeSteps,
     quality: u8,
     display_quality: u8,
-    image_permits: Arc<Semaphore>,
-    video_permits: Arc<Semaphore>,
-    /// 表示用画像の専用枠。一覧のサムネイル生成の待ち行列に、プレビューを並ばせない。
-    display_image_permits: Arc<Semaphore>,
-    display_video_permits: Arc<Semaphore>,
+    pools: MediaPools,
     flights: SingleFlight<ThumbnailKey, Produced>,
     #[cfg(test)]
     conversions: std::sync::atomic::AtomicUsize,
@@ -156,10 +143,18 @@ enum SourceId {
 impl ThumbnailGenerator {
     pub async fn open(fs: Arc<StorageService>, cache_dir: &Path, options: ThumbnailOptions, media: MediaOptions) -> Result<Self> {
         let media_info = Arc::new(MediaInfoService::new(media.clone(), options.video_timeout));
-        Self::open_with_media(fs, cache_dir, options, media, media_info).await
+        let pools = MediaPools::new(&Arc::new(Scheduler::default()), &ScheduleOptions::default());
+        Self::open_with_media(fs, cache_dir, options, media, media_info, pools).await
     }
 
-    pub async fn open_with_media(fs: Arc<StorageService>, cache_dir: &Path, options: ThumbnailOptions, media: MediaOptions, media_info: Arc<MediaInfoService>) -> Result<Self> {
+    pub async fn open_with_media(
+        fs: Arc<StorageService>,
+        cache_dir: &Path,
+        options: ThumbnailOptions,
+        media: MediaOptions,
+        media_info: Arc<MediaInfoService>,
+        pools: MediaPools,
+    ) -> Result<Self> {
         let (sizes, display_sizes) = options.steps()?;
         let cache = ThumbnailCache::open(
             cache_dir,
@@ -181,10 +176,7 @@ impl ThumbnailGenerator {
                 display_sizes,
                 quality: options.quality,
                 display_quality: options.display_quality,
-                image_permits: Arc::new(Semaphore::new(options.max_concurrent_images)),
-                video_permits: Arc::new(Semaphore::new(options.max_concurrent_videos)),
-                display_image_permits: Arc::new(Semaphore::new(options.max_concurrent_images)),
-                display_video_permits: Arc::new(Semaphore::new(options.max_concurrent_videos)),
+                pools,
                 flights: SingleFlight::new(),
                 #[cfg(test)]
                 conversions: std::sync::atomic::AtomicUsize::new(0),
@@ -277,11 +269,9 @@ impl ThumbnailGenerator {
             sprite_key: if shares_a_run { key_of(ThumbnailVariant::Sprite) } else { None },
         };
         let flight_key = job.primary_key.clone();
-        let semaphore = inner.semaphore_for(kind, request.variant);
-        let available = semaphore.available_permits();
-        let gate = inner
-            .acquire(semaphore)
-            .instrument(perf_span!("thumbnail_permit_wait", available_when_requested = available));
+        let pool = inner.pool_for(kind).clone();
+        let class = request.class;
+        let gate = async move { Ok::<_, Error>(pool.acquire(class).await) }.instrument(perf_span!("thumbnail_permit_wait", class = ?class));
 
         // 生成枠と同じ key の生成を待つ時間も含む。生成そのものは `thumbnail_production` が測る。
         let produced = async {
@@ -385,28 +375,21 @@ impl Inner {
         })
     }
 
-    /// 画像の変換と、外部プロセスの ffmpeg は、別の同時実行数の上限で数える。
-    /// 表示用画像は、ユーザーが待っているため、サムネイルとは別の枠で数える。
-    fn semaphore_for(&self, kind: MediaKind, variant: ThumbnailVariant) -> Arc<Semaphore> {
-        match (kind, variant == ThumbnailVariant::Display) {
-            (MediaKind::Image, false) => self.image_permits.clone(),
-            (MediaKind::Image, true) => self.display_image_permits.clone(),
-            (_, false) => self.video_permits.clone(),
-            (_, true) => self.display_video_permits.clone(),
+    /// 画像の変換と、外部プロセスの ffmpeg と heif-dec は、別の資源として数える。
+    /// 枠を待つ間に要求が drop されたら、何も始まらない。
+    fn pool_for(&self, kind: MediaKind) -> &crate::core::schedule::PriorityPool {
+        match kind {
+            MediaKind::Image => &self.pools.images,
+            MediaKind::FfmpegImage | MediaKind::HeifImage | MediaKind::Video => &self.pools.processes,
         }
     }
 
-    /// 同時実行数の上限を待つ。待つ間に要求が drop されたら、何も始まらない。
-    async fn acquire(&self, semaphore: Arc<Semaphore>) -> Result<OwnedSemaphorePermit> {
-        semaphore.acquire_owned().await.map_err(|error| Error::from_error(error, ErrorKind::TaskError))
-    }
-
     /// 生成してキャッシュへ入れる。独立した task で走るため、始まった後に要求が切れても最後まで走る。
-    async fn produce(self: Arc<Self>, job: Job, permit: OwnedSemaphorePermit) -> Result<Produced> {
+    async fn produce(self: Arc<Self>, job: Job, permit: SchedulePermit) -> Result<Produced> {
         self.produce_traced(job, permit).instrument(perf_span!("thumbnail_production")).await
     }
 
-    async fn produce_traced(self: Arc<Self>, job: Job, _permit: OwnedSemaphorePermit) -> Result<Produced> {
+    async fn produce_traced(self: Arc<Self>, job: Job, _permit: SchedulePermit) -> Result<Produced> {
         // 直前に終わった同じ key の処理が入れた結果を、重ねて作らない。
         if let Some(cached) = self.cached(&job).await? {
             return Ok(cached);
@@ -427,10 +410,7 @@ impl Inner {
                 }
                 MediaKind::FfmpegImage | MediaKind::HeifImage => {
                     let decode = perf_span!("thumbnail_external_decode", bytes = Empty);
-                    let input = self
-                        .decode_ffmpeg_image(&job.source, file.path(), job.kind, job.plan.priority())
-                        .instrument(decode.clone())
-                        .await?;
+                    let input = self.decode_ffmpeg_image(&job.source, file.path(), job.kind).instrument(decode.clone()).await?;
                     decode.record("bytes", input.len());
                     Produced {
                         image: self.convert_one(input, &job.plan).await?,
@@ -502,7 +482,7 @@ impl Inner {
         if plan.variant == ThumbnailVariant::Display {
             positions.truncate(1);
         }
-        let frames = self.extract_frames(file, &positions, plan.priority()).await?;
+        let frames = self.extract_frames(file, &positions).await?;
 
         let plan = plan.clone();
         let span = Span::current();
@@ -536,27 +516,27 @@ impl Inner {
         .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?
     }
 
-    async fn extract_frames(&self, file: &Path, positions_secs: &[f64], priority: ProcessPriority) -> Result<Vec<Vec<u8>>> {
+    async fn extract_frames(&self, file: &Path, positions_secs: &[f64]) -> Result<Vec<Vec<u8>>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.extract_frames(file, positions_secs, priority).await
+        self.tools.extract_frames(file, positions_secs).await
     }
 
     /// ffmpeg で読む画像をデコードする。HEIC/HEIF/AVIF は PPM、それ以外（JXL、JP2）は PNG を使う。
     /// アルファ付きの HEIC/HEIF/AVIF は heif-dec に回し、ffmpeg が失敗したときも heif-dec で読み直す。
-    async fn decode_ffmpeg_image(&self, source: &ResolvedStoragePath, file: &Path, kind: MediaKind, priority: ProcessPriority) -> Result<Vec<u8>> {
+    async fn decode_ffmpeg_image(&self, source: &ResolvedStoragePath, file: &Path, kind: MediaKind) -> Result<Vec<u8>> {
         let heif_decodable = kind == MediaKind::HeifImage || Self::is_avif(source);
         if !heif_decodable {
-            return self.extract_image(file, priority).await;
+            return self.extract_image(file).await;
         }
         if self.has_alpha(source).await? {
-            return self.decode_heif(file, priority).await;
+            return self.decode_heif(file).await;
         }
-        match self.extract_image_pixels(file, priority).await {
+        match self.extract_image_pixels(file).await {
             Ok(image) => Ok(image),
             Err(error) => {
                 warn!(error = ?error, "ffmpeg failed to decode a HEIF or AVIF image, so heif-dec reads it instead");
-                self.decode_heif(file, priority).await
+                self.decode_heif(file).await
             }
         }
     }
@@ -580,23 +560,23 @@ impl Inner {
         }
     }
 
-    async fn extract_image(&self, file: &Path, priority: ProcessPriority) -> Result<Vec<u8>> {
+    async fn extract_image(&self, file: &Path) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.extract_image(file, priority).await
+        self.tools.extract_image(file).await
     }
 
-    async fn extract_image_pixels(&self, file: &Path, priority: ProcessPriority) -> Result<Vec<u8>> {
+    async fn extract_image_pixels(&self, file: &Path) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.extract_image_pixels(file, priority).await
+        self.tools.extract_image_pixels(file).await
     }
 
     /// heif-dec で読む。アルファ付きの HEIC/HEIF/AVIF と、ffmpeg が読めなかったときのフォールバックに使う。
-    async fn decode_heif(&self, file: &Path, priority: ProcessPriority) -> Result<Vec<u8>> {
+    async fn decode_heif(&self, file: &Path) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.heif_dec_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.decode_heif(file, priority).await
+        self.tools.decode_heif(file).await
     }
 
     /// 拡張子が合っていても中身が読めない file は、`UnsupportedType` にする。
@@ -609,14 +589,6 @@ impl Inner {
 }
 
 impl Plan {
-    /// 表示用画像はユーザーが待っているため、外部プロセスの CPU を優先する。サムネイルとスプライトシートは譲る。
-    fn priority(&self) -> ProcessPriority {
-        match self.variant {
-            ThumbnailVariant::Display => ProcessPriority::Foreground,
-            ThumbnailVariant::Thumbnail | ThumbnailVariant::Sprite => ProcessPriority::Background,
-        }
-    }
-
     /// 動画のキーは、フレームの数と位置を含める。
     fn key(&self, source: &SourceId, variant: ThumbnailVariant, kind: MediaKind) -> ThumbnailKey {
         let mut hasher = ThumbnailKeyHasher::new();
@@ -683,6 +655,7 @@ mod tests {
 
     use crate::{
         core::nfs::FileStorageLocal,
+        core::work::WorkClass,
         service::{ArchiveOptions, ArchiveRuntime, ImageExif, MediaInfo},
     };
 
@@ -722,6 +695,11 @@ mod tests {
             format,
             resize,
             anchor: ImageAnchorPositionType::Center,
+            class: if variant == ThumbnailVariant::Display {
+                WorkClass::Interactive
+            } else {
+                WorkClass::Foreground
+            },
         }
     }
 
@@ -992,14 +970,6 @@ mod tests {
             },
             ThumbnailOptions {
                 cache_capacity_bytes: 0,
-                ..ThumbnailOptions::default()
-            },
-            ThumbnailOptions {
-                max_concurrent_images: 0,
-                ..ThumbnailOptions::default()
-            },
-            ThumbnailOptions {
-                max_concurrent_videos: 0,
                 ..ThumbnailOptions::default()
             },
             ThumbnailOptions {

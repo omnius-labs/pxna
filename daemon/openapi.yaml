@@ -1265,6 +1265,12 @@ paths:
                 returns that entry's thumbnail; `NotFound` means there is none.
 
                 The response `Content-Type` follows `format`.
+
+                `Pxna-Priority` orders the generation of `display` images. The
+                image a viewer shows now is `interactive` and starts before
+                prefetched images and grid thumbnails; a prefetched image is
+                `prefetch`. A request the client abandons while it waits for
+                a generation slot starts nothing.
             operationId: getThumbnail
             parameters:
                 - $ref: "#/components/parameters/LibraryIdPath"
@@ -1276,6 +1282,7 @@ paths:
                 - $ref: "#/components/parameters/ResizeQuery"
                 - $ref: "#/components/parameters/ResamplerQuery"
                 - $ref: "#/components/parameters/AnchorQuery"
+                - $ref: "#/components/parameters/PriorityHeader"
             responses:
                 "200":
                     description: Thumbnail image.
@@ -2189,6 +2196,20 @@ components:
             description: Anchor position used when resizing and cropping.
             schema:
                 $ref: "#/components/schemas/ImageAnchor"
+
+        PriorityHeader:
+            name: Pxna-Priority
+            in: header
+            required: false
+            description: |
+                Priority of a `display` image: `interactive` for the image
+                shown now, the default, and `prefetch` for an image prepared
+                ahead. Other variants ignore it.
+            schema:
+                type: string
+                enum:
+                    - interactive
+                    - prefetch
 
         ConflictQuery:
             name: conflict

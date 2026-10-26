@@ -207,16 +207,24 @@ Each run has a deadline of `video_timeout_secs`, and when it passes the process 
 ## 7. Order and Concurrency of Generation
 
 Generation is done when a request is received.
-Which Entry is generated when is decided only by the order of the client's requests.
+Which tile is generated when is decided by the order of the client's requests, and the display image a viewer shows now goes ahead of them.
 
-**It is the client that has priority, and the server processes in arrival order.**
+**Among tiles, it is the client that has priority, and the server processes in arrival order.**
 The server does not know, at the time it receives a request, whether that tile is still on screen.
 Only the client that has the screen knows that.
 The client requests only the tiles in the visible range and the prefetch margin, limits the number it sends at the same time, and cancels requests for tiles that left the screen ([Client Design §4](./client.md#4-thumbnail-requests)).
 
+**The display image a viewer shows now is Interactive.**
+A display image requested with `Pxna-Priority: interactive`, the default, is Interactive, and one requested with `prefetch` is Foreground like the tiles.
+Image conversion and the ffmpeg and heif-dec runs are each one resource of the scheduler ([Storage Layer Design §9.1](./storage.md#listing-work-budget)).
+While an Interactive generation runs or waits in a resource, no new Foreground generation starts there, and no Background work starts anywhere.
+Interactive also has slots of its own besides the shared slots, so a display image does not wait for tile generations that already started.
+The viewer requests the image it shows as `interactive` and its neighbors as `prefetch`, and cancels the requests of images it no longer shows or neighbors.
+When it moves to an image whose prefetch is still loading, it cancels the prefetch and requests the image again as `interactive`.
+
 The server-side rules are the following three.
 
-- Upper limits on concurrency are set for image conversion and for ffmpeg and heif-dec runs respectively. Requests that reach the limit wait in arrival order
+- Image conversion and ffmpeg and heif-dec runs each have a limit on concurrency. Requests that reach the limit wait in priority order, and in arrival order within the same priority
 - Concurrent requests for the same cache key are merged into one generation by single-flight
 - A request whose connection was cut while waiting is discarded without starting generation. A request cut after generation started is generated to the end and put in the cache
 
@@ -300,8 +308,10 @@ Byte sizes, counts, times, and parallelism allow only positive values and are va
 | `[thumbnail] display_quality` | 90 | Quality of lossy compression for display images (1 to 100) |
 | `[thumbnail] cache_capacity_bytes` | 2 GiB | Capacity budget for thumbnails and sprite sheets |
 | `[thumbnail] display_cache_capacity_bytes` | 2 GiB | Capacity budget for display images |
-| `[thumbnail] max_concurrent_images` | 4 | Number of image conversions running at the same time |
-| `[thumbnail] max_concurrent_videos` | 2 | Number of ffmpeg and heif-dec runs at the same time (heif-dec is used for alpha and as a fallback) |
+| `[scheduler] image_slots` | 4 | Number of image conversions running at the same time for Interactive and Foreground |
+| `[scheduler] image_interactive_slots` | 1 | Additional image conversions that only Interactive uses |
+| `[scheduler] process_slots` | 2 | Number of ffmpeg and heif-dec runs at the same time for Interactive and Foreground (heif-dec is used for alpha and as a fallback) |
+| `[scheduler] process_interactive_slots` | 1 | Additional ffmpeg and heif-dec runs that only Interactive uses |
 | `[thumbnail] video_timeout_secs` | 60 | Deadline for one frame extraction |
 | `[media] ffmpeg_path` | `ffmpeg` | The ffmpeg executable |
 | `[media] ffprobe_path` | `ffprobe` | The ffprobe executable |

@@ -6040,13 +6040,15 @@ where
 
 #[tracing::instrument(skip_all)]
 fn get_thumbnail_validation(
+    header_params: models::GetThumbnailHeaderParams,
     path_params: models::GetThumbnailPathParams,
     query_params: models::GetThumbnailQueryParams,
-) -> std::result::Result<(models::GetThumbnailPathParams, models::GetThumbnailQueryParams), ValidationErrors> {
+) -> std::result::Result<(models::GetThumbnailHeaderParams, models::GetThumbnailPathParams, models::GetThumbnailQueryParams), ValidationErrors> {
+    header_params.validate()?;
     path_params.validate()?;
     query_params.validate()?;
 
-    Ok((path_params, query_params))
+    Ok((header_params, path_params, query_params))
 }
 /// GetThumbnail - GET /api/v1/libraries/{libraryId}/thumbnails
 #[tracing::instrument(skip_all)]
@@ -6075,17 +6077,47 @@ where
         return response_with_status_code_only(StatusCode::UNAUTHORIZED);
     };
 
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_thumbnail_validation(path_params, query_params)).await.unwrap();
+    // Header parameters
+    let header_params = {
+        let header_pxna_priority = headers.get(HeaderName::from_static("pxna-priority"));
 
-    let Ok((path_params, query_params)) = validation else {
+        let header_pxna_priority = match header_pxna_priority {
+            Some(v) => match header::IntoHeaderValue::<String>::try_from((*v).clone()) {
+                Ok(result) => Some(result.0),
+                Err(err) => {
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(Body::from(format!("Invalid header Pxna-Priority - {err}")))
+                        .map_err(|e| {
+                            error!(error = ?e);
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        });
+                }
+            },
+            None => None,
+        };
+
+        models::GetThumbnailHeaderParams {
+            pxna_priority: header_pxna_priority,
+        }
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || get_thumbnail_validation(header_params, path_params, query_params))
+        .await
+        .unwrap();
+
+    let Ok((header_params, path_params, query_params)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().get_thumbnail(&method, &host, &cookies, &claims, &path_params, &query_params).await;
+    let result = api_impl
+        .as_ref()
+        .get_thumbnail(&method, &host, &cookies, &claims, &header_params, &path_params, &query_params)
+        .await;
 
     let mut response = Response::builder();
 

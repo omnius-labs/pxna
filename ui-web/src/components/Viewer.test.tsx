@@ -8,8 +8,10 @@ import type { Entry, FolderListing } from "../library/entries";
 import { stubMatchMedia, stubResizeObserver } from "../testing/preferences";
 import { Viewer } from "./Viewer";
 
-const { get, range, remove, rate } = vi.hoisted(() => ({
+const { get, range, remove, rate, displayLoads } = vi.hoisted(() => ({
     get: vi.fn(),
+    /// 表示用画像を要求した URL と優先度。
+    displayLoads: [] as Array<{ url: string; priority: string }>,
     range: { first: 0, last: 2 },
     remove: vi.fn(),
     rate: vi.fn(),
@@ -35,6 +37,15 @@ vi.mock("@tanstack/react-virtual", () => ({
                 size: options.estimateSize(),
             })),
     }),
+}));
+// jsdom は画像を読まないので、表示用画像は要求の URL をそのまま `<img>` に渡す。
+vi.mock("../viewer/displayImages", async (original) => ({
+    ...(await original<typeof import("../viewer/displayImages")>()),
+    loadDisplayImage: (url: string, priority: string) => {
+        displayLoads.push({ url, priority });
+        return Promise.resolve(url);
+    },
+    revokeDisplayImage: () => {},
 }));
 vi.mock("../thumbnails/api", async (original) => ({
     ...(await original<typeof import("../thumbnails/api")>()),
@@ -309,37 +320,30 @@ describe("元の画像への差し替え", () => {
 
     it("差し替える画像の表示用画像は画素密度を掛けずに要求し、先読みの URL は移った先の要求と一致する", async () => {
         Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
-        const prefetched: string[] = [];
-        const source = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
-        const getSource = source?.get;
-        const setSource = source?.set;
-        if (!source || !getSource || !setSource) throw new Error("HTMLImageElement の src が見つからない");
-        Object.defineProperty(HTMLImageElement.prototype, "src", {
-            configurable: true,
-            get() {
-                return getSource?.call(this);
-            },
-            set(value: string) {
-                prefetched.push(value);
-                setSource?.call(this, value);
-            },
-        });
+        displayLoads.length = 0;
         try {
             listed([image("a.png", "image/png", 1), image("b.png", "image/png", 30_000_001)]);
             const h = await harness("a.png", "/", "auto");
             try {
                 await wait(() => expect(findDisplayImage(h)).not.toBeNull());
                 expect(displayImage(h).getAttribute("src")).toContain("width=1024&height=768");
-                await wait(() => expect(prefetched.some((url) => url.includes("b.png"))).toBe(true));
+                expect(displayLoads[0]?.priority).toBe("interactive");
+                await wait(() =>
+                    expect(
+                        displayLoads.some(({ url, priority }) => url.includes("b.png") && priority === "prefetch"),
+                    ).toBe(true),
+                );
                 await h.render("b.png");
                 await wait(() => expect(displayImage(h).getAttribute("src")).toContain("b.png"));
                 expect(displayImage(h).getAttribute("src")).toContain("width=2048&height=1536");
-                expect(prefetched).toContain(displayImage(h).getAttribute("src"));
+                expect(displayLoads.filter(({ url }) => url.includes("b.png"))).toHaveLength(1);
+                expect(displayLoads.find(({ url }) => url.includes("b.png"))?.url).toBe(
+                    displayImage(h).getAttribute("src"),
+                );
             } finally {
                 await h.dispose();
             }
         } finally {
-            Object.defineProperty(HTMLImageElement.prototype, "src", source);
             Reflect.deleteProperty(window, "devicePixelRatio");
         }
     });

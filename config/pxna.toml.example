@@ -18,6 +18,12 @@ dir = "/opt/pxna/web" # The web UI built into the image
 # Keep the path protected by other means, such as a trusted LAN or Tailscale. The daemon's default is false
 insecure_cookie = true
 
+# [scheduler]
+# image_slots = 4               # Concurrent image conversions for the viewer and thumbnails
+# image_interactive_slots = 1   # Extra conversions only for the image the viewer shows now
+# process_slots = 2             # Concurrent ffmpeg and heif-dec runs
+# process_interactive_slots = 1 # Extra runs only for the image the viewer shows now
+
 # [media]
 # ffmpeg_path = "ffmpeg"   # Installed in the image
 # ffprobe_path = "ffprobe"
