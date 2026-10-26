@@ -403,6 +403,28 @@ describe("フィルムストリップ", () => {
         }
     });
 
+    it("前後へ移っても作り直さず、探し直す間も読み込み中を挟まない", async () => {
+        thousand();
+        range.first = 0;
+        range.last = 22;
+        const h = await harness("5.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(h.host.querySelector("img")?.alt).toBe("5.png"));
+            const before = strip(h);
+            await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" })));
+            await wait(() => expect(h.onChange).toHaveBeenCalledExactlyOnceWith("6.png"));
+            await h.render("6.png");
+            expect(h.host.querySelector("img")?.alt).toBe("6.png");
+            expect(h.host.textContent).not.toContain("読み込み中…");
+            expect(strip(h)).toBe(before);
+            expect(
+                h.host.querySelector("[aria-label=フィルムストリップ] [aria-current=true]")?.getAttribute("aria-label"),
+            ).toBe("6.png");
+        } finally {
+            await h.dispose();
+        }
+    });
+
     it("開いた直後は先頭のページだけを読み、最後の範囲へスクロールすると最後のページだけを読む", async () => {
         thousand();
         range.first = 0;
@@ -422,7 +444,7 @@ describe("フィルムストリップ", () => {
         }
     });
 
-    it("フィルムストリップの画像を押すと、その画像の相対パスで移動する", async () => {
+    it("フィルムストリップの画像を押すと、その画像の相対パスで移動し、探し直さずに開く", async () => {
         thousand();
         range.first = 0;
         range.last = 22;
@@ -435,6 +457,8 @@ describe("フィルムストリップ", () => {
                 h.host.querySelector<HTMLElement>("[aria-label=フィルムストリップ] [aria-label='9.png']")?.click(),
             );
             expect(h.onChange).toHaveBeenCalledExactlyOnceWith("9.png");
+            await h.render("9.png");
+            expect(h.host.querySelector("img")?.alt).toBe("9.png");
         } finally {
             await h.dispose();
         }

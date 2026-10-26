@@ -20,6 +20,7 @@ import {
     displayRequestSize,
     findEntry,
     fittedWidth,
+    type IndexedEntry,
     loadedNeighbor,
     needsOriginal,
     neighbor,
@@ -158,8 +159,16 @@ function ViewerView({
     const [moving, setMoving] = useState(false);
     const [preparingDeletion, setPreparingDeletion] = useState(false);
     const movement = useRef<AbortController | undefined>(undefined);
+    // 前後への移動やフィルムストリップで移るときに、もう分かっている移動先。URL が変わった後に探し直す間も
+    // 「読み込み中…」を挟まず、フィルムストリップを出したまま移る。位置の Entry が移動先と違えば、使わずに探し直す。
+    const [arrival, setArrival] = useState<IndexedEntry>();
     if (found.identity !== identity) {
-        setFound({ identity, done: false });
+        const arrived =
+            arrival !== undefined &&
+            name !== undefined &&
+            listing.entryAt(arrival.index)?.path === arrival.entry.path &&
+            relativePath(location.path, arrival.entry.path) === name;
+        setFound(arrived ? { identity, index: arrival.index, done: true } : { identity, done: false });
         setMoving(false);
         setPreparingDeletion(false);
     }
@@ -171,6 +180,16 @@ function ViewerView({
         listing.setDetailPriority?.(detailOwner, currentPath ? [currentPath] : []);
         return () => listing.releaseDetailPriority?.(detailOwner);
     }, [listing, detailOwner, currentPath]);
+    // フィルムストリップに出す位置。開いている Entry を探し直す間も直前の位置で出し続け、作り直してちらつかないようにする。
+    const [stripIndex, setStripIndex] = useState<number>();
+    if (index !== undefined && index !== stripIndex) {
+        setStripIndex(index);
+    }
+    /// 位置の分かっている Entry へ移る。
+    const moveTo = (target: IndexedEntry) => {
+        setArrival(target);
+        onChange(relativePath(location.path, target.entry.path));
+    };
     const previous = index === undefined ? undefined : loadedNeighbor(listing, index, -1);
     const next = index === undefined ? undefined : loadedNeighbor(listing, index, 1);
 
@@ -254,7 +273,7 @@ function ViewerView({
             const entry = await neighbor(listing, index, direction, controller.signal, kinds);
             if (controller.signal.aborted) return "busy";
             if (!entry) return "end";
-            onChange(relativePath(location.path, entry.entry.path));
+            moveTo(entry);
             return "moved";
         } catch {
             if (controller.signal.aborted) return "busy";
@@ -507,13 +526,12 @@ function ViewerView({
                 onDeleted={() => onChange(deletion?.destination)}
             />
             <Toaster id={VIEWER_TOASTER} position="top-center" />
-            {!narrow && index !== undefined && current && entryKind(current) === "image" && (
+            {!narrow && stripIndex !== undefined && (current === undefined || entryKind(current) === "image") && (
                 <Filmstrip
                     listing={listing}
-                    base={location.path}
-                    index={index}
+                    index={stripIndex}
                     queue={filmstripQueue}
-                    onSelect={onChange}
+                    onSelect={moveTo}
                     onPages={changeWantedPages}
                 />
             )}

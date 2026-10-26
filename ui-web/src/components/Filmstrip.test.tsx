@@ -91,7 +91,6 @@ async function render(props: Partial<React.ComponentProps<typeof Filmstrip>> = {
     const onPages = vi.fn();
     const all = {
         listing: listingOf(1000, 200),
-        base: "/dir",
         index: 3,
         queue,
         onSelect,
@@ -129,7 +128,7 @@ it("1000 件の一覧に、1 件 56 px の横の仮想スクロールで、全�
     }
 });
 
-it("画像の位置はボタンで、押すと起点からの相対パスで移動し、開いている位置を強調する", async () => {
+it("画像の位置はボタンで、押すとその位置と Entry で移動し、開いている位置を強調する", async () => {
     mock.first = 2;
     mock.last = 4;
     const h = await render({ index: 3 });
@@ -139,7 +138,7 @@ it("画像の位置はボタンで、押すと起点からの相対パスで移�
         expect(current?.getAttribute("aria-current")).toBe("true");
         expect(byName(h.host, "img-4.png")?.hasAttribute("aria-current")).toBe(false);
         await act(async () => byName(h.host, "img-4.png")?.click());
-        expect(h.onSelect).toHaveBeenCalledExactlyOnceWith("img-4.png");
+        expect(h.onSelect).toHaveBeenCalledExactlyOnceWith({ index: 4, entry: image(4) });
         await act(async () => current?.click());
         expect(h.onSelect).toHaveBeenCalledTimes(1);
     } finally {
