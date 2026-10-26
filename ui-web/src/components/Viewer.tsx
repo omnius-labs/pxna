@@ -21,14 +21,13 @@ import {
     findEntry,
     fittedWidth,
     type IndexedEntry,
+    isViewable,
     loadedNeighbor,
     needsOriginal,
     neighbor,
     type OriginalImageMode,
     type OriginalTiming,
     originalTiming,
-    SLIDESHOW_KINDS,
-    type StepKinds,
     type ViewTransform,
     zoomView,
 } from "../viewer/viewer";
@@ -232,11 +231,15 @@ function ViewerView({
         [screen, originalImage],
     );
 
-    /// 読み込み済みの隣の画像を先に要求し、移ったときの待ちを減らす。読み込み中の Image は保持する。
+    /// 読み込み済みの隣の画像を先に要求し、移ったときの待ちを減らす。読み込み中の Image は保持する。隣が動画なら要求しない。
     const prefetched = useRef(new Map<string, HTMLImageElement>());
     useEffect(() => {
         for (const neighborEntry of [previous, next]) {
-            if (neighborEntry === undefined || neighborEntry === "unread") {
+            if (
+                neighborEntry === undefined ||
+                neighborEntry === "unread" ||
+                entryKind(neighborEntry.entry) !== "image"
+            ) {
                 continue;
             }
             const url = displayImageUrl(location.libraryId, neighborEntry.entry.path, sizeOf(neighborEntry.entry));
@@ -258,11 +261,7 @@ function ViewerView({
     // スライドショーの自動の移動。停止したときに、読み込み中のものも取り消す。
     const autoMovement = useRef<AbortController | undefined>(undefined);
     /// 前後へ移る。別の移動か、削除の確認の準備の最中は、始めない。中断されても、その移動が最後なら、`moving` を解除する。
-    const step = async (
-        direction: -1 | 1,
-        auto = false,
-        kinds: StepKinds | undefined = auto ? SLIDESHOW_KINDS : undefined,
-    ): Promise<SlideshowStep> => {
+    const step = async (direction: -1 | 1, auto = false): Promise<SlideshowStep> => {
         if (index === undefined || moving || preparingDeletion || deletion) return "busy";
         const controller = new AbortController();
         movement.current?.abort();
@@ -270,7 +269,7 @@ function ViewerView({
         if (auto) autoMovement.current = controller;
         setMoving(true);
         try {
-            const entry = await neighbor(listing, index, direction, controller.signal, kinds);
+            const entry = await neighbor(listing, index, direction, controller.signal);
             if (controller.signal.aborted) return "busy";
             if (!entry) return "end";
             moveTo(entry);
@@ -372,9 +371,9 @@ function ViewerView({
         }
     };
 
-    const ratable = current !== undefined && (entryKind(current) === "image" || entryKind(current) === "video");
+    const ratable = current !== undefined && isViewable(current);
     const rating = useQuery({ ...ratingQuery(location.libraryId, current?.path ?? ""), enabled: rateMode && ratable });
-    /// 評価を記録し、次の Entry へ移る。記録は移動を待たせず、失敗したらトーストで知らせる。次は、画像と動画のどちらにも止まる。
+    /// 評価を記録し、次の Entry へ移る。記録は移動を待たせず、失敗したらトーストで知らせる。
     const rate = (value: Rating | undefined) => {
         if (current === undefined || !ratable) return;
         if (value !== undefined) {
@@ -382,7 +381,7 @@ function ViewerView({
                 toast.error("評価を保存できませんでした。", { toasterId: VIEWER_TOASTER }),
             );
         }
-        void step(1, false, SLIDESHOW_KINDS);
+        void step(1);
     };
     const toggleRateMode = () => {
         if (!rateMode) stopSlideshow();
@@ -395,6 +394,10 @@ function ViewerView({
         const keyDown = (event: KeyboardEvent) => {
             // Radix の確認のダイアログとメニューは、Esc を処理すると `preventDefault` する。
             if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || nestedOpen) {
+                return;
+            }
+            // 動画のプレーヤーにフォーカスがあるときの矢印キーは、シークと音量の操作に任せる。
+            if (event.key.startsWith("Arrow") && event.target instanceof HTMLMediaElement) {
                 return;
             }
             if (event.key === "Escape") {
@@ -410,10 +413,10 @@ function ViewerView({
             ) {
                 event.preventDefault();
                 rate(event.key === "ArrowRight" ? "good" : event.key === "ArrowLeft" ? "bad" : undefined);
-            } else if (event.key === "ArrowLeft" && current && entryKind(current) === "image") {
+            } else if (event.key === "ArrowLeft" && current && isViewable(current)) {
                 event.preventDefault();
                 void stepBackward();
-            } else if (event.key === "ArrowRight" && current && entryKind(current) === "image") {
+            } else if (event.key === "ArrowRight" && current && isViewable(current)) {
                 event.preventDefault();
                 void stepForward();
             }
@@ -487,11 +490,11 @@ function ViewerView({
                         読み込み中…
                     </p>
                 )}
-                {current && entryKind(current) === "image" ? (
+                {current && isViewable(current) ? (
                     <>
                         <button
                             type="button"
-                            aria-label="前の画像"
+                            aria-label="前へ"
                             disabled={previous === undefined || moving}
                             className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-3 py-2 text-2xl hover:bg-white/20 disabled:opacity-20"
                             onClick={stepBackward}
@@ -500,7 +503,7 @@ function ViewerView({
                         </button>
                         <button
                             type="button"
-                            aria-label="次の画像"
+                            aria-label="次へ"
                             disabled={next === undefined || moving}
                             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-3 py-2 text-2xl hover:bg-white/20 disabled:opacity-20"
                             onClick={stepForward}
@@ -526,7 +529,7 @@ function ViewerView({
                 onDeleted={() => onChange(deletion?.destination)}
             />
             <Toaster id={VIEWER_TOASTER} position="top-center" />
-            {!narrow && stripIndex !== undefined && (current === undefined || entryKind(current) === "image") && (
+            {!narrow && stripIndex !== undefined && (current === undefined || isViewable(current)) && (
                 <Filmstrip
                     listing={listing}
                     index={stripIndex}

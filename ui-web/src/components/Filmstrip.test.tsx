@@ -146,19 +146,31 @@ it("画像の位置はボタンで、押すとその位置と Entry で移動し
     }
 });
 
-it("画像でない Entry の位置は、ボタンにせず、種類のアイコンを出す", async () => {
+it("動画の位置もボタンで、押すと動画へ移動する", async () => {
     mock.first = 0;
     mock.last = 2;
     const h = await render();
     try {
-        for (const name of ["clip.mp4", "sub"]) {
-            const element = byName(h.host, name);
-            expect(element?.tagName).toBe("DIV");
-            expect(element?.querySelector("svg")).not.toBeNull();
-            await act(async () => element?.click());
-        }
+        const element = byName(h.host, "clip.mp4");
+        expect(element?.tagName).toBe("BUTTON");
+        await act(async () => element?.click());
+        expect(h.onSelect).toHaveBeenCalledExactlyOnceWith({ index: 0, entry: video });
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("画像でも動画でもない Entry の位置は、ボタンにせず、種類のアイコンを出す", async () => {
+    mock.first = 0;
+    mock.last = 2;
+    const h = await render();
+    try {
+        const element = byName(h.host, "sub");
+        expect(element?.tagName).toBe("DIV");
+        expect(element?.querySelector("svg")).not.toBeNull();
+        await act(async () => element?.click());
         expect(h.onSelect).not.toHaveBeenCalled();
-        expect(h.host.querySelectorAll("button")).toHaveLength(1);
+        expect(h.host.querySelectorAll("button")).toHaveLength(2);
     } finally {
         await h.dispose();
     }
@@ -203,13 +215,13 @@ it("見えている範囲のページを渡し、範囲が動くと前のペー�
     expect([...(h.onPages.mock.lastCall?.[0] ?? [])]).toEqual([]);
 });
 
-it("見えている範囲の画像だけサムネイルを要求し、閉じると要求を取り消す", async () => {
+it("見えている範囲の画像と動画だけサムネイルを要求し、閉じると要求を取り消す", async () => {
     mock.first = 0;
     mock.last = 4;
     const h = await render();
     const wanted = h.setWanted.mock.lastCall?.[0] as ReadonlyMap<string, number>;
     expect(wanted.has("/dir/img-2.png")).toBe(true);
-    expect(wanted.has("/dir/clip.mp4")).toBe(false);
+    expect(wanted.has("/dir/clip.mp4")).toBe(true);
     expect(wanted.has("/dir/sub")).toBe(false);
     await h.dispose();
     expect(h.setWanted.mock.lastCall?.[0]).toEqual(new Map());

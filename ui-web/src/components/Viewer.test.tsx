@@ -362,7 +362,7 @@ describe("フィルムストリップ", () => {
     const offsets = () => get.mock.calls.map(([, options]) => options.params.query.offset as number);
     const strip = (h: { host: HTMLElement }) => h.host.querySelector("[aria-label=フィルムストリップ]");
 
-    it("広い画面の画像のビューアにだけ出し、狭い画面と動画には出さない", async () => {
+    it("広い画面の画像と動画のビューアに出し、狭い画面には出さない", async () => {
         thousand();
         const wide = await harness("5.png", "/", "onZoom", undefined, false);
         try {
@@ -397,7 +397,7 @@ describe("フィルムストリップ", () => {
         const video = await harness("clip.mp4", "/", "onZoom", undefined, false);
         try {
             await wait(() => expect(video.host.querySelector("video")).not.toBeNull());
-            expect(strip(video)).toBeNull();
+            expect(strip(video)).not.toBeNull();
         } finally {
             await video.dispose();
         }
@@ -631,7 +631,7 @@ describe("スライドショー", () => {
             await settle();
             await elapse(20_000);
             expect(h.onChange).not.toHaveBeenCalled();
-            expect(h.host.querySelector<HTMLButtonElement>("button[aria-label=次の画像]")?.disabled).toBe(false);
+            expect(h.host.querySelector<HTMLButtonElement>("button[aria-label=次へ]")?.disabled).toBe(false);
         } finally {
             await h.dispose();
         }
@@ -824,6 +824,49 @@ describe("全画面表示と「その他」のメニュー", () => {
         } finally {
             await wide.dispose();
             await narrow.dispose();
+        }
+    });
+});
+
+describe("動画との行き来", () => {
+    const mixed = () =>
+        listed([image("0.png", "image/png", 1), image("1.mp4", "video/mp4", 1), image("2.png", "image/png", 1)]);
+    const key = (target: EventTarget, name: string) =>
+        act(async () =>
+            target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true })),
+        );
+
+    it("矢印キーとボタンで、画像から動画へ、動画から画像へ移る", async () => {
+        mixed();
+        const h = await harness("0.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(findDisplayImage(h)).not.toBeNull());
+            await key(window, "ArrowRight");
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("1.mp4"));
+            await h.render("1.mp4");
+            await wait(() => expect(h.host.querySelector("video")).not.toBeNull());
+            await key(window, "ArrowRight");
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("2.png"));
+            await h.render("1.mp4");
+            await act(async () => h.host.querySelector<HTMLButtonElement>("button[aria-label=前へ]")?.click());
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("0.png"));
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("動画のプレーヤーにフォーカスがあるときの矢印キーでは移らない", async () => {
+        mixed();
+        const h = await harness("1.mp4", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(h.host.querySelector("video")).not.toBeNull());
+            const video = h.host.querySelector("video");
+            if (!video) throw new Error("動画がない");
+            await key(video, "ArrowRight");
+            await act(async () => Promise.resolve());
+            expect(h.onChange).not.toHaveBeenCalled();
+        } finally {
+            await h.dispose();
         }
     });
 });

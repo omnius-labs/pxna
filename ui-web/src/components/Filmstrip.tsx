@@ -5,7 +5,7 @@ import { type Entry, entryKind } from "../library/entries";
 import type { Listing } from "../library/listing";
 import type { ThumbnailQueue } from "../thumbnails/queue";
 import { FILMSTRIP_ITEM_WIDTH, filmstripWanted } from "../viewer/filmstrip";
-import type { IndexedEntry } from "../viewer/viewer";
+import { type IndexedEntry, isViewable } from "../viewer/viewer";
 import { EntryIcon } from "./EntryIcon";
 
 interface FilmstripProps {
@@ -13,14 +13,14 @@ interface FilmstripProps {
     /// 開いている Entry の位置。
     index: number;
     queue: ThumbnailQueue;
-    /// 画像の位置を押したときの移動。
+    /// 画像か動画の位置を押したときの移動。
     onSelect: (target: IndexedEntry) => void;
     /// 見えている範囲に必要なページ。一覧を読む側へ渡す。
     onPages: (pages: ReadonlySet<number>) => void;
 }
 
 /// ビューアの下端に、一覧のすべての Entry を同じ幅で並べる横のスクロール。
-/// 画像だけサムネイルを出して押せるようにし、画像でない Entry は種類のアイコンを薄く出す。
+/// 画像と動画はサムネイルを出して押せるようにし、それ以外の Entry は種類のアイコンを薄く出す。
 export function Filmstrip({ listing, index, queue, onSelect, onPages }: FilmstripProps) {
     const totalCount = listing.totalCount ?? 0;
     // 先頭が読み込み済みの位置から始まる一覧（タイムライン）は、その位置から並べる。位置は一覧の絶対の値のまま扱う。
@@ -126,7 +126,7 @@ function FilmstripItem({ entry, current, queue, onSelect }: FilmstripItemProps) 
         return <div data-placeholder="" className="m-0.5 h-[52px] w-[52px] rounded bg-white/5" />;
     }
     const kind = entryKind(entry);
-    if (kind !== "image") {
+    if (!isViewable(entry)) {
         return (
             <div
                 role="img"
@@ -154,7 +154,7 @@ function FilmstripItem({ entry, current, queue, onSelect }: FilmstripItemProps) 
             {thumbnail.status === "ready" ? (
                 <img src={thumbnail.url} alt="" draggable={false} className="h-full w-full object-cover" />
             ) : (
-                <EntryIcon kind="image" className="size-6 text-white/30" />
+                <EntryIcon kind={kind} className="size-6 text-white/30" />
             )}
         </button>
     );
