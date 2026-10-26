@@ -156,6 +156,32 @@ it("タイムラインからも「検索」で、最後に使った検索の条�
     }
 });
 
+it("広い画面のツールバーは、表示の名前と Library の名前を文字で出さず、パンくずを Library の直下から始める", async () => {
+    // 切り替えのほかに「タイムライン」「検索」「Photos」の文字がないこと。
+    const outsideSwitch = () => {
+        const header = host.querySelector("header")!.cloneNode(true) as HTMLElement;
+        header.querySelector('nav[aria-label="表示の切り替え"]')?.remove();
+        return header.textContent ?? "";
+    };
+    const crumbs = () =>
+        [...host.querySelectorAll("header [data-slot=breadcrumb-item]")].map((item) => item.textContent);
+    for (const href of ["/timeline", "/search", "/browse/photos"]) {
+        const router = await render(false, href);
+        try {
+            expect(outsideSwitch()).not.toMatch(/タイムライン|検索|Photos/);
+            expect(crumbs()).toEqual([]);
+        } finally {
+            router.history.destroy();
+        }
+    }
+    const router = await render(false, "/browse/photos/sub");
+    try {
+        expect(crumbs()).toEqual(["sub"]);
+    } finally {
+        router.history.destroy();
+    }
+});
+
 const panel = () => host.querySelector<HTMLElement>("aside[aria-label=情報パネル]");
 const toggle = () => host.querySelector<HTMLButtonElement>("button[aria-label=情報パネル]");
 

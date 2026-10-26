@@ -82,6 +82,8 @@ On a wide screen, one screen is divided into the following regions.
 Because the tree and the listing are laid out on one screen, the listing of contents is not interrupted by screen transitions when moving through the hierarchy.
 The width of the tree and the info panel can be changed by dragging the handle at the border with the listing. The handles can also be moved with the left and right arrow keys. The width ranges from 160 to 480 CSS px for the tree and 240 to 640 CSS px for the info panel, and when changed it is saved per device in the browser's `localStorage` and restored the next time it is opened. The timeline's list of months does not change width. Narrow screens show no handles.
 This screen is called folder view, and the toolbar's "フォルダ / タイムライン / 検索" (Folder / Timeline / Search) switch, three choices laid out side by side, goes back and forth between it, the timeline (§3.10), and search mode (§3.6).
+On a wide screen, the current mode is shown only by the switch's highlight, and the name of the mode is not written next to it.
+The breadcrumb to the right of the switch starts below the Library, and nothing is shown at the Library root, because the tree already shows which Library is open.
 The info panel can be collapsed, and while collapsed the listing extends to the right edge.
 The activity panel is shown overlaid at the bottom right, and when collapsed becomes a button at the edge of the status bar (§3.7).
 
@@ -280,7 +282,7 @@ Search is done in search mode, which is separate from folder view and the timeli
 | `view` | The result open in the viewer, as the Library id followed by the Library-relative path with the leading `/` removed (§3.1) |
 
 On a wide screen, the left area of search mode holds the search conditions in place of the tree. From the top, it lines up the field for search terms, a checkbox per Library, the start ("場所", Location), "サブフォルダを含めない" (Do not include subfolders), the rating choice (すべて (All), 良い (Good), 悪い (Bad), 未評価 (Unrated)), and a checkbox per tag word the user has created.
-The grid or list, info panel, status bar, and viewer are the same as in folder view, and the toolbar shows "検索" (Search) in place of the breadcrumb.
+The grid or list, info panel, status bar, and viewer are the same as in folder view, and the toolbar shows no breadcrumb.
 The last checked Library cannot be unchecked, so at least one Library is always searched. Checking every Library is the same as omitting `lib`, so a Library added later is also searched.
 The start can be chosen only while one Library is checked. Pressing it opens a tree of that Library's folders and archives in a popover, and choosing a folder there makes it the start; the popover also has "Library 全体" (Whole Library). While several Libraries are checked, it reads "各 Library の全体" (Whole of each Library), and checking another Library returns the start to the whole Library.
 When the search terms, rating, and tags are all absent, a listing is not requested and input is prompted.
@@ -468,7 +470,10 @@ Changing the choice rereads from the newest Entry and discards the selection.
 The toolbar's switch moves from folder view to the timeline without changing the choice of Libraries.
 Moving from the timeline or search mode to folder view opens the folder last opened in folder view on this device, or else the root of the first Library.
 
-On a wide screen, instead of the tree, it lines up a checkbox per Library at the top and below it the years and months with counts summed over the chosen Libraries.
+On a wide screen, instead of the tree, it lines up a checkbox per Library under the heading "Library" at the top, and below it, under the heading "年と月" (Years and months), the years and months with counts summed over the chosen Libraries.
+The years and months take the same shape as the folder tree: rows have the tree's height, a year is a node at the first level that can be expanded and collapsed, and its months are at the second level, indented by one tree level.
+The checkboxes sit in the column of the expand marks, so the Library names, years, and months line up with the tree's levels, and the counts line up at the right edge.
+At first only the year of the month being viewed, or the newest year when there is none, is expanded. When the month being viewed moves into another year, that year is expanded too. Which years are expanded is kept only while the screen is open and is not saved.
 The last chosen Library cannot be unchecked, so at least one Library is always listed.
 Pressing a month rereads from that month's newest Entry. Pressing the month being displayed again also rereads.
 The month being viewed by scrolling is highlighted, and `month` is put in the URL without pushing onto history.
