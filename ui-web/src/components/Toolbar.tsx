@@ -40,9 +40,9 @@ export interface SearchChrome {
 interface ToolbarProps {
     /// 今いる位置。Library を選ぶ前は `undefined`。
     location?: BrowseLocation;
-    /// 検索モードか。あれば、パンくずの代わりに「検索」と出す。
+    /// 検索モードか。広い画面ではパンくずを出さず、狭い画面では今のフォルダの代わりに「検索」と出す。
     search?: SearchChrome;
-    /// タイムラインか。タイムラインは Library を横断するので、パンくずと検索の代わりに「タイムライン」と出す。
+    /// タイムラインか。Library を横断するので、広い画面ではパンくずを出さず、狭い画面では今のフォルダの代わりに「タイムライン」と出す。
     timeline?: boolean;
     /// 表示の操作など、ツールバーの右に並べる操作。
     actions?: ReactNode;
@@ -50,7 +50,8 @@ interface ToolbarProps {
     onOpenTree?: () => void;
 }
 
-/// 広い画面のツールバー。パンくずと、操作と、ユーザのメニューを並べる。
+/// 広い画面のツールバー。表示の切り替え、パンくず、操作、ユーザのメニューを並べる。
+/// 今の表示は切り替えの強調で、今の Library はツリーで分かるので、表示の名前と Library の名前は文字で出さない。
 export function Toolbar({ location, search, timeline = false, actions }: ToolbarProps) {
     const libraryId = location?.libraryId;
     return (
@@ -64,8 +65,6 @@ export function Toolbar({ location, search, timeline = false, actions }: Toolbar
             {(libraryId !== undefined || timeline || search) && (
                 <ModeSwitch libraryId={libraryId} mode={search ? "search" : timeline ? "timeline" : "folder"} />
             )}
-            {timeline && <span className="min-w-0 truncate font-medium">タイムライン</span>}
-            {search && <span className="min-w-0 truncate font-medium">検索</span>}
             {location !== undefined && !search && <PathBreadcrumb location={location} />}
             <div className="ml-auto flex items-center gap-1">
                 {actions}
@@ -144,12 +143,10 @@ function useLibraryName(libraryId: string | undefined): string {
     return libraries.data?.find((library) => library.id === libraryId)?.name ?? libraryId ?? "Pxna";
 }
 
-/// Library から今のフォルダまでの経路。最後の項目だけが現在の位置で、ほかは移動できる。
+/// Library の直下から今のフォルダまでの経路。最後の項目だけが現在の位置で、ほかは移動できる。Library のルートでは何も出さない。
 function PathBreadcrumb({ location }: { location: BrowseLocation }) {
-    const libraries = useQuery(librariesQuery);
-    const libraryName =
-        libraries.data?.find((library) => library.id === location.libraryId)?.name ?? location.libraryId;
-    const crumbs = breadcrumbs(location, libraryName);
+    const crumbs = breadcrumbs(location);
+    if (crumbs.length === 0) return null;
     return (
         <Breadcrumb className="min-w-0">
             <BreadcrumbList className="flex-nowrap">

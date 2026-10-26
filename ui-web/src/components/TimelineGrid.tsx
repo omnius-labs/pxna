@@ -197,6 +197,7 @@ export function TimelineGrid({
         onProgress,
         onFocus: focusTile,
         onOpen,
+        openOnClick: narrow,
         selectAll: false,
         bounds: { first: store.loadedFrom, last: store.loadedTo - 1 },
         verticalTarget: (index, direction) => {

@@ -11,7 +11,9 @@ import {
 import { ApiError } from "./api/client";
 import { currentUserQuery, fetchSetupInitialized } from "./auth/session";
 import { AuthedOutlet } from "./components/PreferencesGate";
-import { joinPath, paramList, pathSegments, type SearchParam, searchHref, timelineHref } from "./location";
+import { lastFolderLocation } from "./library/folderReturn";
+import { folderQuery, librariesQuery } from "./library/queries";
+import { browseHref, joinPath, paramList, pathSegments, type SearchParam, searchHref, timelineHref } from "./location";
 import { BrowsePage } from "./pages/BrowsePage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
@@ -90,9 +92,36 @@ const authedRoute = createRoute({
     component: AuthedOutlet,
 });
 
+/// 最後に開いたフォルダへ移す。保存が無ければ先頭の Library のルートへ移す。
+/// Library を 1 つも読めないときは、この画面を出したままツリーの読み込み失敗に任せる。
 const homeRoute = createRoute({
     getParentRoute: () => authedRoute,
     path: "/",
+    beforeLoad: async ({ context }) => {
+        const saved = lastFolderLocation();
+        const libraries = await context.queryClient
+            .fetchQuery({ ...librariesQuery, retry: false })
+            .catch(() => undefined);
+        const first = libraries?.[0];
+        if (first === undefined) {
+            return;
+        }
+        if (saved === undefined || !libraries?.some((library) => library.id === saved.libraryId)) {
+            throw redirect({ href: browseHref({ libraryId: first.id, path: "/" }), replace: true });
+        }
+        // 消えたフォルダへ移ると読み込み失敗の画面になるので、`/` のときだけ存在を確かめる。
+        // 404 だけを Library のルートへ戻し、一時的な失敗では保存した場所へ進む。
+        if (saved.path !== "/") {
+            try {
+                await context.queryClient.fetchQuery({ ...folderQuery(saved.libraryId, saved.path), retry: false });
+            } catch (error) {
+                if (error instanceof ApiError && error.status === 404) {
+                    throw redirect({ href: browseHref({ libraryId: saved.libraryId, path: "/" }), replace: true });
+                }
+            }
+        }
+        throw redirect({ href: browseHref(saved), replace: true });
+    },
     component: HomePage,
 });
 

@@ -24,6 +24,7 @@ During implementation, advance the state of the child and of this document, and 
 | [lan-plaintext-exposure](./plans/lan-plaintext-exposure.md) | Setting `PXNA_BIND` lets a phone on the LAN or a VPN log in to the compose setup over plain HTTP | Not started | - |
 | [representative-thumbnail-refresh](./plans/representative-thumbnail-refresh.md) | Folder tiles show the new representative right after our own changes | Not started | - |
 | [viewer-touch-gestures](./plans/viewer-touch-gestures.md) | The image viewer can be operated with one hand on a phone | Not started | - |
+| [restore-last-folder](./plans/restore-last-folder.md) | Opening `/` returns to the last folder instead of asking for a Library | Done | - |
 | [name-index-store](./plans/name-index-store.md) | Every non-hidden Entry of a Library is held in a name index that follows our own changes | Not started | - |
 | [search-condition-panel](./plans/search-condition-panel.md) | Every Library, or chosen ones, can be searched by name, rating, and several tags with the conditions in the left area | Done | - |
 | [name-index-search](./plans/name-index-search.md) | A search from the root of a 10-million-Entry Library returns its first page within a second | Not started | name-index-store, search-condition-panel |
