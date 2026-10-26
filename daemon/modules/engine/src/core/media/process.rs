@@ -61,7 +61,10 @@ mod tests {
 
     #[cfg(unix)]
     async fn niceness(class: WorkClass) -> i32 {
-        let output = run(Command::new("nice"), Duration::from_secs(10), class).await.unwrap();
+        // 引数なしの nice は macOS では使い方を表示して失敗するため、自分の nice 値を ps で読む。
+        let mut command = Command::new("sh");
+        command.args(["-c", "ps -o nice= -p $$"]);
+        let output = run(command, Duration::from_secs(10), class).await.unwrap();
         String::from_utf8_lossy(&output).trim().parse().unwrap()
     }
 

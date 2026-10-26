@@ -460,12 +460,30 @@ pub(crate) mod tests {
         Ok(listings)
     }
 
+    #[cfg(not(windows))]
+    fn open_folder_for_times(folder: &std::path::Path) -> std::io::Result<std::fs::File> {
+        std::fs::File::open(folder)
+    }
+
+    /// Windows で folder を開くには backup semantics が要り、時刻を書くには属性の書き込み権が要る。
+    #[cfg(windows)]
+    fn open_folder_for_times(folder: &std::path::Path) -> std::io::Result<std::fs::File> {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        std::fs::OpenOptions::new()
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(folder)
+    }
+
     async fn changed_listings(state: &DaemonState, before: Vec<(String, bool, models::FolderListing, std::time::SystemTime)>) -> TestResult<Vec<models::FolderListing>> {
         let mut listings = Vec::new();
         for (path, recursive, old, modified) in before {
             let folder = state.conf.libraries[0].path.join(path.trim_start_matches('/'));
             // mtime の版を前に戻し、明示的な破棄だけで id が変わることを確かめる。
-            std::fs::File::open(folder)?.set_modified(modified)?;
+            open_folder_for_times(&folder)?.set_modified(modified)?;
             let new = cached_listing(state, &path, recursive).await?;
             assert_ne!(old.snapshot, new.snapshot, "変更した Entry の祖先: {path}, recursive={recursive}");
             listings.push(new);
