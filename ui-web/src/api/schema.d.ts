@@ -405,6 +405,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/performance/client-timings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record client-side timings
+         * @description Writes the timings a client measured to the daemon's
+         *     performance log, next to the daemon's own measurements. A
+         *     client sends them only while `performanceLogging` of
+         *     `/capabilities` is true. While it is false, the daemon
+         *     accepts and discards them.
+         */
+        post: operations["reportClientTimings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/libraries/{libraryId}/folders/summaries": {
         parameters: {
             query?: never;
@@ -1386,6 +1410,45 @@ export interface components {
             summaryListing: boolean;
             entryDetails: boolean;
             childProbes: boolean;
+            /** @description Whether the daemon writes the performance log, so a client should send its timings to `/performance/client-timings`. */
+            performanceLogging: boolean;
+        };
+        ClientTimingReport: {
+            timings: components["schemas"]["ClientTiming"][];
+        };
+        /**
+         * @description `display_image`, `original_image`, and `thumbnail_image` are the
+         *     loads of those images. `viewer_display` is the time from moving
+         *     the viewer to an entry until its display image is loaded.
+         * @enum {string}
+         */
+        ClientTimingOperation: "display_image" | "original_image" | "thumbnail_image" | "viewer_display";
+        /**
+         * @description One timing in milliseconds. The phases come from the browser's
+         *     Resource Timing and are omitted when the browser does not
+         *     report them.
+         */
+        ClientTiming: {
+            operation: components["schemas"]["ClientTimingOperation"];
+            libraryId?: components["schemas"]["LibraryId"];
+            path?: components["schemas"]["RelativePath"];
+            /** @description The whole time, from the start of the request or the move until the load. */
+            durationMs: number;
+            /** @description From the start of the request until the browser sent it. */
+            queuedMs?: number;
+            /** @description From sending the request until the first byte of the response. */
+            waitingMs?: number;
+            /** @description From the first byte until the last byte of the response. */
+            downloadMs?: number;
+            /** @description From the last byte until the load event, including decoding. */
+            afterResponseMs?: number;
+            /**
+             * Format: int64
+             * @description The encoded body size.
+             */
+            bytes?: number;
+            /** @description Whether the browser served the response from its cache. */
+            cached?: boolean;
         };
         FileSystemEntrySummary: {
             path: components["schemas"]["RelativePath"];
@@ -2619,6 +2682,31 @@ export interface operations {
                     "application/json": components["schemas"]["Capabilities"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    reportClientTimings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientTimingReport"];
+            };
+        };
+        responses: {
+            /** @description The timings were accepted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["InvalidRequest"];
             401: components["responses"]["Unauthorized"];
             500: components["responses"]["InternalServerError"];
         };

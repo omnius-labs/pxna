@@ -1,11 +1,8 @@
-use std::{
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::bytes::Bytes;
+use tracing::{Instrument as _, Span, field::Empty};
 
 use crate::{
     base::util::SingleFlight,
@@ -18,6 +15,7 @@ use crate::{
             request::{Thumbnail, ThumbnailRequest, ThumbnailVariant},
         },
     },
+    perf_span,
     prelude::*,
     service::{EntryCacheKey, MediaInfo, MediaInfoService, NestedFsEntry, ResolvedStoragePath, StorageService},
 };
@@ -205,6 +203,12 @@ impl ThumbnailGenerator {
 
     /// daemon の境界探索で得た driver を、そのまま生成に使う。
     pub async fn generate_resolved(&self, resolved: ResolvedStoragePath, request: &ThumbnailRequest) -> Result<Thumbnail> {
+        let span = perf_span!("thumbnail_generate", variant = ?request.variant, name = Empty, kind = Empty, cache_hit = Empty);
+        self.generate_traced(resolved, request).instrument(span).await
+    }
+
+    /// `generate_resolved` の本体。結果の分かった field を、外側の `thumbnail_generate` の span に記録する。
+    async fn generate_traced(&self, resolved: ResolvedStoragePath, request: &ThumbnailRequest) -> Result<Thumbnail> {
         let inner = &self.inner;
         let path = resolved.path().to_nested_path_buf();
         let entry = resolved.get_entry().await?;
@@ -217,25 +221,27 @@ impl ThumbnailGenerator {
                 }
                 let folder = if folder == path { resolved } else { inner.fs.resolve_entry(&folder).await? };
                 let mut target = inner.selection.select(&folder).await?;
-                let metadata_started = Instant::now();
-                let entry = match target.get_listing_entry().await {
-                    Ok(entry) if matches!(entry.detail, FsEntryDetail::File { .. }) => entry,
-                    Ok(_) => {
-                        inner.selection.invalidate();
-                        target = inner.selection.select(&folder).await?;
-                        target.get_listing_entry().await?
+                let entry = async {
+                    match target.get_listing_entry().await {
+                        Ok(entry) if matches!(entry.detail, FsEntryDetail::File { .. }) => Ok(entry),
+                        Ok(_) => {
+                            inner.selection.invalidate();
+                            target = inner.selection.select(&folder).await?;
+                            target.get_listing_entry().await
+                        }
+                        Err(error) if error.kind() == &ErrorKind::NotFound => {
+                            inner.selection.invalidate();
+                            target = inner.selection.select(&folder).await?;
+                            target.get_listing_entry().await
+                        }
+                        Err(error) => Err(error),
                     }
-                    Err(error) if error.kind() == &ErrorKind::NotFound => {
-                        inner.selection.invalidate();
-                        target = inner.selection.select(&folder).await?;
-                        target.get_listing_entry().await?
-                    }
-                    Err(error) => return Err(error),
-                };
+                }
+                .instrument(perf_span!("representative_metadata"))
+                .await?;
                 if !matches!(entry.detail, FsEntryDetail::File { .. }) {
                     return Err(Error::new(ErrorKind::UnsupportedType).with_message("representative is no longer a file"));
                 }
-                tracing::debug!(target: "pxna::performance", operation = "representative_metadata", elapsed_sec = metadata_started.elapsed().as_secs_f64(), "representative metadata read completed");
                 (target, entry)
             }
             FsEntryDetail::Link { .. } => return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("not a file: {path}"))),
@@ -243,6 +249,7 @@ impl ThumbnailGenerator {
 
         let name = Inner::file_name(&entry.path);
         let kind = MediaKind::of_name(name).ok_or_else(|| Error::new(ErrorKind::UnsupportedType).with_message(format!("not a supported image or video: {name}")))?;
+        Span::current().record("name", name).record("kind", tracing::field::debug(kind));
         if request.variant == ThumbnailVariant::Sprite && kind != MediaKind::Video {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("the sprite variant requires a video"));
         }
@@ -255,10 +262,10 @@ impl ThumbnailGenerator {
         if let Some(key) = &requested_key
             && let Some(hit) = inner.cache.get(key).await?
         {
-            tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = true, variant = ?request.variant, "thumbnail image cache checked");
+            Span::current().record("cache_hit", true);
             return Ok(plan.thumbnail(hit, Some(key)));
         }
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = false, variant = ?request.variant, name, eligible = requested_key.is_some(), "thumbnail image cache checked");
+        Span::current().record("cache_hit", false);
 
         // 動画のサムネイルとスプライトシートは 1 回の ffmpeg の実行で両方を作るため、同じ flight にまとめる。
         let shares_a_run = kind == MediaKind::Video && request.variant != ThumbnailVariant::Display;
@@ -271,38 +278,31 @@ impl ThumbnailGenerator {
         };
         let flight_key = job.primary_key.clone();
         let semaphore = inner.semaphore_for(kind, request.variant);
-        let file_name = name.to_string();
-        let gate = {
-            let inner = inner.clone();
-            let file_name = file_name.clone();
-            let variant = request.variant;
-            async move {
-                let available = semaphore.available_permits();
-                let waiting = Instant::now();
-                let permit = inner.acquire(semaphore).await?;
-                tracing::debug!(target: "pxna::performance", operation = "thumbnail_permit_wait", elapsed_sec = waiting.elapsed().as_secs_f64(), available_when_requested = available, variant = ?variant, kind = ?kind, name = file_name, "thumbnail permit acquired");
-                Ok(permit)
-            }
-        };
+        let available = semaphore.available_permits();
+        let gate = inner
+            .acquire(semaphore)
+            .instrument(perf_span!("thumbnail_permit_wait", available_when_requested = available));
 
         // 生成枠と同じ key の生成を待つ時間も含む。生成そのものは `thumbnail_production` が測る。
-        let generating = Instant::now();
-        let produced = match flight_key {
-            Some(flight_key) => {
-                let work = inner.clone();
-                let produced = inner
-                    .flights
-                    .run_gated(flight_key, gate, move |permit| async move { work.produce(job, permit).await })
-                    .await?;
-                (*produced).clone()
-            }
-            None => {
-                let permit = gate.await?;
-                inner.clone().produce(job, permit).await?
-            }
-        };
+        let produced = async {
+            Ok::<_, Error>(match flight_key {
+                Some(flight_key) => {
+                    let work = inner.clone();
+                    let produced = inner
+                        .flights
+                        .run_gated(flight_key, gate, move |permit| async move { work.produce(job, permit).await })
+                        .await?;
+                    (*produced).clone()
+                }
+                None => {
+                    let permit = gate.await?;
+                    inner.clone().produce(job, permit).await?
+                }
+            })
+        }
+        .instrument(perf_span!("thumbnail_generation"))
+        .await?;
 
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_generation", elapsed_sec = generating.elapsed().as_secs_f64(), variant = ?request.variant, kind = ?kind, name = file_name, "thumbnail generation completed");
         let image = match request.variant {
             ThumbnailVariant::Sprite => produced
                 .sprite
@@ -402,46 +402,50 @@ impl Inner {
     }
 
     /// 生成してキャッシュへ入れる。独立した task で走るため、始まった後に要求が切れても最後まで走る。
-    async fn produce(self: Arc<Self>, job: Job, _permit: OwnedSemaphorePermit) -> Result<Produced> {
+    async fn produce(self: Arc<Self>, job: Job, permit: OwnedSemaphorePermit) -> Result<Produced> {
+        self.produce_traced(job, permit).instrument(perf_span!("thumbnail_production")).await
+    }
+
+    async fn produce_traced(self: Arc<Self>, job: Job, _permit: OwnedSemaphorePermit) -> Result<Produced> {
         // 直前に終わった同じ key の処理が入れた結果を、重ねて作らない。
         if let Some(cached) = self.cached(&job).await? {
             return Ok(cached);
         }
 
-        let started = Instant::now();
         // 変換が終わるまで、archive 内の file の lease を保つ。
-        let file = job.source.materialize_file().await?;
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_materialize", elapsed_sec = started.elapsed().as_secs_f64(), "thumbnail source materialized");
-        let converting = Instant::now();
-        let produced = match job.kind {
-            MediaKind::Image => {
-                let reading = Instant::now();
-                let input = tokio::fs::read(file.path()).await?;
-                tracing::debug!(target: "pxna::performance", operation = "thumbnail_source_read", elapsed_sec = reading.elapsed().as_secs_f64(), bytes = input.len(), "source file read");
-                Produced {
-                    image: self.convert_one(input, &job.plan).await?,
-                    sprite: None,
+        let file = job.source.materialize_file().instrument(perf_span!("thumbnail_materialize")).await?;
+        let produced = async {
+            Ok::<_, Error>(match job.kind {
+                MediaKind::Image => {
+                    let read = perf_span!("thumbnail_source_read", bytes = Empty);
+                    let input = tokio::fs::read(file.path()).instrument(read.clone()).await?;
+                    read.record("bytes", input.len());
+                    Produced {
+                        image: self.convert_one(input, &job.plan).await?,
+                        sprite: None,
+                    }
                 }
-            }
-            MediaKind::FfmpegImage | MediaKind::HeifImage => {
-                let decoding = Instant::now();
-                let input = self.decode_ffmpeg_image(&job.source, file.path(), job.kind, job.plan.priority()).await?;
-                tracing::debug!(target: "pxna::performance", operation = "thumbnail_external_decode", elapsed_sec = decoding.elapsed().as_secs_f64(), kind = ?job.kind, bytes = input.len(), "external decoder finished");
-                Produced {
-                    image: self.convert_one(input, &job.plan).await?,
-                    sprite: None,
+                MediaKind::FfmpegImage | MediaKind::HeifImage => {
+                    let decode = perf_span!("thumbnail_external_decode", bytes = Empty);
+                    let input = self
+                        .decode_ffmpeg_image(&job.source, file.path(), job.kind, job.plan.priority())
+                        .instrument(decode.clone())
+                        .await?;
+                    decode.record("bytes", input.len());
+                    Produced {
+                        image: self.convert_one(input, &job.plan).await?,
+                        sprite: None,
+                    }
                 }
-            }
-            MediaKind::Video => self.produce_video(file.path(), &job.source, &job.plan).await?,
-        };
+                MediaKind::Video => self.produce_video(file.path(), &job.source, &job.plan).await?,
+            })
+        }
+        .instrument(perf_span!("thumbnail_convert"))
+        .await?;
         #[cfg(test)]
         self.conversions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_convert", elapsed_sec = converting.elapsed().as_secs_f64(), "thumbnail source read and converted");
-        let storing = Instant::now();
-        self.store(&job, &produced).await;
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_store", elapsed_sec = storing.elapsed().as_secs_f64(), "thumbnail stored");
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_production", elapsed_sec = started.elapsed().as_secs_f64(), "thumbnail produced and stored");
+        self.store(&job, &produced).instrument(perf_span!("thumbnail_store")).await;
         Ok(produced)
     }
 
@@ -479,7 +483,8 @@ impl Inner {
 
     async fn convert_one(&self, input: Vec<u8>, plan: &Plan) -> Result<CachedImage> {
         let options = plan.convert.clone();
-        let bytes = tokio::task::spawn_blocking(move || ImageConverter::convert(&input, &options))
+        let span = Span::current();
+        let bytes = tokio::task::spawn_blocking(move || span.in_scope(|| ImageConverter::convert(&input, &options)))
             .await
             .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?
             .map_err(Self::decode_error)?;
@@ -500,7 +505,9 @@ impl Inner {
         let frames = self.extract_frames(file, &positions, plan.priority()).await?;
 
         let plan = plan.clone();
+        let span = Span::current();
         tokio::task::spawn_blocking(move || -> Result<Produced> {
+            let _entered = span.enter();
             let resized = frames
                 .iter()
                 .map(|frame| ImageConverter::decode(frame).and_then(|image| ImageConverter::resize(image, &plan.convert)))

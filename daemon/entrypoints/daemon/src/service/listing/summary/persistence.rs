@@ -9,13 +9,17 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use omnius_core_base::clock::Clock;
-use omnius_pxna_engine::service::{WorkBudget, WorkClass, WorkKind};
+use omnius_pxna_engine::{
+    perf_span,
+    service::{WorkBudget, WorkClass, WorkKind},
+};
 use ring::digest::{SHA256, digest};
 use sqlx::{
     Row as _, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
 };
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
+use tracing::Instrument as _;
 
 use super::{SummaryEpochs, SummaryKey, SummarySnapshot};
 use crate::{config::ListingConfig, prelude::*, service::listing::ListingInvalidation};
@@ -349,20 +353,25 @@ impl PersistenceState {
                     return Ok(());
                 }
                 let checksum = hex::encode(digest(&SHA256, &payload).as_ref());
-                let mut transaction = self.pool.begin().await?;
-                sqlx::query("INSERT OR REPLACE INTO summaries (cache_key, library, path, payload, checksum, entry_count, used_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-                    .bind(encoded_key)
-                    .bind(&key.library)
-                    .bind(&key.path)
-                    .bind(payload)
-                    .bind(checksum)
-                    .bind(cost as i64)
-                    .bind(now)
-                    .execute(&mut *transaction)
-                    .await?;
-                self.trim(&mut transaction).await?;
-                transaction.commit().await?;
-                tracing::debug!(target: "pxna::performance", operation = "summary_persist", entry_count = snapshot.data.entries.len(), "summary index committed");
+                let span = perf_span!("summary_persist", entry_count = snapshot.data.entries.len());
+                async {
+                    let mut transaction = self.pool.begin().await?;
+                    sqlx::query("INSERT OR REPLACE INTO summaries (cache_key, library, path, payload, checksum, entry_count, used_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                        .bind(encoded_key)
+                        .bind(&key.library)
+                        .bind(&key.path)
+                        .bind(payload)
+                        .bind(checksum)
+                        .bind(cost as i64)
+                        .bind(now)
+                        .execute(&mut *transaction)
+                        .await?;
+                    self.trim(&mut transaction).await?;
+                    transaction.commit().await?;
+                    Ok::<_, Error>(())
+                }
+                .instrument(span)
+                .await?;
             }
             PendingWrite::Touch { .. } => {
                 sqlx::query("UPDATE summaries SET used_at = ? WHERE cache_key = ?")

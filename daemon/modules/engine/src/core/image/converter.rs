@@ -1,4 +1,6 @@
-use std::{io::Cursor, time::Instant};
+use std::io::Cursor;
+
+use tracing::field::Empty;
 
 use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
 use image::{DynamicImage, ImageDecoder as _, ImageReader, Rgba, RgbaImage, codecs::jpeg::JpegEncoder, imageops};
@@ -6,6 +8,7 @@ use image::{DynamicImage, ImageDecoder as _, ImageReader, Rgba, RgbaImage, codec
 use super::WebpEncoder;
 use crate::{
     model::{ImageAnchorPositionType, ImageFormatType, ImageResamplerType, ImageResizeType},
+    perf_span,
     prelude::*,
 };
 
@@ -29,47 +32,27 @@ pub struct ImageConverter;
 impl ImageConverter {
     pub fn convert(input: &[u8], opts: &ImageConvertOptions) -> Result<Vec<u8>> {
         Self::validate(opts)?;
-        let started = Instant::now();
-        let decoded = Self::decode(input)?;
-        let decode_sec = started.elapsed().as_secs_f64();
-        let (source_width, source_height) = (decoded.width(), decoded.height());
-
-        let resizing = Instant::now();
-        let image = Self::resize(decoded, opts)?;
-        let resize_sec = resizing.elapsed().as_secs_f64();
-
-        let encoding = Instant::now();
+        let span = perf_span!("image_convert", input_bytes = input.len(), format = ?opts.format_type, output_bytes = Empty).entered();
+        let image = Self::resize(Self::decode(input)?, opts)?;
         let output = Self::encode(&image, opts.format_type, opts.quality)?;
-        tracing::debug!(
-            target: "pxna::performance",
-            operation = "image_convert",
-            input_bytes = input.len(),
-            source_width,
-            source_height,
-            output_width = image.width(),
-            output_height = image.height(),
-            output_bytes = output.len(),
-            format = ?opts.format_type,
-            decode_sec,
-            resize_sec,
-            encode_sec = encoding.elapsed().as_secs_f64(),
-            total_sec = started.elapsed().as_secs_f64(),
-            "image converted"
-        );
+        span.record("output_bytes", output.len());
         Ok(output)
     }
 
     /// EXIF の向きを反映して読む。反映しないと、縦に撮った写真が横向きのまま並ぶ。
     pub fn decode(input: &[u8]) -> Result<DynamicImage> {
+        let span = perf_span!("image_decode", width = Empty, height = Empty).entered();
         let mut decoder = ImageReader::new(Cursor::new(input)).with_guessed_format()?.into_decoder()?;
         let orientation = decoder.orientation()?;
         let mut image = DynamicImage::from_decoder(decoder)?;
         image.apply_orientation(orientation);
+        span.record("width", image.width()).record("height", image.height());
         Ok(image)
     }
 
     pub fn resize(image: DynamicImage, opts: &ImageConvertOptions) -> Result<DynamicImage> {
         Self::validate(opts)?;
+        let span = perf_span!("image_resize", source_width = image.width(), source_height = image.height(), width = Empty, height = Empty).entered();
 
         let (src_w, src_h) = (image.width() as f32, image.height() as f32);
         let (target_w, target_h) = match (opts.width, opts.height) {
@@ -83,7 +66,7 @@ impl ImageConverter {
             ImageResamplerType::Unknown => unreachable!("validate rejects an unknown resampler"),
         };
 
-        Ok(match opts.resize_type {
+        let resized = match opts.resize_type {
             // 縦横比を無視して、枠の大きさにする。
             ImageResizeType::Manual => Self::scale(&image, target_w, target_h, filter)?,
             // 枠を覆うまで拡大縮小し、anchor の位置で枠の大きさに切り抜く。
@@ -114,7 +97,9 @@ impl ImageConverter {
                 }
             }
             ImageResizeType::Unknown => unreachable!("validate rejects an unknown resize type"),
-        })
+        };
+        span.record("width", resized.width()).record("height", resized.height());
+        Ok(resized)
     }
 
     /// SIMD で width × height へ縮小する。`image` crate の `resize_exact` は、同じ Lanczos3 でも数倍遅い。
@@ -128,6 +113,7 @@ impl ImageConverter {
     }
 
     pub fn encode(image: &DynamicImage, format_type: ImageFormatType, quality: u8) -> Result<Vec<u8>> {
+        let span = perf_span!("image_encode", format = ?format_type, bytes = Empty).entered();
         let mut output = Vec::new();
         match format_type {
             ImageFormatType::Png => image.write_to(&mut Cursor::new(&mut output), image::ImageFormat::Png)?,
@@ -138,6 +124,7 @@ impl ImageConverter {
             ImageFormatType::Webp => output = WebpEncoder::encode_lossy(image, quality)?,
             ImageFormatType::Unknown => return Err(Error::new(ErrorKind::InvalidInput).with_message("unknown image format")),
         }
+        span.record("bytes", output.len());
         Ok(output)
     }
 

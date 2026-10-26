@@ -4,6 +4,7 @@ pub mod folders;
 pub mod health;
 pub mod libraries;
 pub mod operations;
+pub mod performance;
 pub mod preferences;
 pub mod rating;
 pub mod search;

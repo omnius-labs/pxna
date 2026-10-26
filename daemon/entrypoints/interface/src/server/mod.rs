@@ -27,6 +27,7 @@ where
         + apis::health::Health<E>
         + apis::libraries::Libraries<E, Claims = C>
         + apis::operations::Operations<E, Claims = C>
+        + apis::performance::Performance<E, Claims = C>
         + apis::preferences::Preferences<E, Claims = C>
         + apis::rating::Rating<E, Claims = C>
         + apis::search::Search<E, Claims = C>
@@ -93,6 +94,7 @@ where
         .route("/api/v1/operations", get(list_operations::<I, A, E, C>))
         .route("/api/v1/operations/{operation_id}", get(get_operation::<I, A, E, C>))
         .route("/api/v1/operations/{operation_id}/cancel", post(cancel_operation::<I, A, E, C>))
+        .route("/api/v1/performance/client-timings", post(report_client_timings::<I, A, E, C>))
         .route("/api/v1/preferences", get(get_preferences::<I, A, E, C>).put(put_preferences::<I, A, E, C>))
         .route("/api/v1/search/entries", get(list_search_entries::<I, A, E, C>))
         .route("/api/v1/setup", post(create_initial_setup::<I, A, E>))
@@ -4429,6 +4431,131 @@ where
                 response.body(Body::from(body_content))
             }
             apis::operations::ListOperationsResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct ReportClientTimingsBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::ClientTimingReport,
+}
+
+#[tracing::instrument(skip_all)]
+fn report_client_timings_validation(body: models::ClientTimingReport) -> std::result::Result<(models::ClientTimingReport,), ValidationErrors> {
+    let b = ReportClientTimingsBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// ReportClientTimings - POST /api/v1/performance/client-timings
+#[tracing::instrument(skip_all)]
+async fn report_client_timings<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+    Json(body): Json<models::ClientTimingReport>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::performance::Performance<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || report_client_timings_validation(body)).await.unwrap();
+
+    let Ok((body,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().report_client_timings(&method, &host, &cookies, &claims, &body).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::performance::ReportClientTimingsResponse::Status204_TheTimingsWereAccepted => {
+                let mut response = response.status(204);
+                response.body(Body::empty())
+            }
+            apis::performance::ReportClientTimingsResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::performance::ReportClientTimingsResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::performance::ReportClientTimingsResponse::Status500_InternalServerError(body) => {
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();

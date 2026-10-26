@@ -639,6 +639,7 @@ readonly = false
 
 `[logging] file` appends the log to that file in addition to standard output, and a relative path is based on the configuration directory.
 `[logging] performance = true` turns on the `pxna::performance` measurement logs at debug level even when `level` is `info`, and `RUST_LOG` overrides both.
+While it is on, `/capabilities` reports `performanceLogging`, and the web client sends the load times of display images, original images, and thumbnails, and the time until the viewer shows an entry, to `/performance/client-timings`, which writes them to the same log as `client_timing`.
 `[web] dir` is the directory of the web build output the daemon serves, and relative paths are based on the configuration directory.
 If omitted, the daemon provides only the API (§10.1).
 `[web] insecure_cookie = true` removes `Secure` and the `__Host-` prefix from the session cookie and makes the name `pxna_session`.

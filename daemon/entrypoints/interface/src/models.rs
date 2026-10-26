@@ -1272,15 +1272,20 @@ pub struct Capabilities {
 
     #[serde(rename = "childProbes")]
     pub child_probes: bool,
+
+    /// Whether the daemon writes the performance log, so a client should send its timings to `/performance/client-timings`.
+    #[serde(rename = "performanceLogging")]
+    pub performance_logging: bool,
 }
 
 impl Capabilities {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(summary_listing: bool, entry_details: bool, child_probes: bool) -> Capabilities {
+    pub fn new(summary_listing: bool, entry_details: bool, child_probes: bool, performance_logging: bool) -> Capabilities {
         Capabilities {
             summary_listing,
             entry_details,
             child_probes,
+            performance_logging,
         }
     }
 }
@@ -1297,6 +1302,8 @@ impl std::fmt::Display for Capabilities {
             Some(self.entry_details.to_string()),
             Some("childProbes".to_string()),
             Some(self.child_probes.to_string()),
+            Some("performanceLogging".to_string()),
+            Some(self.performance_logging.to_string()),
         ];
 
         write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
@@ -1317,6 +1324,7 @@ impl std::str::FromStr for Capabilities {
             pub summary_listing: Vec<bool>,
             pub entry_details: Vec<bool>,
             pub child_probes: Vec<bool>,
+            pub performance_logging: Vec<bool>,
         }
 
         let mut intermediate_rep = IntermediateRep::default();
@@ -1342,6 +1350,10 @@ impl std::str::FromStr for Capabilities {
                     "entryDetails" => intermediate_rep.entry_details.push(<bool as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "childProbes" => intermediate_rep.child_probes.push(<bool as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "performanceLogging" => intermediate_rep
+                        .performance_logging
+                        .push(<bool as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     _ => return std::result::Result::Err("Unexpected key while parsing Capabilities".to_string()),
                 }
             }
@@ -1367,6 +1379,11 @@ impl std::str::FromStr for Capabilities {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "childProbes missing in Capabilities".to_string())?,
+            performance_logging: intermediate_rep
+                .performance_logging
+                .into_iter()
+                .next()
+                .ok_or_else(|| "performanceLogging missing in Capabilities".to_string())?,
         })
     }
 }
@@ -1395,6 +1412,400 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<Capabilities
             std::result::Result::Ok(value) => match <Capabilities as std::str::FromStr>::from_str(value) {
                 std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
                 std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into Capabilities - {err}"#)),
+            },
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
+/// One timing in milliseconds. The phases come from the browser's Resource Timing and are omitted when the browser does not report them.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct ClientTiming {
+    #[serde(rename = "operation")]
+    #[validate(nested)]
+    pub operation: models::ClientTimingOperation,
+
+    /// Library identifier chosen by the operator in the daemon configuration file. Unlike the daemon-issued identifiers in this API it is a readable name, not a generated token. It is what the API uses in place of a host path, so the physical location of a Library is never exposed.  Because the value is used as a URL path segment, the character set is restricted. The daemon rejects a configuration that violates it at startup.
+    #[serde(rename = "libraryId")]
+    #[validate(
+            length(min = 1, max = 64),
+            regex(path = *RE_CLIENTTIMING_LIBRARY_ID),
+          custom(function = "check_xss_string"),
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library_id: Option<String>,
+
+    /// Absolute-looking path within the selected Library. The resolved path must never escape that library.
+    #[serde(rename = "path")]
+    #[validate(length(min = 1, max = 4096), custom(function = "check_xss_string"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+
+    /// The whole time, from the start of the request or the move until the load.
+    #[serde(rename = "durationMs")]
+    #[validate(range(min = 0f64))]
+    pub duration_ms: f64,
+
+    /// From the start of the request until the browser sent it.
+    #[serde(rename = "queuedMs")]
+    #[validate(range(min = 0f64))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queued_ms: Option<f64>,
+
+    /// From sending the request until the first byte of the response.
+    #[serde(rename = "waitingMs")]
+    #[validate(range(min = 0f64))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_ms: Option<f64>,
+
+    /// From the first byte until the last byte of the response.
+    #[serde(rename = "downloadMs")]
+    #[validate(range(min = 0f64))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_ms: Option<f64>,
+
+    /// From the last byte until the load event, including decoding.
+    #[serde(rename = "afterResponseMs")]
+    #[validate(range(min = 0f64))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_response_ms: Option<f64>,
+
+    /// The encoded body size.
+    #[serde(rename = "bytes")]
+    #[validate(range(min = 0u64))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+
+    /// Whether the browser served the response from its cache.
+    #[serde(rename = "cached")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached: Option<bool>,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_CLIENTTIMING_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+impl ClientTiming {
+    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
+    pub fn new(operation: models::ClientTimingOperation, duration_ms: f64) -> ClientTiming {
+        ClientTiming {
+            operation,
+            library_id: None,
+            path: None,
+            duration_ms,
+            queued_ms: None,
+            waiting_ms: None,
+            download_ms: None,
+            after_response_ms: None,
+            bytes: None,
+            cached: None,
+        }
+    }
+}
+
+/// Converts the ClientTiming value to the Query Parameters representation (style=form, explode=false)
+/// specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde serializer
+impl std::fmt::Display for ClientTiming {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<Option<String>> = vec![
+            // Skipping operation in query parameter serialization
+            self.library_id.as_ref().map(|library_id| ["libraryId".to_string(), library_id.to_string()].join(",")),
+            self.path.as_ref().map(|path| ["path".to_string(), path.to_string()].join(",")),
+            Some("durationMs".to_string()),
+            Some(self.duration_ms.to_string()),
+            self.queued_ms.as_ref().map(|queued_ms| ["queuedMs".to_string(), queued_ms.to_string()].join(",")),
+            self.waiting_ms.as_ref().map(|waiting_ms| ["waitingMs".to_string(), waiting_ms.to_string()].join(",")),
+            self.download_ms.as_ref().map(|download_ms| ["downloadMs".to_string(), download_ms.to_string()].join(",")),
+            self.after_response_ms
+                .as_ref()
+                .map(|after_response_ms| ["afterResponseMs".to_string(), after_response_ms.to_string()].join(",")),
+            self.bytes.as_ref().map(|bytes| ["bytes".to_string(), bytes.to_string()].join(",")),
+            self.cached.as_ref().map(|cached| ["cached".to_string(), cached.to_string()].join(",")),
+        ];
+
+        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
+    }
+}
+
+/// Converts Query Parameters representation (style=form, explode=false) to a ClientTiming value
+/// as specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde deserializer
+impl std::str::FromStr for ClientTiming {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        /// An intermediate representation of the struct to use for parsing.
+        #[derive(Default)]
+        #[allow(dead_code)]
+        struct IntermediateRep {
+            pub operation: Vec<models::ClientTimingOperation>,
+            pub library_id: Vec<String>,
+            pub path: Vec<String>,
+            pub duration_ms: Vec<f64>,
+            pub queued_ms: Vec<f64>,
+            pub waiting_ms: Vec<f64>,
+            pub download_ms: Vec<f64>,
+            pub after_response_ms: Vec<f64>,
+            pub bytes: Vec<u64>,
+            pub cached: Vec<bool>,
+        }
+
+        let mut intermediate_rep = IntermediateRep::default();
+
+        // Parse into intermediate representation
+        let mut string_iter = s.split(',');
+        let mut key_result = string_iter.next();
+
+        while key_result.is_some() {
+            let val = match string_iter.next() {
+                Some(x) => x,
+                None => return std::result::Result::Err("Missing value while parsing ClientTiming".to_string()),
+            };
+
+            if let Some(key) = key_result {
+                #[allow(clippy::match_single_binding)]
+                match key {
+                    #[allow(clippy::redundant_clone)]
+                    "operation" => intermediate_rep
+                        .operation
+                        .push(<models::ClientTimingOperation as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "libraryId" => intermediate_rep.library_id.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "path" => intermediate_rep.path.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "durationMs" => intermediate_rep.duration_ms.push(<f64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "queuedMs" => intermediate_rep.queued_ms.push(<f64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "waitingMs" => intermediate_rep.waiting_ms.push(<f64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "downloadMs" => intermediate_rep.download_ms.push(<f64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "afterResponseMs" => intermediate_rep
+                        .after_response_ms
+                        .push(<f64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "bytes" => intermediate_rep.bytes.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "cached" => intermediate_rep.cached.push(<bool as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    _ => return std::result::Result::Err("Unexpected key while parsing ClientTiming".to_string()),
+                }
+            }
+
+            // Get the next key
+            key_result = string_iter.next();
+        }
+
+        // Use the intermediate representation to return the struct
+        std::result::Result::Ok(ClientTiming {
+            operation: intermediate_rep
+                .operation
+                .into_iter()
+                .next()
+                .ok_or_else(|| "operation missing in ClientTiming".to_string())?,
+            library_id: intermediate_rep.library_id.into_iter().next(),
+            path: intermediate_rep.path.into_iter().next(),
+            duration_ms: intermediate_rep
+                .duration_ms
+                .into_iter()
+                .next()
+                .ok_or_else(|| "durationMs missing in ClientTiming".to_string())?,
+            queued_ms: intermediate_rep.queued_ms.into_iter().next(),
+            waiting_ms: intermediate_rep.waiting_ms.into_iter().next(),
+            download_ms: intermediate_rep.download_ms.into_iter().next(),
+            after_response_ms: intermediate_rep.after_response_ms.into_iter().next(),
+            bytes: intermediate_rep.bytes.into_iter().next(),
+            cached: intermediate_rep.cached.into_iter().next(),
+        })
+    }
+}
+
+// Methods for converting between header::IntoHeaderValue<ClientTiming> and HeaderValue
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<header::IntoHeaderValue<ClientTiming>> for HeaderValue {
+    type Error = String;
+
+    fn try_from(hdr_value: header::IntoHeaderValue<ClientTiming>) -> std::result::Result<Self, Self::Error> {
+        let hdr_value = hdr_value.to_string();
+        match HeaderValue::from_str(&hdr_value) {
+            std::result::Result::Ok(value) => std::result::Result::Ok(value),
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for ClientTiming - value: {hdr_value} is invalid {e}"#)),
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<ClientTiming> {
+    type Error = String;
+
+    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
+        match hdr_value.to_str() {
+            std::result::Result::Ok(value) => match <ClientTiming as std::str::FromStr>::from_str(value) {
+                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
+                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into ClientTiming - {err}"#)),
+            },
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
+/// `display_image`, `original_image`, and `thumbnail_image` are the loads of those images. `viewer_display` is the time from moving the viewer to an entry until its display image is loaded.
+/// Enumeration of values.
+/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
+/// which helps with FFI.
+#[allow(non_camel_case_types, clippy::large_enum_variant)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
+pub enum ClientTimingOperation {
+    #[serde(rename = "display_image")]
+    DisplayImage,
+    #[serde(rename = "original_image")]
+    OriginalImage,
+    #[serde(rename = "thumbnail_image")]
+    ThumbnailImage,
+    #[serde(rename = "viewer_display")]
+    ViewerDisplay,
+}
+
+impl validator::Validate for ClientTimingOperation {
+    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
+        std::result::Result::Ok(())
+    }
+}
+
+impl std::fmt::Display for ClientTimingOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            ClientTimingOperation::DisplayImage => write!(f, "display_image"),
+            ClientTimingOperation::OriginalImage => write!(f, "original_image"),
+            ClientTimingOperation::ThumbnailImage => write!(f, "thumbnail_image"),
+            ClientTimingOperation::ViewerDisplay => write!(f, "viewer_display"),
+        }
+    }
+}
+
+impl std::str::FromStr for ClientTimingOperation {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "display_image" => std::result::Result::Ok(ClientTimingOperation::DisplayImage),
+            "original_image" => std::result::Result::Ok(ClientTimingOperation::OriginalImage),
+            "thumbnail_image" => std::result::Result::Ok(ClientTimingOperation::ThumbnailImage),
+            "viewer_display" => std::result::Result::Ok(ClientTimingOperation::ViewerDisplay),
+            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct ClientTimingReport {
+    #[serde(rename = "timings")]
+    #[validate(length(min = 1, max = 200), nested)]
+    pub timings: Vec<models::ClientTiming>,
+}
+
+impl ClientTimingReport {
+    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
+    pub fn new(timings: Vec<models::ClientTiming>) -> ClientTimingReport {
+        ClientTimingReport { timings }
+    }
+}
+
+/// Converts the ClientTimingReport value to the Query Parameters representation (style=form, explode=false)
+/// specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde serializer
+impl std::fmt::Display for ClientTimingReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<Option<String>> = vec![
+            // Skipping timings in query parameter serialization
+
+        ];
+
+        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
+    }
+}
+
+/// Converts Query Parameters representation (style=form, explode=false) to a ClientTimingReport value
+/// as specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde deserializer
+impl std::str::FromStr for ClientTimingReport {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        /// An intermediate representation of the struct to use for parsing.
+        #[derive(Default)]
+        #[allow(dead_code)]
+        struct IntermediateRep {
+            pub timings: Vec<Vec<models::ClientTiming>>,
+        }
+
+        let mut intermediate_rep = IntermediateRep::default();
+
+        // Parse into intermediate representation
+        let mut string_iter = s.split(',');
+        let mut key_result = string_iter.next();
+
+        while key_result.is_some() {
+            let val = match string_iter.next() {
+                Some(x) => x,
+                None => return std::result::Result::Err("Missing value while parsing ClientTimingReport".to_string()),
+            };
+
+            if let Some(key) = key_result {
+                #[allow(clippy::match_single_binding)]
+                match key {
+                    "timings" => return std::result::Result::Err("Parsing a container in this style is not supported in ClientTimingReport".to_string()),
+                    _ => return std::result::Result::Err("Unexpected key while parsing ClientTimingReport".to_string()),
+                }
+            }
+
+            // Get the next key
+            key_result = string_iter.next();
+        }
+
+        // Use the intermediate representation to return the struct
+        std::result::Result::Ok(ClientTimingReport {
+            timings: intermediate_rep
+                .timings
+                .into_iter()
+                .next()
+                .ok_or_else(|| "timings missing in ClientTimingReport".to_string())?,
+        })
+    }
+}
+
+// Methods for converting between header::IntoHeaderValue<ClientTimingReport> and HeaderValue
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<header::IntoHeaderValue<ClientTimingReport>> for HeaderValue {
+    type Error = String;
+
+    fn try_from(hdr_value: header::IntoHeaderValue<ClientTimingReport>) -> std::result::Result<Self, Self::Error> {
+        let hdr_value = hdr_value.to_string();
+        match HeaderValue::from_str(&hdr_value) {
+            std::result::Result::Ok(value) => std::result::Result::Ok(value),
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for ClientTimingReport - value: {hdr_value} is invalid {e}"#)),
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<ClientTimingReport> {
+    type Error = String;
+
+    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
+        match hdr_value.to_str() {
+            std::result::Result::Ok(value) => match <ClientTimingReport as std::str::FromStr>::from_str(value) {
+                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
+                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into ClientTimingReport - {err}"#)),
             },
             std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
         }

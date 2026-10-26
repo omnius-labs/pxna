@@ -8,12 +8,14 @@ use async_trait::async_trait;
 use futures::StreamExt as _;
 use omnius_core_base::tsid::TsidProvider;
 use tokio_util::sync::CancellationToken;
+use tracing::field::Empty;
 
 use crate::{
     core::nfs::{
         ConflictPolicy, FileStorageDriver, FsEntryStream, FsEntrySummaryStream, LiveStagingSet, MaterializedFile, Publish, STAGING_MAX_AGE, StagingFile, StagingPublisher,
         StagingSweeper,
     },
+    perf_span,
     prelude::*,
 };
 
@@ -126,7 +128,7 @@ impl FileStorageDriver for FileStorageLocal {
             let cancellation = CancellationToken::new();
             let _cancel_on_drop = cancellation.clone().drop_guard();
             let _scan_permit = class.scope(runtime.enter()).await?;
-            let started = Instant::now();
+            let span = perf_span!("local_listing", recursive, entry_count = Empty, enumeration_sec = Empty, metadata_sec = Empty);
             let mut enumeration_sec = 0.0;
             let mut metadata_sec = 0.0;
             let mut entry_count = 0_u64;
@@ -163,10 +165,8 @@ impl FileStorageDriver for FileStorageLocal {
                     }
                 }
             }
-            // metadata_sec は並列 worker の合計、elapsed_sec は消費側の待ちも含む壁時計時間。
-            tracing::debug!(target: "pxna::performance", operation = "local_listing", recursive,
-                entry_count, enumeration_sec, metadata_sec, elapsed_sec = started.elapsed().as_secs_f64(),
-                "listing stream completed");
+            // metadata_sec は並列 worker の合計、span の時間は消費側の待ちも含む壁時計時間。
+            span.record("entry_count", entry_count).record("enumeration_sec", enumeration_sec).record("metadata_sec", metadata_sec);
         }))
     }
 
@@ -186,7 +186,7 @@ impl FileStorageDriver for FileStorageLocal {
             let cancellation = CancellationToken::new();
             let _cancel_on_drop = cancellation.clone().drop_guard();
             let _scan_permit = class.scope(runtime.enter()).await?;
-            let started = Instant::now();
+            let span = perf_span!("local_summary_listing", entry_count = Empty);
             let directory = class.scope(runtime.open_directory(root, cancellation.clone())).await?;
             let mut entry_count = 0_u64;
             loop {
@@ -195,8 +195,7 @@ impl FileStorageDriver for FileStorageLocal {
                 entry_count += batch.len() as u64;
                 for entry in batch { yield entry; }
             }
-            tracing::debug!(target: "pxna::performance", operation = "local_summary_listing", entry_count,
-                elapsed_sec = started.elapsed().as_secs_f64(), "summary listing completed");
+            span.record("entry_count", entry_count);
         }))
     }
 

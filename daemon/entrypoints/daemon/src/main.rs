@@ -7,6 +7,7 @@ mod db;
 mod error;
 mod executor;
 mod interface;
+mod logging;
 mod media_check;
 mod prelude;
 mod result;
@@ -37,6 +38,6 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     };
-    Executor::shutdown_logging();
+    logging::Logging::shutdown();
     code
 }

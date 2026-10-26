@@ -23,7 +23,7 @@ impl apis::libraries::Libraries for ApiServer {
         _claims: &Self::Claims,
     ) -> std::result::Result<apis::libraries::GetCapabilitiesResponse, ()> {
         Ok(apis::libraries::GetCapabilitiesResponse::Status200_OptionalBrowsingFeaturesImplementedByThisDaemon(
-            models::Capabilities::new(true, true, true),
+            models::Capabilities::new(true, true, true, self.state.conf.logging.performance),
         ))
     }
 
