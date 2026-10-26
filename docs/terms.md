@@ -70,7 +70,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | Tile size | client | - | - | The specification of tile size in a listing, chosen from five levels in the display preferences | thumbnail size |
 | Flipbook playback | client | - | - | A display that cycles through the frames of a sprite sheet on a tile | preview playback |
 | Slideshow | client | - | - | A display, inside the viewer, that automatically advances the open Entry at a fixed interval | autoplay |
-| Rate mode | client | - | the viewer's "Rate mode" button, `r` | A state inside the viewer where ← records bad and moves to the next Entry, → records good and moves to the next Entry, and ↑ moves to the next Entry without rating | triage mode |
+| Rate mode | client | - | the viewer's "Rate mode" button, `r` | A state inside the viewer where ← records bad and moves to the next Entry, → records good and moves to the next Entry, ↓ records unrated and moves to the next Entry, and ↑ undoes the last of these | triage mode |
 | [Viewer](./terms/client.md#t-viewer) | client | `Viewer` | `view` | The web screen that displays and plays images and videos in full screen. It has a filmstrip, a slideshow, and full-screen display | image display mode, slideshow mode |
 | Filmstrip | client | - | - | A display, placed at the bottom edge of the image viewer on a wide screen, that lays out the Entries of the current listing horizontally in the same order as the listing | - |
 | Folder view | client | - | `/browse/{libraryId}/…`, "Folder" | The web screen that lists the direct children of the folder selected in the tree | dir mode |

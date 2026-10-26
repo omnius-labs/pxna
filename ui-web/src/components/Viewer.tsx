@@ -1,5 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Ellipsis, Maximize, Minimize, Pause, Play, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
+import {
+    CircleSlash,
+    Download,
+    Ellipsis,
+    Maximize,
+    Minimize,
+    Pause,
+    Play,
+    ThumbsDown,
+    ThumbsUp,
+    Trash2,
+    Undo2,
+} from "lucide-react";
 import { type PointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type Entry, entryKind } from "../library/entries";
@@ -373,15 +385,54 @@ function ViewerView({
 
     const ratable = current !== undefined && isViewable(current);
     const rating = useQuery({ ...ratingQuery(location.libraryId, current?.path ?? ""), enabled: rateMode && ratable });
+    // Entry ごとの評価の記録の順番。同じ Entry へは前の記録を終えてから次を送り、取り消しが先の記録を追い越さないようにする。
+    const ratingWrites = useRef(new Map<string, Promise<void>>());
+    const writeRating = (path: string, task: () => Promise<void>, failure: string) => {
+        const write = (ratingWrites.current.get(path) ?? Promise.resolve()).then(task);
+        const settled = write.catch(() => {});
+        ratingWrites.current.set(path, settled);
+        void settled.then(() => {
+            if (ratingWrites.current.get(path) === settled) ratingWrites.current.delete(path);
+        });
+        void write.catch(() => toast.error(failure, { toasterId: VIEWER_TOASTER }));
+    };
+    // 評価の操作の履歴。ビューアを開いている間だけ持ち、取り消すと新しいものから戻す。
+    // 記録する前の評価は、キャッシュになければ読んでから記録する。
+    const [rateHistory, setRateHistory] = useState<{ target: IndexedEntry; previous: Promise<Rating> }[]>([]);
     /// 評価を記録し、次の Entry へ移る。記録は移動を待たせず、失敗したらトーストで知らせる。
-    const rate = (value: Rating | undefined) => {
-        if (current === undefined || !ratable) return;
-        if (value !== undefined) {
-            void putRating(client, location.libraryId, current.path, value).catch(() =>
-                toast.error("評価を保存できませんでした。", { toasterId: VIEWER_TOASTER }),
-            );
-        }
+    const rate = (value: Rating) => {
+        if (index === undefined || current === undefined || !ratable) return;
+        const query = ratingQuery(location.libraryId, current.path);
+        const cached = client.getQueryData<Rating>(query.queryKey);
+        const previous = cached === undefined ? client.fetchQuery(query) : Promise.resolve(cached);
+        const path = current.path;
+        setRateHistory((history) => [...history, { target: { index, entry: current }, previous }]);
+        writeRating(
+            path,
+            async () => {
+                // 前の評価を読めなくても記録はする。その操作は取り消せない。
+                await previous.catch(() => {});
+                await putRating(client, location.libraryId, path, value);
+            },
+            "評価を保存できませんでした。",
+        );
         void step(1);
+    };
+    /// 最後の評価の操作を取り消す。その Entry へ戻り、評価を記録する前の値へ書き戻す。
+    const undoRating = () => {
+        const last = rateHistory.at(-1);
+        if (last === undefined || preparingDeletion || deletion) return;
+        setRateHistory((history) => history.slice(0, -1));
+        const path = last.target.entry.path;
+        writeRating(
+            path,
+            async () => {
+                await putRating(client, location.libraryId, path, await last.previous);
+            },
+            "評価を元に戻せませんでした。",
+        );
+        movement.current?.abort();
+        if (last.target.entry.path !== current?.path) moveTo(last.target);
     };
     const toggleRateMode = () => {
         if (!rateMode) stopSlideshow();
@@ -406,13 +457,12 @@ function ViewerView({
             } else if (event.key === "r" && !narrow && ratable) {
                 event.preventDefault();
                 toggleRateMode();
-            } else if (
-                rateMode &&
-                ratable &&
-                (event.key === "ArrowRight" || event.key === "ArrowLeft" || event.key === "ArrowUp")
-            ) {
+            } else if (rateMode && ratable && event.key === "ArrowUp") {
                 event.preventDefault();
-                rate(event.key === "ArrowRight" ? "good" : event.key === "ArrowLeft" ? "bad" : undefined);
+                undoRating();
+            } else if (rateMode && ratable && event.key in RATE_KEYS) {
+                event.preventDefault();
+                rate(RATE_KEYS[event.key as keyof typeof RATE_KEYS]);
             } else if (event.key === "ArrowLeft" && current && isViewable(current)) {
                 event.preventDefault();
                 void stepBackward();
@@ -512,6 +562,14 @@ function ViewerView({
                         </button>
                     </>
                 ) : null}
+                {rateMode && ratable && (
+                    <RatingPad
+                        canUndo={rateHistory.length > 0}
+                        onRate={rate}
+                        onUndo={undoRating}
+                        video={current !== undefined && entryKind(current) === "video"}
+                    />
+                )}
             </div>
             <DeleteDialog
                 target={
@@ -545,6 +603,67 @@ function ViewerView({
 /// ビューアが開いている間の結果のトーストを描く `Toaster` の `id`。外枠の要素の中に置き、モーダルと全画面の上に見せる。
 const VIEWER_TOASTER = "viewer";
 
+/// レートモードのキーと、記録する評価。↑ は元に戻す操作に使う。
+const RATE_KEYS = { ArrowLeft: "bad", ArrowRight: "good", ArrowDown: "none" } as const satisfies Record<string, Rating>;
+
+interface RatingPadProps {
+    canUndo: boolean;
+    onRate: (rating: Rating) => void;
+    onUndo: () => void;
+    /// 動画のコントロールに重ならないよう、上へずらすか。
+    video: boolean;
+}
+
+/// レートモードの間、表示の領域の右下に、矢印キーと同じ十字の形で評価のボタンを出す。
+function RatingPad({ canUndo, onRate, onUndo, video }: RatingPadProps) {
+    const buttonClass =
+        "flex size-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 disabled:opacity-30";
+    return (
+        <fieldset
+            aria-label="評価"
+            className={`absolute right-4 grid grid-cols-3 grid-rows-3 gap-1 ${video ? "bottom-20" : "bottom-4"}`}
+        >
+            <button
+                type="button"
+                aria-label="元に戻す"
+                title="元に戻す（↑）"
+                disabled={!canUndo}
+                className={`${buttonClass} col-start-2 row-start-1`}
+                onClick={onUndo}
+            >
+                <Undo2 className="size-5" />
+            </button>
+            <button
+                type="button"
+                aria-label="悪い"
+                title="悪い（←）"
+                className={`${buttonClass} col-start-1 row-start-2`}
+                onClick={() => onRate("bad")}
+            >
+                <ThumbsDown className="size-5" />
+            </button>
+            <button
+                type="button"
+                aria-label="良い"
+                title="良い（→）"
+                className={`${buttonClass} col-start-3 row-start-2`}
+                onClick={() => onRate("good")}
+            >
+                <ThumbsUp className="size-5" />
+            </button>
+            <button
+                type="button"
+                aria-label="未評価"
+                title="未評価（↓）"
+                className={`${buttonClass} col-start-2 row-start-3`}
+                onClick={() => onRate("none")}
+            >
+                <CircleSlash className="size-5" />
+            </button>
+        </fieldset>
+    );
+}
+
 /// レートモードで、開いている Entry の評価を出す。未評価のときは操作の案内を出す。
 function RatingBadge({ rating }: { rating: Rating | undefined }) {
     if (rating === "good" || rating === "bad") {
@@ -561,7 +680,7 @@ function RatingBadge({ rating }: { rating: Rating | undefined }) {
     }
     return (
         <span data-rating="none" className="shrink-0 text-xs text-neutral-300">
-            ← 悪い　↑ 次へ　→ 良い
+            ← 悪い　→ 良い　↓ 未評価　↑ 元に戻す
         </span>
     );
 }
@@ -613,7 +732,9 @@ function HeaderActions({
                     aria-label="レートモード"
                     aria-pressed={rate.active}
                     title={
-                        rate.active ? "レートモードを終える（R）" : "レートモード（R）: → 良い、← 悪い、↑ 評価せず次へ"
+                        rate.active
+                            ? "レートモードを終える（R）"
+                            : "レートモード（R）: → 良い、← 悪い、↓ 未評価、↑ 元に戻す"
                     }
                     className={`${buttonClass} ${rate.active ? "bg-white/20" : ""}`}
                     onClick={rate.toggle}
