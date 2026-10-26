@@ -118,13 +118,24 @@ pub struct ListingSnapshot {
 
 impl ListingSnapshot {
     pub fn page(&self, options: &ListOptions) -> models::FolderListing {
-        let indices = self
-            .orders
-            .lock()
-            .entry(options.sort())
-            .or_insert_with(|| Arc::new(options.sort().indices(&self.entries)))
-            .clone();
-        options.page(&self.entries, &indices, self.id.clone())
+        options.page(&self.entries, &self.order(options.sort()), self.id.clone())
+    }
+
+    /// 条件に合う Entry の位置を、並べ方の順で返す。
+    pub fn matching(&self, options: &ListOptions) -> Vec<usize> {
+        options.matching(&self.entries, &self.order(options.sort()))
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn entries(&self) -> &ListingEntries {
+        &self.entries
+    }
+
+    fn order(&self, sort: ListSort) -> Arc<Vec<usize>> {
+        self.orders.lock().entry(sort).or_insert_with(|| Arc::new(sort.indices(&self.entries))).clone()
     }
 
     fn fresh(&self, version: &Option<SnapshotVersion>, now: DateTime<Utc>, max_age: Duration) -> bool {

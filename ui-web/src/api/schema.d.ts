@@ -161,6 +161,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/timeline/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List timeline entries
+         * @description Lists the images and videos of the given Libraries, including
+         *     those inside archives, from newest to oldest timeline date, as
+         *     one sequence. Entries with the same timeline date are ordered
+         *     by Library id and then by path. The result comes from the
+         *     timeline index that the daemon builds in the background, not
+         *     from a traversal at request time.
+         *
+         *     At most one of `after`, `before`, `month` and `around` selects
+         *     where the page starts. Without any of them the page starts at
+         *     the newest entry. `around` needs `aroundLibraryId`, which must
+         *     be one of `libraryIds`. `previous` and `next` are cursors for
+         *     the pages before and after the returned entries and are absent
+         *     when there is nothing further in that direction. A cursor is
+         *     only meaningful with the same `libraryIds`.
+         */
+        get: operations["listTimelineEntries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/timeline/months": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the months that have timeline entries
+         * @description Returns the number of entries of the given Libraries per
+         *     month, newest month first. The counts are kept up to date
+         *     together with the timeline index, so they always equal the
+         *     number of entries `entries` returns for that month with the
+         *     same `libraryIds`.
+         */
+        get: operations["listTimelineMonths"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/timeline/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the state of the timeline scans
+         * @description Returns the state of the scan of each given Library, in the given order.
+         */
+        get: operations["getTimelineStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/timeline/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start full timeline scans
+         * @description Starts a scan of each given whole Library in the background
+         *     and returns the current states. For a Library whose full scan
+         *     is already running, nothing is started.
+         */
+        post: operations["refreshTimeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/libraries": {
         parameters: {
             query?: never;
@@ -234,15 +333,47 @@ export interface paths {
          * List folder entries
          * @description Lists direct children by default. Set `recursive=true` only for an
          *     explicit recursive traversal within the selected Library.
-         *
-         *     `rating` and `tag` keep only the images and videos that the
-         *     current user has rated or tagged that way; they combine with the
-         *     other filters. While one of them is set, `snapshot` also changes
-         *     whenever the user rates or tags anything, so a client that pages
-         *     through the result re-reads from the start instead of mixing
-         *     pages from before and after the change.
          */
         get: operations["listFolderEntries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search entries across Libraries
+         * @description Applies the name, rating, and tag conditions to the listing of
+         *     the start in each of `libraryIds`, and returns the matches as one
+         *     sequence ordered by `sort`, `order`, and `foldersFirst`. Entries
+         *     that compare equal, which only happens for the same path in
+         *     different Libraries, follow the order of `libraryIds`.
+         *
+         *     `path` may name a start other than `/` only when `libraryIds`
+         *     has one Library; with several, every Library is searched from
+         *     its root. Hidden entries are never returned.
+         *
+         *     `rating` and `tag` keep only the images and videos that the
+         *     current user has rated or tagged that way; several `tag` values
+         *     must all be present. While one of them is set, `snapshot` also
+         *     changes whenever the user rates or tags anything, so a client
+         *     that pages through the result re-reads from the start instead of
+         *     mixing pages from before and after the change.
+         *
+         *     `recursive` traversal is cut off per Library at the configured
+         *     entry limit, and the Libraries cut off are listed in
+         *     `truncatedLibraryIds`.
+         */
+        get: operations["listSearchEntries"];
         put?: never;
         post?: never;
         delete?: never;
@@ -268,6 +399,30 @@ export interface paths {
         get: operations["getCapabilities"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/performance/client-timings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record client-side timings
+         * @description Writes the timings a client measured to the daemon's
+         *     performance log, next to the daemon's own measurements. A
+         *     client sends them only while `performanceLogging` of
+         *     `/capabilities` is true. While it is false, the daemon
+         *     accepts and discards them.
+         */
+        post: operations["reportClientTimings"];
         delete?: never;
         options?: never;
         head?: never;
@@ -346,97 +501,6 @@ export interface paths {
         get: operations["probeFolderChildren"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/timeline/entries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List timeline entries
-         * @description Lists the images and videos of a Library, including those inside
-         *     archives, from newest to oldest timeline date. The result comes
-         *     from the timeline index that the daemon builds in the
-         *     background, not from a traversal at request time.
-         *
-         *     At most one of `after`, `before`, `month` and `around` selects
-         *     where the page starts. Without any of them the page starts at
-         *     the newest entry. `previous` and `next` are cursors for the
-         *     pages before and after the returned entries and are absent
-         *     when there is nothing further in that direction.
-         */
-        get: operations["listTimelineEntries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/timeline/months": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the months that have timeline entries
-         * @description Returns the number of entries per month, newest month first.
-         *     The counts are kept up to date together with the timeline
-         *     index, so they always equal the number of entries `entries`
-         *     returns for that month.
-         */
-        get: operations["listTimelineMonths"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/timeline/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get the state of the timeline scan */
-        get: operations["getTimelineStatus"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/timeline/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start a full timeline scan
-         * @description Starts a scan of the whole Library in the background and
-         *     returns the current state. When a full scan is already
-         *     running, nothing is started.
-         */
-        post: operations["refreshTimeline"];
         delete?: never;
         options?: never;
         head?: never;
@@ -666,6 +730,12 @@ export interface paths {
          *     returns that entry's thumbnail; `NotFound` means there is none.
          *
          *     The response `Content-Type` follows `format`.
+         *
+         *     `Pxna-Priority` orders the generation of `display` images. The
+         *     image a viewer shows now is `interactive` and starts before
+         *     prefetched images and grid thumbnails; a prefetched image is
+         *     `prefetch`. A request the client abandons while it waits for
+         *     a generation slot starts nothing.
          */
         get: operations["getThumbnail"];
         put?: never;
@@ -1022,12 +1092,19 @@ export interface components {
         };
         /**
          * @description Display preferences. `wide` and `narrow` are chosen by the
-         *     width of the screen (768 CSS px); `sort` does not depend on it.
+         *     width of the screen (768 CSS px); `sort` and `timelineLibraries`
+         *     do not depend on it.
          */
         Preferences: {
             wide: components["schemas"]["DisplaySet"];
             narrow: components["schemas"]["DisplaySet"];
             sort: components["schemas"]["SortPreference"];
+            /**
+             * @description Libraries the timeline shows. Absent means every
+             *     Library. Ids of Libraries that no longer exist are kept
+             *     as saved, and clients ignore them.
+             */
+            timelineLibraries?: components["schemas"]["LibraryId"][];
         };
         DisplaySet: {
             /**
@@ -1261,6 +1338,7 @@ export interface components {
             next?: string;
         };
         TimelineEntry: {
+            libraryId: components["schemas"]["LibraryId"];
             entry: components["schemas"]["FileSystemEntry"];
             /**
              * @description Date the entry is ordered by, as `YYYY-MM-DDTHH:MM:SS`
@@ -1282,7 +1360,11 @@ export interface components {
             /** Format: int64 */
             count: number;
         };
+        TimelineStatuses: {
+            libraries: components["schemas"]["TimelineStatus"][];
+        };
         TimelineStatus: {
+            libraryId: components["schemas"]["LibraryId"];
             /** @description True while a full scan of the Library is running. */
             running: boolean;
             /**
@@ -1296,6 +1378,9 @@ export interface components {
              */
             completedAt?: string;
         };
+        TimelineRefreshRequest: {
+            libraryIds: components["schemas"]["LibraryId"][];
+        };
         FolderListing: {
             entries: components["schemas"]["FileSystemEntry"][];
             /**
@@ -1308,10 +1393,68 @@ export interface components {
             /** @description True when recursive traversal reached its entry limit. */
             truncated: boolean;
         };
+        SearchEntry: {
+            libraryId: components["schemas"]["LibraryId"];
+            entry: components["schemas"]["FileSystemEntry"];
+        };
+        SearchListing: {
+            entries: components["schemas"]["SearchEntry"][];
+            /**
+             * Format: int64
+             * @description Sum of the per-Library counts after filtering.
+             */
+            totalCount: number;
+            /**
+             * @description Opaque identifier of the merged listing. It changes when
+             *     the listing of any searched Library is rebuilt.
+             */
+            snapshot: string;
+            /** @description Libraries whose recursive traversal reached the entry limit. */
+            truncatedLibraryIds: components["schemas"]["LibraryId"][];
+        };
         Capabilities: {
             summaryListing: boolean;
             entryDetails: boolean;
             childProbes: boolean;
+            /** @description Whether the daemon writes the performance log, so a client should send its timings to `/performance/client-timings`. */
+            performanceLogging: boolean;
+        };
+        ClientTimingReport: {
+            timings: components["schemas"]["ClientTiming"][];
+        };
+        /**
+         * @description `display_image`, `original_image`, and `thumbnail_image` are the
+         *     loads of those images. `viewer_display` is the time from moving
+         *     the viewer to an entry until its display image is loaded.
+         * @enum {string}
+         */
+        ClientTimingOperation: "display_image" | "original_image" | "thumbnail_image" | "viewer_display";
+        /**
+         * @description One timing in milliseconds. The phases come from the browser's
+         *     Resource Timing and are omitted when the browser does not
+         *     report them.
+         */
+        ClientTiming: {
+            operation: components["schemas"]["ClientTimingOperation"];
+            libraryId?: components["schemas"]["LibraryId"];
+            path?: components["schemas"]["RelativePath"];
+            /** @description The whole time, from the start of the request or the move until the load. */
+            durationMs: number;
+            /** @description From the start of the request until the browser sent it. */
+            queuedMs?: number;
+            /** @description From sending the request until the first byte of the response. */
+            waitingMs?: number;
+            /** @description From the first byte until the last byte of the response. */
+            downloadMs?: number;
+            /** @description From the last byte until the load event, including decoding. */
+            afterResponseMs?: number;
+            /**
+             * Format: int64
+             * @description The encoded body size.
+             */
+            bytes?: number;
+            /** @description Whether the browser served the response from its cache. */
+            cached?: boolean;
         };
         FileSystemEntrySummary: {
             path: components["schemas"]["RelativePath"];
@@ -1806,6 +1949,16 @@ export interface components {
         /** @description Opaque identifier of a Library owned by the owner. */
         LibraryIdPath: components["schemas"]["LibraryId"];
         /**
+         * @description Libraries to list, repeated as `libraryIds=a&libraryIds=b`.
+         *     Every id must name a Library; an unknown id is 404.
+         */
+        TimelineLibraryIdsQuery: components["schemas"]["LibraryId"][];
+        /**
+         * @description Libraries to search, repeated as `libraryIds=a&libraryIds=b`.
+         *     Every id must name a Library; an unknown id is 404.
+         */
+        SearchLibraryIdsQuery: components["schemas"]["LibraryId"][];
+        /**
          * @description Path relative to the selected Library.
          * @example /photos/2026
          */
@@ -1846,12 +1999,12 @@ export interface components {
          */
         RatingFilterQuery: "good" | "bad" | "none";
         /**
-         * @description Return only images and videos that have this tag of the current
-         *     user. The word is trimmed like a tag being set; a word the user
-         *     has never used selects nothing. `totalCount` counts the entries
-         *     after this filter.
+         * @description Return only images and videos that have all of these tags of the
+         *     current user, repeated as `tag=a&tag=b`. Each word is trimmed
+         *     like a tag being set; a word the user has never used selects
+         *     nothing. `totalCount` counts the entries after this filter.
          */
-        TagFilterQuery: components["schemas"]["TagName"];
+        TagFiltersQuery: components["schemas"]["TagName"][];
         /**
          * @description Single HTTP byte range as defined by RFC 7233, including suffix
          *     ranges such as `bytes=-500`. The daemon parses this header itself,
@@ -1890,6 +2043,12 @@ export interface components {
         ResamplerQuery: components["schemas"]["ImageResampler"];
         /** @description Anchor position used when resizing and cropping. */
         AnchorQuery: components["schemas"]["ImageAnchor"];
+        /**
+         * @description Priority of a `display` image: `interactive` for the image
+         *     shown now, the default, and `prefetch` for an image prepared
+         *     ahead. Other variants ignore it.
+         */
+        PriorityHeader: "interactive" | "prefetch";
         /** @description How to resolve an existing entry at the target path. */
         ConflictQuery: components["schemas"]["ConflictPolicy"];
         /** @description Opaque identifier of an upload session. */
@@ -2136,6 +2295,136 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
+    listTimelineEntries: {
+        parameters: {
+            query: {
+                /**
+                 * @description Libraries to list, repeated as `libraryIds=a&libraryIds=b`.
+                 *     Every id must name a Library; an unknown id is 404.
+                 */
+                libraryIds: components["parameters"]["TimelineLibraryIdsQuery"];
+                /** @description Cursor from `next`. Returns the entries older than the cursor. */
+                after?: string;
+                /** @description Cursor from `previous`. Returns the entries newer than the cursor. */
+                before?: string;
+                /** @description Starts at the newest entry of this month (`YYYY-MM`), or of the next older month that has entries. */
+                month?: string;
+                /** @description Returns a page that has this entry of `aroundLibraryId` near its middle. */
+                around?: components["schemas"]["RelativePath"];
+                /** @description The Library of `around`. Given exactly when `around` is given. */
+                aroundLibraryId?: components["schemas"]["LibraryId"];
+                /** @description Maximum number of entries to return. */
+                limit?: components["parameters"]["ListLimitQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Timeline entries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineListing"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listTimelineMonths: {
+        parameters: {
+            query: {
+                /**
+                 * @description Libraries to list, repeated as `libraryIds=a&libraryIds=b`.
+                 *     Every id must name a Library; an unknown id is 404.
+                 */
+                libraryIds: components["parameters"]["TimelineLibraryIdsQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Entry counts per month. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineMonths"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getTimelineStatus: {
+        parameters: {
+            query: {
+                /**
+                 * @description Libraries to list, repeated as `libraryIds=a&libraryIds=b`.
+                 *     Every id must name a Library; an unknown id is 404.
+                 */
+                libraryIds: components["parameters"]["TimelineLibraryIdsQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description State of the scans. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineStatuses"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    refreshTimeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimelineRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description The scans are running. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineStatuses"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
     listLibraries: {
         parameters: {
             query?: never;
@@ -2290,20 +2579,6 @@ export interface operations {
                  *     true. `totalCount` counts the entries after this filter.
                  */
                 foldersOnly?: components["parameters"]["FoldersOnlyQuery"];
-                /**
-                 * @description Return only images and videos with this rating of the current
-                 *     user. `none` selects the images and videos that have not been
-                 *     rated. Folders and other files never match. `totalCount` counts
-                 *     the entries after this filter.
-                 */
-                rating?: components["parameters"]["RatingFilterQuery"];
-                /**
-                 * @description Return only images and videos that have this tag of the current
-                 *     user. The word is trimmed like a tag being set; a word the user
-                 *     has never used selects nothing. `totalCount` counts the entries
-                 *     after this filter.
-                 */
-                tag?: components["parameters"]["TagFilterQuery"];
             };
             header?: never;
             path: {
@@ -2332,6 +2607,75 @@ export interface operations {
             504: components["responses"]["GatewayTimeout"];
         };
     };
+    listSearchEntries: {
+        parameters: {
+            query: {
+                /**
+                 * @description Libraries to search, repeated as `libraryIds=a&libraryIds=b`.
+                 *     Every id must name a Library; an unknown id is 404.
+                 */
+                libraryIds: components["parameters"]["SearchLibraryIdsQuery"];
+                /** @description Start relative to the Library. Only with one Library. */
+                path?: components["schemas"]["RelativePath"];
+                /** @description Whether to include descendants below the requested folder. */
+                recursive?: components["parameters"]["RecursiveQuery"];
+                /**
+                 * @description Whitespace-separated terms that must all occur in an entry name.
+                 *     Names and terms are normalized with NFKC and converted to lowercase.
+                 */
+                query?: components["parameters"]["NameFilterQuery"];
+                /**
+                 * @description Return only images and videos with this rating of the current
+                 *     user. `none` selects the images and videos that have not been
+                 *     rated. Folders and other files never match. `totalCount` counts
+                 *     the entries after this filter.
+                 */
+                rating?: components["parameters"]["RatingFilterQuery"];
+                /**
+                 * @description Return only images and videos that have all of these tags of the
+                 *     current user, repeated as `tag=a&tag=b`. Each word is trimmed
+                 *     like a tag being set; a word the user has never used selects
+                 *     nothing. `totalCount` counts the entries after this filter.
+                 */
+                tag?: components["parameters"]["TagFiltersQuery"];
+                /** @description Sort key for folder entries. */
+                sort?: components["parameters"]["SortQuery"];
+                /** @description Sort direction. */
+                order?: components["parameters"]["OrderQuery"];
+                /**
+                 * @description Place folders, and files whose `file.archive` hint is true,
+                 *     before the other entries. `sort` and `order` apply within each
+                 *     of the two groups.
+                 */
+                foldersFirst?: components["parameters"]["FoldersFirstQuery"];
+                /** @description Offset in the sorted and filtered listing. */
+                offset?: components["parameters"]["ListOffsetQuery"];
+                /** @description Maximum number of entries to return. */
+                limit?: components["parameters"]["ListLimitQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matching entries of the Libraries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchListing"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
     getCapabilities: {
         parameters: {
             query?: never;
@@ -2350,6 +2694,31 @@ export interface operations {
                     "application/json": components["schemas"]["Capabilities"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    reportClientTimings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientTimingReport"];
+            };
+        };
+        responses: {
+            /** @description The timings were accepted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["InvalidRequest"];
             401: components["responses"]["Unauthorized"];
             500: components["responses"]["InternalServerError"];
         };
@@ -2489,122 +2858,6 @@ export interface operations {
                 };
                 content?: never;
             };
-        };
-    };
-    listTimelineEntries: {
-        parameters: {
-            query?: {
-                /** @description Cursor from `next`. Returns the entries older than the cursor. */
-                after?: string;
-                /** @description Cursor from `previous`. Returns the entries newer than the cursor. */
-                before?: string;
-                /** @description Starts at the newest entry of this month (`YYYY-MM`), or of the next older month that has entries. */
-                month?: string;
-                /** @description Returns a page that has this entry near its middle. */
-                around?: components["schemas"]["RelativePath"];
-                /** @description Maximum number of entries to return. */
-                limit?: components["parameters"]["ListLimitQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Timeline entries. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TimelineListing"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    listTimelineMonths: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Entry counts per month. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TimelineMonths"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getTimelineStatus: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description State of the scan. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TimelineStatus"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    refreshTimeline: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The scan is running. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TimelineStatus"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     copyFolders: {
@@ -3014,7 +3267,14 @@ export interface operations {
                 /** @description Anchor position used when resizing and cropping. */
                 anchor?: components["parameters"]["AnchorQuery"];
             };
-            header?: never;
+            header?: {
+                /**
+                 * @description Priority of a `display` image: `interactive` for the image
+                 *     shown now, the default, and `prefetch` for an image prepared
+                 *     ahead. Other variants ignore it.
+                 */
+                "Pxna-Priority"?: components["parameters"]["PriorityHeader"];
+            };
             path: {
                 /** @description Opaque identifier of a Library owned by the owner. */
                 libraryId: components["parameters"]["LibraryIdPath"];

@@ -6,7 +6,8 @@ use omnius_core_base::{
     tsid::TsidProviderImpl,
 };
 use omnius_pxna_engine::service::{
-    ArchiveRuntime, AuthService, LocalStorageDriver, MediaInfoService, MediaTools, PreferencesService, RatingTagService, StorageService, ThumbnailGenerator, WorkBudget,
+    ArchiveRuntime, AuthService, LocalStorageDriver, MediaInfoService, MediaPools, MediaTools, PreferencesService, RatingTagService, Scheduler, StorageService, ThumbnailGenerator,
+    WorkBudget,
 };
 use rand::{SeedableRng as _, rngs::ChaCha20Rng};
 
@@ -36,6 +37,8 @@ pub struct DaemonState {
     pub uploads: Arc<UploadService>,
     pub operations: Arc<OperationService>,
     pub media_info: Arc<MediaInfoService>,
+    /// 画像の変換と外部プロセスの枠。一覧の枠と同じ scheduler に属する。
+    pub pools: MediaPools,
     pub videos: Arc<VideoService>,
     pub timeline: Arc<TimelineService>,
 }
@@ -53,7 +56,10 @@ impl DaemonState {
 
         // 書き込みの staging は公開先と同じディレクトリに取るため、プロセス共通の一時ディレクトリは持たない。
 
-        let budget = Arc::new(WorkBudget::default());
+        // 一覧、背景処理、サムネイルの生成の枠は、1 つの scheduler で優先度をそろえる。
+        let scheduler = Arc::new(Scheduler::default());
+        let budget = Arc::new(WorkBudget::new(&scheduler));
+        let pools = MediaPools::new(&scheduler, &conf.scheduler);
 
         // HTTP サーバを開く前に extraction cache を開き、前回の残骸を回収しておく。
         let archive = Arc::new(
@@ -98,6 +104,7 @@ impl DaemonState {
             conf.thumbnail.clone(),
             conf.media.clone(),
             media_info.clone(),
+            pools.clone(),
         )
         .await?;
         let videos = VideoService::open(
@@ -107,6 +114,7 @@ impl DaemonState {
             &state_dir.join("video"),
             conf.video.clone(),
             &conf.media,
+            pools.processes.clone(),
         )
         .await?;
 
@@ -124,6 +132,7 @@ impl DaemonState {
             uploads,
             operations,
             media_info,
+            pools,
             videos,
             timeline,
         })
@@ -158,12 +167,15 @@ mod tests {
             logging: LoggingConfig {
                 level: "info".to_string(),
                 json: false,
+                file: None,
+                performance: false,
             },
             libraries: Vec::new(),
             storage: StorageConfig { archive: Default::default() },
             listing: Default::default(),
             timeline: Default::default(),
             thumbnail: Default::default(),
+            scheduler: Default::default(),
             media: Default::default(),
             video: Default::default(),
             web: Default::default(),

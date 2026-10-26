@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use omnius_pxna_engine::{
     model::ImageFormatType,
-    service::{ArchiveOptions, MediaOptions, ThumbnailOptions, ZipLegacyEncoding},
+    service::{ArchiveOptions, MediaOptions, ScheduleOptions, ThumbnailOptions, ZipLegacyEncoding},
 };
 
 use crate::{
@@ -23,6 +23,8 @@ struct DaemonConfigToml {
     pub storage: StorageConfigToml,
     #[serde(default)]
     pub thumbnail: ThumbnailConfigToml,
+    #[serde(default)]
+    pub scheduler: SchedulerConfigToml,
     #[serde(default)]
     pub media: MediaConfigToml,
     #[serde(default)]
@@ -45,6 +47,12 @@ struct CoreConfigToml {
 struct LoggingConfigToml {
     pub level: String,
     pub json: bool,
+    /// 標準出力に加えて追記するログ file。設定 directory が基準で、省略すると file には出さない。
+    #[serde(default)]
+    pub file: Option<String>,
+    /// 処理時間の計測ログ（`pxna::performance`）を debug で出す。`level` が info でも、この計測だけを有効にする。
+    #[serde(default)]
+    pub performance: bool,
 }
 
 /// `dir` を省略すると、daemon は web を配信せず API だけを提供する。
@@ -113,6 +121,33 @@ impl ArchiveConfigToml {
     }
 }
 
+/// 同時実行の枠の数。省略した key は `ScheduleOptions` の既定値を使う。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SchedulerConfigToml {
+    pub image_slots: Option<usize>,
+    pub image_interactive_slots: Option<usize>,
+    pub process_slots: Option<usize>,
+    pub process_interactive_slots: Option<usize>,
+}
+
+impl SchedulerConfigToml {
+    fn into_options(self) -> Result<ScheduleOptions> {
+        let defaults = ScheduleOptions::default();
+        let options = ScheduleOptions {
+            image_slots: self.image_slots.unwrap_or(defaults.image_slots),
+            image_interactive_slots: self.image_interactive_slots.unwrap_or(defaults.image_interactive_slots),
+            process_slots: self.process_slots.unwrap_or(defaults.process_slots),
+            process_interactive_slots: self.process_interactive_slots.unwrap_or(defaults.process_interactive_slots),
+        };
+        options.validate().map_err(|error| {
+            let message = error.message().unwrap_or_default().to_string();
+            Error::from_error(error, ErrorKind::InvalidFormat).with_message(format!("invalid [scheduler]: {message}"))
+        })?;
+        Ok(options)
+    }
+}
+
 /// 省略した key は `ThumbnailOptions` の既定値を使う。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -124,17 +159,19 @@ struct ThumbnailConfigToml {
     pub display_quality: Option<u8>,
     pub cache_capacity_bytes: Option<u64>,
     pub display_cache_capacity_bytes: Option<u64>,
+    /// `[scheduler]` へ移した key。残っていたら、移す先を示して起動を止める。
     pub max_concurrent_images: Option<usize>,
     pub max_concurrent_videos: Option<usize>,
     pub video_timeout_secs: Option<u64>,
 }
 
-/// ffmpeg と ffprobe の場所。サムネイルと動画の再生が共有する。
+/// ffmpeg、ffprobe、heif-dec の場所。サムネイルと動画の再生が共有する。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MediaConfigToml {
     pub ffmpeg_path: Option<String>,
     pub ffprobe_path: Option<String>,
+    pub heif_dec_path: Option<String>,
 }
 
 impl MediaConfigToml {
@@ -143,12 +180,21 @@ impl MediaConfigToml {
         MediaOptions {
             ffmpeg_path: self.ffmpeg_path.map(PathBuf::from).unwrap_or(defaults.ffmpeg_path),
             ffprobe_path: self.ffprobe_path.map(PathBuf::from).unwrap_or(defaults.ffprobe_path),
+            heif_dec_path: self.heif_dec_path.map(PathBuf::from).unwrap_or(defaults.heif_dec_path),
         }
     }
 }
 
 impl ThumbnailConfigToml {
     fn into_options(self) -> Result<ThumbnailOptions> {
+        for (key, moved) in [
+            ("max_concurrent_images", self.max_concurrent_images.is_some()),
+            ("max_concurrent_videos", self.max_concurrent_videos.is_some()),
+        ] {
+            if moved {
+                return Err(Error::new(ErrorKind::InvalidFormat).with_message(format!("invalid [thumbnail]: {key} was replaced by image_slots and process_slots in [scheduler]")));
+            }
+        }
         let defaults = ThumbnailOptions::default();
         let format = match self.format.as_deref() {
             None => defaults.format,
@@ -167,8 +213,6 @@ impl ThumbnailConfigToml {
             display_quality: self.display_quality.unwrap_or(defaults.display_quality),
             cache_capacity_bytes: self.cache_capacity_bytes.unwrap_or(defaults.cache_capacity_bytes),
             display_cache_capacity_bytes: self.display_cache_capacity_bytes.unwrap_or(defaults.display_cache_capacity_bytes),
-            max_concurrent_images: self.max_concurrent_images.unwrap_or(defaults.max_concurrent_images),
-            max_concurrent_videos: self.max_concurrent_videos.unwrap_or(defaults.max_concurrent_videos),
             video_timeout: self.video_timeout_secs.map(std::time::Duration::from_secs).unwrap_or(defaults.video_timeout),
         };
 
@@ -197,6 +241,7 @@ pub struct DaemonConfig {
     pub libraries: Vec<LibraryConfig>,
     pub storage: StorageConfig,
     pub thumbnail: ThumbnailOptions,
+    pub scheduler: ScheduleOptions,
     pub media: MediaOptions,
     pub web: WebConfig,
     pub video: VideoOptions,
@@ -214,6 +259,8 @@ pub struct CoreConfig {
 pub struct LoggingConfig {
     pub level: String,
     pub json: bool,
+    pub file: Option<PathBuf>,
+    pub performance: bool,
 }
 
 /// daemon が配信する web の成果物の置き場（design.md §10.1）。
@@ -342,12 +389,15 @@ impl DaemonConfig {
             logging: LoggingConfig {
                 level: toml.logging.level,
                 json: toml.logging.json,
+                file: toml.logging.file.map(|file| dir.join(file)),
+                performance: toml.logging.performance,
             },
             libraries,
             storage: StorageConfig {
                 archive: toml.storage.archive.into_options()?,
             },
             thumbnail: toml.thumbnail.into_options()?,
+            scheduler: toml.scheduler.into_options()?,
             media: toml.media.into_options(),
             video: toml.video,
             listing: toml.listing,
@@ -466,10 +516,9 @@ mod tests {
 
     #[tokio::test]
     async fn thumbnail_overrides_test() -> TestResult {
-        let toml = format!("{BASE_TOML}\n[thumbnail]\nsizes = [64, 256]\nmax_concurrent_images = 2\ncache_capacity_bytes = 1024\n");
+        let toml = format!("{BASE_TOML}\n[thumbnail]\nsizes = [64, 256]\ncache_capacity_bytes = 1024\n");
         let config = load(&toml).await?;
         assert_eq!(config.thumbnail.sizes, [64, 256]);
-        assert_eq!(config.thumbnail.max_concurrent_images, 2);
         assert_eq!(config.thumbnail.cache_capacity_bytes, 1024);
         assert_eq!(config.thumbnail.display_sizes, ThumbnailOptions::default().display_sizes);
         assert_eq!(config.thumbnail.display_sizes, [2048, 4096]);
@@ -479,15 +528,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scheduler_defaults_overrides_and_moved_thumbnail_keys_test() -> TestResult {
+        assert_eq!(load(BASE_TOML).await?.scheduler, ScheduleOptions::default());
+        let config = load(&format!("{BASE_TOML}\n[scheduler]\nimage_slots = 2\nprocess_interactive_slots = 0\n")).await?;
+        assert_eq!(
+            config.scheduler,
+            ScheduleOptions {
+                image_slots: 2,
+                process_interactive_slots: 0,
+                ..Default::default()
+            }
+        );
+        load(&format!("{BASE_TOML}\n[scheduler]\nprocess_slots = 0\n"))
+            .await
+            .expect_err("a pool needs a shared slot");
+        for key in ["max_concurrent_images", "max_concurrent_videos"] {
+            let error = load(&format!("{BASE_TOML}\n[thumbnail]\n{key} = 2\n")).await.expect_err("moved key");
+            assert!(error.message().unwrap_or_default().contains("[scheduler]"), "{key}: {error:?}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn media_defaults_and_overrides_test() -> TestResult {
         assert_eq!(load(BASE_TOML).await?.media, MediaOptions::default());
 
-        let toml = format!("{BASE_TOML}\n[media]\nffmpeg_path = \"/opt/ffmpeg/bin/ffmpeg\"\n[thumbnail]\nvideo_timeout_secs = 5\nmax_concurrent_videos = 1\n");
+        let toml = format!("{BASE_TOML}\n[media]\nffmpeg_path = \"/opt/ffmpeg/bin/ffmpeg\"\n[thumbnail]\nvideo_timeout_secs = 5\n");
         let config = load(&toml).await?;
         assert_eq!(config.media.ffmpeg_path, PathBuf::from("/opt/ffmpeg/bin/ffmpeg"));
         assert_eq!(config.media.ffprobe_path, PathBuf::from("ffprobe"));
+        assert_eq!(config.media.heif_dec_path, PathBuf::from("heif-dec"));
         assert_eq!(config.thumbnail.video_timeout, std::time::Duration::from_secs(5));
-        assert_eq!(config.thumbnail.max_concurrent_videos, 1);
 
         let toml = format!("{BASE_TOML}\n[media]\nunknown_key = 1\n");
         load(&toml).await.expect_err("unknown key should be rejected");
@@ -529,6 +600,17 @@ mod tests {
 
         let toml = format!("{BASE_TOML}\n[thumbnail]\nunknown_key = 1\n");
         load(&toml).await.expect_err("unknown key should be rejected");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn logging_file_and_performance_default_off_and_override_test() -> TestResult {
+        let logging = load(BASE_TOML).await?.logging;
+        assert_eq!((logging.file, logging.performance), (None, false));
+
+        let config = load(&BASE_TOML.replace("json = false", "json = false\nfile = \"logs/pxna.log\"\nperformance = true")).await?;
+        assert!(config.logging.performance);
+        assert!(config.logging.file.is_some_and(|file| file.ends_with("logs/pxna.log")));
         Ok(())
     }
 

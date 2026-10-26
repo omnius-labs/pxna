@@ -92,12 +92,13 @@ impl MediaInfoService {
             let content_type = MediaKind::content_type(name).unwrap_or("application/octet-stream").to_string();
             (content_type, width, height)
         };
-        let to_info = |(content_type, width, height): (String, u32, u32), rotation: u16, exif| {
+        let to_info = |(content_type, width, height): (String, u32, u32), rotation: u16, has_alpha: bool, exif| {
             MediaInfo::Image(ImageInfo {
                 content_type,
                 width,
                 height,
                 rotation,
+                has_alpha,
                 exif,
             })
         };
@@ -111,15 +112,15 @@ impl MediaInfoService {
                 })
                 .await
                 .map_err(|error| Error::from_error(error, ErrorKind::TaskError))??;
-                Ok(to_info(image(width, height), 0, exif))
+                Ok(to_info(image(width, height), 0, false, exif))
             }
-            Some(MediaKind::FfmpegImage) => {
-                let (width, height, rotation) = self.tools.probe_image_size(file).await?;
+            Some(MediaKind::FfmpegImage | MediaKind::HeifImage) => {
+                let (width, height, rotation, has_alpha) = self.tools.probe_image_size(file).await?;
                 let path = file.to_path_buf();
                 let exif = tokio::task::spawn_blocking(move || ImageInspector::read_exif(&path))
                     .await
                     .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?;
-                Ok(to_info(image(width, height), rotation, exif))
+                Ok(to_info(image(width, height), rotation, has_alpha, exif))
             }
             Some(MediaKind::Video) | None => Ok(MediaInfo::Video(self.tools.probe_video_info(file).await?)),
         }

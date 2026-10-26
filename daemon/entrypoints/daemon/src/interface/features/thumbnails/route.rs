@@ -10,11 +10,13 @@ use http::{
     HeaderMap, HeaderValue, StatusCode,
     header::{CACHE_CONTROL, CONTENT_TYPE, ETAG},
 };
+use tracing::{Instrument as _, Span, field::Empty};
 use validator::Validate as _;
 
 use omnius_pxna_engine::{
     model::{ImageAnchorPositionType, ImageFormatType, ImageResizeType},
-    service::{Thumbnail, ThumbnailRequest, ThumbnailVariant},
+    perf_span,
+    service::{Thumbnail, ThumbnailRequest, ThumbnailVariant, WorkClass},
 };
 use omnius_pxna_interface::models;
 
@@ -31,6 +33,9 @@ impl ThumbnailRoute {
     /// `width` と `height` の契約の既定値。
     const DEFAULT_SIZE: u32 = 256;
 
+    /// 表示用画像の要求の優先度。`interactive` は表示中の画像、`prefetch` は先読みで、省略すると `interactive` になる。
+    const PRIORITY_HEADER: &'static str = "pxna-priority";
+
     pub async fn get(
         State(state): State<Arc<DaemonState>>,
         Path(library_id): Path<String>,
@@ -42,13 +47,24 @@ impl ThumbnailRoute {
             return ApiError::unauthorized().into_response();
         }
 
+        let span = perf_span!("thumbnail_request", library_id, path = Empty, variant = Empty, ok = Empty, bytes = Empty);
         let result = async {
             let Query(params) = query.map_err(|rejection| Error::new(ErrorKind::InvalidInput).with_message(rejection.body_text()))?;
-            let request = Self::request(&params, state.conf.thumbnail.format)?;
-            let source = state.library.thumbnail_source(&library_id, &params.path).await?;
+            let priority = headers.get(Self::PRIORITY_HEADER).map(|value| value.to_str().unwrap_or_default());
+            let request = Self::request(&params, priority, state.conf.thumbnail.format)?;
+            Span::current().record("path", &params.path).record("variant", tracing::field::debug(request.variant));
+            let source = state
+                .library
+                .thumbnail_source(&library_id, &params.path)
+                .instrument(perf_span!("thumbnail_resolve"))
+                .await?;
             Ok::<_, Error>(state.thumbnails.generate_resolved(source, &request).await?)
         }
+        .instrument(span.clone())
         .await;
+        span.record("ok", result.is_ok())
+            .record("bytes", result.as_ref().map_or(0, |thumbnail| thumbnail.bytes.len()));
+        drop(span);
 
         match result {
             Ok(thumbnail) => Self::response(thumbnail),
@@ -57,7 +73,8 @@ impl ThumbnailRoute {
     }
 
     /// クエリを、契約の既定値を補った指定へ写す。`format` を省略した要求には `default_format` を使う。
-    fn request(params: &models::GetThumbnailQueryParams, default_format: ImageFormatType) -> Result<ThumbnailRequest> {
+    /// `priority` は `Pxna-Priority` ヘッダの値である。
+    fn request(params: &models::GetThumbnailQueryParams, priority: Option<&str>, default_format: ImageFormatType) -> Result<ThumbnailRequest> {
         params.validate().map_err(|error| Error::new(ErrorKind::InvalidInput).with_message(error.to_string()))?;
 
         let variant = match params.variant.unwrap_or(models::ThumbnailVariant::Thumbnail) {
@@ -67,6 +84,16 @@ impl ThumbnailRoute {
         };
         // 表示用画像は、幅と高さを指定しなければ、表示用の段階の最大へ収める。
         let default_size = (variant != ThumbnailVariant::Display).then_some(Self::DEFAULT_SIZE);
+
+        // サムネイルとスプライトシートは一覧に出すので、ヘッダによらず Foreground にする。
+        let class = match (variant, priority) {
+            (ThumbnailVariant::Display, None | Some("interactive")) => WorkClass::Interactive,
+            (ThumbnailVariant::Display, Some("prefetch")) => WorkClass::Foreground,
+            (ThumbnailVariant::Display, Some(other)) => {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("invalid Pxna-Priority: {other:?}")));
+            }
+            _ => WorkClass::Foreground,
+        };
 
         Ok(ThumbnailRequest {
             variant,
@@ -95,6 +122,7 @@ impl ThumbnailRoute {
                 models::ImageAnchor::TopLeft => ImageAnchorPositionType::TopLeft,
                 models::ImageAnchor::TopRight => ImageAnchorPositionType::TopRight,
             },
+            class,
         })
     }
 

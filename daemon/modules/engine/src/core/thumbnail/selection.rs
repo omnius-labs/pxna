@@ -6,10 +6,12 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use futures::StreamExt as _;
+use tracing::{Instrument as _, Span, field::Empty};
 
 use crate::{
     base::util::SingleFlight,
     core::{media::MediaKind, work::WorkClass},
+    perf_span,
     prelude::*,
     service::{ArchiveIdentity, ResolvedStoragePath, StorageService},
 };
@@ -88,7 +90,10 @@ impl RepresentativeSelection {
     }
 
     pub async fn select(&self, folder: &ResolvedStoragePath) -> Result<ResolvedStoragePath> {
-        let started = Instant::now();
+        self.select_traced(folder).instrument(perf_span!("representative_selection", cache_hit = Empty)).await
+    }
+
+    async fn select_traced(&self, folder: &ResolvedStoragePath) -> Result<ResolvedStoragePath> {
         let key = SelectionKey {
             path: folder.path().to_nested_path_buf(),
             version: Self::version(folder).await?,
@@ -96,21 +101,46 @@ impl RepresentativeSelection {
             revision: self.state.lock().revision,
         };
         if let Some(path) = self.state.lock().get(&key, Instant::now()) {
-            tracing::debug!(target: "pxna::performance", operation = "representative_selection", cache_hit = true, has_candidate = path.is_some(), entry_count = 0_u64, elapsed_sec = started.elapsed().as_secs_f64(), "representative selection completed");
+            Span::current().record("cache_hit", true);
             return Self::target(folder, path);
         }
+        Span::current().record("cache_hit", false);
 
         let (state, fs, owned, flight_key) = (self.state.clone(), self.fs.clone(), folder.clone(), key.clone());
         let class = WorkClass::current();
         #[cfg(test)]
         let scans = self.scans.clone();
-        let result = self.flights.run(key, class.scope(async move {
-            // 登録直前に別の flight が公開した場合も、再走査しない。
-            if let Some(path) = state.lock().get(&flight_key, Instant::now()) { return Ok(path); }
-            #[cfg(test)]
-            scans.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let scan_started = Instant::now();
-            let mut entries = owned.find_entry_summaries().await?;
+        let result = self
+            .flights
+            .run(
+                key,
+                class.scope(async move {
+                    // 登録直前に別の flight が公開した場合も、再走査しない。
+                    if let Some(path) = state.lock().get(&flight_key, Instant::now()) {
+                        return Ok(path);
+                    }
+                    #[cfg(test)]
+                    scans.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let best = Self::scan(&owned).await?;
+                    let current_version = Self::version(&owned).await?;
+                    if flight_key.version.is_some() && current_version == flight_key.version && fs.browse_generation() == flight_key.generation {
+                        let mut state = state.lock();
+                        if state.revision == flight_key.revision {
+                            state.put(flight_key, best.clone(), Instant::now());
+                        }
+                    }
+                    Ok(best)
+                }),
+            )
+            .await?;
+        Self::target(folder, (*result).clone())
+    }
+
+    /// 直下の画像と動画から、自然順で最初の名前を選ぶ。
+    async fn scan(folder: &ResolvedStoragePath) -> Result<Option<String>> {
+        let span = perf_span!("representative_scan", entry_count = Empty, has_candidate = Empty);
+        async {
+            let mut entries = folder.find_entry_summaries().await?;
             let mut best: Option<String> = None;
             let mut count = 0_u64;
             while let Some(entry) = entries.next().await {
@@ -118,20 +148,21 @@ impl RepresentativeSelection {
                 count += 1;
                 let inner = entry.path.iter().last().unwrap_or_default();
                 let name = inner.rsplit(['/', '\\']).next().unwrap_or_default();
-                if entry.kind != FsEntryKind::File || name.starts_with('.') || MediaKind::of_name(name).is_none() { continue; }
-                if best.as_ref().is_none_or(|current| NaturalOrder::compare(name, current.rsplit(['/', '\\']).next().unwrap_or_default()).is_lt()) {
+                if entry.kind != FsEntryKind::File || name.starts_with('.') || MediaKind::of_name(name).is_none() {
+                    continue;
+                }
+                if best
+                    .as_ref()
+                    .is_none_or(|current| NaturalOrder::compare(name, current.rsplit(['/', '\\']).next().unwrap_or_default()).is_lt())
+                {
                     best = Some(inner.to_string());
                 }
             }
-            let current_version = Self::version(&owned).await?;
-            if flight_key.version.is_some() && current_version == flight_key.version && fs.browse_generation() == flight_key.generation {
-                let mut state = state.lock();
-                if state.revision == flight_key.revision { state.put(flight_key, best.clone(), Instant::now()); }
-            }
-            tracing::debug!(target: "pxna::performance", operation = "representative_selection", cache_hit = false, has_candidate = best.is_some(), entry_count = count, elapsed_sec = scan_started.elapsed().as_secs_f64(), "representative selection completed");
+            Span::current().record("entry_count", count).record("has_candidate", best.is_some());
             Ok(best)
-        })).await?;
-        Self::target(folder, (*result).clone())
+        }
+        .instrument(span)
+        .await
     }
 
     fn target(folder: &ResolvedStoragePath, path: Option<String>) -> Result<ResolvedStoragePath> {

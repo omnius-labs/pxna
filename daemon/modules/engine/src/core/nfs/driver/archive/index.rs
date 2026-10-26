@@ -58,49 +58,61 @@ pub(super) struct ArchiveIndex {
 }
 
 impl ArchiveIndex {
-    pub fn build(raw_entries: Vec<ArchiveEntry>, max_entry_count: usize) -> Result<Self> {
+    /// Builds the index, synthesizing missing parent directories.
+    ///
+    /// The entry count is checked on every insertion, so building never holds more than `max_entry_count` entries.
+    pub fn build(mut raw_entries: Vec<ArchiveEntry>, max_entry_count: usize) -> Result<Self> {
         if raw_entries.len() > max_entry_count {
             return Err(ArchiveError::limit_exceeded(format!("archive has more than {max_entry_count} entries")));
         }
 
-        let mut by_path: BTreeMap<String, ArchiveEntry> = BTreeMap::new();
+        // A path sorts after all of its ancestors, so every entry already present has all of its own ancestors.
+        raw_entries.sort_unstable_by(|a, b| a.path().cmp(b.path()));
+
+        let mut by_path = BTreeMap::from([(String::new(), ArchiveEntry::synthetic_dir(String::new()))]);
         for entry in raw_entries {
-            let path = entry.path().to_string();
-            if let Some(previous) = by_path.get(&path) {
+            if let Some(previous) = by_path.get(entry.path()) {
                 let message = if previous.fs_entry.kind() == entry.fs_entry.kind() {
-                    format!("duplicate archive entry path: {path}")
+                    format!("duplicate archive entry path: {}", entry.path())
                 } else {
-                    format!("archive entry kind collision: {path}")
+                    format!("archive entry kind collision: {}", entry.path())
                 };
                 return Err(ArchiveError::invalid_format(message));
             }
-            by_path.insert(path, entry);
+            Self::insert_parents(&mut by_path, entry.path(), max_entry_count)?;
+            Self::ensure_capacity(&by_path, max_entry_count)?;
+            by_path.insert(entry.path().to_string(), entry);
         }
 
-        let paths = by_path.keys().cloned().collect::<Vec<_>>();
-        for path in paths {
-            let segments = path.split('/').collect::<Vec<_>>();
-            for end in 1..segments.len() {
-                let parent = segments[..end].join("/");
-                if let Some(existing) = by_path.get(&parent) {
-                    if !existing.fs_entry.is_dir() {
-                        return Err(ArchiveError::invalid_format(format!("archive entry kind collision: {parent}")));
-                    }
-                } else {
-                    by_path.insert(parent.clone(), ArchiveEntry::synthetic_dir(parent));
+        Ok(Self {
+            entries: by_path.into_values().collect(),
+        })
+    }
+
+    /// Inserts the missing ancestors of `path` from the deepest one up, and stops at the first ancestor that exists.
+    fn insert_parents(by_path: &mut BTreeMap<String, ArchiveEntry>, path: &str, max_entry_count: usize) -> Result<()> {
+        let mut parent = path;
+        while let Some(end) = parent.rfind('/') {
+            parent = &parent[..end];
+            if let Some(existing) = by_path.get(parent) {
+                if !existing.fs_entry.is_dir() {
+                    return Err(ArchiveError::invalid_format(format!("archive entry kind collision: {parent}")));
                 }
+                return Ok(());
             }
+            Self::ensure_capacity(by_path, max_entry_count)?;
+            by_path.insert(parent.to_string(), ArchiveEntry::synthetic_dir(parent.to_string()));
         }
-        by_path.insert(String::new(), ArchiveEntry::synthetic_dir(String::new()));
+        Ok(())
+    }
 
-        if by_path.len() > max_entry_count {
+    fn ensure_capacity(by_path: &BTreeMap<String, ArchiveEntry>, max_entry_count: usize) -> Result<()> {
+        if by_path.len() >= max_entry_count {
             return Err(ArchiveError::limit_exceeded(format!(
                 "archive has more than {max_entry_count} entries after parent synthesis"
             )));
         }
-        Ok(Self {
-            entries: by_path.into_values().collect(),
-        })
+        Ok(())
     }
 
     pub fn estimated_size(&self) -> u64 {
@@ -159,8 +171,53 @@ mod tests {
         assert_eq!(ArchiveIndex::build(vec![file("a"), file("a/b")], 10).unwrap_err().kind(), &ErrorKind::InvalidFormat);
     }
 
+    fn dir(path: &str) -> ArchiveEntry {
+        ArchiveEntry::new(path.to_string(), FsEntryKind::Dir, 0, Some(DateTime::UNIX_EPOCH), None)
+    }
+
+    /// A path just under `FsEntry::MAX_PATH_LENGTH` with about 2,000 segments.
+    fn deep_path(root: &str) -> String {
+        let mut path = root.to_string();
+        while path.len() + 4 <= FsEntry::MAX_PATH_LENGTH {
+            path.push_str("/a");
+        }
+        path.push_str("/f");
+        path
+    }
+
+    #[test]
+    fn rejects_kind_collision_in_any_input_order_test() {
+        assert_eq!(ArchiveIndex::build(vec![file("a/b"), file("a")], 10).unwrap_err().kind(), &ErrorKind::InvalidFormat);
+        assert_eq!(ArchiveIndex::build(vec![file("a/b/c"), file("a")], 10).unwrap_err().kind(), &ErrorKind::InvalidFormat);
+    }
+
+    #[test]
+    fn keeps_raw_directory_listed_after_its_descendant_test() {
+        let index = ArchiveIndex::build(vec![file("a/b/c.txt"), dir("a/b")], 10).unwrap();
+        assert_eq!(index.get("a/b").unwrap().fs_entry.meta.modified, Some(DateTime::UNIX_EPOCH));
+        assert_eq!(index.get("a").unwrap().fs_entry.meta.modified, None);
+    }
+
     #[test]
     fn enforces_limit_after_parent_synthesis_test() {
         assert_eq!(ArchiveIndex::build(vec![file("a/b")], 2).unwrap_err().kind(), &ErrorKind::LimitExceeded);
+        assert_eq!(ArchiveIndex::build(vec![file("a/b")], 3).unwrap().entries.len(), 3);
+    }
+
+    #[test]
+    fn rejects_deep_paths_before_synthesizing_past_limit_test() {
+        // Synthesizing every parent before the limit check would ask for about 2 million directories here.
+        let entries = (0..1_000).map(|i| file(&deep_path(&format!("e{i}")))).collect::<Vec<_>>();
+        assert_eq!(ArchiveIndex::build(entries, 100_000).unwrap_err().kind(), &ErrorKind::LimitExceeded);
+    }
+
+    #[test]
+    fn synthesizes_shared_deep_parents_once_test() {
+        let base = deep_path("d");
+        let base = base.strip_suffix("/f").unwrap();
+        let depth = base.split('/').count();
+        let entries = (0..1_000).map(|i| file(&format!("{base}/f{i}"))).collect::<Vec<_>>();
+        let index = ArchiveIndex::build(entries, 1_000 + depth + 1).unwrap();
+        assert_eq!(index.entries.len(), 1_000 + depth + 1);
     }
 }

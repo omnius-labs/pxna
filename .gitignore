@@ -2,3 +2,6 @@ buildServer.json
 .playwright-cli
 /.pxna
 /.env
+/.serena
+/compose.override.yaml
+/config/pxna.toml

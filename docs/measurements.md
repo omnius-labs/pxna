@@ -25,6 +25,8 @@ Each record has the measurement method, the numbers, and the limits, and values 
 | [2026-10-15-browse-thumbnails](./measurements/2026-10-15-browse-thumbnails.md) | 2026-10-15 | Comparison of the representative selection cache, delayed usage-order updates, and the 200 ms delay of folder requests |
 | [2026-10-16-display-image-latency](./measurements/2026-10-16-display-image-latency.md) | 2026-10-16 | The viewer's first generation of a display image, cache hits, fetching the original image, and waits during consecutive flipping |
 | [2026-10-16-webp-method](./measurements/2026-10-16-webp-method.md) | 2026-10-16 | A sweep of WebP compression effort (method), and first generation and consecutive flipping before and after lowering it from 4 to 2 |
+| [2026-10-24-heif-display](./measurements/2026-10-24-heif-display.md) | 2026-10-24 | HEIC decoding, display image and thumbnail generation, and cache hits compared with the same-size JPEG |
+| [2026-10-24-heif-ppm](./measurements/2026-10-24-heif-ppm.md) | 2026-10-24 | Display and thumbnail generation after switching ffmpeg-read images to PPM output |
 
 ## 3. Comparison Procedures
 

@@ -1,13 +1,13 @@
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { ClipboardContents } from "./clipboard";
+import type { TransferSource } from "./clipboard";
 import type { TransferDestination } from "./collision";
 import { useTransfer } from "./transfer";
 import { droppedInputs } from "./upload";
 
 export const ENTRY_MIME = "application/x-pxna-entries";
-let dragged: ClipboardContents | undefined;
-export function beginEntryDrag(data: DataTransfer, source: ClipboardContents) {
+let dragged: TransferSource | undefined;
+export function beginEntryDrag(data: DataTransfer, source: TransferSource) {
     dragged = source;
     data.effectAllowed = "copyMove";
     data.setData(ENTRY_MIME, JSON.stringify(source));
@@ -15,7 +15,7 @@ export function beginEntryDrag(data: DataTransfer, source: ClipboardContents) {
 export function endEntryDrag() {
     dragged = undefined;
 }
-export function readEntryDrag(data: DataTransfer): ClipboardContents | undefined {
+export function readEntryDrag(data: DataTransfer): TransferSource | undefined {
     try {
         const value: unknown = JSON.parse(data.getData(ENTRY_MIME));
         if (

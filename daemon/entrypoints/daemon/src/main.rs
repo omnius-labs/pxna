@@ -7,6 +7,8 @@ mod db;
 mod error;
 mod executor;
 mod interface;
+mod logging;
+mod media_check;
 mod prelude;
 mod result;
 mod service;
@@ -29,11 +31,13 @@ fn main() -> ExitCode {
     // spawn_blocking は中断できないため、runtime の Drop による無期限の終了待ちを避ける。
     runtime.shutdown_timeout(Duration::from_secs(1));
 
-    match result {
+    let code = match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             error!(error = ?e, "unexpected error");
             ExitCode::FAILURE
         }
-    }
+    };
+    logging::Logging::shutdown();
+    code
 }

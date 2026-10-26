@@ -8,20 +8,20 @@ import {
     usePanelWidth,
 } from "../library/panelWidth";
 import { useNarrowScreen } from "../library/preferences";
-import type { BrowseLocation, SearchLocation } from "../location";
+import type { BrowseLocation } from "../location";
 import { ActivityPanel } from "./ActivityPanel";
 import { ResizeHandle } from "./ResizeHandle";
-import { NarrowHeader, Toolbar } from "./Toolbar";
+import { NarrowHeader, type SearchChrome, Toolbar } from "./Toolbar";
 import { Tree } from "./Tree";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 
 interface AppShellProps {
     /// 今いる位置。ツリーで強調し、パンくずに出す。
     location?: BrowseLocation;
-    /// 検索モードの位置。あれば、パンくずの代わりに検索の操作を出す。
-    search?: SearchLocation;
-    /// タイムラインを開いている Library。あれば、パンくずと検索の代わりに Library の名前を出す。
-    timelineLibraryId?: string;
+    /// 検索モードか。あれば、パンくずの代わりに「検索」と出し、狭い画面ではヘッダーの下に検索語の欄を出す。
+    search?: SearchChrome;
+    /// タイムラインか。パンくずと検索の代わりに「タイムライン」と出す。
+    timeline?: boolean;
     /// 左の領域。省略するとツリーを出す。狭い画面では、ドロワーの中に出す。引数で、ドロワーを閉じられる。
     sidebar?: (close: () => void) => ReactNode;
     /// ツールバーの右に並べる操作。
@@ -38,7 +38,7 @@ interface AppShellProps {
 export function AppShell({
     location,
     search,
-    timelineLibraryId,
+    timeline = false,
     sidebar,
     actions,
     children,
@@ -67,7 +67,7 @@ export function AppShell({
                 <NarrowHeader
                     location={location}
                     search={search}
-                    timelineLibraryId={timelineLibraryId}
+                    timeline={timeline}
                     actions={actions}
                     onOpenTree={() => setDrawerOpen(true)}
                 />
@@ -75,14 +75,16 @@ export function AppShell({
                 <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
                     <SheetContent side="left" className="w-72 p-0">
                         <SheetHeader className="border-b">
-                            <SheetTitle>{timelineLibraryId ? "年と月" : "フォルダ"}</SheetTitle>
+                            <SheetTitle>{timeline ? "Library と年月" : search ? "検索の条件" : "フォルダ"}</SheetTitle>
                             <SheetDescription className="sr-only">
-                                {timelineLibraryId
-                                    ? "表示する年と月を選んで移ります。"
-                                    : "Library のフォルダを選んで移ります。"}
+                                {timeline
+                                    ? "並べる Library と、表示する年と月を選びます。"
+                                    : search
+                                      ? "探す Library、場所、評価、タグを選びます。"
+                                      : "Library のフォルダを選んで移ります。"}
                             </SheetDescription>
                         </SheetHeader>
-                        <nav aria-label="Library" className="min-h-0 flex-1 overflow-y-auto">
+                        <nav aria-label={search ? "検索の条件" : "Library"} className="min-h-0 flex-1 overflow-y-auto">
                             {left}
                         </nav>
                     </SheetContent>
@@ -93,16 +95,16 @@ export function AppShell({
 
     return (
         <div className="flex h-dvh flex-col bg-background text-sm text-foreground">
-            <Toolbar location={location} search={search} timelineLibraryId={timelineLibraryId} actions={actions} />
+            <Toolbar location={location} search={search} timeline={timeline} actions={actions} />
             <div className="flex min-h-0 flex-1">
                 <nav
-                    aria-label="Library"
+                    aria-label={search ? "検索の条件" : "Library"}
                     className="shrink-0 overflow-y-auto border-r bg-sidebar"
-                    style={{ width: sidebar ? "14rem" : treeWidth.width }}
+                    style={{ width: sidebar ? (search ? "16rem" : "14rem") : treeWidth.width }}
                 >
                     {left}
                 </nav>
-                {/* 幅を変えられるのはツリーだけで、タイムラインの月の一覧（`sidebar`）は固定である。 */}
+                {/* 幅を変えられるのはツリーだけで、タイムラインの月の一覧と検索の条件（`sidebar`）は固定である。 */}
                 {!sidebar && (
                     <ResizeHandle
                         label="ツリーの幅"

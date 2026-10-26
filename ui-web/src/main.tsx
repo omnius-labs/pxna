@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { clientTimings } from "./api/clientTimings";
 import { createAppQueryClient } from "./auth/unauthorized";
 import { Toaster } from "./components/ui/sonner";
 import "./index.css";
@@ -17,6 +18,7 @@ const queryClient = createAppQueryClient(() => ({
     toLogin: (redirect) => void router.navigate({ to: "/login", search: { redirect }, replace: true }),
 }));
 const router = createAppRouter(queryClient);
+clientTimings.attach(queryClient);
 
 const root = document.getElementById("root");
 if (!root) {

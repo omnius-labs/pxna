@@ -1,25 +1,23 @@
-use std::{
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{path::Path, sync::Arc, time::Duration};
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::bytes::Bytes;
+use tracing::{Instrument as _, Span, field::Empty};
 
 use crate::{
     base::util::SingleFlight,
     core::{
         image::{ImageConvertOptions, ImageConverter, SizeSteps},
         media::{FrameSpec, MediaKind, MediaOptions, MediaTools},
+        schedule::{MediaPools, ScheduleOptions, SchedulePermit, Scheduler},
         thumbnail::{
             cache::{CacheBucket, CachedImage, ThumbnailCache, ThumbnailCacheOptions},
             key::{ThumbnailKey, ThumbnailKeyHasher},
             request::{Thumbnail, ThumbnailRequest, ThumbnailVariant},
         },
     },
+    perf_span,
     prelude::*,
-    service::{EntryCacheKey, MediaInfoService, NestedFsEntry, ResolvedStoragePath, StorageService},
+    service::{EntryCacheKey, MediaInfo, MediaInfoService, NestedFsEntry, ResolvedStoragePath, StorageService},
 };
 
 const GIB: u64 = 1024 * 1024 * 1024;
@@ -42,9 +40,6 @@ pub struct ThumbnailOptions {
     pub display_quality: u8,
     pub cache_capacity_bytes: u64,
     pub display_cache_capacity_bytes: u64,
-    pub max_concurrent_images: usize,
-    /// 同時に走る ffmpeg の数。
-    pub max_concurrent_videos: usize,
     /// 1 回の ffmpeg の実行の期限。
     pub video_timeout: Duration,
 }
@@ -59,8 +54,6 @@ impl Default for ThumbnailOptions {
             display_quality: 90,
             cache_capacity_bytes: 2 * GIB,
             display_cache_capacity_bytes: 2 * GIB,
-            max_concurrent_images: 4,
-            max_concurrent_videos: 2,
             video_timeout: Duration::from_secs(60),
         }
     }
@@ -73,11 +66,7 @@ impl ThumbnailOptions {
     }
 
     fn steps(&self) -> Result<(SizeSteps, SizeSteps)> {
-        let positive = self.cache_capacity_bytes > 0
-            && self.display_cache_capacity_bytes > 0
-            && self.max_concurrent_images > 0
-            && self.max_concurrent_videos > 0
-            && !self.video_timeout.is_zero();
+        let positive = self.cache_capacity_bytes > 0 && self.display_cache_capacity_bytes > 0 && !self.video_timeout.is_zero();
         if !positive {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("thumbnail capacities, concurrency, and the timeout must be greater than zero"));
         }
@@ -109,13 +98,14 @@ struct Inner {
     display_sizes: SizeSteps,
     quality: u8,
     display_quality: u8,
-    image_permits: Arc<Semaphore>,
-    video_permits: Arc<Semaphore>,
+    pools: MediaPools,
     flights: SingleFlight<ThumbnailKey, Produced>,
     #[cfg(test)]
     conversions: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     ffmpeg_runs: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    heif_dec_runs: std::sync::atomic::AtomicUsize,
 }
 
 /// 要求を、サイズ段階へ切り上げた、キャッシュのキーに含める条件にそろえたもの。
@@ -153,10 +143,18 @@ enum SourceId {
 impl ThumbnailGenerator {
     pub async fn open(fs: Arc<StorageService>, cache_dir: &Path, options: ThumbnailOptions, media: MediaOptions) -> Result<Self> {
         let media_info = Arc::new(MediaInfoService::new(media.clone(), options.video_timeout));
-        Self::open_with_media(fs, cache_dir, options, media, media_info).await
+        let pools = MediaPools::new(&Arc::new(Scheduler::default()), &ScheduleOptions::default());
+        Self::open_with_media(fs, cache_dir, options, media, media_info, pools).await
     }
 
-    pub async fn open_with_media(fs: Arc<StorageService>, cache_dir: &Path, options: ThumbnailOptions, media: MediaOptions, media_info: Arc<MediaInfoService>) -> Result<Self> {
+    pub async fn open_with_media(
+        fs: Arc<StorageService>,
+        cache_dir: &Path,
+        options: ThumbnailOptions,
+        media: MediaOptions,
+        media_info: Arc<MediaInfoService>,
+        pools: MediaPools,
+    ) -> Result<Self> {
         let (sizes, display_sizes) = options.steps()?;
         let cache = ThumbnailCache::open(
             cache_dir,
@@ -178,13 +176,14 @@ impl ThumbnailGenerator {
                 display_sizes,
                 quality: options.quality,
                 display_quality: options.display_quality,
-                image_permits: Arc::new(Semaphore::new(options.max_concurrent_images)),
-                video_permits: Arc::new(Semaphore::new(options.max_concurrent_videos)),
+                pools,
                 flights: SingleFlight::new(),
                 #[cfg(test)]
                 conversions: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 ffmpeg_runs: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                heif_dec_runs: std::sync::atomic::AtomicUsize::new(0),
             }),
         })
     }
@@ -196,6 +195,12 @@ impl ThumbnailGenerator {
 
     /// daemon の境界探索で得た driver を、そのまま生成に使う。
     pub async fn generate_resolved(&self, resolved: ResolvedStoragePath, request: &ThumbnailRequest) -> Result<Thumbnail> {
+        let span = perf_span!("thumbnail_generate", variant = ?request.variant, name = Empty, kind = Empty, cache_hit = Empty);
+        self.generate_traced(resolved, request).instrument(span).await
+    }
+
+    /// `generate_resolved` の本体。結果の分かった field を、外側の `thumbnail_generate` の span に記録する。
+    async fn generate_traced(&self, resolved: ResolvedStoragePath, request: &ThumbnailRequest) -> Result<Thumbnail> {
         let inner = &self.inner;
         let path = resolved.path().to_nested_path_buf();
         let entry = resolved.get_entry().await?;
@@ -208,25 +213,27 @@ impl ThumbnailGenerator {
                 }
                 let folder = if folder == path { resolved } else { inner.fs.resolve_entry(&folder).await? };
                 let mut target = inner.selection.select(&folder).await?;
-                let metadata_started = Instant::now();
-                let entry = match target.get_listing_entry().await {
-                    Ok(entry) if matches!(entry.detail, FsEntryDetail::File { .. }) => entry,
-                    Ok(_) => {
-                        inner.selection.invalidate();
-                        target = inner.selection.select(&folder).await?;
-                        target.get_listing_entry().await?
+                let entry = async {
+                    match target.get_listing_entry().await {
+                        Ok(entry) if matches!(entry.detail, FsEntryDetail::File { .. }) => Ok(entry),
+                        Ok(_) => {
+                            inner.selection.invalidate();
+                            target = inner.selection.select(&folder).await?;
+                            target.get_listing_entry().await
+                        }
+                        Err(error) if error.kind() == &ErrorKind::NotFound => {
+                            inner.selection.invalidate();
+                            target = inner.selection.select(&folder).await?;
+                            target.get_listing_entry().await
+                        }
+                        Err(error) => Err(error),
                     }
-                    Err(error) if error.kind() == &ErrorKind::NotFound => {
-                        inner.selection.invalidate();
-                        target = inner.selection.select(&folder).await?;
-                        target.get_listing_entry().await?
-                    }
-                    Err(error) => return Err(error),
-                };
+                }
+                .instrument(perf_span!("representative_metadata"))
+                .await?;
                 if !matches!(entry.detail, FsEntryDetail::File { .. }) {
                     return Err(Error::new(ErrorKind::UnsupportedType).with_message("representative is no longer a file"));
                 }
-                tracing::debug!(target: "pxna::performance", operation = "representative_metadata", elapsed_sec = metadata_started.elapsed().as_secs_f64(), "representative metadata read completed");
                 (target, entry)
             }
             FsEntryDetail::Link { .. } => return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("not a file: {path}"))),
@@ -234,6 +241,7 @@ impl ThumbnailGenerator {
 
         let name = Inner::file_name(&entry.path);
         let kind = MediaKind::of_name(name).ok_or_else(|| Error::new(ErrorKind::UnsupportedType).with_message(format!("not a supported image or video: {name}")))?;
+        Span::current().record("name", name).record("kind", tracing::field::debug(kind));
         if request.variant == ThumbnailVariant::Sprite && kind != MediaKind::Video {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("the sprite variant requires a video"));
         }
@@ -246,10 +254,10 @@ impl ThumbnailGenerator {
         if let Some(key) = &requested_key
             && let Some(hit) = inner.cache.get(key).await?
         {
-            tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = true, "thumbnail image cache checked");
+            Span::current().record("cache_hit", true);
             return Ok(plan.thumbnail(hit, Some(key)));
         }
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = false, eligible = requested_key.is_some(), "thumbnail image cache checked");
+        Span::current().record("cache_hit", false);
 
         // 動画のサムネイルとスプライトシートは 1 回の ffmpeg の実行で両方を作るため、同じ flight にまとめる。
         let shares_a_run = kind == MediaKind::Video && request.variant != ThumbnailVariant::Display;
@@ -261,26 +269,30 @@ impl ThumbnailGenerator {
             sprite_key: if shares_a_run { key_of(ThumbnailVariant::Sprite) } else { None },
         };
         let flight_key = job.primary_key.clone();
-        let semaphore = inner.semaphore_for(kind);
+        let pool = inner.pool_for(kind).clone();
+        let class = request.class;
+        let gate = async move { Ok::<_, Error>(pool.acquire(class).await) }.instrument(perf_span!("thumbnail_permit_wait", class = ?class));
 
         // 生成枠と同じ key の生成を待つ時間も含む。生成そのものは `thumbnail_production` が測る。
-        let generating = Instant::now();
-        let produced = match flight_key {
-            Some(flight_key) => {
-                let work = inner.clone();
-                let produced = inner
-                    .flights
-                    .run_gated(flight_key, inner.acquire(semaphore), move |permit| async move { work.produce(job, permit).await })
-                    .await?;
-                (*produced).clone()
-            }
-            None => {
-                let permit = inner.acquire(semaphore).await?;
-                inner.clone().produce(job, permit).await?
-            }
-        };
+        let produced = async {
+            Ok::<_, Error>(match flight_key {
+                Some(flight_key) => {
+                    let work = inner.clone();
+                    let produced = inner
+                        .flights
+                        .run_gated(flight_key, gate, move |permit| async move { work.produce(job, permit).await })
+                        .await?;
+                    (*produced).clone()
+                }
+                None => {
+                    let permit = gate.await?;
+                    inner.clone().produce(job, permit).await?
+                }
+            })
+        }
+        .instrument(perf_span!("thumbnail_generation"))
+        .await?;
 
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_generation", elapsed_sec = generating.elapsed().as_secs_f64(), variant = ?request.variant, "thumbnail generation completed");
         let image = match request.variant {
             ThumbnailVariant::Sprite => produced
                 .sprite
@@ -300,6 +312,12 @@ impl ThumbnailGenerator {
     #[cfg(test)]
     fn ffmpeg_runs(&self) -> usize {
         self.inner.ffmpeg_runs.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// heif-dec を起動した回数。
+    #[cfg(test)]
+    fn heif_dec_runs(&self) -> usize {
+        self.inner.heif_dec_runs.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -357,57 +375,57 @@ impl Inner {
         })
     }
 
-    /// 画像の変換と、外部プロセスの ffmpeg は、別の同時実行数の上限で数える。
-    fn semaphore_for(&self, kind: MediaKind) -> Arc<Semaphore> {
+    /// 画像の変換と、外部プロセスの ffmpeg と heif-dec は、別の資源として数える。
+    /// 枠を待つ間に要求が drop されたら、何も始まらない。
+    fn pool_for(&self, kind: MediaKind) -> &crate::core::schedule::PriorityPool {
         match kind {
-            MediaKind::Image => self.image_permits.clone(),
-            MediaKind::FfmpegImage | MediaKind::Video => self.video_permits.clone(),
+            MediaKind::Image => &self.pools.images,
+            MediaKind::FfmpegImage | MediaKind::HeifImage | MediaKind::Video => &self.pools.processes,
         }
     }
 
-    /// 同時実行数の上限を待つ。待つ間に要求が drop されたら、何も始まらない。
-    async fn acquire(&self, semaphore: Arc<Semaphore>) -> Result<OwnedSemaphorePermit> {
-        semaphore.acquire_owned().await.map_err(|error| Error::from_error(error, ErrorKind::TaskError))
+    /// 生成してキャッシュへ入れる。独立した task で走るため、始まった後に要求が切れても最後まで走る。
+    async fn produce(self: Arc<Self>, job: Job, permit: SchedulePermit) -> Result<Produced> {
+        self.produce_traced(job, permit).instrument(perf_span!("thumbnail_production")).await
     }
 
-    /// 生成してキャッシュへ入れる。独立した task で走るため、始まった後に要求が切れても最後まで走る。
-    async fn produce(self: Arc<Self>, job: Job, _permit: OwnedSemaphorePermit) -> Result<Produced> {
+    async fn produce_traced(self: Arc<Self>, job: Job, _permit: SchedulePermit) -> Result<Produced> {
         // 直前に終わった同じ key の処理が入れた結果を、重ねて作らない。
         if let Some(cached) = self.cached(&job).await? {
             return Ok(cached);
         }
 
-        let started = Instant::now();
         // 変換が終わるまで、archive 内の file の lease を保つ。
-        let file = job.source.materialize_file().await?;
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_materialize", elapsed_sec = started.elapsed().as_secs_f64(), "thumbnail source materialized");
-        let converting = Instant::now();
-        let produced = match job.kind {
-            MediaKind::Image => {
-                let input = tokio::fs::read(file.path()).await?;
-                Produced {
-                    image: self.convert_one(input, &job.plan).await?,
-                    sprite: None,
+        let file = job.source.materialize_file().instrument(perf_span!("thumbnail_materialize")).await?;
+        let produced = async {
+            Ok::<_, Error>(match job.kind {
+                MediaKind::Image => {
+                    let read = perf_span!("thumbnail_source_read", bytes = Empty);
+                    let input = tokio::fs::read(file.path()).instrument(read.clone()).await?;
+                    read.record("bytes", input.len());
+                    Produced {
+                        image: self.convert_one(input, &job.plan).await?,
+                        sprite: None,
+                    }
                 }
-            }
-            MediaKind::FfmpegImage => {
-                let mut frames = self.extract_frames(file.path(), &[0.0]).await?;
-                let input = frames.swap_remove(0);
-                Produced {
-                    image: self.convert_one(input, &job.plan).await?,
-                    sprite: None,
+                MediaKind::FfmpegImage | MediaKind::HeifImage => {
+                    let decode = perf_span!("thumbnail_external_decode", bytes = Empty);
+                    let input = self.decode_ffmpeg_image(&job.source, file.path(), job.kind).instrument(decode.clone()).await?;
+                    decode.record("bytes", input.len());
+                    Produced {
+                        image: self.convert_one(input, &job.plan).await?,
+                        sprite: None,
+                    }
                 }
-            }
-            MediaKind::Video => self.produce_video(file.path(), &job.source, &job.plan).await?,
-        };
+                MediaKind::Video => self.produce_video(file.path(), &job.source, &job.plan).await?,
+            })
+        }
+        .instrument(perf_span!("thumbnail_convert"))
+        .await?;
         #[cfg(test)]
         self.conversions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_convert", elapsed_sec = converting.elapsed().as_secs_f64(), "thumbnail source read and converted");
-        let storing = Instant::now();
-        self.store(&job, &produced).await;
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_store", elapsed_sec = storing.elapsed().as_secs_f64(), "thumbnail stored");
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_production", elapsed_sec = started.elapsed().as_secs_f64(), "thumbnail produced and stored");
+        self.store(&job, &produced).instrument(perf_span!("thumbnail_store")).await;
         Ok(produced)
     }
 
@@ -445,7 +463,8 @@ impl Inner {
 
     async fn convert_one(&self, input: Vec<u8>, plan: &Plan) -> Result<CachedImage> {
         let options = plan.convert.clone();
-        let bytes = tokio::task::spawn_blocking(move || ImageConverter::convert(&input, &options))
+        let span = Span::current();
+        let bytes = tokio::task::spawn_blocking(move || span.in_scope(|| ImageConverter::convert(&input, &options)))
             .await
             .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?
             .map_err(Self::decode_error)?;
@@ -466,7 +485,9 @@ impl Inner {
         let frames = self.extract_frames(file, &positions).await?;
 
         let plan = plan.clone();
+        let span = Span::current();
         tokio::task::spawn_blocking(move || -> Result<Produced> {
+            let _entered = span.enter();
             let resized = frames
                 .iter()
                 .map(|frame| ImageConverter::decode(frame).and_then(|image| ImageConverter::resize(image, &plan.convert)))
@@ -499,6 +520,63 @@ impl Inner {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.tools.extract_frames(file, positions_secs).await
+    }
+
+    /// ffmpeg で読む画像をデコードする。HEIC/HEIF/AVIF は PPM、それ以外（JXL、JP2）は PNG を使う。
+    /// アルファ付きの HEIC/HEIF/AVIF は heif-dec に回し、ffmpeg が失敗したときも heif-dec で読み直す。
+    async fn decode_ffmpeg_image(&self, source: &ResolvedStoragePath, file: &Path, kind: MediaKind) -> Result<Vec<u8>> {
+        let heif_decodable = kind == MediaKind::HeifImage || Self::is_avif(source);
+        if !heif_decodable {
+            return self.extract_image(file).await;
+        }
+        if self.has_alpha(source).await? {
+            return self.decode_heif(file).await;
+        }
+        match self.extract_image_pixels(file).await {
+            Ok(image) => Ok(image),
+            Err(error) => {
+                warn!(error = ?error, "ffmpeg failed to decode a HEIF or AVIF image, so heif-dec reads it instead");
+                self.decode_heif(file).await
+            }
+        }
+    }
+
+    /// 拡張子が avif の file か。アルファを保持できる heif-dec に回せるかの判定に使う。
+    fn is_avif(source: &ResolvedStoragePath) -> bool {
+        Self::file_name(&source.path().to_nested_path_buf())
+            .rsplit_once('.')
+            .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("avif"))
+    }
+
+    /// 画像がアルファの補助画像を持つか。probe に失敗したときは、アルファを見落とさないよう heif-dec に回す。
+    async fn has_alpha(&self, source: &ResolvedStoragePath) -> Result<bool> {
+        match self.media_info.probe(source).await {
+            Ok(MediaInfo::Image(info)) => Ok(info.has_alpha),
+            Ok(_) => Ok(false),
+            Err(error) => {
+                warn!(error = ?error, "failed to probe an image for alpha, so heif-dec reads it");
+                Ok(true)
+            }
+        }
+    }
+
+    async fn extract_image(&self, file: &Path) -> Result<Vec<u8>> {
+        #[cfg(test)]
+        self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.tools.extract_image(file).await
+    }
+
+    async fn extract_image_pixels(&self, file: &Path) -> Result<Vec<u8>> {
+        #[cfg(test)]
+        self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.tools.extract_image_pixels(file).await
+    }
+
+    /// heif-dec で読む。アルファ付きの HEIC/HEIF/AVIF と、ffmpeg が読めなかったときのフォールバックに使う。
+    async fn decode_heif(&self, file: &Path) -> Result<Vec<u8>> {
+        #[cfg(test)]
+        self.heif_dec_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.tools.decode_heif(file).await
     }
 
     /// 拡張子が合っていても中身が読めない file は、`UnsupportedType` にする。
@@ -577,6 +655,7 @@ mod tests {
 
     use crate::{
         core::nfs::FileStorageLocal,
+        core::work::WorkClass,
         service::{ArchiveOptions, ArchiveRuntime, ImageExif, MediaInfo},
     };
 
@@ -616,6 +695,11 @@ mod tests {
             format,
             resize,
             anchor: ImageAnchorPositionType::Center,
+            class: if variant == ThumbnailVariant::Display {
+                WorkClass::Interactive
+            } else {
+                WorkClass::Foreground
+            },
         }
     }
 
@@ -889,14 +973,6 @@ mod tests {
                 ..ThumbnailOptions::default()
             },
             ThumbnailOptions {
-                max_concurrent_images: 0,
-                ..ThumbnailOptions::default()
-            },
-            ThumbnailOptions {
-                max_concurrent_videos: 0,
-                ..ThumbnailOptions::default()
-            },
-            ThumbnailOptions {
                 video_timeout: Duration::ZERO,
                 ..ThumbnailOptions::default()
             },
@@ -1124,6 +1200,7 @@ mod tests {
             MediaOptions {
                 ffmpeg_path: "/nonexistent/ffmpeg".into(),
                 ffprobe_path: "/nonexistent/ffprobe".into(),
+                heif_dec_path: "/nonexistent/heif-dec".into(),
             },
         )
         .await?;
@@ -1187,14 +1264,25 @@ mod tests {
             ("rot90.avif", include_bytes!("../../../tests/fixtures/rot90.avif"), 90),
             ("rot180.avif", include_bytes!("../../../tests/fixtures/rot180.avif"), 180),
         ];
-        for (name, bytes, rotation) in rotated {
-            let file = fixture.dir.path().join(name);
-            std::fs::write(&file, bytes)?;
-            let source = fixture.generator.inner.fs.resolve_entry(&nested(&file)).await?;
+        for (name, bytes, _) in rotated {
+            std::fs::write(fixture.dir.path().join(name), bytes)?;
+        }
+        // 確かめた範囲では、ffmpeg 8.1.1 は `irot` を読み、5.1、6.1、7.1 は回転を返さず、デコードでも回さない。
+        // 返す回転は、サムネイルを作るデコードが適用する回転と一致していればよいので、90 度の画像のサムネイルが縦長かで期待値を決める。
+        let (width, height) = size(
+            &fixture
+                .generator
+                .generate(&nested(&fixture.dir.path().join("rot90.avif")), &thumbnail_request(128, 128))
+                .await?,
+        )?;
+        let applies_irot = height > width;
+        for (name, _, rotation) in rotated {
+            let source = fixture.generator.inner.fs.resolve_entry(&nested(&fixture.dir.path().join(name))).await?;
             let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source).await? else {
                 return Err("a rotated AVIF must be recognized as an image".into());
             };
-            assert_eq!((info.width, info.height, info.rotation), (64, 32, rotation), "{name}");
+            let expected = if applies_irot { rotation } else { 0 };
+            assert_eq!((info.width, info.height, info.rotation), (64, 32, expected), "{name} (applies irot: {applies_irot})");
         }
         Ok(())
     }
@@ -1277,13 +1365,230 @@ mod tests {
             return Ok(());
         }
         let fixture = fixture(ThumbnailOptions::default()).await?;
-        // ffmpeg で読むと定めた拡張子でも、中身は ffmpeg が内容から判定するので、PNG を HEIC の名前で置いて経路を確かめる。
-        let file = fixture.dir.path().join("photo.heic");
+        // ffmpeg で読むと定めた拡張子でも、中身は ffmpeg が内容から判定するので、PNG を JPEG XL の名前で置いて経路を確かめる。
+        let file = fixture.dir.path().join("photo.jxl");
         write_png(&file, 600, 300)?;
 
         let thumbnail = fixture.generator.generate(&nested(&file), &thumbnail_request(256, 256)).await?;
         assert_eq!(size(&thumbnail)?, (256, 128));
         assert_eq!(fixture.generator.ffmpeg_runs(), 1);
+        assert_eq!(fixture.generator.heif_dec_runs(), 0);
+        Ok(())
+    }
+
+    /// macOS の `sips` が書いた、512×512 のタイル 6 枚で 1280×960 を符号化した HEIC と、その `irot` の角度を 90 度に書き換えた HEIC。
+    /// 作り方は docs/knowledge/ffmpeg-heif-tile-grid.md にある。
+    /// 名前と、組み立てて回転を反映した後の幅と高さを返す。
+    fn write_tiled_heics(dir: &Path) -> TestResult<Vec<(std::path::PathBuf, (u32, u32))>> {
+        let files = [
+            ("grid.heic", include_bytes!("../../../tests/fixtures/grid.heic").as_slice(), (1280, 960)),
+            ("grid-rot90.heic", include_bytes!("../../../tests/fixtures/grid-rot90.heic").as_slice(), (960, 1280)),
+        ];
+        let mut written = Vec::new();
+        for (name, bytes, displayed) in files {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes)?;
+            written.push((path, displayed));
+        }
+        Ok(written)
+    }
+
+    /// PATH にある libheif のデコーダ。1.17 より前の名前の heif-convert も、同じ引数で使える。
+    /// ローカルでは libheif のない環境を許すが、CI では HEIF の検証を必須にする。
+    fn heif_decoder() -> Option<&'static str> {
+        let found = ["heif-dec", "heif-convert"].into_iter().find(|program| {
+            std::process::Command::new(program)
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        });
+        if found.is_none() {
+            assert!(std::env::var_os("PXNA_REQUIRE_HEIF_DEC").is_none(), "heif-dec or heif-convert is required in CI");
+            eprintln!("skipped: neither heif-dec nor heif-convert is available on PATH");
+        }
+        found
+    }
+
+    /// PATH にある ffmpeg が指定した版より前なら、確かめずに飛ばす。版を読めない build も飛ばす。
+    /// 確かめた範囲では、タイルを組み立てて読むのは 8.1 と 9.0 で、ffprobe がタイルを束ねた画像の回転を返すのは 9.0 だけである。
+    fn skip_before_ffmpeg(required: u32) -> bool {
+        if skip_without_ffmpeg() {
+            return true;
+        }
+        let output = std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .map(|output| output.stdout)
+            .unwrap_or_default();
+        let major = String::from_utf8_lossy(&output)
+            .strip_prefix("ffmpeg version ")
+            .map(|rest| rest.trim_start_matches('n').chars().take_while(char::is_ascii_digit).collect::<String>())
+            .and_then(|digits| digits.parse::<u32>().ok());
+        let supported = major.is_some_and(|major| major >= required);
+        if !supported {
+            eprintln!("skipped: ffmpeg {major:?} is older than {required}");
+        }
+        !supported
+    }
+
+    #[tokio::test]
+    async fn a_tiled_heic_is_decoded_whole_by_ffmpeg_test() -> TestResult {
+        if skip_before_ffmpeg(9) {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
+        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
+            let image = fixture.generator.generate(&nested(&file), &display).await?;
+            assert_eq!(size(&image)?, displayed, "{}: タイル 1 枚ではなく、組み立てて回転した画像になる", file.display());
+        }
+        assert_eq!(fixture.generator.heif_dec_runs(), 0, "アルファのない HEIC は ffmpeg だけで読む");
+        assert_eq!(fixture.generator.ffmpeg_runs(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_heic_is_read_by_heif_dec_when_ffmpeg_fails_test() -> TestResult {
+        let Some(decoder) = heif_decoder() else {
+            return Ok(());
+        };
+        let media = MediaOptions {
+            ffmpeg_path: "/nonexistent/ffmpeg".into(),
+            heif_dec_path: decoder.into(),
+            ..MediaOptions::default()
+        };
+        let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
+        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
+            let image = fixture.generator.generate(&nested(&file), &display).await?;
+            assert_eq!(size(&image)?, displayed, "{}: ffmpeg が読めないときは heif-dec で読み直す", file.display());
+        }
+        assert_eq!(fixture.generator.heif_dec_runs(), 2);
+        assert_eq!(fixture.generator.ffmpeg_runs(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_heic_is_read_by_heif_dec_when_the_alpha_probe_fails_test() -> TestResult {
+        let Some(decoder) = heif_decoder() else {
+            return Ok(());
+        };
+        let media = MediaOptions {
+            ffprobe_path: "/nonexistent/ffprobe".into(),
+            heif_dec_path: decoder.into(),
+            ..MediaOptions::default()
+        };
+        let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Jpeg, ImageResizeType::Fit);
+        for (file, displayed) in write_tiled_heics(fixture.dir.path())? {
+            let image = fixture.generator.generate(&nested(&file), &display).await?;
+            assert_eq!(size(&image)?, displayed, "{}: アルファの判定に失敗したら heif-dec で読む", file.display());
+        }
+        assert_eq!(fixture.generator.heif_dec_runs(), 2);
+        assert_eq!(fixture.generator.ffmpeg_runs(), 0);
+        Ok(())
+    }
+
+    /// 赤の左半分が不透明で、右半分が透明な画像。HEIC と AVIF、それぞれタイルなしとタイルありを返す。
+    fn write_alpha_images(dir: &Path) -> TestResult<Vec<(std::path::PathBuf, (u32, u32))>> {
+        let files = [
+            ("alpha.heic", include_bytes!("../../../tests/fixtures/alpha.heic").as_slice(), (512, 512)),
+            ("alpha-grid.heic", include_bytes!("../../../tests/fixtures/alpha-grid.heic").as_slice(), (1024, 1024)),
+            ("alpha.avif", include_bytes!("../../../tests/fixtures/alpha.avif").as_slice(), (512, 512)),
+            ("alpha-grid.avif", include_bytes!("../../../tests/fixtures/alpha-grid.avif").as_slice(), (1024, 1024)),
+        ];
+        let mut written = Vec::new();
+        for (name, bytes, displayed) in files {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes)?;
+            written.push((path, displayed));
+        }
+        Ok(written)
+    }
+
+    #[tokio::test]
+    async fn an_image_with_alpha_is_read_by_heif_dec_test() -> TestResult {
+        if skip_without_ffmpeg() {
+            return Ok(());
+        }
+        let Some(decoder) = heif_decoder() else {
+            return Ok(());
+        };
+        let media = MediaOptions {
+            heif_dec_path: decoder.into(),
+            ..MediaOptions::default()
+        };
+        let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Webp, ImageResizeType::Fit);
+        for (file, displayed) in write_alpha_images(fixture.dir.path())? {
+            let image = fixture.generator.generate(&nested(&file), &display).await?;
+            let decoded = ImageConverter::decode(&image.bytes)?;
+            assert_eq!((decoded.width(), decoded.height()), displayed, "{}: 組み立てと回転を反映する", file.display());
+            let rgba = decoded.to_rgba8();
+            assert_eq!(rgba.get_pixel(decoded.width() / 4, decoded.height() / 2)[3], 255, "{}: 不透明な左半分", file.display());
+            assert_eq!(rgba.get_pixel(decoded.width() * 3 / 4, decoded.height() / 2)[3], 0, "{}: 透明な右半分", file.display());
+        }
+        assert_eq!(fixture.generator.heif_dec_runs(), 4, "アルファ付きは heif-dec に回す");
+        assert_eq!(fixture.generator.ffmpeg_runs(), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_jxl_with_alpha_keeps_it_on_the_ffmpeg_png_path_test() -> TestResult {
+        if skip_without_ffmpeg() {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("alpha.jxl");
+        std::fs::write(&file, include_bytes!("../../../tests/fixtures/alpha.jxl"))?;
+        let display = request(ThumbnailVariant::Display, None, None, ImageFormatType::Webp, ImageResizeType::Fit);
+        let image = fixture.generator.generate(&nested(&file), &display).await?;
+        let decoded = ImageConverter::decode(&image.bytes)?;
+        let rgba = decoded.to_rgba8();
+        assert_eq!((rgba.width(), rgba.height()), (512, 512));
+        assert_eq!(rgba.get_pixel(rgba.width() / 4, rgba.height() / 2)[3], 255, "不透明な左半分");
+        assert_eq!(rgba.get_pixel(rgba.width() * 3 / 4, rgba.height() / 2)[3], 0, "透明な右半分");
+        assert_eq!(fixture.generator.heif_dec_runs(), 0);
+        assert_eq!(fixture.generator.ffmpeg_runs(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_avif_is_thumbnailed_through_ppm_test() -> TestResult {
+        if skip_without_ffmpeg() {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("blue.avif");
+        std::fs::write(&file, include_bytes!("../../../tests/fixtures/blue.avif"))?;
+        let thumbnail = fixture.generator.generate(&nested(&file), &thumbnail_request(256, 256)).await?;
+        assert_eq!(size(&thumbnail)?, (64, 32), "元の画像より大きくはしない");
+        assert_eq!(fixture.generator.heif_dec_runs(), 0, "アルファのない AVIF は ffmpeg の PPM だけで読む");
+        assert_eq!(fixture.generator.ffmpeg_runs(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn media_information_of_a_tiled_heic_is_the_assembled_size_test() -> TestResult {
+        if skip_before_ffmpeg(9) {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let expected = [(1280, 960, 0), (1280, 960, 90)];
+        for ((file, _), expected) in write_tiled_heics(fixture.dir.path())?.into_iter().zip(expected) {
+            let source = fixture.generator.inner.fs.resolve_entry(&nested(&file)).await?;
+            let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source).await? else {
+                return Err("a HEIC must be recognized as an image".into());
+            };
+            assert_eq!(
+                (info.width, info.height, info.rotation),
+                expected,
+                "{}: 幅と高さは入れ替えず、回転を別に返す",
+                file.display()
+            );
+            assert_eq!(info.content_type, "image/heic");
+        }
         Ok(())
     }
 
@@ -1354,6 +1659,7 @@ mod tests {
         let media = MediaOptions {
             ffmpeg_path: "/nonexistent/ffmpeg".into(),
             ffprobe_path: "/nonexistent/ffprobe".into(),
+            heif_dec_path: "/nonexistent/heif-dec".into(),
         };
         let fixture = fixture_with_media(ThumbnailOptions::default(), media).await?;
         let video = fixture.dir.path().join("clip.mp4");

@@ -4,16 +4,19 @@ import {
     type BrowseLocation,
     browseHref,
     browseLocation,
+    CROSS_LIBRARY_SCOPE,
+    entryAddress,
+    groupByLibrary,
     parentPath,
     relativePath,
     type SearchLocation,
     safeRedirect,
-    searchBrowseLocation,
+    scopedKey,
     searchHref,
     searchLocation,
-    timelineEntryPath,
     timelineHref,
     timelineLocation,
+    viewKey,
 } from "./location";
 import { loadRouterAt } from "./testing/router";
 
@@ -59,58 +62,52 @@ describe("location", () => {
 
 describe("search location", () => {
     it.each<SearchLocation>([
-        { libraryId: "photos", path: "/" },
-        { libraryId: "photos", path: "/a b/日本語", query: "#?%/ 日本語", flat: true, view: "b/#?%.png" },
-        { libraryId: "my.lib-1_x", path: "/1e3", query: "1e3" },
-    ])("round-trips $libraryId $path $query", async (location) => {
+        { path: "/", tags: [] },
+        {
+            libraryIds: ["photos"],
+            path: "/a b/日本語",
+            query: "#?%/ 日本語",
+            flat: true,
+            view: "photos/b/#?%.png",
+            tags: [],
+        },
+        { libraryIds: ["my.lib-1_x", "other"], path: "/", query: "1e3", tags: ["1e3", "旅行 2026"] },
+    ])("round-trips %j", async (location) => {
         const router = await loadRouterAt(searchHref(location));
-        const match = router.state.matches.at(-1);
-        const params = match?.params as { libraryId: string };
-        expect(searchLocation(params.libraryId, router.state.location.search as never)).toEqual(location);
+        expect(searchLocation(router.state.location.search as never)).toEqual(location);
     });
 
-    it("carries the rating and the tag, and ignores a rating that is not one of the values", async () => {
-        const location: SearchLocation = { libraryId: "p", path: "/a", rating: "none", tag: "旅行 2026", flat: true };
-        expect(searchHref(location)).toBe("/search/p?rating=none&tag=%E6%97%85%E8%A1%8C+2026&path=%2Fa&flat=1");
+    it("repeats the Library and the tag, keeps the start only for one Library, and ignores a rating that is not one of the values", async () => {
+        const location: SearchLocation = {
+            libraryIds: ["p", "q"],
+            path: "/",
+            rating: "none",
+            tags: ["a", "b"],
+            flat: true,
+        };
+        expect(searchHref({ ...location, path: "/ignored" })).toBe(
+            "/search?lib=p&lib=q&flat=1&rating=none&tag=a&tag=b",
+        );
+        expect(searchHref({ libraryIds: ["p"], path: "/a", tags: [] })).toBe("/search?lib=p&path=%2Fa");
+        expect(searchHref({ path: "/a", tags: [] })).toBe("/search");
         const router = await loadRouterAt(searchHref(location));
-        expect(searchLocation("p", router.state.location.search as never)).toEqual(location);
-        const invalid = await loadRouterAt("/search/p?rating=great&tag=%20");
-        expect(searchLocation("p", invalid.state.location.search as never)).toEqual({ libraryId: "p", path: "/" });
-    });
-
-    it("lists the origin recursively when only a rating or a tag is given", () => {
-        expect(searchBrowseLocation({ libraryId: "p", path: "/a", rating: "good" })).toEqual({
-            libraryId: "p",
+        expect(searchLocation(router.state.location.search as never)).toEqual(location);
+        const invalid = await loadRouterAt("/search?rating=great&tag=%20&lib=p&lib=p&path=%2Fa");
+        expect(searchLocation(invalid.state.location.search as never)).toEqual({
+            libraryIds: ["p"],
             path: "/a",
-            rating: "good",
-            recursive: true,
+            tags: [],
         });
-        expect(searchBrowseLocation({ libraryId: "p", path: "/a", tag: "x", flat: true })).toEqual({
-            libraryId: "p",
-            path: "/a",
-            tag: "x",
-            recursive: false,
-        });
+        const several = await loadRouterAt("/search?lib=p&lib=q&path=%2Fa");
+        expect(searchLocation(several.state.location.search as never).path).toBe("/");
     });
 
     it("builds a readable URL and trims the query", () => {
-        expect(searchHref({ libraryId: "p", path: "/", query: " alpha " })).toBe("/search/p?q=alpha");
-        expect(searchHref({ libraryId: "p", path: "/a/b", query: "  ", flat: true })).toBe(
-            "/search/p?path=%2Fa%2Fb&flat=1",
+        expect(searchHref({ path: "/", query: " alpha ", tags: [] })).toBe("/search?q=alpha");
+        expect(searchHref({ libraryIds: ["p"], path: "/a/b", query: "  ", flat: true, tags: [] })).toBe(
+            "/search?lib=p&path=%2Fa%2Fb&flat=1",
         );
-        expect(searchHref({ libraryId: "p", path: "/" })).toBe("/search/p");
-    });
-
-    it("searches recursively from the origin unless flat", () => {
-        expect(searchBrowseLocation({ libraryId: "p", path: "/a", query: "x", view: "b.png" })).toEqual({
-            libraryId: "p",
-            path: "/a",
-            query: "x",
-            recursive: true,
-            view: "b.png",
-        });
-        expect(searchBrowseLocation({ libraryId: "p", path: "/a", query: "x", flat: true }).recursive).toBe(false);
-        expect(searchBrowseLocation({ libraryId: "p", path: "/a" })).toEqual({ libraryId: "p", path: "/a" });
+        expect(searchHref({ path: "/", tags: [] })).toBe("/search");
     });
 });
 it.each([
@@ -123,29 +120,48 @@ it.each([
 
 describe("timeline location", () => {
     it("round-trips the month and the opened entry through a URL", async () => {
-        for (const location of [
-            { libraryId: "photos" },
-            { libraryId: "photos", month: "2024-05" },
-            { libraryId: "my.lib-1_x", month: "2024-05", view: "a b/日本語#?%.jpg" },
-        ]) {
+        for (const location of [{}, { month: "2024-05" }, { month: "2024-05", view: "my.lib-1_x/a b/日本語#?%.jpg" }]) {
             const router = await loadRouterAt(timelineHref(location));
-            const match = router.state.matches.at(-1);
-            const params = match?.params as { libraryId: string };
             const search = router.state.location.search as { month?: string; view?: string };
-            expect(timelineLocation(params.libraryId, search)).toEqual(location);
+            expect(timelineLocation(search)).toEqual(location);
         }
     });
 
     it("drops a month that is not YYYY-MM", () => {
-        expect(timelineHref({ libraryId: "p", month: "2024-13" })).toBe("/timeline/p");
-        expect(timelineLocation("p", { month: "2024-5" })).toEqual({ libraryId: "p" });
-        expect(timelineHref({ libraryId: "p", month: "2024-05", view: "a/b.jpg" })).toBe(
-            "/timeline/p?month=2024-05&view=a%2Fb.jpg",
+        expect(timelineHref({ month: "2024-13" })).toBe("/timeline");
+        expect(timelineLocation({ month: "2024-5" })).toEqual({});
+        expect(timelineHref({ month: "2024-05", view: "p/a/b.jpg" })).toBe(
+            "/timeline?month=2024-05&view=p%2Fa%2Fb.jpg",
         );
     });
 
+    it("splits a timeline key into the Library and the Library path", () => {
+        expect(scopedKey("my.lib", "/a/b.jpg")).toBe("/my.lib/a/b.jpg");
+        expect(entryAddress(CROSS_LIBRARY_SCOPE, "/my.lib/a/b.jpg")).toEqual({ libraryId: "my.lib", path: "/a/b.jpg" });
+        expect(entryAddress("photos", "/a/b.jpg")).toEqual({ libraryId: "photos", path: "/a/b.jpg" });
+        expect(entryAddress(CROSS_LIBRARY_SCOPE, "/root")).toEqual({ libraryId: "root", path: "/" });
+        const groups = groupByLibrary(
+            CROSS_LIBRARY_SCOPE,
+            new Map([
+                ["/a/1", 1],
+                ["/b/2", 2],
+                ["/a/3", 3],
+            ]),
+        );
+        expect([...groups].map(([id, group]) => [id, [...group]])).toEqual([
+            [
+                "a",
+                [
+                    ["/1", 1],
+                    ["/3", 3],
+                ],
+            ],
+            ["b", [["/2", 2]]],
+        ]);
+    });
+
     it("maps an opened entry back to a Library path and finds its parent", () => {
-        expect(timelineEntryPath("a/b.jpg")).toBe("/a/b.jpg");
+        expect(viewKey("a/b.jpg")).toBe("/a/b.jpg");
         expect(parentPath("/a/b.jpg")).toBe("/a");
         expect(parentPath("/b.jpg")).toBe("/");
         expect(parentPath("/books/vol1.zip/inner/1.png")).toBe("/books/vol1.zip/inner");

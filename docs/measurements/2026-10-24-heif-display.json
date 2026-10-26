@@ -1,0 +1,1025 @@
+{
+ "schema": 1,
+ "measured_utc": "2026-10-24",
+ "build": {
+  "base_commit": "1773c4a",
+  "profile": "release",
+  "change": "split the media tools into media.rs, ffmpeg.rs, heif.rs, and process.rs; a temporary ignored engine test measured generation and was not committed"
+ },
+ "environment": {
+  "os": "Debian GNU/Linux 13 (trixie) arm64",
+  "kernel": "Linux 6.12.76-linuxkit aarch64",
+  "cpu_cores": 10,
+  "memory_bytes": 8321712128,
+  "rust": "1.96.0",
+  "profile": "release",
+  "ffmpeg": "n9.0.2-17-g2a571b6068 (BtbN static)",
+  "libheif": "1.23.6",
+  "libde265": "1.0.15-1+deb13u2"
+ },
+ "fixture": {
+  "synthetic": "ffmpeg lavfi mandelbrot 4032x3024, JPEG q:v 2, then heif-enc q90 with and without --cut-tiles 512",
+  "jpeg": {
+   "path": "photo.jpg",
+   "bytes": 1485854,
+   "sha256": "8642fda4062244434ad795a0ffa972dca967996a838bc22ced906abf9bd68b1e"
+  },
+  "heic_tiled": {
+   "path": "photo-tiled.heic",
+   "bytes": 1617544,
+   "sha256": "6d90d07b7835532ef3e45b667a650a740e04a00425ee361189f27ec5e0546e41"
+  },
+  "heic_untiled": {
+   "path": "photo.heic",
+   "bytes": 1599877,
+   "sha256": "4d0515e3d98faaa9d4a5af5b9d616c1e103218c0c3849ab00cf784723a61e132"
+  }
+ },
+ "request": {
+  "display": {
+   "width": 2880,
+   "height": 1800,
+   "resize": "fit",
+   "format": "webp",
+   "quality": 90,
+   "rounded_long_edge": 4096
+  },
+  "thumbnail": {
+   "width": 512,
+   "height": 512,
+   "resize": "fit",
+   "format": "webp",
+   "quality": 80
+  },
+  "settings": "ThumbnailOptions::default()"
+ },
+ "procedure": {
+  "tool_level": "5 direct decoder runs per format, writing a PNG",
+  "engine": "5 cache-miss runs per format using fresh copies, then 5 cache hits; thumbnail uses another 5 fresh copies per format",
+  "ffmpeg_webp": "5 direct runs per setting and format, encoding full-size WebP in one ffmpeg process"
+ },
+ "tool_level": {
+  "wall_sec": {
+   "heif-dec tiled": {
+    "median": 0.61,
+    "min": 0.59,
+    "max": 0.64,
+    "runs": [
+     0.64,
+     0.61,
+     0.63,
+     0.59,
+     0.59
+    ]
+   },
+   "heif-dec untiled": {
+    "median": 0.74,
+    "min": 0.73,
+    "max": 0.75,
+    "runs": [
+     0.74,
+     0.75,
+     0.74,
+     0.75,
+     0.73
+    ]
+   },
+   "ffmpeg9 tiled": {
+    "median": 0.54,
+    "min": 0.52,
+    "max": 0.74,
+    "runs": [
+     0.74,
+     0.54,
+     0.53,
+     0.52,
+     0.54
+    ]
+   },
+   "ffmpeg9 untiled": {
+    "median": 0.58,
+    "min": 0.57,
+    "max": 0.58,
+    "runs": [
+     0.58,
+     0.58,
+     0.58,
+     0.57,
+     0.57
+    ]
+   },
+   "heif-dec small": {
+    "median": 0.02,
+    "min": 0.02,
+    "max": 0.02,
+    "runs": [
+     0.02,
+     0.02,
+     0.02,
+     0.02,
+     0.02
+    ]
+   },
+   "ffmpeg9 small": {
+    "median": 0.02,
+    "min": 0.02,
+    "max": 0.02,
+    "runs": [
+     0.02,
+     0.02,
+     0.02,
+     0.02,
+     0.02
+    ]
+   }
+  },
+  "cpu_user_sec": {
+   "heif-dec tiled": {
+    "median": 0.75,
+    "min": 0.73,
+    "max": 0.76,
+    "runs": [
+     0.76,
+     0.76,
+     0.75,
+     0.73,
+     0.73
+    ]
+   },
+   "heif-dec untiled": {
+    "median": 0.72,
+    "min": 0.72,
+    "max": 0.72,
+    "runs": [
+     0.72,
+     0.72,
+     0.72,
+     0.72,
+     0.72
+    ]
+   },
+   "ffmpeg9 tiled": {
+    "median": 0.62,
+    "min": 0.62,
+    "max": 0.64,
+    "runs": [
+     0.64,
+     0.62,
+     0.62,
+     0.63,
+     0.62
+    ]
+   },
+   "ffmpeg9 untiled": {
+    "median": 0.55,
+    "min": 0.55,
+    "max": 0.56,
+    "runs": [
+     0.55,
+     0.55,
+     0.56,
+     0.55,
+     0.55
+    ]
+   },
+   "heif-dec small": {
+    "median": 0.02,
+    "min": 0.02,
+    "max": 0.02,
+    "runs": [
+     0.02,
+     0.02,
+     0.02,
+     0.02,
+     0.02
+    ]
+   },
+   "ffmpeg9 small": {
+    "median": 0.01,
+    "min": 0.01,
+    "max": 0.02,
+    "runs": [
+     0.01,
+     0.01,
+     0.02,
+     0.02,
+     0.01
+    ]
+   }
+  },
+  "cpu_sys_sec": {
+   "heif-dec tiled": {
+    "median": 0.03,
+    "min": 0.03,
+    "max": 0.08,
+    "runs": [
+     0.08,
+     0.03,
+     0.08,
+     0.03,
+     0.03
+    ]
+   },
+   "heif-dec untiled": {
+    "median": 0.02,
+    "min": 0.01,
+    "max": 0.03,
+    "runs": [
+     0.02,
+     0.02,
+     0.01,
+     0.03,
+     0.01
+    ]
+   },
+   "ffmpeg9 tiled": {
+    "median": 0.11,
+    "min": 0.09,
+    "max": 0.32,
+    "runs": [
+     0.32,
+     0.13,
+     0.1,
+     0.11,
+     0.09
+    ]
+   },
+   "ffmpeg9 untiled": {
+    "median": 0.02,
+    "min": 0.02,
+    "max": 0.03,
+    "runs": [
+     0.03,
+     0.03,
+     0.02,
+     0.02,
+     0.02
+    ]
+   },
+   "heif-dec small": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "runs": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "ffmpeg9 small": {
+    "median": 0.01,
+    "min": 0.0,
+    "max": 0.02,
+    "runs": [
+     0.01,
+     0.01,
+     0.01,
+     0.0,
+     0.02
+    ]
+   }
+  },
+  "max_rss_kib": {
+   "heif-dec tiled": {
+    "median": 63172,
+    "min": 63028,
+    "max": 63264,
+    "runs": [
+     63144,
+     63264,
+     63172,
+     63172,
+     63028
+    ]
+   },
+   "heif-dec untiled": {
+    "median": 66744,
+    "min": 66672,
+    "max": 66780,
+    "runs": [
+     66672,
+     66748,
+     66780,
+     66744,
+     66688
+    ]
+   },
+   "ffmpeg9 tiled": {
+    "median": 189808,
+    "min": 187032,
+    "max": 191576,
+    "runs": [
+     187032,
+     189808,
+     190248,
+     189052,
+     191576
+    ]
+   },
+   "ffmpeg9 untiled": {
+    "median": 150844,
+    "min": 149068,
+    "max": 152272,
+    "runs": [
+     152064,
+     150844,
+     149068,
+     150516,
+     152272
+    ]
+   },
+   "heif-dec small": {
+    "median": 13756,
+    "min": 13536,
+    "max": 13928,
+    "runs": [
+     13756,
+     13884,
+     13536,
+     13604,
+     13928
+    ]
+   },
+   "ffmpeg9 small": {
+    "median": 50740,
+    "min": 50448,
+    "max": 53400,
+    "runs": [
+     53400,
+     50740,
+     50772,
+     50488,
+     50448
+    ]
+   }
+  }
+ },
+ "engine": {
+  "before_refactor": {
+   "display": {
+    "tiled": {
+     "total_ms": {
+      "median": 944.3,
+      "min": 905.5,
+      "max": 1132.2,
+      "runs": [
+       1132.2,
+       963.6,
+       944.3,
+       905.5,
+       915.6
+      ]
+     },
+     "read_ms": {
+      "median": 665.3,
+      "min": 630.3,
+      "max": 896.7,
+      "runs": [
+       896.7,
+       637.7,
+       665.3,
+       676.5,
+       630.3
+      ]
+     },
+     "png_decode_ms": {
+      "median": 56.3,
+      "min": 53.1,
+      "max": 75.1,
+      "runs": [
+       53.1,
+       56.3,
+       61.4,
+       56.0,
+       75.1
+      ]
+     },
+     "resize_ms": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "runs": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     },
+     "encode_ms": {
+      "median": 216.4,
+      "min": 213.0,
+      "max": 237.0,
+      "runs": [
+       237.0,
+       216.4,
+       225.1,
+       213.0,
+       216.1
+      ]
+     },
+     "bytes": 596960
+    },
+    "untiled": {
+     "total_ms": {
+      "median": 1078.5,
+      "min": 1026.9,
+      "max": 1118.0,
+      "runs": [
+       1066.8,
+       1026.9,
+       1118.0,
+       1092.9,
+       1078.5
+      ]
+     },
+     "read_ms": {
+      "median": 785.2,
+      "min": 754.4,
+      "max": 801.3,
+      "runs": [
+       785.2,
+       801.3,
+       788.5,
+       764.9,
+       754.4
+      ]
+     },
+     "png_decode_ms": {
+      "median": 52.8,
+      "min": 52.1,
+      "max": 56.6,
+      "runs": [
+       52.1,
+       56.6,
+       52.4,
+       56.6,
+       52.8
+      ]
+     },
+     "resize_ms": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "runs": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     },
+     "encode_ms": {
+      "median": 211.8,
+      "min": 208.2,
+      "max": 240.9,
+      "runs": [
+       208.2,
+       227.8,
+       211.0,
+       240.9,
+       211.8
+      ]
+     },
+     "bytes": 597598
+    },
+    "jpeg": {
+     "total_ms": {
+      "median": 259.7,
+      "min": 250.7,
+      "max": 457.4,
+      "runs": [
+       457.4,
+       250.7,
+       259.7,
+       289.1,
+       251.4
+      ]
+     },
+     "read_ms": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "runs": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     },
+     "png_decode_ms": {
+      "median": 28.0,
+      "min": 27.6,
+      "max": 41.2,
+      "runs": [
+       28.4,
+       28.0,
+       27.6,
+       41.2,
+       27.8
+      ]
+     },
+     "resize_ms": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "runs": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     },
+     "encode_ms": {
+      "median": 211.8,
+      "min": 205.5,
+      "max": 216.9,
+      "runs": [
+       211.8,
+       216.9,
+       213.2,
+       211.7,
+       205.5
+      ]
+     },
+     "bytes": 583396
+    }
+   },
+   "cache_hit_ms": {
+    "tiled": {
+     "median": 0.45,
+     "min": 0.32,
+     "max": 0.59,
+     "runs": [
+      0.32,
+      0.45,
+      0.59,
+      0.38,
+      0.45
+     ]
+    },
+    "untiled": {
+     "median": 0.48,
+     "min": 0.36,
+     "max": 0.57,
+     "runs": [
+      0.49,
+      0.57,
+      0.36,
+      0.38,
+      0.48
+     ]
+    },
+    "jpeg": {
+     "median": 0.42,
+     "min": 0.31,
+     "max": 0.87,
+     "runs": [
+      0.38,
+      0.42,
+      0.87,
+      0.31,
+      0.52
+     ]
+    }
+   },
+   "thumbnail": {
+    "tiled": {
+     "median": 773.8,
+     "min": 756.1,
+     "max": 799.4,
+     "runs": [
+      756.1,
+      796.7,
+      773.8,
+      770.9,
+      799.4
+     ],
+     "bytes": 14198
+    },
+    "untiled": {
+     "median": 896.7,
+     "min": 890.6,
+     "max": 912.6,
+     "runs": [
+      909.1,
+      896.7,
+      890.6,
+      912.6,
+      893.2
+     ],
+     "bytes": 14168
+    },
+    "jpeg": {
+     "median": 103.8,
+     "min": 101.5,
+     "max": 106.7,
+     "runs": [
+      102.7,
+      105.6,
+      101.5,
+      106.7,
+      103.8
+     ],
+     "bytes": 14186
+    }
+   }
+  },
+  "after_refactor": {
+   "display": {
+    "tiled": {
+     "total_ms": {
+      "median": 935.4,
+      "min": 903.5,
+      "max": 1080.3,
+      "runs": [
+       1080.3,
+       935.4,
+       903.5,
+       950.0,
+       932.1
+      ]
+     },
+     "read_ms": {
+      "median": 635.9,
+      "min": 617.3,
+      "max": 671.9,
+      "runs": [
+       636.4,
+       617.8,
+       671.9,
+       635.9,
+       617.3
+      ]
+     },
+     "png_decode_ms": {
+      "median": 63.3,
+      "min": 56.8,
+      "max": 79.3,
+      "runs": [
+       67.8,
+       56.9,
+       79.3,
+       56.8,
+       63.3
+      ]
+     },
+     "resize_ms": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "runs": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     },
+     "encode_ms": {
+      "median": 232.6,
+      "min": 220.9,
+      "max": 268.8,
+      "runs": [
+       268.8,
+       220.9,
+       254.0,
+       232.6,
+       227.8
+      ]
+     },
+     "bytes": 596960
+    },
+    "untiled": {
+     "total_ms": {
+      "median": 1064.4,
+      "min": 1055.2,
+      "max": 1069.7,
+      "runs": [
+       1064.4,
+       1069.7,
+       1068.4,
+       1055.2,
+       1059.1
+      ]
+     },
+     "read_ms": {
+      "median": 791.4,
+      "min": 750.5,
+      "max": 805.9,
+      "runs": [
+       799.0,
+       782.3,
+       805.9,
+       750.5,
+       791.4
+      ]
+     },
+     "png_decode_ms": {
+      "median": 60.3,
+      "min": 57.3,
+      "max": 72.7,
+      "runs": [
+       72.7,
+       60.6,
+       57.3,
+       60.3,
+       60.2
+      ]
+     },
+     "resize_ms": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "runs": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     },
+     "encode_ms": {
+      "median": 250.2,
+      "min": 217.2,
+      "max": 262.0,
+      "runs": [
+       250.2,
+       231.5,
+       217.2,
+       259.3,
+       262.0
+      ]
+     },
+     "bytes": 597598
+    },
+    "jpeg": {
+     "total_ms": {
+      "median": 258.7,
+      "min": 240.2,
+      "max": 309.7,
+      "runs": [
+       258.7,
+       240.2,
+       251.8,
+       309.7,
+       272.1
+      ]
+     },
+     "read_ms": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "runs": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     },
+     "png_decode_ms": {
+      "median": 29.5,
+      "min": 28.2,
+      "max": 43.2,
+      "runs": [
+       28.2,
+       29.5,
+       29.5,
+       43.2,
+       33.5
+      ]
+     },
+     "resize_ms": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "runs": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     },
+     "encode_ms": {
+      "median": 224.8,
+      "min": 212.7,
+      "max": 245.2,
+      "runs": [
+       226.2,
+       212.7,
+       215.1,
+       245.2,
+       224.8
+      ]
+     },
+     "bytes": 583396
+    }
+   },
+   "cache_hit_ms": {
+    "tiled": {
+     "median": 0.46,
+     "min": 0.38,
+     "max": 0.7,
+     "runs": [
+      0.38,
+      0.41,
+      0.58,
+      0.46,
+      0.7
+     ]
+    },
+    "untiled": {
+     "median": 0.54,
+     "min": 0.36,
+     "max": 0.7,
+     "runs": [
+      0.43,
+      0.54,
+      0.7,
+      0.36,
+      0.7
+     ]
+    },
+    "jpeg": {
+     "median": 0.43,
+     "min": 0.35,
+     "max": 0.48,
+     "runs": [
+      0.43,
+      0.35,
+      0.4,
+      0.43,
+      0.48
+     ]
+    }
+   },
+   "thumbnail": {
+    "tiled": {
+     "median": 765.4,
+     "min": 756.9,
+     "max": 869.6,
+     "runs": [
+      869.6,
+      779.5,
+      765.4,
+      756.9,
+      764.3
+     ],
+     "bytes": 14198
+    },
+    "untiled": {
+     "median": 908.3,
+     "min": 884.7,
+     "max": 976.9,
+     "runs": [
+      976.9,
+      928.5,
+      884.7,
+      908.3,
+      902.4
+     ],
+     "bytes": 14168
+    },
+    "jpeg": {
+     "median": 102.1,
+     "min": 101.6,
+     "max": 103.3,
+     "runs": [
+      103.3,
+      101.7,
+      102.1,
+      102.4,
+      101.6
+     ],
+     "bytes": 14186
+    }
+   }
+  }
+ },
+ "ffmpeg_webp": {
+  "description": "ffmpeg 9 decodes the HEIC and writes WebP in one process; no PNG and no Rust WebP encoder",
+  "quality": 90,
+  "settings": {
+   "default": {
+    "tiled": {
+     "wall_sec": {
+      "median": 0.5,
+      "min": 0.49,
+      "max": 0.61,
+      "runs": [
+       0.61,
+       0.49,
+       0.51,
+       0.49,
+       0.5
+      ]
+     },
+     "bytes": 570388
+    },
+    "untiled": {
+     "wall_sec": {
+      "median": 0.55,
+      "min": 0.55,
+      "max": 0.59,
+      "runs": [
+       0.59,
+       0.55,
+       0.55,
+       0.55,
+       0.58
+      ]
+     },
+     "bytes": 570506
+    }
+   },
+   "compression_level_2": {
+    "tiled": {
+     "wall_sec": {
+      "median": 0.27,
+      "min": 0.26,
+      "max": 0.38,
+      "runs": [
+       0.38,
+       0.27,
+       0.26,
+       0.29,
+       0.27
+      ]
+     },
+     "bytes": 588082
+    },
+    "untiled": {
+     "wall_sec": {
+      "median": 0.32,
+      "min": 0.32,
+      "max": 0.33,
+      "runs": [
+       0.32,
+       0.32,
+       0.32,
+       0.32,
+       0.33
+      ]
+     },
+     "bytes": 588184
+    }
+   },
+   "compression_level_0": {
+    "tiled": {
+     "wall_sec": {
+      "median": 0.23,
+      "min": 0.23,
+      "max": 0.24,
+      "runs": [
+       0.23,
+       0.23,
+       0.24,
+       0.23,
+       0.23
+      ]
+     },
+     "bytes": 656294
+    },
+    "untiled": {
+     "wall_sec": {
+      "median": 0.29,
+      "min": 0.29,
+      "max": 0.31,
+      "runs": [
+       0.29,
+       0.29,
+       0.31,
+       0.29,
+       0.29
+      ]
+     },
+     "bytes": 657208
+    }
+   }
+  },
+  "thumbnail_second_step": {
+   "description": "scale the full-size tiled WebP to 512x384 and encode with compression_level 2, quality 80",
+   "wall_sec": {
+    "median": 0.08,
+    "min": 0.08,
+    "max": 0.11,
+    "runs": [
+     0.11,
+     0.08,
+     0.09,
+     0.08,
+     0.08
+    ]
+   },
+   "bytes": 13856
+  },
+  "rotation_check": "grid-rot90.heic produced a 960x1280 WebP",
+  "tile_grid_scale_limit": "a simple -vf scale cannot be combined with the tile grid; ffmpeg reads one tile or rejects the graph"
+ }
+}

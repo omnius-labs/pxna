@@ -1,6 +1,9 @@
 use tokio_util::bytes::Bytes;
 
-use crate::model::{ImageAnchorPositionType, ImageFormatType, ImageResizeType};
+use crate::{
+    core::work::WorkClass,
+    model::{ImageAnchorPositionType, ImageFormatType, ImageResizeType},
+};
 
 /// 何を生成するか。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +25,8 @@ pub struct ThumbnailRequest {
     pub format: ImageFormatType,
     pub resize: ImageResizeType,
     pub anchor: ImageAnchorPositionType,
+    /// 生成の枠を待つ段。表示中の画像は Interactive、先読みとサムネイルは Foreground にする。
+    pub class: WorkClass,
 }
 
 /// 生成した画像。`key` はキャッシュのキーで、応答の `ETag` に使える。

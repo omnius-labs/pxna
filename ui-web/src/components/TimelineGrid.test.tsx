@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { emptySelection, type Selection } from "../library/selection";
 import { TimelineStore } from "../library/timeline";
+import { CROSS_LIBRARY_SCOPE } from "../location";
 import { stubResizeObserver } from "../testing/preferences";
 import { TimelineGrid } from "./TimelineGrid";
 
@@ -42,6 +43,7 @@ afterEach(() => {
 });
 
 const item = (name: string, date: string) => ({
+    libraryId: "photos",
     entry: {
         path: `/${name}`,
         name,
@@ -68,7 +70,7 @@ async function harness(store: TimelineStore, onSelectionChange = vi.fn<(selectio
             <QueryClientProvider client={client}>
                 <TimelineGrid
                     store={store}
-                    libraryId="photos"
+                    libraryId={CROSS_LIBRARY_SCOPE}
                     tileSize={3}
                     shape="crop"
                     narrow={false}
@@ -103,7 +105,7 @@ it("puts a heading before each day and lists the tiles of a day from newest to o
             item("c.png", "2025-04-30T09:00:00"),
         ]),
     );
-    const store = new TimelineStore("photos", { kind: "newest" });
+    const store = new TimelineStore(["photos"], { kind: "newest" });
     await store.ensureInitial();
     const h = await harness(store);
     try {
@@ -128,14 +130,14 @@ it("selects the clicked tile by its absolute position", async () => {
     mock.entries.mockResolvedValueOnce(
         reply([item("a.png", "2025-05-03T10:00:00"), item("b.png", "2025-05-03T09:00:00")]),
     );
-    const store = new TimelineStore("photos", { kind: "newest" });
+    const store = new TimelineStore(["photos"], { kind: "newest" });
     await store.ensureInitial();
     const h = await harness(store);
     try {
         const second = h.host.querySelector<HTMLElement>("[role=option][title='b.png']");
         await act(async () => second?.click());
         const selection = h.onSelectionChange.mock.calls.at(-1)?.[0];
-        expect([...(selection?.items.keys() ?? [])]).toEqual(["/b.png"]);
+        expect([...(selection?.items.keys() ?? [])]).toEqual(["/photos/b.png"]);
         expect(selection?.anchor).toBe(store.loadedFrom + 1);
     } finally {
         await h.dispose();
@@ -146,7 +148,7 @@ it("reads older entries when the visible rows reach the end, and newer ones at t
     mock.first = 0;
     mock.last = 9;
     mock.entries.mockResolvedValueOnce(reply([item("a.png", "2025-05-03T10:00:00")], { previous: "p1", next: "n1" }));
-    const store = new TimelineStore("photos", { kind: "around", path: "/a.png" });
+    const store = new TimelineStore(["photos"], { kind: "around", path: "/photos/a.png" });
     await store.ensureInitial();
     mock.entries.mockResolvedValue(reply([]));
     const h = await harness(store);
@@ -163,7 +165,7 @@ it("reads older entries when the visible rows reach the end, and newer ones at t
 
 it("shows the empty message when nothing is loaded", async () => {
     mock.entries.mockResolvedValueOnce(reply([]));
-    const store = new TimelineStore("photos", { kind: "newest" });
+    const store = new TimelineStore(["photos"], { kind: "newest" });
     await store.ensureInitial();
     const h = await harness(store);
     try {
@@ -178,13 +180,13 @@ it("keeps the clicked entry's anchor after older entries are read", async () => 
     mock.first = 0;
     mock.last = 9;
     mock.entries.mockResolvedValueOnce(reply([item("a.png", "2025-05-03T10:00:00")], { next: "n1" }));
-    const store = new TimelineStore("photos", { kind: "newest" });
+    const store = new TimelineStore(["photos"], { kind: "newest" });
     await store.ensureInitial();
     mock.entries.mockResolvedValueOnce(reply([item("b.png", "2025-05-02T10:00:00")]));
     const h = await harness(store);
     try {
         await vi.waitFor(() => expect(store.loadedItems).toHaveLength(2));
-        expect(store.locate("/a.png")).toBe(store.loadedFrom);
+        expect(store.locate("/photos/a.png")).toBe(store.loadedFrom);
         expect(h.host.querySelectorAll("[role=option]")).toHaveLength(2);
     } finally {
         await h.dispose();

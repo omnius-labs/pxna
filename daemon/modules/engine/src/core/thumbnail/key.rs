@@ -1,7 +1,7 @@
 use sha3::{Digest as _, Sha3_256};
 
 /// キャッシュの形式や変換の実装を変えたときに上げる。古い版のキーは、どの要求からも引かれなくなり、やがて LRU で消える。
-pub const THUMBNAIL_FORMAT_VERSION: u32 = 1;
+pub const THUMBNAIL_FORMAT_VERSION: u32 = 3;
 
 /// 各 field を長さ付きで SHA3-256 に入れる。field の切れ目が曖昧にならないよう、境界を含めて直列化する。
 pub struct ThumbnailKeyHasher(Sha3_256);

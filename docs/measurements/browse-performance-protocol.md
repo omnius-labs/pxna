@@ -65,16 +65,33 @@ Expect `total_count = 22433`, a returned count of 200, and `truncated = false` f
 `empty` is a condition the caller guarantees by restarting, and the tool does not clear the server's cache.
 The API tool saves the elapsed time, the response count, the total count, the snapshot, and the HTTP status, and does not save actual Entry names. It does not overwrite existing result files.
 
-Enable JSON output with `pxna::performance=debug` in the logging filter. The measurement points kept in the implementation are as follows.
+Enable the measurement with `[logging] performance = true`, or with `pxna::performance=debug` in the logging filter, and use JSON output.
+Each measurement point is a span. When the span closes, the daemon writes one line with `fields.operation` set to the span name, `fields.elapsed_sec` set to the wall-clock time from opening to closing, and the span's own fields.
+Spans opened for the same request carry the same `fields.request`, and `fields.parent` names the enclosing measurement span. Work started in another task by single-flight or a blocking worker stays in the span of the request that started it.
+The measurement points kept in the implementation are as follows.
 
 | operation | Metric and boundary |
 | --- | --- |
-| `local_listing` | Enumeration, the count and wait time of `symlink_metadata`, and the elapsed time of the whole stream. The elapsed time includes the consumer's processing |
-| `listing_scan` | The returned count, the conversion and name normalization time, the whole scan, and truncation. Async spans do not use manual enter guards across an await |
+| `local_listing` | Enumeration, the count and wait time of `symlink_metadata`, and the whole stream. The elapsed time includes the consumer's processing |
+| `local_summary_listing` | The count and the whole stream of the summary enumeration. The elapsed time includes the consumer's processing |
+| `listing_scan` | The returned count, the conversion and name normalization time, the whole scan, and truncation |
 | `listing_sort` | The count and the elapsed time of sorting |
+| `summary_scan` | The count and the whole scan of the summary listing, including sorting |
+| `summary_persist` | The write of one summary to the index |
+| `thumbnail_request` | The whole thumbnail API request, with the path, the variant, the result, and the body size. It does not include sending the body |
+| `thumbnail_resolve` | Resolving the request path to a storage path |
+| `thumbnail_generate` | Generation including the cache check, with the file name, the media kind, and `cache_hit` |
+| `representative_selection`, `representative_scan`, `representative_metadata` | Choosing the representative file of a folder or an archive, its scan, and reading its attributes |
+| `thumbnail_cache_lookup`, `thumbnail_cache_read` | The cache index query and the read of the cached file |
+| `thumbnail_permit_wait` | The wait for a generation permit, with the number of free permits at the request |
+| `thumbnail_generation` | The wait for the permit and for a running generation of the same key, plus the generation |
+| `thumbnail_production` | The generation itself: `thumbnail_materialize`, `thumbnail_convert`, and `thumbnail_store` |
+| `thumbnail_source_read`, `thumbnail_external_decode` | Reading the source file, and the ffmpeg or heif-dec decode, with the byte count |
+| `image_convert`, `image_decode`, `image_resize`, `image_encode` | The image conversion and its stages, with the sizes and the output bytes |
+| `client_timing` | A time the web client measured, with `client_operation`, the path, `duration_ms`, and the Resource Timing phases in milliseconds. It is an event, not a span, and has no `request` |
 
-Section events are emitted on success after the stream is read to the end. The absence of a success event on failure or cancellation is not interpreted as zero time.
-The API, the whole scan, and the whole driver stream are nested, so they are not added together. Attribute fetching means the query of the symlink itself, and does not include the query of the target's kind or reading the link.
+A span closes when its work ends, including on failure and cancellation. The result fields such as `entry_count` are recorded only on success, so a line without them is not interpreted as a completed operation.
+Nested spans overlap, so they are not added together. Attribute fetching means the query of the symlink itself, and does not include the query of the target's kind or reading the link.
 Even when the total attribute-fetch time is reported after parallelization, distinguish the total that overlaps across workers from the wall-clock elapsed time.
 
 ## 5. Browser
@@ -175,8 +192,8 @@ The sections are defined as follows. For each `--case`, the tool saves the HTTP 
 
 | Section | `--case` | What is measured | Discrimination |
 | --- | --- | --- | --- |
-| First generation | `initial` | The first display image request for each of 5 images in local and in the archive (from a cache miss until the body is read to the end) | `thumbnail_image_cache` is a miss. Generation (`thumbnail_generation`) is split into extraction (`thumbnail_materialize`), reading and conversion (`thumbnail_convert`), and saving (`thumbnail_store`) |
-| Cache hit | `cached` | Re-request the same 5 images 5 times each | `thumbnail_image_cache` is a hit. Confirm that all are hits |
+| First generation | `initial` | The first display image request for each of 5 images in local and in the archive (from a cache miss until the body is read to the end) | `cache_hit` of `thumbnail_generate` is false. Generation (`thumbnail_generation`) is split into extraction (`thumbnail_materialize`), reading and conversion (`thumbnail_convert`), and saving (`thumbnail_store`) |
+| Cache hit | `cached` | Re-request the same 5 images 5 times each | `cache_hit` of `thumbnail_generate` is true. Confirm that all are hits |
 | Swapping to the original image | `cached` | Fetch `files/content` of the same 5 images 5 times each | The time until the body is read to the end. Browser decoding and painting are not included |
 | Consecutive flipping | `flip` | Advance through 10 images in order. Opening an image requests the display images of that image and the one before and after it (the same as the viewer's prefetch). The operation intervals of 1000 ms and 300 ms are measured on different sets of 10 images | The wait at each step (from the step's time until the display image arrives) and the request's duration. The wait for a slot for generation is seen from the difference between `thumbnail_generation` and `thumbnail_production` |
 
@@ -190,4 +207,4 @@ python3 tools/performance/display.py --origin http://127.0.0.1:16061 \
   --label D1-r1-initial --output "$AGENT_TEMP_DIR/pxna-display-run/r1/initial.json"
 ```
 
-Run `--case cached` and `--case flip` in the same form. Pass authentication with the environment variable `PXNA_PERF_TOKEN`. Browser decoding and painting and real network lines are not measured. When browser-side time is needed, read the display image and original image requests separately with Resource Timing.
+Run `--case cached` and `--case flip` in the same form. Pass authentication with the environment variable `PXNA_PERF_TOKEN`. Browser decoding and painting and real network lines are not measured. When browser-side time is needed, use the `client_timing` lines that the web client writes while the measurement is on.

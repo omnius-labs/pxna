@@ -377,7 +377,7 @@ impl TimelineScanner {
     /// 中身から読む撮影日時か `creation_time`。読めなければ `None` にする。
     async fn content_date(&self, kind: MediaKind, file: &Path) -> Option<TimelineDate> {
         match kind {
-            MediaKind::Image | MediaKind::FfmpegImage => {
+            MediaKind::Image | MediaKind::FfmpegImage | MediaKind::HeifImage => {
                 let path = file.to_path_buf();
                 let permit = self.storage.work_budget().acquire(WorkClass::Background, WorkKind::Exif).await.ok()?;
                 let exif = tokio::task::spawn_blocking(move || {
@@ -471,7 +471,7 @@ impl TimelineScanner {
 
     fn kind(kind: MediaKind) -> TimelineKind {
         match kind {
-            MediaKind::Image | MediaKind::FfmpegImage => TimelineKind::Image,
+            MediaKind::Image | MediaKind::FfmpegImage | MediaKind::HeifImage => TimelineKind::Image,
             MediaKind::Video => TimelineKind::Video,
         }
     }

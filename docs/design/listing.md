@@ -2,7 +2,7 @@
 
 ## 1. About This Document
 
-This document covers the mechanism that sorts and filters the contents of folders and archives and returns them in pages, and name search, and defines snapshots, how freshness is kept, search matching, recursion limits, and the reasons for adopting them.
+This document covers the mechanism that sorts and filters the contents of folders and archives and returns them in pages, and name search, and defines snapshots, how freshness is kept, search matching, the name index, recursion limits, and the reasons for adopting them.
 The intended readers are developers and AI agents who implement or review this concern.
 It assumes the vocabulary of [terms.md](../terms.md).
 The definitions of words are not in this document.
@@ -11,10 +11,12 @@ The definitions of words are not in this document.
 
 | Document | What it covers |
 | --- | --- |
-| This document | Sorting and filtering of listings, snapshots, name search, recursion limits, reasons for adoption, deferred items |
+| This document | Sorting and filtering of listings, snapshots, name search, the name index, recursion limits, reasons for adoption, deferred items |
 | [design.md](../design.md) | Pxna's overall scope, overall structure, how name order is compared, conventions for mutating APIs |
 | [Storage Layer Design](./storage.md) | The driver operation that enumerates the Entries of folders and archives, archive identity and fingerprint |
 | [Client Design](./client.md) | In what range and when listings are read, the search screen |
+| [Timeline Design](./timeline.md) | The aggregation whose walk updates the name index, and when it starts |
+| [Rating and Tag Design](./rating-tags.md) | Conditions on ratings and tags, and the identifier of a filtered listing |
 | [terms.md](../terms.md) | Definitions of terms |
 | [issues.md](../issues.md) | Clear defects confirmed in code and handling policies |
 | [daemon/openapi.yaml](../../daemon/openapi.yaml) | The authoritative listing API paths, parameters, schemas, and status codes |
@@ -30,8 +32,9 @@ If you want to know what works now, read §9 first.
 ## 2. Responsibilities and Boundaries
 
 This document covers the span from receiving the inside of a folder or archive that a checked `NestedPath` points to, to returning the Entries of the requested range as a response.
-`listFolderEntries` returns detail listings and recursive name search. The advance display of direct children's names and kinds uses the summary listing.
-Search is handled as a listing with a name condition (§5).
+`listFolderEntries` returns detail listings. The advance display of direct children's names and kinds uses the summary listing.
+Search is handled as a listing with conditions (§5), and `listSearchEntries` merges the listings of one or more Libraries into one sequence (§5.3).
+A recursive listing with conditions is answered from the name index without walking the file system (§5.1, §5.2).
 
 The client jumps to any position by the scrollbar even for a large folder, and reads only the page at that position ([Client Design §3.5](./client.md#35-loading-listings)).
 For that reason, the server does not rescan every time a page is requested, and has a form in which a page at any position can be returned at the same cost.
@@ -49,11 +52,11 @@ The boundaries with other concerns are as follows.
 
 ### 2.1 What Is Not Built
 
-- A name index for recursive search of the whole Library is not built.
-  Only the direct-child listings that have already been browsed are reused, and there is no scan that indexes unbrowsed descendants (§8.1).
-- A recursive walk does not descend into archives.
-  This avoids building the indexes of all archives in the range of the walk for one listing.
-  Only when the path of an archive is specified as the starting point does it walk the inside of that archive.
+- The name index has no scan of its own and does not watch file system notifications.
+  It is updated by the walk of aggregation and by the daemon's own changes, so external changes appear in search at the next aggregation (§5.1).
+- Neither a recursive walk nor the name index descends into archives.
+  This avoids building the indexes of all archives in the range of the walk or the aggregation.
+  Only when the path of an archive is specified as the starting point does a listing walk the inside of that archive.
 - Search by file contents and metadata (such as EXIF) is not done.
   Matching is by name alone, so the walk does not need to read Entry contents.
 - The continuation of a cut-off recursive walk is not returned.
@@ -75,6 +78,8 @@ A listing is a sequence of Entries determined by the target (Library and `path`)
 `totalCount` is the count after applying `foldersOnly`, `includeHidden`, and `query`.
 With this value the client decides the overall height of the listing from the first page.
 
+The search API takes the same specifications except `includeHidden` and `foldersOnly`, applies them to the listing of each Library, and also takes rating and tag conditions (§5.3).
+
 ## 4. Snapshots
 
 ### 4.1 The Unit That Is Built
@@ -87,6 +92,10 @@ The target's version is held to check the freshness of the snapshot (§4.3).
 The order by `sort`, `order`, and `foldersFirst` is computed only once per order inside the snapshot and kept.
 `foldersOnly` and `query` are applied to the order on every request.
 This way, the scan is needed only once even when the sort order is changed or the search terms are retyped.
+
+A recursive listing answered from the name index is the exception.
+Its snapshot holds only the Entries that match the conditions, and the conditions are part of the combination (§5.2).
+Retyping the search terms queries the index again instead of rescanning.
 
 Concurrent requests for the snapshot of the same combination are merged into one scan.
 If all the requests waiting for a scan disconnect, the scan is stopped and the snapshot is discarded.
@@ -121,13 +130,13 @@ The target's version is decided according to the kind of target as follows.
 Separately from this, any snapshot is considered stale once `snapshot_max_age_secs` has passed since it was built.
 A recursive listing has no means of checking changes underneath with one stat, so freshness is checked by this elapsed time alone.
 
-On POSIX-compliant file systems, a local folder's modification time changes when an Entry is created, deleted, or renamed among its direct children ([Directory modification time](../knowledges/posix-directory-mtime.md) in [knowledges.md](../knowledges.md)).
+On POSIX-compliant file systems, a local folder's modification time changes when an Entry is created, deleted, or renamed among its direct children ([Directory modification time](../knowledge/posix-directory-mtime.md) in [knowledge.md](../knowledge.md)).
 A change to the contents of an existing file, and a change inside a child folder, do not change the modification time.
 These are not reflected in the listing's size and modification date until `snapshot_max_age_secs` has passed since the snapshot was built.
 
 On file systems with coarse modification-time precision, a change right after a scan gets the same time as before the scan and may not show up as a version difference.
 Therefore, if the difference between the time the scan started and the folder's modification time is less than 2 seconds, that snapshot is rebuilt on the next request.
-If a Library is placed on an NFS mount, a change on another device may be delayed before showing up in the modification time because of the client's attribute cache ([NFS attribute cache](../knowledges/nfs-attribute-cache.md) in [knowledges.md](../knowledges.md)).
+If a Library is placed on an NFS mount, a change on another device may be delayed before showing up in the modification time because of the client's attribute cache ([NFS attribute cache](../knowledge/nfs-attribute-cache.md) in [knowledge.md](../knowledge.md)).
 During that time, the old listing is returned.
 
 The daemon's own mutating operations discard snapshots without waiting for the modification time.
@@ -151,14 +160,90 @@ An Entry matches if its name contains all of the terms obtained by splitting `qu
 Before matching, both the name and the terms are normalized with NFKC, and lowercased with Unicode's lowercase mapping.
 
 We normalize because a Library may contain both decomposed and composed names.
-macOS's HFS Plus stores filenames in decomposed form, and APFS stores them in the normalization they had at creation ([macOS filename normalization](../knowledges/macos-filename-normalization.md) in [knowledges.md](../knowledges.md)).
+macOS's HFS Plus stores filenames in decomposed form, and APFS stores them in the normalization they had at creation ([macOS filename normalization](../knowledge/macos-filename-normalization.md) in [knowledge.md](../knowledge.md)).
 If the "が" in a name is decomposed (か of U+304B and the voiced mark of U+3099) and the "が" in the term is composed (U+304C), comparing without normalization does not match.
 NFKC also unifies full-width and half-width alphanumerics into the same characters.
 
 Only the Entry's name is matched, and the parent's path is not included.
 When searching underneath, `recursive=true` and `query` are combined.
-Entries that do not match the condition are also walked, so the time a subtree search takes is decided by the number of Entries underneath regardless of the condition.
-The snapshot is built in the combination that does not include `query` (§4.1), so retyping search terms does not rescan.
+When a subtree search walks the file system, Entries that do not match the condition are also walked, so the time it takes is decided by the number of Entries underneath regardless of the condition.
+The walked snapshot is built in the combination that does not include `query` (§4.1), so retyping search terms does not rescan.
+
+### 5.1 Name Index
+
+The name index holds, per Library, the Library-relative path, the parent's path, the kind, and the normalized name of every Entry outside archives.
+Hidden Entries whose names start with `.`, and the Entries inside them, are not held, by the same rule as aggregation ([Timeline Design §3](./timeline.md#3-what-is-listed)).
+An archive is held as one Entry, and its contents are not.
+It is derived state in SQLite under the listing state directory, separate from the authentication DB.
+
+The index is updated at the same points as the timeline index.
+Each time aggregation enumerates a folder, the rows of that folder's direct children are replaced with the enumerated names ([Timeline Design §6.1](./timeline.md#61-scanning-and-skipping-rereads)).
+A full aggregation records its generation in the rows it saw, and when the scan finishes, removes the rows in the scanned range that do not have it.
+The daemon's own changes delete the rows of a path that no longer exists and everything under it, and reassign the rows under a renamed or moved path to the destination, before the response ([Timeline Design §6.4](./timeline.md#64-the-daemons-own-changes)).
+Added Entries appear when range aggregation enumerates their folder.
+External changes appear at the next full aggregation or manual aggregation.
+A result that has changed externally since then is still returned, and opening it gives `NotFound` through the existing revalidation of the path.
+
+An index of a Library becomes usable when a full aggregation of that Library has finished with it once, and this is recorded in the index file per Library.
+Later aggregations update the rows in place, so the index stays usable while they run.
+If reading, writing, or verifying the index fails, the process stops using it and returns to walking.
+At the next startup the file is verified again, and a Library whose record of usability is missing or whose file was discarded waits for a full aggregation ([Timeline Design §6.3](./timeline.md#63-when-aggregation-starts)).
+A snapshot answered from the index is discarded by the daemon's own changes and after `snapshot_max_age_secs`, as other recursive listings are (§4.3).
+A missing, corrupt, or unknown-format index is discarded and rebuilt by the next full aggregation, and does not affect the authentication DB.
+
+The index holds the whole range above and has no capacity limit or LRU.
+An index that has dropped part of a Library cannot tell a missing Entry from an Entry that does not match, so it could not answer a search.
+Its size is proportional to the number of Entries.
+
+A term of 3 or more characters is matched against a trigram index of the normalized names, and a shorter term is matched by comparing the normalized names of the candidates directly.
+SQLite's trigram tokenizer matches no rows for a substring shorter than 3 characters ([SQLite FTS5 trigram](../knowledge/sqlite-fts5-trigram.md) in [knowledge.md](../knowledge.md)).
+When all terms are shorter than 3 characters, the candidates are all rows under the start.
+Names are stored already normalized by the rules of §5, so the trigram index compares them as they are and does not fold case or remove diacritics itself.
+The meaning of a match is the same as in a walk.
+
+### 5.2 Answering Recursive Listings with Conditions
+
+A listing is answered from the name index when all of the following hold.
+
+- `recursive` is true and `includeHidden` is false
+- At least one of a name condition, a rating condition, or a tag condition is given
+- The start is a local folder, not an archive or a path inside one
+- The index of that Library is usable (§5.1)
+
+Otherwise the listing walks the file system as before.
+The response tells whether the name index answered it.
+When only the last condition fails, the walked result may be cut off by the walk's count, and the client shows that the index is being built ([Client Design §3.6](./client.md#36-search)).
+A walk taken for one of the other reasons is the intended answer and is not marked.
+
+The snapshot holds only the matching Entries, sorted by the same rules as other snapshots.
+The index holds names and kinds only, so the attributes that a detail listing returns are read from the file system for the matching Entries, with the same workers and limits as the detail batch.
+A match whose Entry no longer exists is dropped at this point, so the results do not include Entries deleted since the last aggregation.
+Beyond the index query, the cost of a search is therefore proportional to the number of matches, not to the size of the Library.
+With a good, bad, or tag condition, the candidates are the paths under the start in the user's ratings and tags, kept only if the name index holds them, and then the name terms are applied.
+Ratings and tags are a small part of a Library, so starting from them is cheaper than starting from the names.
+With the unrated condition, the candidates are the image and video rows of the index under the start, minus the rated paths, so without name terms the number of matches can reach the limit of §6.
+A rated path whose Entry has been deleted externally is not in the index and does not appear in the results.
+The version of ratings and tags is part of the combination, so a snapshot with a rating or tag condition is rebuilt from the index when they are written ([Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings)).
+
+### 5.3 Searching Across Libraries
+
+`listSearchEntries` searches the Libraries named by `libraryIds` and returns their matching Entries as one sequence, each with its Library id.
+For each Library, the listing of its start with the given `recursive`, `query`, rating, and tag conditions is built by the rules of §4, §5, and the two sections above, and the server merges these listings in the order of `sort`, `order`, and `foldersFirst`.
+Entries are told apart by path within a Library, so two Entries compare as equal only when they have the same path in different Libraries, and those are ordered by the position of their Library in `libraryIds`.
+
+The start is given by `path` only when `libraryIds` names one Library.
+With several Libraries, the root of each Library is the start, and a `path` other than `/` is `InvalidInput`.
+Hidden Entries are always excluded, and `includeHidden` and `foldersOnly` are not accepted.
+An id that names no Library is `NotFound`.
+
+The merged sequence is not kept as a snapshot of its own.
+Each Library's listing comes from the snapshot of §4.1 for that combination, which is shared with folder listings of the same target, and each page request merges the per-Library orders again from the head.
+The cost of cutting a page therefore grows with `offset` and the number of Libraries, but no memory beyond the per-Library snapshots is held.
+The response's snapshot id joins the identifiers of the per-Library listings, including the version of ratings and tags while a rating or tag condition is given ([Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings)).
+When any one of them is rebuilt, the id changes, and the client rereads as with other listings (§4.2).
+
+`totalCount` is the sum of the per-Library counts.
+The recursion limit of §6 applies to each Library separately, and the response lists the Libraries whose listing was cut off in `truncatedLibraryIds`.
 
 ## 6. Recursion Limit
 
@@ -170,7 +255,13 @@ The limit is there to hold down memory and the wait until the first page.
 In a subtree search from the Library root, the snapshot would hold the Entries of the whole Library.
 Without the limit, one search would use memory and wait time proportional to the size of the Library.
 
-When the client receives `truncated`, it indicates that the result is partial and urges moving the starting point down ([Client Design §3.6](./client.md#36-search)).
+In a search across Libraries, the limit is counted for each Library separately, so the memory and the wait until the first page can reach as many times the single-Library amount as there are Libraries (§5.3).
+
+For a listing answered from the name index, the same `recursive_max_entries` limits the number of matching Entries put in the snapshot (§5.2).
+Matching Entries are a part of the Entries underneath, so a search from the Library root is not cut off unless the conditions themselves match that many.
+There is no walk to bound, and the query is stopped when all requests waiting for it disconnect, as with a scan (§4.1).
+
+When the client receives `truncated`, or a non-empty `truncatedLibraryIds` from the search API, it indicates that the result is partial and urges narrowing the Libraries or moving the start down ([Client Design §3.6](./client.md#36-search)).
 
 ## 7. Configuration
 
@@ -268,14 +359,16 @@ It also needs no stat on every request, but external changes would not be visibl
 #### Treat Name Search as a Listing Condition
 
 **Decision**
-Name search is done with `query` of `listFolderEntries`, and search underneath is done in combination with `recursive=true`.
-There is no dedicated search API.
+Name search is a condition on listings, and search underneath is the combination with `recursive=true`.
+`listFolderEntries` accepts `query`, and `listSearchEntries`, which search mode uses, applies the same conditions to the listing of each Library and merges them (§5.3).
+Search has no mechanism of its own apart from listings.
 
 **Reason**
 Search results can also use snapshots, sorting, `totalCount`, and extracting a page at any position as they are.
 The client can display search results in the same grid and list as ordinary listings.
-The snapshot is built in the combination that does not include `query`, so retyping search terms does not rescan.
-The cost is that the first page of a subtree search does not return until the scan finishes.
+A walked snapshot is built in the combination that does not include `query`, so retyping search terms does not rescan.
+A snapshot answered from the name index includes the conditions, so retyping costs one index query instead.
+The cost is that the first page does not return until the walk or the index query finishes.
 
 **Rejected alternative 1**
 A streaming search API that sends found Entries in order.
@@ -285,19 +378,110 @@ The first results appear immediately, but the order changes as they arrive, so v
 Keeping a search API (`searchEntries`) that waits until the scan finishes or `limit` items are reached and returns in scan order.
 The previous implementation took this form, and no server change is needed, but there is no way to fetch the continuation and sorting is left to the client, so we rejected it.
 
-#### Separate the Recursive Search Index from the Index of Already-Browsed Listings
+#### Search Several Libraries by Merging Per-Library Listings on the Server
 
 **Decision**
-Recursive search keeps scanning at request time. Only the already-browsed summary listings of direct children are held in the browse index, which is reused after checking the version and expiry.
-The timeline index holds the timeline dates of images and videos and is not substituted for either name listing.
+`listSearchEntries` accepts several Libraries, builds the listing of each with the snapshots of §4.1, and merges them on the server for every page.
+The recursion limit is counted for each Library (§5.3, §6).
 
 **Reason**
-We do not have a search index that follows changes across all Libraries, and we skip the enumeration and sorting of repeatedly opened folders even after a restart.
-Direct-child listings can use the existing rules of version and maximum age. The speed of unbrowsed descendants is not improved.
+The client's virtual scrolling needs one sequence with `totalCount` and pages at any `offset` ([Client Design §3.5](./client.md#35-loading-listings)), and only the server can cut such a page out of several Libraries without reading all of them.
+Per-Library snapshots are shared with folder listings, and the name index also answers per Library (§5.2), so building the merged search on them needs no second kind of snapshot.
+Counting the limit per Library keeps each Library's result the same as when it is searched alone.
+The cost is that a search across many large Libraries can hold as many truncated snapshots and wait as many walks as there are Libraries while the name index is not usable.
 
-**Rejected alternative**
-The previous method of not persisting listings either repeats enumeration and sorting after every restart, so it is replaced for summary listings of direct children.
-An index for name search across the whole Library is not adopted because it would add following external changes and full background scans.
+**Rejected alternative 1**
+A method in which the client calls the single-Library listing of each Library and joins the results.
+No server change would be needed, but there is no overall order or `totalCount` for the joined sequence, so a page in the middle could not be read without reading everything before it, and we rejected it.
+
+**Rejected alternative 2**
+A method that counts the recursion limit over all the Libraries together.
+The memory bound would stay that of one search, but a Library walked later would lose its results depending on the order of the walk, so we rejected it.
+
+<a id="name-index"></a>
+#### Answer Recursive Searches from a Library-Wide Name Index Updated by Aggregation
+
+**Decision**
+A recursive listing with name, rating, or tag conditions is answered from the name index, which aggregation's walk and the daemon's own changes update (§5.1, §5.2).
+External changes appear in search at the next aggregation.
+The browse index keeps holding only already-browsed summary listings of direct children, and the timeline index is not substituted for name listings.
+
+**Reason**
+The design assumes Libraries of 10 million Entries or more.
+A walk costs time in proportion to the Entries underneath, and a search from the Library root also has to be cut off by count.
+Answering without touching the file system is the only way to keep a search from the root within a second at that scale.
+Aggregation already walks every non-hidden folder once a day by default, so the index needs no scan of its own.
+Reflecting external changes at the next aggregation is the same promise the timeline makes ([Timeline Design §2.1](./timeline.md#21-what-is-not-built)).
+The timeline index holds only images and videos, so it cannot answer searches that include folders and other files.
+
+**Rejected alternative 1**
+A method that reuses the browse index during a recursive walk, checking each folder's modification time with one stat and reusing its saved names.
+Freshness would stay as exact as now and nothing new would follow external changes, but a search from the root still needs one stat and one lookup per folder.
+At an average of 10 Entries per folder, that is about a million stats per search at the assumed scale, which takes minutes, so we rejected it.
+
+**Rejected alternative 2**
+A method that walks when the range under the start is small and uses the index when it is large.
+Small searches would always be current, but the same terms would give different results depending only on the start, and both paths would have to be tested for agreement, so we rejected it.
+
+**Rejected alternative 3**
+The previous method of scanning at request time for every recursive search.
+It always returns the current state, but at the assumed scale a search from the root waits for the whole Library and is cut off by count, so it is replaced.
+
+**Rejected alternative 4**
+A method in which the name index has its own periodic walk.
+It would not depend on aggregation's interval, but it would double the daily full walk of the NAS, so we rejected it.
+
+#### Read the Attributes of Matching Entries from the File System
+
+**Decision**
+The name index holds no sizes or times, and a listing answered from it reads the attributes of the matching Entries from the file system before building the snapshot (§5.2).
+
+**Reason**
+A detail listing returns size, modification time, and readonly as required fields, and sorting by size or date needs them.
+Reading them for the matches only keeps them current and drops Entries deleted since the last aggregation.
+
+**Rejected alternative 1**
+A method that stores sizes and times in the name index.
+No file system access would be needed, but they would be as old as the last aggregation and the index would grow, so we rejected it.
+
+**Rejected alternative 2**
+A method that returns results from the index without those attributes.
+It would change the required fields of the existing listing contract, which the summary listing decision kept for existing clients ([summary-listing](#summary-listing)), so we rejected it.
+
+#### Match Names in the Index with Trigrams and Compare Short Terms Directly
+
+**Decision**
+Terms of 3 or more characters are matched through a trigram index of the normalized names, and shorter terms by comparing the normalized names of the candidates (§5.1).
+
+**Reason**
+Terms of 3 or more characters, which narrow results well, return from the index without reading every row.
+Japanese terms are often 1 or 2 characters, and the trigram index cannot match those, so they are compared directly.
+A search with only such terms costs as much as rejected alternative 1 and no more.
+
+**Rejected alternative 1**
+A method that compares the normalized names of all rows under the start for every term.
+It needs the least disk, but every search reads all the rows, so we rejected it.
+
+**Rejected alternative 2**
+A method that keeps all normalized names in memory and compares them in parallel.
+It would be fast for every term, but at the assumed scale it keeps 400 MB or more resident on the NAS, so we rejected it.
+
+#### Walk While the Name Index Is Not Usable
+
+**Decision**
+While the index of a Library is not usable, recursive listings with conditions walk the file system as before, and the response tells that the index did not answer (§5.2).
+
+**Reason**
+It follows the same rule as the browse index: when derived state cannot be used, the listing returns to enumeration.
+The first full aggregation of a large Library can take hours, and search keeps working during that time.
+
+**Rejected alternative 1**
+A method that refuses recursive search until the index is usable.
+The results would always come from one source, but search would be unavailable for hours after adding a Library, so we rejected it.
+
+**Rejected alternative 2**
+A method that answers from the part of the index built so far.
+It would be fast, but the user could not tell which part of the Library the results cover, so we rejected it.
 
 #### Normalize Names with NFKC and Match in Lowercase
 
@@ -321,10 +505,12 @@ Pairs that do not become the same under lowercase mapping, like German ß and ss
 
 **Decision**
 A recursive walk is cut off when the Entries put in the snapshot reach `recursive_max_entries`, and responds with only the Entries already walked and sets `truncated` (§6).
+For a listing answered from the name index, the same limit counts matching Entries.
 
 **Reason**
 Even in a subtree search from the Library root, memory and the wait until the first page stay within the limit.
 Even when cut off, the results for the range already walked are returned, so the user can move the starting point down and search again.
+A snapshot from the name index holds only the matching Entries, so counting matches bounds the same memory without cutting off a search merely because the Library is large.
 
 **Rejected alternative 1**
 A method that sets a deadline for the walk and fails with a 504 `Timeout` once it passes.
@@ -387,25 +573,12 @@ It keeps the checks of maximum age and version and does not become a cache that 
 
 ### 8.2 Deferred
 
-#### Indexing Search
-
-**Current state**
-Listings and search are returned from snapshots of results scanned on request.
-The first page of a subtree search does not return until the scan proceeds up to `recursive_max_entries` items or the scan finishes.
-
-**Why not decide now**
-A mechanism for making the index follow external file changes would be needed, and the implementation effort for correctness is large.
-Until speed becomes a problem in real operation, we prefer scanning each time, which always returns the current state.
-
-**Conditions for deciding**
-When the wait until the first page of a subtree search returns becomes unusable on a real operation tree.
-In that case, how to make index updates follow becomes the main issue.
-
 #### Whether to Reflect External Changes in Listings Immediately
 
 **Current state**
 Changes to the direct children of a local folder are reflected from the next request by modification time.
 Changes to file contents, changes inside child folders, and changes delayed by the NFS attribute cache are not reflected until `snapshot_max_age_secs` has passed since the snapshot was built (§4.3).
+The name index reflects external changes at the next aggregation (§5.1).
 
 **Why not decide now**
 Reflecting immediately would mean using per-OS file change notifications, and handling the case where notifications do not arrive would also be needed on network file systems.
@@ -427,8 +600,19 @@ A listing with `query` uses the same snapshots.
 The `[listing]` configuration, checking freshness by the target's version and elapsed time, sharing the scan among concurrent requests, stopping the scan when all requests have disconnected, and discarding by capacity and expiry work according to the rules of §4 through §7.
 `LibraryBrowser` reads snapshots, and `LibraryMutation` and `OperationService` discard ancestors' snapshots after the daemon's own changes.
 
+`listSearchEntries` is implemented by [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) and `LibraryBrowser::search_entries`: each Library's listing comes from the same snapshots as `listFolderEntries`, and `SearchResults` merges their sorted, filtered orders on every page (§5.3). `listFolderEntries` accepts only the name condition; rating and tag conditions are accepted only by the search API.
+
+The name index of §5.1 and §5.2 is not implemented. Recursive listings with conditions, including the search API's, always walk the file system and are cut off by the number of walked Entries for each Library.
+
 ### 9.2 Roadmap
 
-There is no remaining work in this milestone.
+The order is provisional.
+Only the dependencies must be respected.
+
+| No. | Content | Dependencies assumed | State |
+| --- | --- | --- | --- |
+| L1 | Implement the name index, its update by aggregation and by the daemon's own changes, and answering recursive listings with name, rating, and tag conditions from it (§5.1, §5.2) | None | Not started |
+
+L1 corresponds to M19 of [design.md §12.2](../design.md#122-roadmap).
 
 For confirmed defects, see [issues.md](../issues.md).

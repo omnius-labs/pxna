@@ -4,10 +4,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
-import type { FolderListing } from "../library/entries";
+import { type Entry, entryPlace, type FolderListing } from "../library/entries";
+import type { ListingSource } from "../library/listing";
 import type { SortPreference } from "../library/preferences";
 import { emptySelection } from "../library/selection";
-import type { BrowseLocation } from "../location";
+import { CROSS_LIBRARY_SCOPE, entryAddress } from "../location";
 import { ThumbnailQueue } from "../thumbnails/queue";
 import { List } from "./List";
 
@@ -44,10 +45,25 @@ const listPage = (): FolderListing => ({
     snapshot: "one",
     truncated: false,
 });
+const searchSource = (recursive: boolean, query = "txt"): ListingSource => ({
+    kind: "search",
+    criteria: { libraryIds: ["search"], path: "/base", recursive, query, tags: [] },
+});
+const placeUnder = (entry: Entry) =>
+    entryPlace("/base", { ...entry, path: entryAddress(CROSS_LIBRARY_SCOPE, entry.path).path });
+/// 検索の応答。Entry は Library の id を添える。
+const searchPage = (page: FolderListing) => ({
+    entries: page.entries.map((entry) => ({ libraryId: "search", entry })),
+    totalCount: page.totalCount,
+    snapshot: page.snapshot,
+    truncatedLibraryIds: page.truncated ? ["search"] : [],
+});
+const folderSource: ListingSource = { kind: "folder", libraryId: "big", path: "/" };
 async function harness(
     narrow: boolean,
-    location: BrowseLocation = { libraryId: "big", path: "/" },
-    data: FolderListing | null = listPage(),
+    source: ListingSource = folderSource,
+    data: FolderListing | ReturnType<typeof searchPage> | null = listPage(),
+    place?: (entry: Entry) => string,
 ) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     get.mockImplementation(() =>
@@ -62,7 +78,8 @@ async function harness(
             actualRoot.render(
                 <QueryClientProvider client={client}>
                     <List
-                        location={location}
+                        source={source}
+                        place={place}
                         shape="crop"
                         narrow={narrow}
                         sort={sort}
@@ -141,7 +158,7 @@ it("renders two lines without headings on a narrow screen", async () => {
 });
 
 it("広いリストは名前の次に、並べ替えない場所の列を足す", async () => {
-    const h = await harness(false, { libraryId: "search", path: "/base", query: "txt", recursive: true });
+    const h = await harness(false, searchSource(true), searchPage(listPage()), placeUnder);
     try {
         expect(h.host.querySelectorAll("[role=columnheader]")).toHaveLength(6);
         const heading = [...h.host.querySelectorAll("[role=columnheader]")].find((el) => el.textContent === "場所")!;
@@ -154,7 +171,7 @@ it("広いリストは名前の次に、並べ替えない場所の列を足す"
     }
 });
 it("狭いリストは配下の検索の場所を 2 段目の頭に置く", async () => {
-    const h = await harness(true, { libraryId: "search", path: "/base", query: "txt", recursive: true });
+    const h = await harness(true, searchSource(true), searchPage(listPage()), placeUnder);
     try {
         const lines = [...h.host.querySelectorAll("[data-two-lines]")];
         expect(lines[0]!.children[1]!.textContent).toMatch(/^\. · /);
@@ -165,7 +182,7 @@ it("狭いリストは配下の検索の場所を 2 段目の頭に置く", asyn
     }
 });
 it("直下の絞り込みでは場所を出さない", async () => {
-    const h = await harness(false, { libraryId: "search", path: "/base", query: "txt", recursive: false });
+    const h = await harness(false, searchSource(false), searchPage(listPage()));
     try {
         expect(h.host.querySelectorAll("[role=columnheader]")).toHaveLength(5);
         expect(h.host.querySelector("[title=deep]")).toBeNull();
@@ -174,7 +191,7 @@ it("直下の絞り込みでは場所を出さない", async () => {
     }
 });
 it.each([true, false])("リストは配下の最初のページだけ検索中と示す %s", async (recursive) => {
-    const h = await harness(false, { libraryId: "search", path: "/base", query: "txt", recursive }, null);
+    const h = await harness(false, searchSource(recursive), null, recursive ? placeUnder : undefined);
     try {
         expect(h.host.textContent).toBe(recursive ? "検索中…" : "読み込み中…");
     } finally {
@@ -184,26 +201,23 @@ it.each([true, false])("リストは配下の最初のページだけ検索中�
 it.each([false, true])("リストは検索の 0 件と打ち切りを示す %s", async (truncated) => {
     const h = await harness(
         false,
-        { libraryId: "search", path: "/base", query: "missing", recursive: true },
-        { entries: [], totalCount: 0, snapshot: "empty", truncated },
+        searchSource(true, "missing"),
+        searchPage({ entries: [], totalCount: 0, snapshot: "empty", truncated }),
+        placeUnder,
     );
     try {
         expect(h.host.textContent).toContain("一致する項目がありません。");
         expect(h.host.querySelector('[role="status"]')?.textContent).toBe(
-            truncated ? "結果の一部を表示しています。起点のフォルダを下げて探し直してください。" : undefined,
+            truncated ? "結果の一部を表示しています。Library を絞るか、場所を下げて探し直してください。" : undefined,
         );
     } finally {
         await h.dispose();
     }
 });
 it("リストは結果があるときも打ち切りを示す", async () => {
-    const h = await harness(
-        false,
-        { libraryId: "search", path: "/base", query: "txt", recursive: true },
-        { ...listPage(), truncated: true },
-    );
+    const h = await harness(false, searchSource(true), searchPage({ ...listPage(), truncated: true }), placeUnder);
     try {
-        expect(h.host.querySelector('[role="status"]')?.textContent).toContain("起点のフォルダを下げて");
+        expect(h.host.querySelector('[role="status"]')?.textContent).toContain("Library を絞るか");
     } finally {
         await h.dispose();
     }
@@ -211,7 +225,7 @@ it("リストは結果があるときも打ち切りを示す", async () => {
 it("リストは 0 件の通常の一覧を空のフォルダと示す", async () => {
     const h = await harness(
         false,
-        { libraryId: "search", path: "/base" },
+        { kind: "folder", libraryId: "search", path: "/base" },
         { entries: [], totalCount: 0, snapshot: "empty", truncated: false },
     );
     try {
@@ -235,10 +249,10 @@ it("only schedules visible folders but retains prefetched images and videos", as
         snapshot: "thumb-visible",
         truncated: false,
     };
-    const h = await harness(false, { libraryId: "thumb-visible", path: "/" }, data);
+    const h = await harness(false, { kind: "folder", libraryId: "thumb-visible", path: "/" }, data);
     try {
         const last = spy.mock.calls.at(-1);
-        if (!last || !last[1]) throw new Error("thumbnail demand missing");
+        if (!last?.[1]) throw new Error("thumbnail demand missing");
         expect([...last[0].keys()]).toEqual(["/dir", "/a.zip", "/i.png", "/v.mp4"]);
         expect([...last[1]]).toEqual(["/dir", "/a.zip"]);
     } finally {

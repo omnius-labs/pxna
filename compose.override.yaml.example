@@ -1,0 +1,16 @@
+# Local additions to compose.yaml. Copy this file to compose.override.yaml (not tracked by git);
+# docker compose merges it automatically, so start.sh needs no changes.
+# Each mount here needs a matching [[libraries]] entry in config/pxna.toml, for example:
+#
+#   [[libraries]]
+#   id = "videos"
+#   name = "Videos"
+#   path = "/libraries/videos"
+#   readonly = false
+#
+# Mount each library at /libraries/<id>. Use absolute host paths.
+
+services:
+  pxna:
+    volumes:
+      - /absolute/path/to/videos:/libraries/videos

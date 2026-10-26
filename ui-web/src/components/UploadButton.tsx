@@ -1,3 +1,4 @@
+import { FolderUp, Upload } from "lucide-react";
 import { useRef } from "react";
 import { useEntryActions } from "../library/actionContext";
 import { useTransfer } from "../library/transfer";
@@ -22,20 +23,22 @@ export function UploadButton() {
             <button
                 type="button"
                 aria-label="ファイルをアップロード"
+                title="ファイルをアップロード"
                 disabled={disabled}
                 onClick={() => files.current?.click()}
-                className="rounded px-1.5 py-1 disabled:opacity-40"
+                className="rounded p-1.5 disabled:opacity-40"
             >
-                アップロード
+                <Upload className="size-4" />
             </button>
             <button
                 type="button"
                 aria-label="フォルダをアップロード"
+                title="フォルダをアップロード"
                 disabled={disabled}
                 onClick={() => folders.current?.click()}
-                className="rounded px-1.5 py-1 disabled:opacity-40"
+                className="rounded p-1.5 disabled:opacity-40"
             >
-                フォルダ
+                <FolderUp className="size-4" />
             </button>
             <input
                 ref={files}

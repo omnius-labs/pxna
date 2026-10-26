@@ -16,7 +16,7 @@ Pxna is a self-hosted remote file manager. A Rust daemon serves files from direc
 - Ratings and tags, with filtering in search
 - Upload, rename, move, copy, and delete files
 - Single-owner authentication with server-side sessions
-- Docker image with ffmpeg included
+- Docker image with ffmpeg 9 and libheif included
 
 The design documents are in [docs/design.md](docs/design.md).
 
@@ -29,6 +29,8 @@ Please initialize the submodules right after cloning.
 ```sh
 git submodule update --init
 ```
+
+To keep the submodules in sync on `git pull` and `git checkout`, also run `git config submodule.recurse true` (add `--global` to apply it to every repository).
 
 ### Installing Required Dependencies
 
@@ -79,23 +81,51 @@ npx --yes shadcn@4.21.4 add <component>
 Use trusted registry configuration and local paths.
 The CLI still depends on [braces with an unpatched denial-of-service vulnerability](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm); removing it from the project does not patch the CLI itself.
 
+### Linting
+
+```sh
+(cd daemon && cargo make lint)
+(cd ui-web && npm run lint)
+```
+
 ## Running in Docker
 
-Initialize the submodules, then build and start the container:
+Create `.env`, then run `start.sh`. It initializes the submodules, creates `config/pxna.toml` from the template if it is missing, then builds and starts the container (arguments are passed to `docker compose up`):
 
 ```sh
 cp .env.example .env
-# Edit .env and set PXNA_LIBRARY_DIR to the absolute path of your library.
-docker compose up --build -d
+# Edit .env and set PXNA_CONTENTS_DIR to the absolute path of your library.
+./start.sh
 ```
 
-Open `http://localhost:6050` and create the owner account. The image includes the SPA, ffmpeg, and ffprobe.
-The container listens on `127.0.0.1` only. Change the port with `PXNA_PORT`.
+The image build fails with a message if the submodules are empty, for example when you run `docker compose up` directly without `start.sh`.
+
+Open `http://localhost:6050` and create the owner account. The image includes the SPA, ffmpeg 9, ffprobe, and libheif's heif-dec for images with alpha.
+The container listens on `127.0.0.1` only. Change the address with `PXNA_BIND` and the port with `PXNA_PORT`.
+Setting `PXNA_BIND=0.0.0.0` exposes pxna to your network. Authentication is a single owner password, so use it only on a trusted network or behind an HTTPS reverse proxy.
 The container runs as `PXNA_UID:PXNA_GID` (default `1000:1000`), so match them to the owner of the library (`id -u`, `id -g`) when you want to modify files.
 The SQLite database, uploads, and caches live in `.pxna/state`, which survives restarts. The `init` service sets its owner on startup.
-The configuration is [config/pxna.toml](config/pxna.toml), mounted read-only at `/config/pxna.toml`; Library paths refer to paths inside the container.
+The configuration is `config/pxna.toml`, created from [config/pxna.toml.example](config/pxna.toml.example) and mounted read-only at `/config/pxna.toml`. It is not tracked by git, so edit it freely. Library paths refer to paths inside the container.
+`PXNA_CONTENTS_DIR` is mounted at `/libraries/contents`, which backs the `contents` library.
 `TZ` (default `Asia/Tokyo`) sets the time zone used by the timeline.
 The image built from the `Dockerfile` runs as UID/GID `10001:10001`, and its configuration directory must be writable so the daemon can create its process lock. Set `[web] dir` to `/opt/pxna/web` when supplying another configuration.
+
+Run `stop.sh` to stop and remove the container. `.pxna/state` and `config/pxna.toml` are kept (arguments are passed to `docker compose down`):
+
+```sh
+./stop.sh
+```
+
+### Adding Libraries
+
+`.env` sets only one directory. To add more, copy the override template; `docker compose` merges `compose.override.yaml` automatically, and it is not tracked by git:
+
+```sh
+cp compose.override.yaml.example compose.override.yaml
+# Edit compose.override.yaml and mount each directory at /libraries/<id>.
+# Add a matching [[libraries]] entry with path = "/libraries/<id>" to config/pxna.toml.
+./start.sh
+```
 
 ## Contributing
 
@@ -104,7 +134,6 @@ This project is not accepting external contributions for now.
 ## License
 
 Pxna is licensed under the [GNU Affero General Public License v3.0](LICENSE).
-Copyright (C) 2026 Lyrise.
 
 ## Links
 

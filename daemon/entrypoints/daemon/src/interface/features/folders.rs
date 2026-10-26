@@ -98,8 +98,6 @@ impl apis::folders::Folders for ApiServer {
     ) -> std::result::Result<apis::folders::ListFolderEntriesResponse, ()> {
         let listing = async {
             let options = ListOptions::from_query(query_params)?;
-            let selection = options.marks().select(&self.state.rating_tags, &claims.user.id, &path_params.library_id).await?;
-            let options = options.with_selection(selection);
             self.state.library.list_folder_entries(&path_params.library_id, &query_params.path, &options).await
         }
         .await;
@@ -288,8 +286,6 @@ mod tests {
             include_hidden: None,
             folders_first: None,
             folders_only: None,
-            rating: None,
-            tag: None,
         };
         let params = models::ListFolderEntriesPathParams { library_id: "photos".to_string() };
         apis::folders::Folders::list_folder_entries(&fixture.server, &Method::GET, &host(), &CookieJar::default(), &claims(), &params, &query)

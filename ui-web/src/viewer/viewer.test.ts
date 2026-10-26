@@ -51,17 +51,18 @@ function listing(entries: Entry[], initial: number[] = [0]) {
 const signal = () => new AbortController().signal;
 
 describe("viewer navigation", () => {
-    it("reads the next unread page and skips non-images in one operation", async () => {
-        const entries = Array.from({ length: 202 }, (_, index) => entry(`${index}.txt`));
+    it("reads the next unread page and skips entries other than images and videos in one operation", async () => {
+        const entries = Array.from({ length: 203 }, (_, index) => entry(`${index}.txt`));
         entries[199] = entry("a.png", "image/png");
-        entries[200] = entry("b.mp4", "video/mp4");
-        entries[201] = entry("c.jpg", "image/jpeg");
+        entries[201] = entry("b.mp4", "video/mp4");
+        entries[202] = entry("c.jpg", "image/jpeg");
         const h = listing(entries);
         expect(loadedNeighbor(h.value, 199, 1)).toBe("unread");
         expect(h.loadPages).not.toHaveBeenCalled();
-        expect((await neighbor(h.value, 199, 1, signal()))?.entry.name).toBe("c.jpg");
+        expect((await neighbor(h.value, 199, 1, signal()))?.entry.name).toBe("b.mp4");
         expect(h.loadPages.mock.calls.map(([pages]) => pages)).toEqual([[1]]);
         expect(loadedNeighbor(h.value, 199, 1)).toMatchObject({ index: 201 });
+        expect((await neighbor(h.value, 201, 1, signal()))?.entry.name).toBe("c.jpg");
     });
     it("reads backward across a page and stops at both ends", async () => {
         const entries = Array.from({ length: 202 }, (_, index) => entry(`${index}.txt`));

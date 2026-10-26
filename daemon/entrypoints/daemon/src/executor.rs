@@ -8,16 +8,10 @@ use std::{
 use clap::Parser as _;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing_subscriber::EnvFilter;
 
 use omnius_core_base::file_lock::FileLock;
 
-use crate::{
-    config::{DaemonConfig, LoggingConfig},
-    interface::ApiServer,
-    prelude::*,
-    state::DaemonState,
-};
+use crate::{config::DaemonConfig, interface::ApiServer, logging::Logging, prelude::*, state::DaemonState};
 
 const LOCK_FILE_NAME: &str = "pxna.lock";
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -58,17 +52,6 @@ impl Executor {
     pub async fn run() -> Result<()> {
         let args = Args::parse();
         Self::execute(args).await
-    }
-
-    fn tracing_config(conf: &LoggingConfig) {
-        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(format!("{},sqlx=off", conf.level)));
-        let fmt = tracing_subscriber::fmt().with_env_filter(filter);
-
-        if conf.json {
-            fmt.json().init();
-        } else {
-            fmt.init();
-        }
     }
 
     async fn execute(args: Args) -> Result<()> {
@@ -144,7 +127,9 @@ impl Executor {
                 eprintln!("failed to load daemon config from {}: {error:?}", config_dir.display());
             })?;
 
-            Self::tracing_config(&conf.logging);
+            Logging::init(&conf.logging)?;
+
+            crate::media_check::MediaEnvironment::verify(&conf.media).await?;
 
             let state = Arc::new(DaemonState::new(conf).await?);
             state.timeline.start();

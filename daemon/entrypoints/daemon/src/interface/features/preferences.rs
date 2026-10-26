@@ -70,7 +70,7 @@ struct PreferencesModel;
 
 impl PreferencesModel {
     fn to_model(preferences: Preferences) -> models::Preferences {
-        models::Preferences::new(
+        let mut model = models::Preferences::new(
             Self::display_set_to_model(preferences.wide),
             Self::display_set_to_model(preferences.narrow),
             models::SortPreference::new(
@@ -85,7 +85,9 @@ impl PreferencesModel {
                     SortOrder::Desc => models::SortOrder::Desc,
                 },
             ),
-        )
+        );
+        model.timeline_libraries = preferences.timeline_libraries.map(|ids| ids.into_iter().map(models::LibraryId).collect());
+        model
     }
 
     fn from_model(model: &models::Preferences) -> Preferences {
@@ -104,6 +106,7 @@ impl PreferencesModel {
                     models::SortOrder::Desc => SortOrder::Desc,
                 },
             },
+            timeline_libraries: model.timeline_libraries.as_ref().map(|ids| ids.iter().map(|id| id.0.clone()).collect()),
         }
     }
 

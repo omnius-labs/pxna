@@ -519,16 +519,16 @@ mod tests {
         Ok(())
     }
 
-    const ENTRIES: &str = "/api/v1/libraries/photos/folders/entries";
+    const SEARCH: &str = "/api/v1/search/entries?libraryIds=photos";
 
     async fn names(router: &axum::Router, headers: &[(&str, &str)], query: &str) -> TestResult<(Vec<String>, serde_json::Value, String)> {
-        let response = send(router, Method::GET, &format!("{ENTRIES}?{query}"), headers, None).await?;
+        let response = send(router, Method::GET, &format!("{SEARCH}&{query}"), headers, None).await?;
         assert_eq!(response.status, StatusCode::OK, "{query}: {}", response.body);
         let names = response.body["entries"]
             .as_array()
             .ok_or("entries is missing")?
             .iter()
-            .filter_map(|entry| entry["path"].as_str().map(str::to_string))
+            .filter_map(|entry| entry["entry"]["path"].as_str().map(str::to_string))
             .collect();
         Ok((
             names,
@@ -582,6 +582,8 @@ mod tests {
         assert_eq!(tagged, vec!["/clip.mp4".to_string(), "/good.png".to_string()]);
         let (both, ..) = names(&router, headers, "path=/&tag=trip&rating=good").await?;
         assert_eq!(both, vec!["/good.png".to_string()]);
+        let (all_tags, ..) = names(&router, headers, "path=/&tag=trip&tag=cat&sort=name").await?;
+        assert_eq!(all_tags, vec!["/good.png".to_string()], "複数のタグは、すべてを持つ Entry だけを選ぶ");
         let (named, ..) = names(&router, headers, "path=/&tag=trip&query=clip").await?;
         assert_eq!(named, vec!["/clip.mp4".to_string()], "名前の条件とも組み合わせられる");
         let (none, total, _) = names(&router, headers, "path=/&tag=unused").await?;
@@ -592,6 +594,13 @@ mod tests {
             everything.contains(&"/memo.txt".to_string()) && everything.contains(&"/sub".to_string()),
             "指定がなければ絞らない"
         );
+
+        // フォルダの一覧は評価とタグの条件を受け付けず、名前の条件だけで絞る。
+        let folder = send(&router, Method::GET, "/api/v1/libraries/photos/folders/entries?path=/&rating=good&tag=trip", headers, None).await?;
+        assert_eq!(folder.status, StatusCode::OK);
+        assert!(folder.body["totalCount"].as_u64().unwrap_or_default() > 1, "{}", folder.body);
+        let named = send(&router, Method::GET, "/api/v1/libraries/photos/folders/entries?path=/&query=memo", headers, None).await?;
+        assert_eq!(named.body["totalCount"], json!(1));
         Ok(())
     }
 
@@ -604,7 +613,7 @@ mod tests {
         let headers = &[("authorization", token.as_str())];
 
         for query in ["path=/&rating=great", "path=/&tag=%20", "path=/&tag=a%0Ab"] {
-            let response = send(&router, Method::GET, &format!("{ENTRIES}?{query}"), headers, None).await?;
+            let response = send(&router, Method::GET, &format!("{SEARCH}&{query}"), headers, None).await?;
             assert!(response.status.is_client_error(), "{query}: {}", response.status);
         }
 

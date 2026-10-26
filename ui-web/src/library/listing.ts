@@ -1,7 +1,7 @@
 import { type QueryClient, QueryObserver, type QueryObserverResult, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { BrowseLocation } from "../location";
-import { type Entry, type FolderListing, fetchEntryDetails, fetchListingPage } from "./entries";
+import { CROSS_LIBRARY_SCOPE } from "../location";
+import { type Entry, type FolderListing, fetchEntryDetails, fetchListingPage, fetchSearchPage } from "./entries";
 import type { SortPreference } from "./preferences";
 import type { Rating } from "./ratingTags";
 import { refreshTimeline } from "./timeline";
@@ -9,39 +9,34 @@ import { refreshTimeline } from "./timeline";
 export const PAGE_SIZE = 200;
 export type PageStatus = "idle" | "loading" | "loaded" | "error";
 
-export interface ListingFilter {
-    query: string;
+/// 検索の条件。`libraryIds` の順は、同じ並びの値の Entry を置く順になる。
+export interface SearchCriteria {
+    /// 探す Library の id。空ではない。
+    libraryIds: readonly string[];
+    /// 起点の Library 相対パス。Library が 1 つのときだけ `/` 以外になる。
+    path: string;
     recursive: boolean;
+    query: string;
     /// 評価での絞り込み。`none` は未評価の画像と動画を選ぶ。
     rating?: Rating;
-    tag?: string;
+    /// すべてを持つ Entry を選ぶタグ。
+    tags: readonly string[];
 }
 
-/// 位置が持つ絞り込みの条件。名前の語も評価もタグもなければ、絞り込まない。
-export function locationFilter(location: BrowseLocation): ListingFilter | undefined {
-    const filter: ListingFilter = {
-        query: location.query ?? "",
-        recursive: !!location.recursive,
-        rating: location.rating,
-        tag: location.tag,
-    };
-    return isFiltering(filter) ? filter : undefined;
+/// 一覧の出どころ。フォルダの直下か、Library を横断する検索である。
+/// 検索の Entry の path は、`scopedKey` が作る Library を含む鍵である。
+export type ListingSource =
+    | { kind: "folder"; libraryId: string; path: string }
+    | { kind: "search"; criteria: SearchCriteria };
+
+/// 検索の条件が 1 つでもあるか。名前の語だけでなく、評価とタグも数える。
+export function hasSearchConditions(criteria: SearchCriteria): boolean {
+    return criteria.query.trim() !== "" || criteria.rating !== undefined || criteria.tags.length > 0;
 }
 
-/// 絞り込みの条件が 1 つでもあるか。名前の語だけでなく、評価とタグも数える。
-export function isFiltering(filter: ListingFilter | undefined): boolean {
-    return !!filter && (filter.query.trim() !== "" || filter.rating !== undefined || !!filter.tag);
-}
-
-/// 一覧の要求に載せる絞り込みの条件。
-function filterQuery(filter: ListingFilter) {
-    const query = filter.query.trim();
-    return {
-        ...(query === "" ? {} : { query }),
-        ...(filter.recursive ? { recursive: true as const } : {}),
-        ...(filter.rating === undefined ? {} : { rating: filter.rating }),
-        ...(filter.tag ? { tag: filter.tag } : {}),
-    };
+/// 一覧の出どころの範囲。フォルダは Library の id、検索は `CROSS_LIBRARY_SCOPE` である。
+export function sourceScope(source: ListingSource): string {
+    return source.kind === "folder" ? source.libraryId : CROSS_LIBRARY_SCOPE;
 }
 
 export interface Listing {
@@ -77,11 +72,8 @@ export function folderPageKey(
     path: string,
     sort: SortPreference,
     pageIndex: number,
-    filter?: ListingFilter,
     foldersOnly = false,
 ) {
-    const query = filter?.query.trim() || undefined;
-    const filtering = isFiltering(filter);
     return [
         "entries",
         libraryId,
@@ -89,13 +81,22 @@ export function folderPageKey(
         foldersOnly ? "tree" : "page",
         sort.key,
         sort.order,
-        query,
-        filtering && !!filter?.recursive,
-        filter?.rating,
-        filter?.tag,
-        !filter?.recursive && !filter?.rating && !filter?.tag && (sort.key === "name" || sort.key === "kind")
-            ? "summary-or-legacy"
-            : "detailed",
+        sort.key === "name" || sort.key === "kind" ? "summary-or-legacy" : "detailed",
+        pageIndex,
+    ] as const;
+}
+
+export function searchPageKey(criteria: SearchCriteria, sort: SortPreference, pageIndex: number) {
+    return [
+        "search",
+        criteria.libraryIds.join("\n"),
+        criteria.path,
+        criteria.recursive,
+        criteria.query.trim(),
+        criteria.rating,
+        criteria.tags.join("\n"),
+        sort.key,
+        sort.order,
         pageIndex,
     ] as const;
 }
@@ -126,14 +127,24 @@ class FolderListingStore implements Listing {
     private detailScheduled = false;
     private mismatches = new Set<string>();
 
+    /// 詳細を補う要求の Library。検索は軽量一覧を使わないので、補う詳細はない。
+    private libraryId: string;
+
     constructor(
         private client: QueryClient,
-        private libraryId: string,
-        private path: string,
+        private source: ListingSource,
         private sort: SortPreference,
-        private filter?: ListingFilter,
         private foldersOnly = false,
-    ) {}
+    ) {
+        this.libraryId = sourceScope(source);
+    }
+
+    /// この一覧が、その Library の Entry を含みうるか。
+    covers(libraryId: string): boolean {
+        return this.source.kind === "folder"
+            ? this.source.libraryId === libraryId
+            : this.source.criteria.libraryIds.includes(libraryId);
+    }
 
     subscribe = (listener: () => void) => {
         this.listeners.add(listener);
@@ -175,8 +186,23 @@ class FolderListingStore implements Listing {
         this.owners.delete(owner);
         this.syncObservers();
     }
-    private key(index: number) {
-        return folderPageKey(this.libraryId, this.path, this.sort, index, this.filter, this.foldersOnly);
+    private key(index: number): readonly unknown[] {
+        return this.source.kind === "folder"
+            ? folderPageKey(this.source.libraryId, this.source.path, this.sort, index, this.foldersOnly)
+            : searchPageKey(this.source.criteria, this.sort, index);
+    }
+    private fetchPage(index: number, signal: AbortSignal): Promise<FolderListing> {
+        const order = { sort: this.sort.key, order: this.sort.order };
+        if (this.source.kind === "search")
+            return fetchSearchPage(this.source.criteria, index * PAGE_SIZE, order, signal);
+        return fetchListingPage(
+            this.client,
+            this.source.libraryId,
+            this.source.path,
+            index * PAGE_SIZE,
+            { foldersFirst: true, ...(this.foldersOnly ? { foldersOnly: true } : {}), ...order },
+            signal,
+        );
     }
     private syncObservers() {
         const wanted = new Set<number>();
@@ -194,21 +220,7 @@ class FolderListingStore implements Listing {
             if (index < 0 || !Number.isInteger(index) || this.observers.has(index)) continue;
             const observer = new QueryObserver<FolderListing, Error>(this.client, {
                 queryKey: this.key(index),
-                queryFn: ({ signal }) =>
-                    fetchListingPage(
-                        this.client,
-                        this.libraryId,
-                        this.path,
-                        index * PAGE_SIZE,
-                        {
-                            foldersFirst: true,
-                            ...(this.foldersOnly ? { foldersOnly: true } : {}),
-                            sort: this.sort.key,
-                            order: this.sort.order,
-                            ...(this.filter ? filterQuery(this.filter) : {}),
-                        },
-                        signal,
-                    ),
+                queryFn: ({ signal }) => this.fetchPage(index, signal),
                 staleTime: Infinity,
                 retry: false,
                 retryOnMount: false,
@@ -431,37 +443,36 @@ class FolderListingStore implements Listing {
 
 const stores = new WeakMap<QueryClient, Map<string, FolderListingStore>>();
 
-/// 同じ Library・path・条件の購読を共有する。ツリーは foldersOnly で一覧から分離する。
-export function folderListingStore(
-    client: QueryClient,
-    libraryId: string,
-    path: string,
-    sort: SortPreference,
-    filter?: ListingFilter,
-    foldersOnly = false,
-) {
+function sourceKey(source: ListingSource, sort: SortPreference, foldersOnly: boolean): string {
+    return source.kind === "folder"
+        ? JSON.stringify([source.libraryId, source.path, sort.key, sort.order, foldersOnly])
+        : JSON.stringify([CROSS_LIBRARY_SCOPE, ...searchPageKey(source.criteria, sort, 0).slice(0, -1)]);
+}
+
+/// 同じ出どころと並べ方の購読を共有する。ツリーは foldersOnly で一覧から分離する。
+export function listingStore(client: QueryClient, source: ListingSource, sort: SortPreference, foldersOnly = false) {
     let listings = stores.get(client);
     if (!listings) {
         listings = new Map();
         stores.set(client, listings);
     }
-    const key = JSON.stringify([
-        libraryId,
-        path,
-        sort.key,
-        sort.order,
-        filter?.query,
-        !!filter?.recursive,
-        filter?.rating,
-        filter?.tag,
-        foldersOnly,
-    ]);
+    const key = sourceKey(source, sort, foldersOnly);
     let listing = listings.get(key);
     if (!listing) {
-        listing = new FolderListingStore(client, libraryId, path, sort, filter, foldersOnly);
+        listing = new FolderListingStore(client, source, sort, foldersOnly);
         listings.set(key, listing);
     }
     return listing;
+}
+
+export function folderListingStore(
+    client: QueryClient,
+    libraryId: string,
+    path: string,
+    sort: SortPreference,
+    foldersOnly = false,
+) {
+    return listingStore(client, { kind: "folder", libraryId, path }, sort, foldersOnly);
 }
 
 /// 詳細だけの失敗を再試行し、名前のsnapshotと並びを維持する。
@@ -471,17 +482,21 @@ export function retryEntryDetails(client: QueryClient, libraryId: string, paths:
     }
 }
 
-/// 表示中の一覧は古いページを残して先頭から再取得し、未表示のキャッシュは捨てる。
+/// 表示中の一覧は古いページを残して先頭から再取得し、未表示のキャッシュは捨てる。その Library を探す検索も同じく読み直す。
 export async function refreshLibrary(client: QueryClient, libraryId: string): Promise<void> {
-    await client.cancelQueries({ queryKey: ["entries", libraryId] });
-    const timeline = refreshTimeline(client, libraryId);
+    await Promise.all([
+        client.cancelQueries({ queryKey: ["entries", libraryId] }),
+        client.cancelQueries({ queryKey: ["search"] }),
+    ]);
+    const timeline = refreshTimeline(client, [libraryId]);
     const active: FolderListingStore[] = [];
     for (const [key, store] of stores.get(client) ?? []) {
-        if (JSON.parse(key)[0] !== libraryId) continue;
+        if (!store.covers(libraryId)) continue;
         if (store.active) active.push(store);
         else stores.get(client)?.delete(key);
     }
     client.removeQueries({ queryKey: ["entries", libraryId], type: "inactive" });
+    client.removeQueries({ queryKey: ["search"], type: "inactive" });
     await Promise.all([
         ...active.map((store) => store.refresh()),
         client.invalidateQueries({
@@ -493,30 +508,12 @@ export async function refreshLibrary(client: QueryClient, libraryId: string): Pr
     ]);
 }
 
-export function useFolderListing(
-    libraryId: string,
-    path: string,
-    sort: SortPreference,
-    wantedPages: ReadonlySet<number>,
-    filter?: ListingFilter,
-): Listing {
+/// 出どころの一覧を購読し、`wantedPages` のページを読む。
+export function useListing(source: ListingSource, sort: SortPreference, wantedPages: ReadonlySet<number>): Listing {
     const client = useQueryClient();
-    const query = filter?.query.trim() || undefined;
-    const filtering = isFiltering(filter);
-    const recursive = filtering && !!filter?.recursive;
-    const rating = filter?.rating;
-    const tag = filter?.tag;
-    const store = useMemo(
-        () =>
-            folderListingStore(
-                client,
-                libraryId,
-                path,
-                { key: sort.key, order: sort.order },
-                filtering ? { query: query ?? "", recursive, rating, tag } : undefined,
-            ),
-        [client, libraryId, path, sort.key, sort.order, filtering, query, recursive, rating, tag],
-    );
+    const key = sourceKey(source, sort, false);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: 出どころと並べ方は key に畳み、内容が同じなら同じ購読を使う
+    const store = useMemo(() => listingStore(client, source, { key: sort.key, order: sort.order }), [client, key]);
     const [owner] = useState(() => ({}));
     const pagesKey = [...wantedPages].sort((a, b) => a - b).join(",");
     useEffect(() => {
@@ -532,4 +529,13 @@ export function useFolderListing(
     useEffect(() => () => store.release(owner), [store, owner]);
     useSyncExternalStore(store.subscribe, store.getRevision);
     return store;
+}
+
+export function useFolderListing(
+    libraryId: string,
+    path: string,
+    sort: SortPreference,
+    wantedPages: ReadonlySet<number>,
+): Listing {
+    return useListing({ kind: "folder", libraryId, path }, sort, wantedPages);
 }
