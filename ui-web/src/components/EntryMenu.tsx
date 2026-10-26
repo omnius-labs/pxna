@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Download, FolderPlus, FolderSearch, Pencil, Trash2 } from "lucide-react";
+import { ClipboardPaste, Download, FolderPlus, FolderSearch, Pencil, Trash2 } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 import { actionAvailability, useEntryActions } from "../library/actionContext";
 import { beginEntryDrag, endEntryDrag, useEntryDrop } from "../library/dnd";
@@ -230,7 +230,7 @@ export function EntryToolbar() {
                     }}
                     className="rounded p-1.5 disabled:opacity-40"
                 >
-                    貼り付け
+                    <ClipboardPaste className="size-4" />
                 </button>
             )}
             {actions.crossLibrary && (

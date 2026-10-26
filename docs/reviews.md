@@ -21,6 +21,7 @@ Advance the state once transcription is done, but do not delete a review's row.
 
 | Review | Type | Findings | Transcription |
 | --- | --- | --- | --- |
+| [2026-10-24-security-audit](./reviews/2026-10-24-security-audit.md) | Audit | 11 | Done |
 | [2026-10-23-plans](./reviews/2026-10-23-plans.md) | Diff | 26 | R-1 to R-26 open |
 | [2026-10-07-web-entry-transfer](./reviews/2026-10-07-web-entry-transfer.md) | Diff | 2 | Done |
 | [2026-10-07-web-entry-operations](./reviews/2026-10-07-web-entry-operations.md) | Diff | 2 | Done |

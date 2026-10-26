@@ -131,6 +131,7 @@ export function List({
         onProgress,
         onFocus: focus,
         onOpen,
+        openOnClick: narrow,
     });
     const loadedIndexes = rows.map((row) => row.index).filter((index) => listing.entryAt(index));
     const tabbable = loadedIndexes.includes(interaction.focusedIndex) ? interaction.focusedIndex : loadedIndexes[0];

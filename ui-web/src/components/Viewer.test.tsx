@@ -366,7 +366,7 @@ describe("フィルムストリップ", () => {
     const offsets = () => get.mock.calls.map(([, options]) => options.params.query.offset as number);
     const strip = (h: { host: HTMLElement }) => h.host.querySelector("[aria-label=フィルムストリップ]");
 
-    it("広い画面の画像のビューアにだけ出し、狭い画面と動画には出さない", async () => {
+    it("広い画面の画像と動画のビューアに出し、狭い画面には出さない", async () => {
         thousand();
         const wide = await harness("5.png", "/", "onZoom", undefined, false);
         try {
@@ -401,9 +401,31 @@ describe("フィルムストリップ", () => {
         const video = await harness("clip.mp4", "/", "onZoom", undefined, false);
         try {
             await wait(() => expect(video.host.querySelector("video")).not.toBeNull());
-            expect(strip(video)).toBeNull();
+            expect(strip(video)).not.toBeNull();
         } finally {
             await video.dispose();
+        }
+    });
+
+    it("前後へ移っても作り直さず、探し直す間も読み込み中を挟まない", async () => {
+        thousand();
+        range.first = 0;
+        range.last = 22;
+        const h = await harness("5.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(h.host.querySelector("img")?.alt).toBe("5.png"));
+            const before = strip(h);
+            await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" })));
+            await wait(() => expect(h.onChange).toHaveBeenCalledExactlyOnceWith("6.png"));
+            await h.render("6.png");
+            expect(h.host.querySelector("img")?.alt).toBe("6.png");
+            expect(h.host.textContent).not.toContain("読み込み中…");
+            expect(strip(h)).toBe(before);
+            expect(
+                h.host.querySelector("[aria-label=フィルムストリップ] [aria-current=true]")?.getAttribute("aria-label"),
+            ).toBe("6.png");
+        } finally {
+            await h.dispose();
         }
     });
 
@@ -426,7 +448,7 @@ describe("フィルムストリップ", () => {
         }
     });
 
-    it("フィルムストリップの画像を押すと、その画像の相対パスで移動する", async () => {
+    it("フィルムストリップの画像を押すと、その画像の相対パスで移動し、探し直さずに開く", async () => {
         thousand();
         range.first = 0;
         range.last = 22;
@@ -439,6 +461,8 @@ describe("フィルムストリップ", () => {
                 h.host.querySelector<HTMLElement>("[aria-label=フィルムストリップ] [aria-label='9.png']")?.click(),
             );
             expect(h.onChange).toHaveBeenCalledExactlyOnceWith("9.png");
+            await h.render("9.png");
+            expect(h.host.querySelector("img")?.alt).toBe("9.png");
         } finally {
             await h.dispose();
         }
@@ -611,7 +635,7 @@ describe("スライドショー", () => {
             await settle();
             await elapse(20_000);
             expect(h.onChange).not.toHaveBeenCalled();
-            expect(h.host.querySelector<HTMLButtonElement>("button[aria-label=次の画像]")?.disabled).toBe(false);
+            expect(h.host.querySelector<HTMLButtonElement>("button[aria-label=次へ]")?.disabled).toBe(false);
         } finally {
             await h.dispose();
         }
@@ -804,6 +828,49 @@ describe("全画面表示と「その他」のメニュー", () => {
         } finally {
             await wide.dispose();
             await narrow.dispose();
+        }
+    });
+});
+
+describe("動画との行き来", () => {
+    const mixed = () =>
+        listed([image("0.png", "image/png", 1), image("1.mp4", "video/mp4", 1), image("2.png", "image/png", 1)]);
+    const key = (target: EventTarget, name: string) =>
+        act(async () =>
+            target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true })),
+        );
+
+    it("矢印キーとボタンで、画像から動画へ、動画から画像へ移る", async () => {
+        mixed();
+        const h = await harness("0.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(findDisplayImage(h)).not.toBeNull());
+            await key(window, "ArrowRight");
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("1.mp4"));
+            await h.render("1.mp4");
+            await wait(() => expect(h.host.querySelector("video")).not.toBeNull());
+            await key(window, "ArrowRight");
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("2.png"));
+            await h.render("1.mp4");
+            await act(async () => h.host.querySelector<HTMLButtonElement>("button[aria-label=前へ]")?.click());
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("0.png"));
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("動画のプレーヤーにフォーカスがあるときの矢印キーでは移らない", async () => {
+        mixed();
+        const h = await harness("1.mp4", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(h.host.querySelector("video")).not.toBeNull());
+            const video = h.host.querySelector("video");
+            if (!video) throw new Error("動画がない");
+            await key(video, "ArrowRight");
+            await act(async () => Promise.resolve());
+            expect(h.onChange).not.toHaveBeenCalled();
+        } finally {
+            await h.dispose();
         }
     });
 });
@@ -1120,7 +1187,7 @@ describe("レートモード", () => {
         }
     });
 
-    it("→ は good、← は bad を記録して次へ移り、↑ は評価せずに次へ移る", async () => {
+    it("→ は good、← は bad、↓ は none を記録して次へ移る", async () => {
         answering(images);
         rate.mockResolvedValue(undefined);
         const h = await wideViewer("0.png");
@@ -1141,9 +1208,10 @@ describe("レートモード", () => {
             expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/1.png", "bad"]);
 
             await h.render("2.png");
-            await press("ArrowUp");
-            await act(async () => Promise.resolve());
-            expect(rate).toHaveBeenCalledTimes(2);
+            await press("ArrowDown");
+            await wait(() => expect(rate).toHaveBeenCalledTimes(3));
+            expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/2.png", "none"]);
+            expect(h.onChange).toHaveBeenCalledTimes(2);
         } finally {
             await h.dispose();
         }
@@ -1163,6 +1231,80 @@ describe("レートモード", () => {
             await wait(() => expect(rate).toHaveBeenCalledTimes(2));
             expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/2.png", "good"]);
             expect(h.onChange).toHaveBeenCalledTimes(1);
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("↑ は最後の評価の操作から順に、その Entry へ戻って記録する前の評価へ書き戻す", async () => {
+        answering(images, { "/0.png": "bad" });
+        rate.mockResolvedValue(undefined);
+        const h = await wideViewer("0.png");
+        try {
+            await wait(() => expect(findDisplayImage(h)).not.toBeNull());
+            await press("r");
+            await press("ArrowUp");
+            expect(rate).not.toHaveBeenCalled();
+            await wait(() => expect(badge(h)?.getAttribute("data-rating")).toBe("bad"));
+
+            await press("ArrowRight");
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("1.png"));
+            await h.render("1.png");
+            await press("ArrowLeft");
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("2.png"));
+            await h.render("2.png");
+            await wait(() => expect(rate).toHaveBeenCalledTimes(2));
+
+            await press("ArrowUp");
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("1.png"));
+            await wait(() => expect(rate).toHaveBeenCalledTimes(3));
+            expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/1.png", "none"]);
+            await h.render("1.png");
+
+            await press("ArrowUp");
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("0.png"));
+            await wait(() => expect(rate).toHaveBeenCalledTimes(4));
+            expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/0.png", "bad"]);
+            await h.render("0.png");
+
+            const calls = h.onChange.mock.calls.length;
+            await press("ArrowUp");
+            await act(async () => Promise.resolve());
+            expect(rate).toHaveBeenCalledTimes(4);
+            expect(h.onChange).toHaveBeenCalledTimes(calls);
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("評価のボタンをレートモードの間だけ出し、キーと同じ操作をする", async () => {
+        answering(images);
+        rate.mockResolvedValue(undefined);
+        const h = await wideViewer("0.png");
+        const pad = (label: string) =>
+            h.host.querySelector<HTMLButtonElement>(`fieldset[aria-label=評価] button[aria-label="${label}"]`);
+        try {
+            await wait(() => expect(findDisplayImage(h)).not.toBeNull());
+            expect(h.host.querySelector("fieldset[aria-label=評価]")).toBeNull();
+            await press("r");
+            expect(pad("元に戻す")?.disabled).toBe(true);
+            await act(async () => pad("良い")?.click());
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("1.png"));
+            expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/0.png", "good"]);
+            await h.render("1.png");
+            await act(async () => pad("悪い")?.click());
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("2.png"));
+            expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/1.png", "bad"]);
+            await h.render("2.png");
+            await act(async () => pad("未評価")?.click());
+            await wait(() => expect(rate).toHaveBeenCalledTimes(3));
+            expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/2.png", "none"]);
+            expect(pad("元に戻す")?.disabled).toBe(false);
+            await act(async () => pad("元に戻す")?.click());
+            await wait(() => expect(rate).toHaveBeenCalledTimes(4));
+            expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/2.png", "none"]);
+            await press("r");
+            expect(h.host.querySelector("fieldset[aria-label=評価]")).toBeNull();
         } finally {
             await h.dispose();
         }

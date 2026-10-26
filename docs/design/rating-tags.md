@@ -182,7 +182,7 @@ The rating's value is the two values good and bad, and is held in three states b
 
 **Reason**
 Sorting is the work of looking and deciding whether to keep or drop.
-With two choices, rate mode's operations fit in the three of "good", "bad", and "do not rate", and can proceed with one key operation per image.
+With two choices, rate mode's operations fit in the three of "good", "bad", and "unrated", and can proceed with one key operation per image.
 
 **Rejected alternative**
 Making ratings with many levels, like 5-level stars.

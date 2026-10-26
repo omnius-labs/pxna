@@ -41,7 +41,7 @@ const initial: Selection = {
     anchor: 0,
 };
 
-async function harness() {
+async function harness({ openOnClick = false } = {}) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     const pending = new Map<number, { resolve: (snapshot?: string) => void; signal: AbortSignal }>();
     get.mockImplementation((_, options) =>
@@ -54,6 +54,7 @@ async function harness() {
                   }),
               ),
     );
+    const onOpen = vi.fn();
     const latest: {
         selection: Selection;
         progress?: SelectionProgress;
@@ -79,7 +80,8 @@ async function harness() {
             onSelectionChange: setSelection,
             onProgress: setProgress,
             onFocus: () => {},
-            onOpen: () => {},
+            onOpen,
+            openOnClick,
         });
         useEffect(() => {
             report(selection, progress, listing);
@@ -94,7 +96,15 @@ async function harness() {
                 >
                     range
                 </button>
-                <button type="button" data-plain onClick={(event) => interaction.click(event, 0)}>
+                <button
+                    type="button"
+                    data-plain
+                    onClick={(event) => interaction.click(event, 0)}
+                    onDoubleClick={() => {
+                        const entry = listing.entryAt(0);
+                        if (entry) interaction.open(entry);
+                    }}
+                >
                     plain
                 </button>
             </>
@@ -120,6 +130,7 @@ async function harness() {
     };
     return {
         latest,
+        onOpen,
         pending,
         host,
         clickRange,
@@ -230,4 +241,32 @@ it("aborts a range when the folder component unmounts", async () => {
     await h.dispose();
     expect(h.pending.get(200)!.signal.aborted).toBe(true);
     expect(h.pending.get(400)!.signal.aborted).toBe(true);
+});
+it("opens with a click without modifiers and ignores the double click when opening on click", async () => {
+    const h = await harness({ openOnClick: true });
+    const plain = () => h.host.querySelector("[data-plain]") ?? document.body;
+    try {
+        await act(async () => plain().dispatchEvent(new MouseEvent("click", { bubbles: true })));
+        expect(h.onOpen.mock.calls.map(([entry]) => entry.path)).toEqual(["/f0"]);
+        await act(async () => plain().dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+        expect(h.onOpen).toHaveBeenCalledOnce();
+        await act(async () => plain().dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true })));
+        expect(h.onOpen).toHaveBeenCalledOnce();
+        expect(h.latest.selection.items.size).toBe(0);
+    } finally {
+        await h.dispose();
+    }
+});
+it("selects with a click and opens with a double click by default", async () => {
+    const h = await harness();
+    const plain = () => h.host.querySelector("[data-plain]") ?? document.body;
+    try {
+        await act(async () => plain().dispatchEvent(new MouseEvent("click", { bubbles: true })));
+        expect(h.onOpen).not.toHaveBeenCalled();
+        expect([...h.latest.selection.items.keys()]).toEqual(["/f0"]);
+        await act(async () => plain().dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+        expect(h.onOpen).toHaveBeenCalledOnce();
+    } finally {
+        await h.dispose();
+    }
 });

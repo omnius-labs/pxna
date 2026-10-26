@@ -49,12 +49,19 @@ describe("filmstripWanted", () => {
         expect(thumbnails.get("/115")).toBeGreaterThan(thumbnails.get("/110") ?? Infinity);
     });
 
-    it("画像でない Entry と未読の位置は、サムネイルを要求しない", () => {
+    it("画像でも動画でもない Entry と未読の位置は、サムネイルを要求しない", () => {
         const entryAt = (index: number) =>
-            index === 5 ? entry(index, "video/mp4") : index === 6 ? undefined : entry(index);
+            index === 5
+                ? entry(index, "video/mp4")
+                : index === 6
+                  ? undefined
+                  : index === 7
+                    ? entry(index, "text/plain")
+                    : entry(index);
         const { thumbnails } = filmstripWanted({ first: 0, last: 10, count: 100, entryAt });
-        expect(thumbnails.has("/5")).toBe(false);
+        expect(thumbnails.has("/5")).toBe(true);
         expect(thumbnails.has("/6")).toBe(false);
+        expect(thumbnails.has("/7")).toBe(false);
         expect(thumbnails.has("/4")).toBe(true);
     });
 });

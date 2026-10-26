@@ -11,9 +11,8 @@ import { List } from "../components/List";
 import { LoadFailure } from "../components/LoadFailure";
 import { EntryNameDialog } from "../components/NameDialog";
 import { SearchPanel, SearchTermsField } from "../components/SearchPanel";
-import { SettingsDialog } from "../components/SettingsDialog";
+import { SettingsMenu } from "../components/SettingsMenu";
 import { StatusBar } from "../components/StatusBar";
-import { ViewControls } from "../components/ViewControls";
 import { Viewer } from "../components/Viewer";
 import { EntryActionContext, type EntryEditing } from "../library/actionContext";
 import { useClipboard } from "../library/clipboard";
@@ -218,9 +217,8 @@ export function SearchPage() {
                 actions={
                     <>
                         <EntryToolbar />
-                        <ViewControls />
                         {!narrow && <InfoPanelToggle open={infoPanel.open} onToggle={infoPanel.toggle} />}
-                        <SettingsDialog />
+                        <SettingsMenu />
                     </>
                 }
                 panel={infoPanel.open ? <InfoPanel libraryId={CROSS_LIBRARY_SCOPE} selection={selection} /> : undefined}

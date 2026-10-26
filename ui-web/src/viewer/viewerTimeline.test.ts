@@ -40,7 +40,7 @@ it("finds the opened entry among the loaded entries without paging from the star
     expect(get).toHaveBeenCalledTimes(1);
 });
 
-it("moves to newer and older images by reading further, skipping videos", async () => {
+it("moves to newer and older images and videos by reading further", async () => {
     get.mockResolvedValueOnce(reply(["c.png"], { previous: "p", next: "n" }));
     const store = new TimelineStore(["photos"], { kind: "around", path: "/photos/c.png" });
     const opened = await findEntry(store, "/", "photos/c.png", signal());
@@ -49,13 +49,13 @@ it("moves to newer and older images by reading further, skipping videos", async 
     expect(loadedNeighbor(store, index, -1)).toBe("unread");
 
     get.mockResolvedValueOnce(reply(["clip.mp4", "d.png"]));
-    expect((await neighbor(store, index, 1, signal()))?.entry.name).toBe("d.png");
+    expect((await neighbor(store, index, 1, signal()))?.entry.name).toBe("clip.mp4");
     expect(get.mock.calls.at(-1)?.[1].params.query).toMatchObject({ after: "n" });
 
     get.mockResolvedValueOnce(reply(["a.png", "movie.mp4"], { previous: "p0" }));
     const before = await neighbor(store, index, -1, signal());
-    expect(before?.entry.name).toBe("a.png");
-    expect(before?.index).toBe(TIMELINE_BASE - 2);
+    expect(before?.entry.name).toBe("movie.mp4");
+    expect(before?.index).toBe(TIMELINE_BASE - 1);
     // 前へ読み足しても、開いている画像の位置は変わらない。
     expect(store.entryAt(index)?.name).toBe("c.png");
 });
