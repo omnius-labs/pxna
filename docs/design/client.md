@@ -191,6 +191,9 @@ A flick is a horizontal movement of more than 50 CSS px within 300 ms, a downwar
 The order of previous and next follows the same sort as the listing.
 When moving to an Entry on a page not yet read, that page is read.
 The display images of one before and one after are requested in advance, so they are shown without waiting when moved to.
+The shown image is requested with `Pxna-Priority: interactive` and the ones before and after with `prefetch`, so the server starts the shown image first ([Thumbnail Design §7](./thumbnail.md#7-order-and-concurrency-of-generation)).
+The requests of images that are neither shown nor next to the shown image are canceled while loading. Besides the shown image and its neighbors, up to 6 more loaded display images are kept, the most recent first.
+Moving to an image whose prefetch is still loading cancels the prefetch and requests it again as `interactive`.
 The original images before and after are not requested in advance.
 The targets of moving back and forth are the images and videos in the current listing, and Entries that are neither are skipped. Arrow keys pressed while focus is on the video player are left to the player.
 When the destination is already known from back and forth movement, the filmstrip, or undo in rate mode, the viewer opens it at that position without waiting for the listing to be searched again, so neither "読み込み中…" (Loading…) nor a rebuilt filmstrip appears between Entries.

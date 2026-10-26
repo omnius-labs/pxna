@@ -313,6 +313,7 @@ pub(crate) mod tests {
             listing,
             timeline: Default::default(),
             thumbnail: Default::default(),
+            scheduler: Default::default(),
             media: Default::default(),
             video: Default::default(),
             web: Default::default(),

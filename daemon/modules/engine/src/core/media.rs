@@ -32,16 +32,6 @@ impl Default for MediaOptions {
     }
 }
 
-/// 外部プロセスの CPU の優先度。
-///
-/// ユーザーが待っている表示用画像は `Foreground`、一覧のサムネイルのように待たれない生成は `Background` にする。
-/// `Background` は nice を上げて起動し、CPU を奪い合うときだけ `Foreground` に譲る。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProcessPriority {
-    Foreground,
-    Background,
-}
-
 /// ffmpeg、ffprobe、heif-dec を外部プロセスとして呼ぶ。
 ///
 /// daemon にリンクしないので、壊れた動画で ffmpeg が異常終了しても daemon は巻き込まれず、期限を過ぎたプロセスは kill すれば止まる。
@@ -58,11 +48,8 @@ impl MediaTools {
     }
 
     /// 期限付きで実行し、標準出力を返す。失敗したときは、外部プロセスの標準エラーを message に残す。
+    /// Background の処理（[`crate::core::work::WorkClass`]）から呼んだときは、nice を上げて起動する。
     async fn run(&self, command: tokio::process::Command) -> Result<Vec<u8>> {
-        self.run_with(command, ProcessPriority::Foreground).await
-    }
-
-    async fn run_with(&self, command: tokio::process::Command, priority: ProcessPriority) -> Result<Vec<u8>> {
-        process::run(command, self.timeout, priority).await
+        process::run(command, self.timeout, crate::core::work::WorkClass::current()).await
     }
 }
