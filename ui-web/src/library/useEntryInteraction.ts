@@ -18,6 +18,8 @@ interface InteractionOptions {
     onProgress: (progress: SelectionProgress | undefined) => void;
     onFocus: (index: number) => void;
     onOpen: (entry: Entry) => void;
+    /// 修飾キーのないクリックで開くか。狭い画面は 1 回のタップで開き、ダブルクリックでは開かない。既定は開かない。
+    openOnClick?: boolean;
     /// Ctrl か ⌘ を押しながらの A で、全件を選ぶか。読み込み済みの範囲だけを持つ一覧は選ばない。既定は選ぶ。
     selectAll?: boolean;
     /// 矢印キーで動ける位置の範囲。省略すると、一覧の先頭から末尾までである。
@@ -36,6 +38,7 @@ export function useEntryInteraction({
     onProgress,
     onFocus,
     onOpen,
+    openOnClick = false,
     selectAll: allowSelectAll = true,
     bounds,
     verticalTarget,
@@ -171,7 +174,11 @@ export function useEntryInteraction({
         setFocusedIndex(index);
         setPendingFocus(undefined);
         const modifiers = { toggle: event.metaKey || event.ctrlKey, range: event.shiftKey };
-        if (modifiers.range)
+        const entry = listing.entryAt(index);
+        if (openOnClick && !modifiers.toggle && !modifiers.range && entry) {
+            cancel();
+            onOpen(entry);
+        } else if (modifiers.range)
             void readRange(selection.anchor ?? index, index, () => clickSelection(selection, index, modifiers, itemAt));
         else {
             cancel();
@@ -215,7 +222,9 @@ export function useEntryInteraction({
             onSelectionChange(clickSelection(selection, index, { toggle: true, range: false }, itemAt));
         }
     };
+    /// ダブルクリックで開く。クリックで開く一覧では、2 度目のクリックと重ねて開かないよう、何もしない。
     const open = (entry: Entry) => {
+        if (openOnClick) return;
         cancel();
         onOpen(entry);
     };

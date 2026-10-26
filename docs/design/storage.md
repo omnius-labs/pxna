@@ -167,6 +167,8 @@ Violations of the path length and entry count limits are `LimitExceeded`, and ot
 
 If `a/b/c.txt` exists and there are no parent directory entries, `a` and `a/b` are synthesized as readonly directories when the index is built.
 The total entry count after synthesis must also be at most `max_entry_count`.
+The count is checked on every insertion, including synthetic parents, so building the index never holds more than `max_entry_count` entries.
+Synthesis walks each path's ancestors from the deepest one up and stops at the first existing one, so its work is proportional to the number of entries inserted, not to the square of the path depth.
 
 ### 4.4 Symlinks and Special Entries
 
@@ -821,20 +823,30 @@ A method that creates tasks for all Entries first. It increases unfinished work 
 #### Reserve Separate Execution Slots for Foreground and Background Enumeration
 
 **Decision**
-Across all Libraries and all requests of the same local driver, the attribute-fetch batches of listings, the batches of name enumeration, and the leaf attribute fetches of detail fetching are summed. 3 slots are reserved for the foreground and 1 for the background, for a total of at most 4 slots. Waiters on one side do not use up the other side's reserved slots.
+Work belongs to one of three classes: Interactive (the one item the user waits for now, such as the display image shown in the viewer), Foreground (listings, search, and grid thumbnails), and Background (the timeline and child probes).
+Each resource is one pool of a single scheduler. A pool has shared slots for Interactive and Foreground, slots only Interactive uses, and slots only Background uses.
+Foreground does not start while Interactive runs or waits in the same pool. Background does not start while Interactive or Foreground runs or waits in any pool. Work that started is not stopped, and within a class work starts in arrival order.
+Interactive and Foreground never wait for a Background slot, so Background work that holds one pool while it waits for another does not stall them.
+The pools are the listing workers and the listing streams below, image conversion, and ffmpeg and heif-dec runs ([Thumbnail Design §7](./thumbnail.md#7-order-and-concurrency-of-generation)).
+While a video segment the player waits for is not yet written, and while the media info of an opened file is read, the ffmpeg pool counts Interactive work without using a slot.
+The child processes that Background work starts run with nice 10.
+
+Across all Libraries and all requests of the same local driver, the attribute-fetch batches of listings, the batches of name enumeration, and the leaf attribute fetches of detail fetching are summed. 3 shared slots and 1 Background slot are reserved, for a total of at most 4 slots.
 The background slot is also shared with the timeline's local enumeration, fetching dates and probes from contents, background extraction of archives, and serialization and persistent writes of the browse index. The same slot is not acquired in a nested way, and is returned at the boundaries of enumeration, extraction, and content reading.
 The maximum of 4 items of a detail batch is the number of items admitted including boundary resolution, and is not a slot that adds 4 more local attribute workers. A leaf's attribute fetch is included in the same 3 foreground slots as an ordinary listing, and resolution processing that took an item slot does not preempt the foreground attribute slot, and acquires it only for the leaf's processing.
-A batch is at most 64 Entries, the stream admission slots are reserved as 12 foreground and 4 background for a total of 16, and each stream's prefetch is at most 128 items. Background admission waits do not fill the foreground side's stream slots. Background processing yields at the boundary of a batch or of one file or one block.
+A batch is at most 64 Entries, the stream admission slots are reserved as 12 shared and 4 Background for a total of 16, and each stream's prefetch is at most 128 items. Background admission waits do not fill the shared stream slots. Background processing yields at the boundary of a batch or of one file or one block.
 The background acquisition order is the shared background slot, then the processing's existing probe, extraction, and DB-write exclusion. It does not hold in the reverse order and wait for the background slot. Before moving to the next processing unit, both are returned, and the same background slot is not reacquired internally while held.
 Probing for whether there are children tries the background slot and the background stream slot only when neither the normal background workers nor streams have waiters, and returns unconfirmed if it cannot get them.
 
 What this budget limits is the processing units above, and it does not limit HTTP acceptance, admission-waiting futures, stat of the root, search targets of recursion, or all I/O of writes and file delivery to 4.
-The archive's process-wide extraction slot and the foreground's slots for media info, image conversion, and video generation keep their existing separate budgets. Limits on different resources are not reported as the same counter.
+The archive's process-wide extraction slot and the slots of video transcoding keep their existing separate budgets. Limits on different resources are not reported as the same counter.
 max_concurrent_probes and max_concurrent_extractions are additional limits on the background side and do not increase the shared background slot. Even with multiple Libraries, heavy background processing is limited to 1 unit at a time.
 It does not forcibly stop blocking processing that has started, and even after cancellation it holds the slot until actual termination. That waiters alone do not keep increasing is verified together with the existing stream admission slots.
 
 **Reason**
-It leaves execution opportunities to both the foreground and the background, and avoids the timeline's load filling the foreground's slots.
+In a measured session, the wait of display images for a generation slot behind tile generations and abandoned display requests reached 35 s, while one ffmpeg decode of a HEIC file took 2.7 to 15.5 s.
+Holding the lower classes keeps the CPU for the item the user waits for, and the separate Background slots keep the timeline's load from filling the shared slots.
+Background does not progress while the user keeps browsing, which is accepted for a personal server whose browsing sessions are limited.
 The cost of limiting to 3 slots even when there is only the foreground is confirmed by comparison with the 4 slots of phase one. Interruption of heavy processing in progress is not guaranteed, and is controlled before moving to the next unit.
 
 ### 9.2 Deferred
@@ -902,7 +914,7 @@ When memory pressure on the daemon from the number of active archives is observe
 
 ### 10.1 Current Code
 
-[WorkBudget](../../daemon/modules/engine/src/core/work.rs) reserves 3 foreground and 1 background, and 12 foreground and 4 background for streams. When the daemon is constructed, the same budget is passed to the local driver, the archive runtime, the timeline, and the browse index. Name enumeration and attribute fetching acquire slots 64 items at a time and hold them until the blocking worker actually finishes. Child probes try both slots only when neither the normal background workers nor streams have waiters.
+The priority rule is owned by [schedule.rs](../../daemon/modules/engine/src/core/schedule.rs). [WorkBudget](../../daemon/modules/engine/src/core/work.rs) holds the listing worker pool with 3 shared and 1 Background slot, and the stream pool with 12 shared and 4 Background slots. When the daemon is constructed, the same budget is passed to the local driver, the archive runtime, the timeline, and the browse index. Name enumeration and attribute fetching acquire slots 64 items at a time and hold them until the blocking worker actually finishes. Child probes try both slots only when neither the normal background workers nor streams have waiters.
 
 The driver contract has the shape of §5.
 `FileStorageDriver` receives a `&str` within the bound namespace in all methods, and `FsEntry.path` is a `String`.
@@ -948,7 +960,6 @@ The actual empty places can be found with `rg 'todo!' daemon/modules/engine/src`
 
 The shared slots and batch processing of local attribute fetching are owned by [local/listing.rs](../../daemon/modules/engine/src/core/nfs/driver/local/listing.rs).
 The enumeration in [local.rs](../../daemon/modules/engine/src/core/nfs/driver/local.rs) prepares at most 128 paths to match the consumer, and on cancellation the worker stops moving to the next Entry.
-The priority allocation between foreground and background is not yet integrated into this budget.
 
 ### 10.2 Roadmap
 

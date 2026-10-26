@@ -2,23 +2,15 @@ import { Fragment, type KeyboardEvent, type MouseEvent, useEffect, useState, use
 import { useEntryActions } from "../library/actionContext";
 import { isCut, useClipboard } from "../library/clipboard";
 import { useDragScroll } from "../library/dnd";
-import {
-    ENTRY_KIND_LABELS,
-    type Entry,
-    entryKind,
-    entryPlace,
-    isFolderLike,
-    isThumbnailable,
-} from "../library/entries";
+import { ENTRY_KIND_LABELS, type Entry, entryKind, isFolderLike, isThumbnailable } from "../library/entries";
 import { formatBytes, formatModifiedAt } from "../library/format";
-import { isFiltering, locationFilter, useFolderListing } from "../library/listing";
+import { type ListingSource, sourceScope, useListing } from "../library/listing";
 import type { DisplaySet, SortPreference } from "../library/preferences";
 import { type Selection, selectionItem, selectionValue } from "../library/selection";
 import { SORT_KEYS, SORT_LABELS, sortFromHeader } from "../library/sort";
 import { type SelectionProgress, useEntryInteraction } from "../library/useEntryInteraction";
 import { useListingRows } from "../library/useListingRows";
 import { useRevealEntry } from "../library/useRevealEntry";
-import type { BrowseLocation } from "../location";
 import type { ThumbnailQueue } from "../thumbnails/queue";
 import { type ScrollDirection, tilePriority, wantedPagesForRows, wantedRows } from "../thumbnails/range";
 import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
@@ -31,7 +23,10 @@ const THUMBNAIL_SIDE = 40;
 const WIDE_COLUMNS = "48px minmax(0, 1fr) 150px 84px 80px";
 const SEARCH_COLUMNS = "48px minmax(0, 1fr) minmax(0, 1fr) 150px 84px 80px";
 interface ListProps {
-    location: BrowseLocation;
+    /// 一覧の出どころ。フォルダの直下か、検索である。
+    source: ListingSource;
+    /// 検索の結果に出す場所。省略すると場所を出さない。
+    place?: (entry: Entry) => string;
     libraryReadonly?: boolean;
     shape: DisplaySet["thumbnailShape"];
     narrow: boolean;
@@ -49,7 +44,8 @@ interface ListProps {
 
 /// 行の高さを固定し、未読のページでもスクロールバーが一覧全体を表すようにする。
 export function List({
-    location,
+    source,
+    place,
     libraryReadonly = false,
     shape,
     narrow,
@@ -63,11 +59,12 @@ export function List({
     reveal,
     onRevealed,
 }: ListProps) {
-    const filter = locationFilter(location);
-    const searching = isFiltering(filter);
-    const recursive = searching && !!location.recursive;
+    const searching = source.kind === "search";
+    const recursive = place !== undefined;
+    const libraryId = sourceScope(source);
+    const folderPath = source.kind === "folder" ? source.path : "/";
     const [wantedPages, setWantedPages] = useState<ReadonlySet<number>>(new Set());
-    const listing = useFolderListing(location.libraryId, location.path, sort, wantedPages, filter);
+    const listing = useListing(source, sort, wantedPages);
     const { totalCount, version } = listing;
     const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
     useDragScroll(scrollElement);
@@ -77,7 +74,7 @@ export function List({
         listing,
         columns: 1,
         virtualizer,
-        folderPath: location.path,
+        folderPath,
         name: reveal,
         onSelect: (entry, index) =>
             onSelectionChange({
@@ -86,7 +83,7 @@ export function List({
             }),
         onDone: () => onRevealed?.(),
     });
-    const { queue } = useThumbnailQueue(location.libraryId, 1, false, shape, THUMBNAIL_SIDE);
+    const { queue } = useThumbnailQueue(libraryId, 1, false, shape, THUMBNAIL_SIDE);
     const [direction, setDirection] = useState<ScrollDirection>("forward");
     if (virtualizer.scrollDirection !== null && virtualizer.scrollDirection !== direction)
         setDirection(virtualizer.scrollDirection);
@@ -134,6 +131,7 @@ export function List({
         onProgress,
         onFocus: focus,
         onOpen,
+        openOnClick: narrow,
     });
     const loadedIndexes = rows.map((row) => row.index).filter((index) => listing.entryAt(index));
     const tabbable = loadedIndexes.includes(interaction.focusedIndex) ? interaction.focusedIndex : loadedIndexes[0];
@@ -152,7 +150,7 @@ export function List({
             <div className="flex h-full flex-col" data-view="list">
                 {listing.truncated && (
                     <p role="status" className="shrink-0 border-b p-3 text-sm text-muted-foreground">
-                        結果の一部を表示しています。起点のフォルダを下げて探し直してください。
+                        結果の一部を表示しています。Library を絞るか、場所を下げて探し直してください。
                     </p>
                 )}
                 {!narrow && (
@@ -203,7 +201,7 @@ export function List({
                     <div
                         ref={setScrollElement}
                         role="listbox"
-                        aria-label={location.path}
+                        aria-label={folderPath}
                         aria-multiselectable="true"
                         className="min-h-0 flex-1 overflow-auto"
                     >
@@ -220,7 +218,7 @@ export function List({
                                             <EntryMenu entry={entry} allowDrop={false}>
                                                 <ListRow
                                                     entry={entry}
-                                                    place={recursive ? entryPlace(location.path, entry) : undefined}
+                                                    place={place?.(entry)}
                                                     index={row.index}
                                                     narrow={narrow}
                                                     shape={shape}

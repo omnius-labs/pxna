@@ -1,0 +1,58 @@
+# Template configuration for the container. The image bakes it in as /config/pxna.toml.
+# start.sh copies it to config/pxna.toml (not tracked by git) when that file is missing,
+# and compose.yaml mounts config/pxna.toml over the baked-in copy. Paths are inside the container.
+
+[core]
+listen_addr = "0.0.0.0:6050" # Inside the container. compose.yaml publishes it on ${PXNA_BIND:-127.0.0.1}:${PXNA_PORT:-6050}
+state_dir = "/state"         # compose.yaml mounts ./.pxna/state here
+
+[logging]
+level = "info" # "trace" | "debug" | "info" | "warn" | "error"
+json = true
+# file = "/state/pxna.log" # Also append the log to this file (./.pxna/state/pxna.log on the host)
+# performance = true       # Log processing times (pxna::performance) at debug level even when level is "info"
+
+[web]
+dir = "/opt/pxna/web" # The web UI built into the image
+# The compose setup is reached over plain HTTP, so drop Secure and __Host- from the session cookie.
+# Keep the path protected by other means, such as a trusted LAN or Tailscale. The daemon's default is false
+insecure_cookie = true
+
+# [scheduler]
+# image_slots = 4               # Concurrent image conversions for the viewer and thumbnails
+# image_interactive_slots = 1   # Extra conversions only for the image the viewer shows now
+# process_slots = 2             # Concurrent ffmpeg and heif-dec runs
+# process_interactive_slots = 1 # Extra runs only for the image the viewer shows now
+
+# [media]
+# ffmpeg_path = "ffmpeg"   # Installed in the image
+# ffprobe_path = "ffprobe"
+# heif_dec_path = "heif-dec" # libheif, installed in the image. Used for HEIC/AVIF with alpha and as a fallback
+
+# [video]
+# max_concurrent_transcodes = 1
+# segment_secs = 6
+# restart_threshold_segments = 3
+# max_height = 1080
+# encoder = "libx264"
+# encoder_args = ["-preset", "veryfast", "-crf", "23"]
+# session_idle_timeout_secs = 300
+
+# [timeline]
+# time_zone = "Asia/Tokyo"       # If omitted, TZ is used. compose.yaml sets TZ (default Asia/Tokyo)
+# scan_interval_secs = 86400     # Seconds from the end of the last aggregation to the next one. 0 disables periodic aggregation
+# max_concurrent_extractions = 1 # Concurrent archive extractions during aggregation
+# max_concurrent_probes = 1      # Concurrent ffprobe runs during aggregation
+
+[[libraries]]
+id = "contents"
+name = "Contents"
+path = "/libraries/contents" # compose.yaml mounts PXNA_CONTENTS_DIR here
+readonly = false
+
+# Additional libraries need a matching mount in compose.override.yaml (see compose.override.yaml.example).
+# [[libraries]]
+# id = "videos"
+# name = "Videos"
+# path = "/libraries/videos"
+# readonly = false

@@ -68,7 +68,7 @@ On a wide screen, one screen is divided into the following regions.
 
 ```text
 +--------------------------------------------------------------------+
-| Toolbar (breadcrumb, search entrance, view menu, operations)        |
+| Toolbar (mode switch, breadcrumb, operations, settings menu)       |
 +------------+----------------------------------------+--------------+
 | Tree       | Grid or list                           | Info panel   |
 |  Library   |  [tile] [tile] [tile] [tile]           |  thumbnail   |
@@ -81,7 +81,9 @@ On a wide screen, one screen is divided into the following regions.
 
 Because the tree and the listing are laid out on one screen, the listing of contents is not interrupted by screen transitions when moving through the hierarchy.
 The width of the tree and the info panel can be changed by dragging the handle at the border with the listing. The handles can also be moved with the left and right arrow keys. The width ranges from 160 to 480 CSS px for the tree and 240 to 640 CSS px for the info panel, and when changed it is saved per device in the browser's `localStorage` and restored the next time it is opened. The timeline's list of months does not change width. Narrow screens show no handles.
-This screen is called folder view, and the toolbar's "フォルダ / タイムライン" (Folder / Timeline) switch goes back and forth between it and the timeline (§3.10).
+This screen is called folder view, and the toolbar's "フォルダ / タイムライン / 検索" (Folder / Timeline / Search) switch, three choices laid out side by side, goes back and forth between it, the timeline (§3.10), and search mode (§3.6).
+On a wide screen, the current mode is shown only by the switch's highlight, and the name of the mode is not written next to it.
+The breadcrumb to the right of the switch starts below the Library, and nothing is shown at the Library root, because the tree already shows which Library is open.
 The info panel can be collapsed, and while collapsed the listing extends to the right edge.
 The activity panel is shown overlaid at the bottom right, and when collapsed becomes a button at the edge of the status bar (§3.7).
 
@@ -89,20 +91,20 @@ The direct children of the folder selected in the tree are laid out in the listi
 The tree represents the Library's hierarchy, and lays out folders and archives with the same treatment.
 An archive can be entered like a folder, so it is not distinguished even on the tree.
 
-Double-clicking a listing tile moves into a folder or archive, and opens an image or video in the viewer.
+Double-clicking a listing tile moves into a folder or archive, and opens an image or video in the viewer. A single click selects.
 While the mouse is over a video tile, flipbook playback is performed (§3.3).
 
 At the top level of the tree, the Libraries that `GET /libraries` returns are listed.
 The current position is represented by a URL of `/browse/{libraryId}/{Library-relative path}`, and the Entry open in the viewer is put in the `view` query as a path relative to the current folder. For a direct child Entry, it is its name.
-Search is done at the dedicated `/search/{libraryId}` URL, and the search terms, the start, the scope, and the Entry open in the viewer are put in the query (§3.6). A search result is an Entry in a different folder, so `view` is expressed as a path relative to the start.
+Search is done at the dedicated `/search` URL, and the Libraries, the start, the scope, the conditions, and the Entry open in the viewer are put in the query (§3.6). Search results span Libraries, so `view` carries the Library id followed by the Library-relative path, as in the timeline.
 Library-relative paths are percent-encoded per segment, and positions inside archives are also put in with the paths joined as they are ([design.md §11.1](../design.md#represent-paths-inside-archives-by-joining-paths)).
-At `/`, before a Library is chosen, only the Libraries are listed in the tree and nothing is listed in the listing.
+At `/`, the client opens the folder last opened in folder view, by redirecting with `replace` to that folder's `/browse/...` URL. The last folder is saved per device in the browser's `localStorage` under `pxna.lastFolder` as the Library id and the Library-relative path, on every folder view, without the viewer's `view` or `reveal`. When nothing is saved, or the saved Library no longer exists, it opens the root of the first Library that `GET /libraries` returns. When `GET /libraries/{libraryId}/folders` answers `404` for the saved path other than `/`, it opens that Library's root; any other failure keeps the saved path and leaves the retry to folder view. When there is no Library, or the list cannot be read, `/` shows only the Libraries in the tree and nothing in the listing.
 
 On a narrow screen, the tree is folded into a drawer, and the info panel and the activity panel are not shown.
-Tapping a tile once moves into a folder or archive, and opens an image or video in the viewer.
+Tapping a tile or list row once moves into a folder or archive, and opens an image or video in the viewer. A tap with Ctrl, ⌘, or Shift selects as on a wide screen, and a double tap does not open again.
 The context menu, toolbar operations that change Entries, drag and drop, and uploads are not shown.
 Tile size, the thumbnail shape, and sorting operations are shown even on narrow screens.
-Search is done by moving to search mode with the header's search button (§3.6).
+Search is done by moving to search mode with the header's switch (§3.6).
 
 When opened without a session, the initial setup screen is shown if the owner is not registered, or the login screen if registered, and once done it returns to the URL that was about to be opened.
 
@@ -128,17 +130,17 @@ The size of tiles is chosen from 5 levels by the display preferences' tile size.
 On a wide screen, the minimum length of a tile's side is 96, 128, 176, 240, and 320 CSS px for each level, the number of columns that fit in the listing's width is found with that minimum, and then the columns are widened to fill the listing's width.
 On a narrow screen, the levels are treated as numbers of columns (6, 5, 4, 3, 2 columns), and the tile's side is decided from the screen width.
 Phone screen widths differ by model, so with a fixed size the number of columns and the right-edge margin would vary by model.
-The tile size is switched with the slider in the "表示" (View) menu, and on a wide screen also with Ctrl or ⌘ plus the wheel, and with the `+` and `-` keys.
+The tile size is switched with the slider in the settings menu (§3.9), and on a wide screen also with Ctrl or ⌘ plus the wheel, and with the `+` and `-` keys.
 
 The listing can be switched between grid and list.
 A list is a sequence of rows with columns for a small thumbnail, name, modification date, size, and kind, and can be sorted by the column headings.
 Pressing a heading sorts ascending by that key, and pressing the current key reverses the direction.
-A narrow screen's list uses rows with a small thumbnail and two lines of text. The name goes on the upper line and the modification date and size on the lower, and column headings are not shown. Sorting is chosen in the "表示" (View) popover.
-In the results of a subtree search, a "場所" (Location) column is added to a wide screen's list, and on a narrow screen's list the location is shown at the start of the second line (§3.6). The "場所" column does not sort.
+A narrow screen's list uses rows with a small thumbnail and two lines of text. The name goes on the upper line and the modification date and size on the lower, and column headings are not shown. Sorting is chosen in the settings menu.
+While a search covers descendants or several Libraries, a "場所" (Location) column is added to a wide screen's list, and on a narrow screen's list the location is shown at the start of the second line (§3.6). The "場所" column does not sort.
 A list has no tiles, so the tile size operations (the menu slider, wheel, and keys) are not shown. The thumbnail shape is applied to the rows' small thumbnails.
 When switching between grid and list, as when moving between folders, the selection is cleared and the display returns to starting from the top of the listing.
 The default sort order is the natural order of names, with folder-like Entries placed first.
-Sorting can be chosen in the "表示" (View) menu, and the grid and list use the same order.
+Sorting can be chosen in the settings menu, and the grid and list use the same order.
 Separating and sorting are left to the server (`foldersFirst`, `sort`, `order`).
 The web client's tree has the server narrow to only folder-like Entries (`foldersOnly`) and lists them.
 
@@ -176,22 +178,33 @@ For an image swapped in immediately, the display image is a stopgap until the or
 Other images keep the display image until zoomed, so it is matched to the number of the screen's pixels.
 The server rounds up to size steps, so the client need not know the step values.
 
-Zoom is done with the wheel or a touch pinch.
+Zoom is done with the wheel, a touch pinch, or a double tap.
+A double tap switches between the whole image and an enlarged view, and the enlarged view counts as zooming for the timing of fetching the original image.
 While zoomed, dragging moves the display position.
 
 In the viewer, left and right flicks or key operations move to the previous or next Entry of the current listing (including search results).
+A downward swipe closes the viewer, the same as the close button.
+Flicks and the downward swipe are accepted only while the image is shown whole, so that they do not take over the drag of a zoomed image.
+In the video viewer they are not accepted, so that they do not collide with the player's own controls.
+The image area takes all touch gestures itself (`touch-action: none`, `overscroll-behavior: contain`), so the browser's pull-to-refresh and scrolling of the page do not start from it.
+A flick is a horizontal movement of more than 50 CSS px within 300 ms, a downward swipe is a downward movement of more than 80 CSS px, and a double tap is two taps within 300 ms and 30 CSS px. A double tap at the whole view enlarges 2 times around the tapped point.
 The order of previous and next follows the same sort as the listing.
 When moving to an Entry on a page not yet read, that page is read.
 The display images of one before and one after are requested in advance, so they are shown without waiting when moved to.
+The shown image is requested with `Pxna-Priority: interactive` and the ones before and after with `prefetch`, so the server starts the shown image first ([Thumbnail Design §7](./thumbnail.md#7-order-and-concurrency-of-generation)).
+The requests of images that are neither shown nor next to the shown image are canceled while loading. Besides the shown image and its neighbors, up to 6 more loaded display images are kept, the most recent first.
+Moving to an image whose prefetch is still loading cancels the prefetch and requests it again as `interactive`.
 The original images before and after are not requested in advance.
-The targets of moving back and forth are only the images in the current listing, and Entries that are not images are skipped.
+The targets of moving back and forth are the images and videos in the current listing, and Entries that are neither are skipped. Arrow keys pressed while focus is on the video player are left to the player.
+When the destination is already known from back and forth movement, the filmstrip, or undo in rate mode, the viewer opens it at that position without waiting for the listing to be searched again, so neither "読み込み中…" (Loading…) nor a rebuilt filmstrip appears between Entries.
 Opening the viewer pushes onto the URL history, and moving back and forth and closing do not.
 The browser's back operation also closes the viewer, and even when a URL is opened directly with the viewer open, the same image appears.
 
-The wide-screen image viewer has a filmstrip at the bottom edge.
+The wide-screen image and video viewer has a filmstrip at the bottom edge.
 The filmstrip assigns the same width to every Entry of the current listing (including search results), and lays them out horizontally in the same order as the listing.
-At image positions it shows thumbnails, highlights the open image, and moves to the clicked image.
-At the positions of Entries that are not images it shows a faint icon indicating the kind and does not accept clicks.
+At image and video positions it shows thumbnails, highlights the open Entry, and moves to the clicked Entry.
+At the positions of other Entries it shows a faint icon indicating the kind and does not accept clicks.
+While the open Entry is being searched for, the filmstrip stays at the previous position instead of being rebuilt.
 The overall width is decided from `totalCount`, and only the pages of the range that became visible by scrolling horizontally are read (§3.5).
 When the open image changes, it scrolls until that position comes to the center.
 Thumbnails use the crop shape and are requested under the same queue rules as the listing (§4).
@@ -201,9 +214,11 @@ The image viewer has a slideshow and full-screen display through the Fullscreen 
 The slideshow advances to the next image 5 seconds after the display image appears, and stops at the last image.
 When moving back or forth midway, the 5 seconds are counted again from the image moved to.
 Even for an image whose display image could not be read, it advances to the next once 5 seconds have passed since the failure was known.
-The slideshow's automatic movement stops at videos as well as images. When it arrives at a video it starts playback automatically, does not advance in 5 seconds, and advances to the next after playing to the end. When it becomes known that playback is impossible, such as when the video's information cannot be read, it advances without stopping. It stops after the last video finishes playing. Back and forth movement by operation continues to follow only images. A slideshow can be started only from an image, and even while it is at a video, the operation to stop the slideshow is shown.
+The slideshow's automatic movement stops at videos as well as images. When it arrives at a video it starts playback automatically, does not advance in 5 seconds, and advances to the next after playing to the end. When it becomes known that playback is impossible, such as when the video's information cannot be read, it advances without stopping. It stops after the last video finishes playing. A slideshow can be started only from an image, and even while it is at a video, the operation to stop the slideshow is shown.
 The wide-screen image and video viewer has rate mode, used to record ratings.
-It is entered with the header button or `r`, and exited by pressing again. While in it, ← records bad and moves to the next Entry, → records good and moves to the next Entry, and ↑ moves to the next Entry without rating. Rating and moving are done in one key operation, and it moves without waiting for the record to complete.
+It is entered with the header button or `r`, and exited by pressing again. While in it, ← records bad and moves to the next Entry, → records good and moves to the next Entry, and ↓ records unrated (`none`) and moves to the next Entry. Rating and moving are done in one key operation, and it moves without waiting for the record to complete.
+↑ undoes the last of these operations: it returns to the Entry that was rated and writes back the rating it had before. Undo goes back one operation at a time, newest first, and the history is kept only while the viewer is open. The rating before an operation is taken from the cache, or read from the server before the record is sent. If that read fails, the record is still sent, and undoing that operation fails with a toast. Records to the same Entry are sent in order, so an undo does not overtake the record it undoes.
+During rate mode, four buttons laid out in a cross like the arrow keys are shown at the bottom right of the display area, and do the same as the keys. For a video they are raised above the player's controls.
 The next Entry stops at videos as well as images. At the last Entry it does not move and only records the rating.
 The open Entry's rating is shown beside the name. For an Entry that is not rated, a guide to the keys is shown. A saved rating is also shown when reopened.
 It is not used at the same time as the slideshow, and starting one stops the other. When saving a rating fails, a toast notifies.
@@ -261,47 +276,56 @@ Unconfirmed nodes are displayed as expandable. Confirming whether there are chil
 
 ### 3.6 Search
 
-Search is done in search mode, which is separate from folder view and the timeline. The URL is `/search/{libraryId}`, and the queries are as follows.
+Search is done in search mode, which is separate from folder view and the timeline. The URL is `/search`, and the queries are as follows.
 
 | Query | Meaning |
 | --- | --- |
-| `q` | The search terms |
-| `path` | The Library-relative path of the starting folder. If omitted, the whole Library |
+| `lib` | A Library to search, repeated for each one. If omitted, every Library |
+| `path` | The Library-relative path of the starting folder. Only when one Library is searched. If omitted, the whole Library |
 | `flat=1` | Search only direct children of the start (not including subfolders). If omitted, searches underneath recursively |
+| `q` | The search terms |
 | `rating` | Filtering by rating. `good`, `bad`, `none` (unrated) |
-| `tag` | Filtering by tag. One word |
-| `view` | The path, relative to the start, of the result open in the viewer (§3.1) |
+| `tag` | Filtering by tag, repeated for each word. Entries with all the words match |
+| `view` | The result open in the viewer, as the Library id followed by the Library-relative path with the leading `/` removed (§3.1) |
 
-The search mode screen uses the same tree, grid or list, info panel, status bar, and viewer as folder view. In place of the toolbar's breadcrumb, it has the field for search terms, the choice of start, "サブフォルダを含めない" (Do not include subfolders), and the operation to end the search.
-When input has stopped for 300 ms, a listing with `query` is requested ([Listing and Search Design §5](./listing.md#5-name-search)). When searching underneath, `recursive=true` is attached.
-The results line up in the same grid and list as ordinary listings. When none of the search terms, rating, or tag is present, a listing is not requested and input is prompted.
+On a wide screen, the left area of search mode holds the search conditions in place of the tree. From the top, it lines up the field for search terms, a checkbox per Library, the start ("場所", Location), "サブフォルダを含めない" (Do not include subfolders), the rating choice (すべて (All), 良い (Good), 悪い (Bad), 未評価 (Unrated)), and a checkbox per tag word the user has created.
+The grid or list, info panel, status bar, and viewer are the same as in folder view, and the toolbar shows no breadcrumb.
+The last checked Library cannot be unchecked, so at least one Library is always searched. Checking every Library is the same as omitting `lib`, so a Library added later is also searched.
+The start can be chosen only while one Library is checked. Pressing it opens a tree of that Library's folders and archives in a popover, and choosing a folder there makes it the start; the popover also has "Library 全体" (Whole Library). While several Libraries are checked, it reads "各 Library の全体" (Whole of each Library), and checking another Library returns the start to the whole Library.
+When the search terms, rating, and tags are all absent, a listing is not requested and input is prompted.
+Otherwise, `listSearchEntries` is requested with the checked Libraries, the start, the scope, and the conditions ([Listing and Search Design §5.3](./listing.md#53-searching-across-libraries)). When searching underneath, `recursive=true` is attached.
+The results line up in the same grid and list as ordinary listings.
 
-The entrance to search is the search button on the toolbars of folder view and the timeline. The entrance passes only the default start, and the search mode screen is the same whichever it is opened from.
-From folder view it opens with the current folder as the start, and from the timeline with the whole Library as the start. On a wide screen, pressing `/` outside input fields and dialogs also moves to search mode. In search mode, `/` focuses the search terms field. Rate mode (§3.4) can also be used in search mode's viewer, which allows narrowing to "未評価" (Unrated) and rating one after another.
-The choice of start is made from the current start, its ancestor folders, and the whole Library. Choosing replaces only the start while keeping the terms and scope.
-Opening an old URL form (`/browse/...` with `q` and `deep=1` attached) replaces it with the corresponding search mode URL. Those without `deep=1` correspond to `flat=1`.
+The switch's "検索" (Search) opens search mode with the conditions last used in search mode while the tab is open, or else every Library with no conditions. The result open in the viewer is not restored.
+In folder view, pressing `/` outside input fields and dialogs on a wide screen, or choosing "このフォルダ内を検索" (Search in this folder) in the context menu of a tree folder or of empty space in the listing, opens search mode with that Library and folder as the start and no conditions.
+In search mode, `/` focuses the search terms field. Rate mode (§3.4) can also be used in search mode's viewer, which allows narrowing to "未評価" (Unrated) and rating one after another.
+Opening an old URL form replaces it with the corresponding `/search` URL. `/search/{libraryId}` becomes `lib` with that Library, its `tag` stays one word, and its `view`, relative to the start, is joined after the Library id and the start. `/browse/...` with `q` attached becomes that folder as the start, and those without `deep=1` correspond to `flat=1`.
 
-In the results of a subtree search, each Entry's parent folder is shown as a path relative to the start folder. An Entry directly under the start is shown as ".". It is shown below the tile's name, in the "場所" (Location) column of a wide screen's list, and at the start of the second line of a narrow screen's list.
-Opening a folder or archive result moves to that position in folder view, and the search ends. Moving by the tree and breadcrumb also ends the search.
-Opening an image or video result opens a viewer that moves back and forth among the search results. The result open in the viewer is carried in `view` as a path relative to the start (§3.1).
+While a search covers descendants or several Libraries, each Entry's parent folder is shown below the tile's name, in the "場所" (Location) column of a wide screen's list, and at the start of the second line of a narrow screen's list. A search of direct children in one Library shows no location.
+While one Library is searched, it is a path relative to the start, and an Entry directly under the start is shown as ".". While several are searched, it is the Library name followed by the Library-relative path of the parent folder.
+Opening a folder or archive result moves to that position in folder view, and the search ends. Moving by the switch also ends the search.
+Opening an image or video result opens a viewer that moves back and forth among the search results.
 
-On narrow screens, the header's search button moves to search mode. Below the search mode header, a row with the field for search terms, the choice of start, and "サブフォルダを含めない" is always shown.
-When any of the search terms, start, scope, or the end of search changes, the selection is cleared. This is so that Entries that became invisible do not remain in the status bar's count and total size.
-Entered terms are shown on screen immediately, and are put in the URL when they stop for 300 ms. Entering terms and switching the start and scope replace the URL without pushing onto history. Entering search mode pushes onto history, so the browser's back operation can return to the screen of the entrance.
+On a wide screen, delete, download, cut, copy, rename, and "フォルダで表示" (Show in folder) can be done, by the same rules as in the timeline (§3.10). A selection spanning Libraries is deleted with one request per Library, and cut and copy keep the Entries grouped by Library. There is no current folder, so new folder, paste, upload, and move by drag are not shown.
+The info panel shows the Library name in addition to the Library-relative path.
+
+On narrow screens, the field for search terms is always shown in a row below the search mode header, and the other conditions are in the left drawer. The drawer's button shows the number of conditions other than the terms that narrow the search.
+When any condition changes, the selection is cleared. This is so that Entries that became invisible do not remain in the status bar's count and total size.
+Entered terms are shown on screen immediately, and are put in the URL when they stop for 300 ms. The other conditions are put in the URL immediately. Changing conditions replaces the URL without pushing onto history. Entering search mode pushes onto history, so the browser's back operation can return to the screen of the entrance.
 Terms that are only whitespace are treated as no terms and do not make a search.
 
-The rating choice (すべて (All), 良い (Good), 悪い (Bad), 未評価 (Unrated)) and the tag input field are placed in the same row as the search terms field. The rating choice is reflected in the URL immediately, and the tag is reflected when input stops for 300 ms, as with search terms, and while typing, the words created so far are shown as completions.
-When a rating or tag is specified, even without search terms, the images and videos under the start (directly under it, with "サブフォルダを含めない") that satisfy the conditions are listed. They can be combined with name terms, the start, and the scope, and ratings and tags narrow to those satisfying both.
-A filtered listing is not reread when a rating or tag is given. The re-given result is reflected the next time the listing is opened and when the server returns a different identifier. The filtering rules and the handling of the listing's identifier are authoritative in [Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings).
+When a rating or tags are specified, even without search terms, the images and videos under the start (directly under it, with "サブフォルダを含めない") that satisfy the conditions are listed. They can be combined with name terms, the Libraries, the start, and the scope, and narrow to those satisfying all of them ([Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings)).
+A filtered listing is not reread when a rating or tag is given. The re-given result is reflected the next time the listing is opened and when the server returns a different identifier.
 
-The first page of a subtree search does not return until the server's scan finishes.
-In the meantime it indicates that searching is in progress, and the request is canceled when the terms, start, or scope is changed or the search is ended.
-The server stops the scan when all requests waiting for the scan have been cut ([Listing and Search Design §4.1](./listing.md#41-the-unit-that-is-built)).
-If the response's `truncated` is set, it indicates that the result is partial and urges moving the starting folder down and searching again.
-A subtree search does not search inside archives, so to search inside an archive, open the archive and then search.
+The first page of a subtree search does not return until the server's query of the name index, or its walk, finishes ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)).
+In the meantime it indicates that searching is in progress, and the request is canceled when a condition is changed or the search is ended.
+The server stops the work when all requests waiting for it have been cut ([Listing and Search Design §4.1](./listing.md#41-the-unit-that-is-built)).
+When a subtree search from a folder outside archives gets a response telling that the name index did not answer, "索引を作成中のため、結果が不完全な場合があります。" (The index is being built, so the results may be incomplete.) is displayed above the results.
+A search with "サブフォルダを含めない" or from inside an archive is walked by design and does not show it.
+If the response's `truncatedLibraryIds` is not empty, it indicates that the result is partial and urges narrowing the Libraries or moving the start down and searching again.
+A subtree search does not search inside archives, so to search inside an archive, choose the archive as the start.
 
 Reload and the browser's back operation can return to the same search's results.
-The operation to end the search moves to the folder view of the start folder.
 
 ### 3.7 Entry Operations
 
@@ -426,10 +450,11 @@ Only sorting does not depend on the screen width, so it is held once outside the
 | Sorting (key and direction) | No | Name ascending |
 
 The key and direction of sorting are the same as the values the listing API's `sort` and `order` take.
-The tile size, shape, display switch, and sorting in the "表示" (View) menu directly change the values of the set currently in use.
-The settings screen shows the two sets side by side and indicates the set currently in use.
-The settings screen shows only the choices of values that are in effect at that point.
-For the set whose listing display is the list, the tile size choice is not shown.
+The values are changed in the settings menu, a popover opened from the gear button at the right end of the toolbar.
+The menu shows the listing display, tile size, thumbnail shape, and swapping to the original image of the set currently in use, and sorting, each under a heading, and directly changes those values.
+The other set is changed from a screen of that width. The menu does not show which set it changes.
+The menu shows only the choices of values that are in effect at that point.
+When the listing display is the list, the tile size choice is not shown.
 Making ineffective values selectable would show the user an operation that does nothing when changed.
 Values that are not shown also round-trip as the saved values when written back.
 Writing back is sent together when operations have stopped for 500 ms.
@@ -439,15 +464,25 @@ There is one owner, and situations of changing display preferences in succession
 
 ### 3.10 Timeline
 
-Apart from folder view, the web client has a timeline that lists the Library's images and videos in descending order of timeline date.
-What is listed, the timeline dates, and the server's aggregation are authoritative in [Timeline Design](./timeline.md).
+Apart from folder view, the web client has a timeline that lists the images and videos of the chosen Libraries in one sequence in descending order of timeline date.
+What is listed, the timeline dates, the order across Libraries, and the server's aggregation are authoritative in [Timeline Design](./timeline.md).
 
-The timeline is placed at the URL `/timeline/{libraryId}`, and carries the month being viewed in the `month` query (`YYYY-MM`) and the Entry open in the viewer in the `view` query.
-The timeline has no current folder, so `view` carries the Library-relative path with the leading `/` removed.
-The toolbar's "フォルダ / タイムライン" (Folder / Timeline) switch moves to the other of the same Library.
-Moving from the timeline to folder view opens that Library's root.
+The timeline is placed at the URL `/timeline`, and carries the month being viewed in the `month` query (`YYYY-MM`) and the Entry open in the viewer in the `view` query.
+The timeline has no current folder and spans Libraries, so `view` carries the Library id followed by the Library-relative path, with the leading `/` removed (`photos/2025/a.jpg`).
+The old URL `/timeline/{libraryId}` is replaced by `/timeline`, keeping `month` and putting that Library in front of `view`.
 
-On a wide screen, instead of the tree, it lines up the Library switch at the top and below it the years and months with counts.
+Which Libraries to list is not put in the URL; it is saved in the display preferences (`timelineLibraries`).
+While nothing is saved, every Library is listed. Saved ids of Libraries that no longer exist are ignored, and when none of the saved Libraries exists, every Library is listed.
+Changing the choice rereads from the newest Entry and discards the selection.
+
+The toolbar's switch moves from folder view to the timeline without changing the choice of Libraries.
+Moving from the timeline or search mode to folder view opens the folder last opened in folder view on this device, or else the root of the first Library.
+
+On a wide screen, instead of the tree, it lines up a checkbox per Library under the heading "Library" at the top, and below it, under the heading "年と月" (Years and months), the years and months with counts summed over the chosen Libraries.
+The years and months take the same shape as the folder tree: rows have the tree's height, a year is a node at the first level that can be expanded and collapsed, and its months are at the second level, indented by one tree level.
+The checkboxes sit in the column of the expand marks, so the Library names, years, and months line up with the tree's levels, and the counts line up at the right edge.
+At first only the year of the month being viewed, or the newest year when there is none, is expanded. When the month being viewed moves into another year, that year is expanded too. Which years are expanded is kept only while the screen is open and is not saved.
+The last chosen Library cannot be unchecked, so at least one Library is always listed.
 Pressing a month rereads from that month's newest Entry. Pressing the month being displayed again also rereads.
 The month being viewed by scrolling is highlighted, and `month` is put in the URL without pushing onto history.
 On a narrow screen, this list goes in the same drawer as the tree.
@@ -455,7 +490,7 @@ On a narrow screen, this list goes in the same drawer as the tree.
 The listing is the grid only, and the order is fixed to newest first.
 Every time the day changes, a heading with the date and day of the week (2025年5月3日（土）, Saturday, May 3, 2025) is inserted and the row is broken.
 Tile size and thumbnail shape use the same display preference values as folder view.
-The toolbar's "表示" (View) menu does not show the switch between grid and list or sorting.
+The settings menu does not show the switch between grid and list or sorting.
 
 The timeline does not reserve the overall height in advance.
 If the visible rows and the rows in the margin of one screen above and below have not yet been read, the continuation in that direction is read 200 items at a time.
@@ -464,18 +499,22 @@ When the continuation above is added and when distant Entries are discarded, the
 When a month is chosen and when opened from the URL's `month`, the range already read is discarded and reread from that month.
 Thumbnails are requested under the same queue rules as folder view (§4).
 
-While the server is aggregating, "集計中" (Aggregating) and the number of files processed are shown, and the per-month counts are reread every 10 seconds.
+While the server is aggregating any of the chosen Libraries, "集計中" (Aggregating) and the number of files processed, summed over them, are shown, and the per-month counts are reread every 10 seconds.
 Entries added by aggregation are not automatically inserted into the already loaded grid. Added Entries appear when "今すぐ更新" (Update now) is pressed and on the reread when a month is chosen again.
-The "今すぐ更新" button makes the server start aggregation.
+The "今すぐ更新" button makes the server start aggregation of the chosen Libraries.
 
 On a wide screen, delete, download, cut, copy, and rename can be done from the tile's context menu, the toolbar, and key operations (§3.7).
 There is no current folder, so new folder, paste, upload, and move by drag are not shown.
+Changeability is decided per Entry from the `readonly` of its Library and of the Entry, and an operation is not offered when any selected Entry cannot be changed.
+A selection spanning Libraries is deleted with one request per Library, and a failure in one Library does not stop the others.
+Cut and copy keep the Entries grouped by Library, and pasting in folder view sends one group after another.
+The info panel shows the Library name in addition to the Library-relative path.
 Range selection is limited to the loaded range, and Ctrl or ⌘ plus A is not provided.
-When it finishes changing Entries, that Library's timeline and per-month counts are reread.
+When it finishes changing Entries, the timelines that list a changed Library and their per-month counts are reread.
 "フォルダで表示" (Show in folder) opens the selected Entry's parent folder in folder view, selects that Entry, and scrolls to the display position.
 For an Entry inside an archive, it opens the folder inside that archive.
 
-The viewer moves to the previous and next images in timeline order. The range the viewer holds also discards Entries farther than 1000 items from the open Entry and the filmstrip's range. The filmstrip does not read beyond 3000 items from the open Entry. This is to avoid holding everything between the open Entry and distant positions, since the range read is one contiguous range.
+The viewer moves to the previous and next images and videos in timeline order. The range the viewer holds also discards Entries farther than 1000 items from the open Entry and the filmstrip's range. The filmstrip does not read beyond 3000 items from the open Entry. This is to avoid holding everything between the open Entry and distant positions, since the range read is one contiguous range.
 The filmstrip lines up the Entries of the range read and reads the continuation when scrolled to the end.
 When opened directly from the URL's `view`, the range containing that Entry in the center is read.
 
@@ -512,6 +551,11 @@ If the API's URL were put directly in an `img` element's `src`, the browser woul
 A tile for which the server returned a deadline expiry (`Timeout`) becomes an icon showing the kind, like files whose thumbnail cannot be made, and is not requested again while that folder is displayed.
 As with the failure of a listing, this is because repeating can hit the same deadline expiry.
 
+The exception is right after the daemon's own change.
+When the listing is reread after a change made through Pxna, the read and failed states of folder and archive tiles are discarded, and the tiles in the request targets are requested again.
+A representative can change with the contents, and the server revalidates its response on every request, so a request made again receives the new representative ([Thumbnail Design §10.1](./thumbnail.md#representative-revalidation)).
+Image and video tiles are not requested again, because their thumbnails change only when the file itself is replaced.
+
 ## 5. Design Decisions
 
 ### 5.1 Decided
@@ -519,7 +563,7 @@ As with the failure of a listing, this is because repeating can hit the same dea
 #### The Web Client Combines a File Manager's Skeleton with a Photo App's Presentation
 
 **Decision**
-The web client puts a tree on the left, a grid or list in the center, a collapsible info panel on the right, and a status bar at the bottom, and puts the breadcrumb, search, display switches, and operations on the toolbar at the top (§3.1).
+The web client puts a tree on the left, a grid or list in the center, a collapsible info panel on the right, and a status bar at the bottom, and puts the mode switch, the breadcrumb, display switches, and operations on the toolbar at the top (§3.1).
 Tiles make large thumbnails the main attraction, and the viewer has a filmstrip.
 
 **Reason**
@@ -632,10 +676,10 @@ It would cause the mistaken operation of deleting thinking everything was select
 #### Separate Search into a Common Search Mode and Choose the Start Within Search Mode
 
 **Decision**
-Search is done in a search mode that belongs to neither folder view nor the timeline. The start (the whole Library, or under a folder) and the scope (include descendants, or only direct children) are chosen within search mode, and the entrances pass only the default start. The default scope includes descendants (§3.6).
+Search is done in a search mode that belongs to neither folder view nor the timeline. The Libraries, the start (the whole Library, or under a folder), the scope (include descendants, or only direct children), and the conditions are chosen within search mode, and the entrances in folder view pass only the default start. The default scope includes descendants (§3.6).
 
 **Reason**
-If the search field were coupled to folder view, a search with the same experience could not be offered from the timeline, and the screen implementation would also be duplicated.
+If the search field were coupled to folder view, a search with the same experience could not be offered from another entrance, and the screen implementation would also be duplicated.
 With a dedicated URL, reload and the back operation can return to the same search's results.
 If the start can be chosen within search mode, a separate search need not be built for each entrance.
 Filtering direct children gives the same result as a search with the scope set to direct children only.
@@ -651,11 +695,12 @@ Narrowing direct children is fast, but it presupposes search belonging to each e
 #### Put the Entry Open in the Viewer in the URL as a Path Relative to the Current Folder
 
 **Decision**
-The `view` query carries a path relative to the current folder, not the Entry's name. For an Entry directly under, it has the same value as the name (§3.1).
+In folder view, the `view` query carries a path relative to the current folder, not the Entry's name. For an Entry directly under, it has the same value as the name (§3.1).
+Search mode and the timeline have no current folder and span Libraries, so their `view` carries the Library id followed by the Library-relative path (§3.6, §3.10).
 
 **Reason**
-The results of a subtree search can include Entries of the same name in different folders. With the name alone, the Entry to open from the URL cannot be decided as one.
-With a relative path, the URLs of direct Entries do not change, and subtree search results can be expressed in the same form.
+Search results and the timeline can include Entries of the same name in different folders and Libraries. With the name alone, the Entry to open from the URL cannot be decided as one.
+With a relative path, the URLs of direct Entries in folder view do not change.
 
 **Rejected alternative 1**
 A method that carries the absolute value of the Library-relative path in `view`.
@@ -665,22 +710,23 @@ The Entry would be decided as one, but the form of the URLs of direct Entries wo
 A method that carries only the name and takes the first of Entries with the same name.
 The implementation is minimal, but it would open the wrong one of images of the same name in different folders (such as `IMG_0001.jpg`), so we rejected it.
 
-#### Search on Narrow Screens Puts a Row Under the Search Mode Header
+#### Search on Narrow Screens Puts Only the Terms Field Under the Header
 
 **Decision**
-A search button is placed in the header on narrow screens, and pressing it moves to search mode. Under the search mode header, a row with the field for search terms, the choice of start, and "サブフォルダを含めない" (Do not include subfolders) is always shown (§3.6).
+On narrow screens, the search terms field is always shown in a row under the search mode header, and the other conditions are placed in the left drawer, whose button shows how many of them narrow the search (§3.6).
 
 **Reason**
-The header on narrow screens is filled in width by the tree, up, title, and operations, and there is no room to place a search field.
-While searching, the name of the start and the operation to end the search can remain visible.
+The header on narrow screens is filled in width by the drawer button, the title, the switch, and the operations, and there is no room to place a search field.
+The terms are what is changed most often while searching, so they stay at hand, while the Libraries, start, rating, and tags do not fit in one row and are changed less often.
+The count on the drawer's button tells that the results are narrowed by conditions that are not visible.
 
 **Rejected alternative 1**
-A method where the search button replaces the whole header with the search field.
-It would not increase vertical space, but while searching, the start's name and the tree operation would be hidden, so we rejected it.
+A method that also puts the terms field in the drawer.
+The screen would gain a row, but the drawer would have to be opened every time the terms are typed, so we rejected it.
 
 **Rejected alternative 2**
-A method that does not show search on narrow screens.
-The implementation is light, but it would overturn the decision to provide browsing and search even in phone browsers (§3.1), so we rejected it.
+A method that lines up every condition in rows under the header.
+Nothing would be hidden, but the tags and Libraries would take several rows and push the results down on a phone screen, so we rejected it.
 
 #### Make Name Input a Modal Dialog and Show the Target's Path
 
@@ -701,19 +747,29 @@ The operation is light, but both the listing and the tree would need editing par
 A method where rename is in place and only new folder uses a dialog.
 There would be two kinds of operation and the explanation of the rules would be doubled, so we rejected it.
 
-#### Rate Mode Bundles Rating and Moving into ← → ↑
+#### Rate Mode Bundles Rating and Moving into ← → ↓, and Undoes with ↑
 
 **Decision**
-In rate mode, → is used for recording good and moving to the next Entry, ← for recording bad and moving to the next Entry, and ↑ for moving to the next Entry without rating. Recording does not make moving wait (§3.4).
+In rate mode, → is used for recording good and moving to the next Entry, ← for recording bad and moving to the next Entry, and ↓ for recording unrated and moving to the next Entry. ↑ undoes the last of these operations, returning to that Entry and writing back its previous rating. Recording does not make moving wait (§3.4). The same four operations are also buttons laid out in a cross.
 
 **Reason**
 Sorting is work of looking at images one by one and deciding, so if rating and moving to the next were separate operations, the operations would double in proportion to the number of images.
 The left and right keys are assigned to the two-choice rating, and both advance to the next Entry. The ordinary meaning of ← → as "move back and forth" is replaced only during rate mode, so the direction of rating and the direction of moving do not coincide. A separate operation for entering is prepared so that it is not mistaken for ordinary movement.
 By moving without waiting for the record, communication delay does not become a delay in consecutive operations.
+Because every rating key advances, a wrong key moves past the Entry at once. Undo returns to it and restores the rating in one operation, without leaving rate mode.
+The buttons mirror the arrow keys so that the assignment can be read from the screen, and rating can be done with the mouse alone.
 
-**Rejected alternative**
+**Rejected alternative 1**
 A method that puts the rating keys at another position such as number keys and leaves moving to the existing keys.
 The inputs would not be mixed, but two operations would be needed for rating and moving, so we rejected it.
+
+**Rejected alternative 2**
+A method where ↑ moves to the next Entry without rating (the previous method).
+A mistake could only be fixed by leaving rate mode, moving back, and rating again, so we rejected it.
+
+**Rejected alternative 3**
+A method where undo only returns to the previous Entry without writing back its rating.
+The wrong rating would stay unless rated again, and an Entry that should be unrated could not be restored without another key, so we rejected it.
 
 #### Use shadcn/ui for Parts Such as Menus and Dialogs
 
@@ -826,7 +882,7 @@ A method that discards the results on the first failure loses sight of Operation
 #### The Slideshow Plays a Video to the End Before Advancing
 
 **Decision**
-The slideshow's automatic movement also stops at videos, and a video is played to the end before advancing to the next. Back and forth movement by operation follows only images (§3.4).
+The slideshow's automatic movement also stops at videos, and a video is played to the end before advancing to the next (§3.4).
 
 **Reason**
 If videos were skipped, a folder mixing images and videos could not be viewed as a flow.
@@ -840,18 +896,23 @@ The implementation is small, but in folders containing videos, only the videos w
 A method that advances videos to the next in 5 seconds too.
 They could not be seen to the end, which does not suit the slideshow's purpose, so we rejected it.
 
-#### Gather View Operations into One "表示" (View) Menu
+#### Gather Display Preferences into One Settings Menu
 
 **Decision**
-The listing display (grid and list), tile size, thumbnail shape, and sorting are placed in a single "表示" (View) menu on the toolbar, on both wide and narrow screens (§3.2).
+The listing display (grid and list), tile size, thumbnail shape, swapping to the original image, and sorting are placed in a single settings menu opened from the toolbar's gear button, on both wide and narrow screens. The menu changes only the set currently in use (§3.9).
 
 **Reason**
-When operations line up on the toolbar, they compete for width with the breadcrumb, the search entrance, and the operations. Display settings are not changed often, so folding them into a menu is not a problem.
+When operations line up on the toolbar, they compete for width with the mode switch, the breadcrumb, and the operations. Display settings are not changed often, so folding them into a menu is not a problem.
 Wide and narrow screens use the same part, so implementations per screen width need not be separated.
+A separate view menu and settings screen showed the same values in two places, and the user had to know which entrance held which value.
 
-**Rejected alternative**
-A method that lines them up on the bar on wide screens and makes a menu only on narrow screens (the previous method).
+**Rejected alternative 1**
+A method that lines them up on the bar on wide screens and makes a menu only on narrow screens.
 Operation would take one step, but the bar gets crowded and the parts are kept in two ways, so we rejected it.
+
+**Rejected alternative 2**
+A method that keeps, next to the menu, a settings screen that shows the wide and narrow sets side by side (the previous method).
+The other set could be changed from any device, but the menu and the screen overlapped in most values, so we rejected it.
 
 #### Change the Width of the Tree and Info Panel by Dragging, and Save It per Device
 
@@ -960,16 +1021,16 @@ The user could decide the transfer volume, but an operation would be needed ever
 
 **Decision**
 The filmstrip assigns the same width to every Entry of the current listing, lays them out in the same order as the listing, and reads only the pages of the range that became visible (§3.4).
-Only images show thumbnails and can be moved to by clicking, and at the positions of Entries that are not images, an icon showing the kind is shown.
+Images and videos show thumbnails and can be moved to by clicking, and at the positions of other Entries, an icon showing the kind is shown.
 
 **Reason**
 The listing API cannot filter by kind (§5.2's "Whether to filter listings by kind"), and `totalCount` counts all Entries.
 How many images there are and where they are in the listing is not known until all pages are read.
 If the filmstrip's positions are aligned with the listing's order, the overall width is decided from `totalCount` alone, and as with the listing, it can be displayed by reading only the page jumped to by scrolling (§3.5).
 The width is not varied by Entry kind because the positions of Entries on unread pages are computed without knowing their kind.
-Entries that are not images are not made targets for moving by click, to align with the rule limiting the targets of moving back and forth to images (§3.4).
-The cost is that in ranges where Entries that are not images continue, only icons line up.
-The number of images is not known, so it also does not indicate which number the open image is.
+Other Entries are not made targets for moving by click, to align with the rule limiting the targets of moving back and forth to images and videos (§3.4).
+The cost is that in ranges where other Entries continue, only icons line up.
+The number of images and videos is not known, so it also does not indicate which number the open Entry is.
 
 **Rejected alternative 1**
 A method that places the open image in the center and lines up only a few images before and after.
@@ -1068,9 +1129,9 @@ For the viewer's result toasts, a dedicated `Toaster` is placed inside the outer
 
 **Reason**
 While the browser's modal is open, elements drawn outside the `dialog` end up behind it and cannot be operated.
-The `dialog` element itself cannot be made full screen, but an element that is its descendant can, and elements drawn inside it are also visible and operable in full screen ([Measurements of Chromium](../knowledges/chromium-modal-dialog-fullscreen.md)).
+The `dialog` element itself cannot be made full screen, but an element that is its descendant can, and elements drawn inside it are also visible and operable in full screen ([Measurements of Chromium](../knowledge/chromium-modal-dialog-fullscreen.md)).
 If aligned to the outer frame element, the header, filmstrip, confirmation dialogs, menus, and toasts are seen in the same place in both modal and full screen.
-In the confirmation dialogs and menus inside the outer frame, the Esc `keydown` reaches the viewer even after Radix handles it, and a Tab reaches the `Modal` cycle, so the viewer does not handle a `keydown` that has already been handled, and `Modal` does not handle a Tab inside ([Measurements of Radix](../knowledges/radix-nested-layer-events.md)).
+In the confirmation dialogs and menus inside the outer frame, the Esc `keydown` reaches the viewer even after Radix handles it, and a Tab reaches the `Modal` cycle, so the viewer does not handle a `keydown` that has already been handled, and `Modal` does not handle a Tab inside ([Measurements of Radix](../knowledge/radix-nested-layer-events.md)).
 
 **Rejected alternative 1**
 A method that leaves the confirmation dialogs and menus drawn directly under `body`.
@@ -1121,10 +1182,10 @@ The implementation is the simplest, but a user who wants to use it collapsed wou
 #### Put the Timeline on a Separate Route and Switch with the Toolbar
 
 **Decision**
-The timeline is placed at `/timeline/{libraryId}`, and the toolbar's "フォルダ / タイムライン" (Folder / Timeline) switch goes back and forth with the same Library's folder view (§3.10).
+The timeline is placed at `/timeline`, and the toolbar's switch goes back and forth with folder view and search mode (§3.10).
 
 **Reason**
-Reload, bookmarks, and the browser's back operation can return to the same month of the same timeline.
+Reload, bookmarks, and the browser's back operation can return to the same month of the timeline.
 The timeline has no current folder, so the URL can omit a folder path.
 
 **Rejected alternative 1**
@@ -1134,6 +1195,26 @@ Routes would not increase, but a folder path that the timeline does not use woul
 **Rejected alternative 2**
 A method that saves in the display preferences whether to open in folder view or the timeline.
 It would be convenient for a user who always views the timeline, but the display could not be known from the URL, and the results of shared URLs and the back operation would change with the settings, so we rejected it.
+
+#### Save the Timeline's Libraries in the Display Preferences as the Chosen Ones
+
+**Decision**
+The Libraries the timeline lists are chosen with checkboxes in the timeline's left area and saved in the display preferences as the list of chosen Libraries, not put in the URL (§3.10).
+While nothing is saved, every Library is listed.
+
+**Reason**
+Which Libraries hold photos rarely changes, so the choice is made once and kept across reloads and devices.
+With the choice only in the preferences, there is no state in which the URL and the saved value disagree, and Pxna has a single owner, so a URL that reproduces someone else's choice is not needed.
+Saving the chosen Libraries rather than the excluded ones keeps a newly added Library out of the timeline until it is chosen, so a Library of other images does not get mixed in unnoticed.
+The cost is that a newly added Library of photos has to be checked once.
+
+**Rejected alternative 1**
+A method that carries the chosen Libraries in the URL query and uses the saved value only when the query is absent.
+A narrowed timeline could be bookmarked, but which of the URL and the saved value wins, and when the saved value is updated, would have to be decided, so we rejected it.
+
+**Rejected alternative 2**
+A method that saves the excluded Libraries.
+A newly added Library would appear without any operation, but a Library of other images would also be mixed in until excluded, so we rejected it.
 
 #### Line Up Years and Months in the Timeline's Left Area and Jump to the Chosen Month
 
@@ -1250,18 +1331,91 @@ The implementation is small, but to move to a distant photo one would have to cl
 A method that lines up only a few images before and after the open image.
 Reading the continuation would not be needed, but it becomes the same as the method rejected because there would be no means of moving to distant images in folder view, so we rejected it.
 
-#### Put Only the Entrance to Search in the Timeline
+#### Switch Folder View, the Timeline, and Search Mode with One Switch of Three Choices
 
 **Decision**
-The timeline's toolbar shows only a search button, and pressing it moves to search mode with the whole Library as the start. The timeline itself has no filtering conditions (§3.6, §3.10).
+The toolbar has one switch that lays out "フォルダ" (Folder), "タイムライン" (Timeline), and "検索" (Search) side by side, and it highlights the current one (§3.1).
+Neither the toolbar nor the timeline has a separate search button, and the timeline itself has no filtering conditions (§3.6, §3.10).
 
 **Reason**
+Search mode spans Libraries like the timeline and has no current folder, so it is a screen of the same rank as the other two, and the switch shows which of the three is open.
 If the screen for searching by name is unified into search mode, the timeline's loading and per-month counts need not carry filtering conditions.
-For the flow of wanting to search from the timeline, the entrance's search button is enough.
+Searching from a folder keeps its own entrances, `/` and the context menu, which pass the folder as the start.
 
-**Rejected alternative**
+**Rejected alternative 1**
+A method that keeps a search button next to the two-choice switch.
+The entrance would stay where it was, but search mode would be highlighted nowhere and would look like a part of folder view, so we rejected it.
+
+**Rejected alternative 2**
 A method that narrows the timeline to Entries whose names match with the words of the search field.
 It would be fast because of the index, but the per-month counts would also have to be recounted for each narrowing, so we rejected it.
+
+#### Put the Search Conditions in the Left Area in Place of the Tree
+
+**Decision**
+Search mode puts the search terms, Libraries, start, scope, rating, and tags in the left area, where folder view puts the tree (§3.6).
+
+**Reason**
+The conditions grew to the Libraries, the start, and several tags, and no longer fit in one toolbar row next to the operations.
+In search mode the tree only served to leave the search, since moving by it opened folder view, so the area is better spent on the conditions.
+The timeline already uses the left area for its Library checkboxes, so the two screens that span Libraries choose them in the same place.
+
+**Rejected alternative 1**
+A method that keeps the conditions in the toolbar row.
+No new area would be needed, but a list of tags cannot be laid out there and the row would wrap on medium widths, so we rejected it.
+
+**Rejected alternative 2**
+A method that keeps the tree and puts the conditions in a panel on the right.
+Moving by the tree would stay, but the panel would compete with the info panel for the same side, so we rejected it.
+
+#### Choose the Start Only While One Library Is Searched, with a Tree in a Popover
+
+**Decision**
+The start can be chosen only while one Library is checked, from a tree of that Library's folders and archives opened in a popover. While several Libraries are checked, each Library's whole is searched (§3.6).
+
+**Reason**
+A start is a Library-relative path, so it has meaning only within one Library.
+A tree lets the user reach a deep folder without knowing its exact path, and shows archives too, so an archive can be chosen as the start to search inside it.
+
+**Rejected alternative 1**
+A method that holds a start for each checked Library.
+It would allow mixed starts, but the URL and the panel would need a start per Library, and the use of narrowing several Libraries to different folders at once is rare, so we rejected it.
+
+**Rejected alternative 2**
+A method that types the start as text such as `Library名/フォルダ` with completions.
+No tree would be needed, but the user would have to know or type the path, so we rejected it.
+
+#### Open Search Mode with the Conditions Last Used
+
+**Decision**
+The switch's "検索" (Search) opens the conditions last used in search mode while the tab is open, and every Library with no conditions the first time. The `/` key and "このフォルダ内を検索" (Search in this folder) in folder view open that folder as the start with no conditions (§3.6).
+The conditions are put in the URL and are not saved in the display preferences.
+
+**Reason**
+Going to another mode and coming back to the same search, for example to check an Entry in the timeline, is common, and the switch should return to it as it does for the folder last opened.
+The flow of searching under the folder being viewed keeps its own entrances, so it does not need the switch to carry the folder.
+Conditions change with each search, so saving them on the server would only make the result of opening `/search` depend on another device's last search.
+
+**Rejected alternative 1**
+A method in which the switch always opens the current folder as the start.
+It would keep the previous behavior, but the timeline has no current folder, so the switch would act differently by the mode it is pressed from, so we rejected it.
+
+**Rejected alternative 2**
+A method in which the switch always opens with no conditions.
+It would be predictable, but returning to a search would mean entering the conditions again, so we rejected it.
+
+#### Search Results Allow the Same Operations as the Timeline
+
+**Decision**
+In search mode, delete, download, cut, copy, rename, and "フォルダで表示" (Show in folder) can be done, also on a selection that spans Libraries. New folder, paste, upload, and move by drag are not provided (§3.6).
+
+**Reason**
+Search results, like the timeline, have no current folder and span Libraries, so the operations of the timeline fit them without change, including splitting a selection into one request per Library.
+Operations that need a destination cannot decide it without a current folder.
+
+**Rejected alternative**
+A method that does not offer delete, cut, and copy on a selection that spans Libraries.
+It would avoid splitting requests, but the timeline already splits them, and refusing them only in search mode would make the same selection behave differently, so we rejected it.
 
 <a id="tree-progressive-disclosure"></a>
 #### Show the Tree in Stages and Limit the Child-Presence Check to the Visible Range
@@ -1318,6 +1472,28 @@ If capabilities' childProbes is false, or the capabilities query is not provided
 
 **Reason**
 Unconfirmed is not misjudged as empty, and folder checks of all 20,000 items do not become new background load.
+
+#### Add Double Tap and a Downward Swipe to the Viewer's Touch Operations
+
+**Decision**
+In addition to left and right flicks and pinch, the viewer accepts a double tap to switch zoom and a downward swipe to close (§3.4).
+Flicks and the swipe are accepted only while the image is shown whole, and not in the video viewer.
+The gestures are recognized with the Pointer Events the viewer already uses for dragging, without adding a gesture library.
+
+**Reason**
+A narrow screen fetches the original image only on zoom by default, and a double tap reaches the enlarged view with one hand.
+A downward swipe closes the viewer without reaching for the button at the top of a phone screen.
+Taking the gestures in the image area keeps them from starting the browser's pull-to-refresh, which a downward swipe would otherwise collide with.
+Limiting flicks and the swipe to the whole view keeps them from competing with dragging a zoomed image, and keeping them off videos keeps them from competing with the player's seek bar.
+The set of gestures is small, so recognizing them in the existing pointer handling does not need a dependency.
+
+**Rejected alternative 1**
+A method that implements only left and right flicks and pinch.
+There would be fewer gestures to tell apart, but reaching the enlarged view and closing would need two fingers or the button at the top, so we rejected it.
+
+**Rejected alternative 2**
+A method that also moves back and forth among videos with flicks.
+Movement would be the same for images and videos, but a horizontal drag on the seek bar would be taken as a flick, so we rejected it.
 
 ### 5.2 Deferred
 
@@ -1380,28 +1556,29 @@ When the info panel has been used on real screens and one can judge whether over
 Summary listings and detail completion are implemented in [entries.ts](../../ui-web/src/library/entries.ts) and [listing.ts](../../ui-web/src/library/listing.ts). Support is confirmed with capabilities, and names and kinds are displayed first. The existence of children for visible rows is checked one request at a time by [ChildProbeQueue](../../ui-web/src/library/childProbes.ts). It cancels on leaving the screen and on snapshot change, and returns to unconfirmed after the remaining TTL. Waiting for a probe does not stop normal expansion.
 
 The web client is a Vite SPA that the daemon serves from `[web] dir`.
-It has initial setup and login, the toolbar (breadcrumb, search entrance, user menu), the tree, the grid and list, the status bar, selection, the thumbnail request queue, flipbook playback of videos, and the image viewer.
+It has initial setup and login, the toolbar (mode switch, breadcrumb, user menu), the tree, the grid and list, the status bar, selection, the thumbnail request queue, flipbook playback of videos, and the image viewer.
 The video viewer chooses direct playback or HLS from media info, and on closing ends playback and the transcode session.
 The screen skeleton lines up the toolbar, tree, listing, and status bar on a wide screen (the tree and info panel change width with [ResizeHandle.tsx](../../ui-web/src/components/ResizeHandle.tsx)), and folds the tree into a drawer on a narrow screen. The color scheme follows the OS's light and dark setting.
 Display preferences wait for loading at the entrance of authenticated screens, and run with defaults if they cannot be read. Changes are written back as a whole when they have stopped for 500 ms, and on failure return to the saved values.
-From the toolbar's "表示" (View) menu and the settings screen, the listing display, the grid's tile size, the thumbnail shape, and sorting can be chosen. Wide and narrow screens are separate sets, and they switch when the screen width crosses 768 CSS px. The list's set does not show the tile size choice.
+From the toolbar's settings menu ([SettingsMenu.tsx](../../ui-web/src/components/SettingsMenu.tsx)), the listing display, the grid's tile size, the thumbnail shape, swapping to the original image, and sorting can be chosen for the set currently in use. Wide and narrow screens are separate sets, and they switch when the screen width crosses 768 CSS px. The list's set does not show the tile size choice.
 The listing's data is held per page by [library/listing.ts](../../ui-web/src/library/listing.ts). It reserves the overall height from the first page's `totalCount`, and reads the pages containing the visible rows and one screen of prefetch rows in the scrolling direction, 200 items at a time by `offset`. It shows frames at unread positions and cancels requests for pages that left the targets.
-The grid lines up square tiles following the tile size level. The list, on a wide screen, has the 5 columns of small thumbnail, name, modification date, size, and kind with sort headings, and on a narrow screen shows no headings and lines up two-line rows of the name and "更新日時 · サイズ" (modification date · size).
+The grid lines up square tiles following the tile size level. The list, on a wide screen, has the 5 columns of small thumbnail, name, modification date, size, and kind with sort headings, and on a narrow screen shows no headings and lines up two-line rows of the name and "更新日時 · サイズ" (modification date · size). On a narrow screen, a single tap on a tile or list row opens it ([useEntryInteraction.ts](../../ui-web/src/library/useEntryInteraction.ts)).
 When the folder, sorting, listing display, or search conditions change, the display returns to starting from the top. When a page with a different snapshot id arrives, the other pages are discarded and the needed range is reread, keeping the scroll position.
 Range selection reads unread pages first, shows progress in the status bar, and selects after reading finishes. Loading is canceled by another operation, a folder move, or a snapshot change. It holds the selected paths and the size, kind, and changeability at the time of selection, so the count and total size, the destination of operations, and the selectable state can be decided regardless of the pages being loaded. On sorting and snapshot change only the start is discarded, and on changes of the folder, listing display, or search conditions the selection is cleared.
-Search is handled by search mode in [SearchPage.tsx](../../ui-web/src/pages/SearchPage.tsx), which shares the listing, viewer, selection, and info panel with folder view. The search field is in [SearchBox.tsx](../../ui-web/src/components/SearchBox.tsx), and when input stops for 300 ms, it puts the search terms, start, and scope in `q`, `path`, and `flat=1` and replaces the URL. The old `/browse` with `q` and `deep=1` is replaced with a search mode URL.
-The listing and viewer read pages under the same search conditions. For subtree results, the parent folder's relative path is shown below the name in the grid, in the "場所" (Location) column in a wide screen's list, and at the start of the second line in a narrow screen's list. Direct children are shown as ".". During a subtree search, "検索中…" (Searching…) is displayed, and if the search results are 0, "一致する項目がありません。" (No matching items.) is displayed, and on truncation it guides moving the starting folder down and searching again. Operations that open folders and archives, and moves through the tree and breadcrumb, end the search.
+Search is handled by search mode in [SearchPage.tsx](../../ui-web/src/pages/SearchPage.tsx), which spans Libraries like the timeline: its Entries carry `/{libraryId}{Library-relative path}` as their path, and it shares the grid, list, viewer, selection, info panel, and Entry operations with the timeline's rules (§3.6). The conditions are in the left area ([SearchPanel.tsx](../../ui-web/src/components/SearchPanel.tsx)) in place of the tree: the search terms field, a checkbox per Library, the start (a popover holding the picking mode of [Tree.tsx](../../ui-web/src/components/Tree.tsx), only while one Library is checked), "サブフォルダを含めない", the rating, and a checkbox per tag word. Terms are put in the URL when input stops for 300 ms ([useDebouncedParam.ts](../../ui-web/src/library/useDebouncedParam.ts)), and the other conditions immediately, replacing the URL. On a narrow screen only the terms field stays under the header and the rest is in the drawer, whose button shows the number of narrowing conditions. The last conditions are kept for the tab by [searchReturn.ts](../../ui-web/src/library/searchReturn.ts) for the switch's "検索". The old `/search/{libraryId}` and the `/browse` with `q` and `deep=1` are replaced with a `/search` URL.
+The paged listing store in [listing.ts](../../ui-web/src/library/listing.ts) reads either a folder or a search (`ListingSource`), and a search is requested with `listSearchEntries` through `fetchSearchPage` in [entries.ts](../../ui-web/src/library/entries.ts), which turns each Entry's path into the keyed path. Grid, List, and the viewer take the source; the viewer moves among the search results. For subtree results, the parent folder is shown below the name in the grid, in the "場所" (Location) column in a wide screen's list, and at the start of the second line in a narrow screen's list; direct children of the start are shown as ".". During a subtree search, "検索中…" (Searching…) is displayed, and if the search results are 0, "一致する項目がありません。" (No matching items.) is displayed, and on truncation of any Library it guides narrowing the Libraries or moving the start down and searching again. Opening a folder or archive result moves to that position in folder view and ends the search.
 The tree reads folder-like Entries in order by `offset` and shows children after fetching all pages. When the snapshot's id changes, it rereads from the start.
-The image and video viewer also uses the same listing data, and reads pages in order until the Entry of the relative path that `view` of a directly opened URL points to is found. Moving to the previous and next images skips non-images, and moves in one operation after finishing reading unread pages too. The display images of one before and one after in the loaded range are prefetched. The original image is fetched at a timing decided from the format, size, and the display preferences' value for swapping to the original image, and the size of the display image request is also decided by the same result ([viewer.ts](../../ui-web/src/viewer/viewer.ts)). Zoom is done only with the wheel.
-The wide-screen image viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), and the header's slideshow, full-screen, download, and delete buttons. On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1). The settings screen has the choice of swapping to the original image in each of the wide and narrow sets.
+The image and video viewer also uses the same listing data, and reads pages in order until the Entry of the relative path that `view` of a directly opened URL points to is found. Moving to the previous and next Entries stops at images and videos and skips the rest, and moves in one operation after finishing reading unread pages too. When the destination is known, it is opened at that position without waiting for the search. The display images of the image before and after in the loaded range are prefetched. The original image is fetched at a timing decided from the format, size, and the display preferences' value for swapping to the original image, and the size of the display image request is also decided by the same result ([viewer.ts](../../ui-web/src/viewer/viewer.ts)). Zoom is done only with the wheel.
+The wide-screen image and video viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), and the image viewer has the header's slideshow, full-screen, download, and delete buttons. Rate mode's buttons and undo history are in [Viewer.tsx](../../ui-web/src/components/Viewer.tsx). On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1).
 Parts are built with Tailwind, the shadcn/ui parts in `ui-web/src/components/ui`, and in-house code.
 On a wide screen, from the listing's context menu and the toolbar, one can create folders, rename, delete, and download a single file. Creating, renaming, and deleting can also use key operations. In the tree too, one can create inside, rename, and delete the right-clicked folder. Creating and renaming are done in the modal dialog of [NameDialog.tsx](../../ui-web/src/components/NameDialog.tsx), which shows the target's path. Whether something can be changed is decided by the logical OR of the Library's `readonly` and the Entry's or the current folder's `metadata.readonly`. After success, that Library's listing and tree are reread.
 [clipboard.ts](../../ui-web/src/library/clipboard.ts) holds the targets of cut and copy across authenticated screens. They can be operated with the menu and Ctrl or ⌘ X, C, and V, and during cut the targets in the grid and list are shown faintly. Paste targets the current folder, or a tile or tree folder, and transfer to another Library is also possible.
 [TransferProvider.tsx](../../ui-web/src/components/TransferProvider.tsx) checks the destination's writability and Entries of the same name, and if there are conflicts, asks the policy only once. It splits the requests for files and folders, notifies synchronous success and rereads the listing and tree, and keeps accepted Operations even if there are partial failures.
 Internal drag moves to the same Library's tree and folder tiles, and copies when Alt is pressed. It rejects destinations that are readonly or archives, scrolls at the listing's edges, and expands closed tree folders after 1 second.
-[upload.ts](../../ui-web/src/library/upload.ts) sends the toolbar's file and folder selection and OS drops in a queue of at most 2. Files of 32 MiB or less are written directly, and larger files send 16 MiB chunks. Folders are created first, and the conflict policy is also applied to what is underneath. For OS folders, it reads from the same reader until an empty batch, and does not drop the tail of what is underneath ([Measurements of Chromium](../knowledges/chromium-directory-reader.md)). A session is discarded when canceled, and the listing and tree are reread once per published file.
+[upload.ts](../../ui-web/src/library/upload.ts) sends the toolbar's file and folder selection and OS drops in a queue of at most 2. Files of 32 MiB or less are written directly, and larger files send 16 MiB chunks. Folders are created first, and the conflict policy is also applied to what is underneath. For OS folders, it reads from the same reader until an empty batch, and does not drop the tail of what is underneath ([Measurements of Chromium](../knowledge/chromium-directory-reader.md)). A session is discarded when canceled, and the listing and tree are reread once per published file.
 The activity panel is shown overlaid at the bottom right and shows the progress, state, and failures and skips of Operations and uploads. Operations are updated every second only while running, and return even after a reload. Uploads show the number of bytes sent and can be canceled while waiting and sending. When collapsed it becomes a status bar button and shows the unread count. The items lined up when it is opened become read and are shown faintly, and finished items can be removed with ×. During an upload a leave confirmation is registered, and it is released when a terminal state is reached. On narrow screens, the entrances to operations and the panel are not shown.
-The viewer does not have back-and-forth movement by left and right flicks or zoom by pinch.
+The viewer does not have back-and-forth movement by left and right flicks, zoom by pinch or double tap, or closing by a downward swipe.
+The thumbnail queue does not discard the states of folder and archive tiles after the daemon's own changes, and search mode does not display the notice for results the name index did not answer.
 To the right of the listing on a wide screen, the info panel ([InfoPanel.tsx](../../ui-web/src/components/InfoPanel.tsx)), which can be opened and closed with a toolbar button, is placed.
 The open/closed state is saved in the browser's `localStorage`, and is open when first opened.
 When one item is selected, the name, kind, size, modification date, and Library-relative path are shown from the Entry the selection holds, without a request.
@@ -1409,10 +1586,11 @@ Size is not shown for folders and archives.
 When multiple items are selected, the count and total size are shown.
 The larger thumbnail and media info are requested only when the selection has not changed for 200 ms, and when the selection changes, the request already sent is canceled.
 For images, it shows the dimensions with the rotation applied and the items of shooting info that Exif has, and for videos the duration, resolution, and codecs.
-The timeline (§3.10) places at `/timeline/{libraryId}` a grid with daily headings ([TimelineGrid.tsx](../../ui-web/src/components/TimelineGrid.tsx)) and a list of years and months ([TimelineSidebar.tsx](../../ui-web/src/components/TimelineSidebar.tsx)).
+The timeline (§3.10) places at `/timeline` a grid with daily headings ([TimelineGrid.tsx](../../ui-web/src/components/TimelineGrid.tsx)) and a list of years and months ([TimelineSidebar.tsx](../../ui-web/src/components/TimelineSidebar.tsx)).
 Loading is held by `TimelineStore` in [library/timeline.ts](../../ui-web/src/library/timeline.ts), which points to Entries by absolute positions based on the start of the range first read, so even when reading is added toward the front, the positions of the selection and the viewer do not move.
 The viewer and filmstrip run on a `TimelineStore` that has the same `Listing` shape, and use the same parts as the folder view listing.
-The switch between folder view and the timeline is [ModeSwitch.tsx](../../ui-web/src/components/ModeSwitch.tsx), and "フォルダで表示" (Show in folder) is received by `reveal` in the folder view URL.
+The switch between folder view and the timeline is [ModeSwitch.tsx](../../ui-web/src/components/ModeSwitch.tsx), which goes back to the folder saved by [folderReturn.ts](../../ui-web/src/library/folderReturn.ts) in `localStorage`, and "フォルダで表示" (Show in folder) is received by `reveal` in the folder view URL.
+Timeline Entries carry `/{libraryId}{Library-relative path}` as their path, so the selection, the viewer, and the positions in the range tell Entries of different Libraries apart without change; the API helpers turn that path back into the Library and the Library-relative path with `entryAddress` in [location.ts](../../ui-web/src/location.ts).
 Ratings and tags are read and written by the queries and saving in [ratingTags.ts](../../ui-web/src/library/ratingTags.ts). In the info panel, [EntryTags.tsx](../../ui-web/src/components/EntryTags.tsx) handles displaying the rating and attaching and detaching tags. The viewer's rate mode is handled by [Viewer.tsx](../../ui-web/src/components/Viewer.tsx), shared by the viewers of folder view, search mode, and the timeline.
 The tree subscribes with [useTreeListing.ts](../../ui-web/src/library/useTreeListing.ts) to levels that are expanded and whose ancestors are not closed, and shares the page and generation management of [listing.ts](../../ui-web/src/library/listing.ts).
 It generates only the rows in the visible range, and makes unfetched positions frames that have height. For key operations toward off-screen, it reads the destination page and then focuses.
@@ -1425,9 +1603,11 @@ Only the dependencies must be respected.
 
 | No. | Content | Dependencies assumed |
 | --- | --- | --- |
-| C10 | Implement back-and-forth movement by left and right flicks in the viewer, and zoom by pinch | None |
+| C10 | Implement back-and-forth movement by left and right flicks in the viewer, zoom by pinch and double tap, and closing by a downward swipe | None |
+| C11 | Discard the states of folder and archive tiles and request them again when the listing is reread after the daemon's own change (§4) | None |
+| C12 | Display the notice of §3.6 when a subtree search from a folder outside archives is not answered from the name index | L1 of [Listing and Search Design §9.2](./listing.md#92-roadmap) |
 
-C10 corresponds to M15 of [design.md §12.2](../design.md#122-roadmap).
+C10 corresponds to M15, C11 to part of M20, and C12 to part of M19 of [design.md §12.2](../design.md#122-roadmap).
 M13, which corresponds to C8b, M14, which corresponds to C9a and C9b, and M17, which corresponds to the timeline screen, are complete.
 With the narrow-screen default of "only on zoom" as is, the state in which the original image cannot be shown by touch operation alone continues until C10.
 

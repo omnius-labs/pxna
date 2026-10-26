@@ -1,18 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, LogOut, Menu, Search, User } from "lucide-react";
-import { type ReactNode, useEffect } from "react";
+import { ChevronLeft, LogOut, Menu, User } from "lucide-react";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 
 import { ApiError } from "../api/client";
 import { currentUserQuery, logout } from "../auth/session";
 import { breadcrumbs, parentLocation } from "../library/breadcrumb";
 import { librariesQuery } from "../library/queries";
-import { isTypingTarget } from "../library/shortcuts";
-import { type BrowseLocation, browseHref, pathSegments, type SearchLocation, searchHref } from "../location";
+import { type BrowseLocation, browseHref, pathSegments } from "../location";
 import { BrowseLink } from "./BrowseLink";
 import { ModeSwitch } from "./ModeSwitch";
-import { SearchBox } from "./SearchBox";
 import {
     Breadcrumb,
     BreadcrumbItem,
@@ -31,23 +29,31 @@ import {
     DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 
+/// 検索モードが外枠に渡すもの。
+export interface SearchChrome {
+    /// 狭い画面でヘッダーの下に常に出す、検索語の欄。
+    field: ReactNode;
+    /// 検索語のほかに絞り込んでいる条件の数。狭い画面のドロワーのボタンに出す。
+    conditions: number;
+}
+
 interface ToolbarProps {
     /// 今いる位置。Library を選ぶ前は `undefined`。
     location?: BrowseLocation;
-    /// 検索モードの位置。あれば、パンくずの代わりに検索の操作を出す。
-    search?: SearchLocation;
-    /// タイムラインの Library。あれば、パンくずの代わりに、Library の名前を出す。
-    timelineLibraryId?: string;
+    /// 検索モードか。広い画面ではパンくずを出さず、狭い画面では今のフォルダの代わりに「検索」と出す。
+    search?: SearchChrome;
+    /// タイムラインか。Library を横断するので、広い画面ではパンくずを出さず、狭い画面では今のフォルダの代わりに「タイムライン」と出す。
+    timeline?: boolean;
     /// 表示の操作など、ツールバーの右に並べる操作。
     actions?: ReactNode;
     /// 狭い画面でだけ使う、ツリーのドロワーを開く操作。
     onOpenTree?: () => void;
 }
 
-/// 広い画面のツールバー。パンくずと、操作と、ユーザのメニューを並べる。
-export function Toolbar({ location, search, timelineLibraryId, actions }: ToolbarProps) {
-    const libraryId = timelineLibraryId ?? location?.libraryId;
-    const libraryName = useLibraryName(libraryId);
+/// 広い画面のツールバー。表示の切り替え、パンくず、操作、ユーザのメニューを並べる。
+/// 今の表示は切り替えの強調で、今の Library はツリーで分かるので、表示の名前と Library の名前は文字で出さない。
+export function Toolbar({ location, search, timeline = false, actions }: ToolbarProps) {
+    const libraryId = location?.libraryId;
     return (
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
             <div className="flex w-auto shrink-0 lg:w-[13.25rem] items-center gap-2">
@@ -56,18 +62,10 @@ export function Toolbar({ location, search, timelineLibraryId, actions }: Toolba
                 </div>
                 <span className="font-heading text-sm font-semibold tracking-tight">Pxna</span>
             </div>
-            {libraryId !== undefined && (
-                <ModeSwitch
-                    libraryId={libraryId}
-                    mode={search ? "search" : timelineLibraryId ? "timeline" : "folder"}
-                />
+            {(libraryId !== undefined || timeline || search) && (
+                <ModeSwitch libraryId={libraryId} mode={search ? "search" : timeline ? "timeline" : "folder"} />
             )}
-            {timelineLibraryId !== undefined && <TimelineTitle libraryId={timelineLibraryId} />}
             {location !== undefined && !search && <PathBreadcrumb location={location} />}
-            {search !== undefined && <SearchBox search={search} libraryName={libraryName} shortcut />}
-            {libraryId !== undefined && !search && (
-                <SearchEntry libraryId={libraryId} path={location?.path ?? "/"} shortcut />
-            )}
             <div className="ml-auto flex items-center gap-1">
                 {actions}
                 <UserMenu />
@@ -76,29 +74,41 @@ export function Toolbar({ location, search, timelineLibraryId, actions }: Toolba
     );
 }
 
-/// 狭い画面のヘッダー。ツリーのドロワーを開く操作、1 つ上のフォルダへの操作、今のフォルダの名前と、操作を並べる。
-export function NarrowHeader({ location, search, timelineLibraryId, actions, onOpenTree }: ToolbarProps) {
+/// 狭い画面のヘッダー。ドロワーを開く操作、1 つ上のフォルダへの操作、今のフォルダの名前と、操作を並べる。
+/// 検索モードでは、ヘッダーの下に検索語の欄を常に出し、ドロワーのボタンに絞り込んでいる条件の数を出す。
+export function NarrowHeader({ location, search, timeline = false, actions, onOpenTree }: ToolbarProps) {
     const navigate = useNavigate();
     const parent = location === undefined ? undefined : parentLocation(location);
-    const libraryId = timelineLibraryId ?? location?.libraryId;
+    const libraryId = location?.libraryId;
     const libraryName = useLibraryName(libraryId);
     const segments = location === undefined ? [] : pathSegments(location.path);
-    const title = search ? "検索" : timelineLibraryId ? libraryName : (segments.at(-1) ?? libraryName);
-    const trail = search
-        ? [libraryName, ...segments].join(" / ")
-        : timelineLibraryId
-          ? "タイムライン"
-          : segments.length > 0
-            ? [libraryName, ...segments.slice(0, -1)].join(" / ")
-            : "";
+    const title = search ? "検索" : timeline ? "タイムライン" : (segments.at(-1) ?? libraryName);
+    const trail =
+        search || timeline ? "" : segments.length > 0 ? [libraryName, ...segments.slice(0, -1)].join(" / ") : "";
 
     return (
         <>
             <header className="flex h-12 shrink-0 items-center gap-1 border-b px-1.5">
-                <Button variant="ghost" size="icon" aria-label="フォルダ" onClick={onOpenTree}>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={
+                        search ? `検索の条件${search.conditions > 0 ? `（${search.conditions} 件）` : ""}` : "フォルダ"
+                    }
+                    className="relative"
+                    onClick={onOpenTree}
+                >
                     <Menu />
+                    {search !== undefined && search.conditions > 0 && (
+                        <span
+                            aria-hidden="true"
+                            className="absolute right-0.5 top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground"
+                        >
+                            {search.conditions}
+                        </span>
+                    )}
                 </Button>
-                {timelineLibraryId === undefined && (
+                {!timeline && !search && (
                     <Button
                         variant="ghost"
                         size="icon"
@@ -113,24 +123,17 @@ export function NarrowHeader({ location, search, timelineLibraryId, actions, onO
                     <p className="truncate text-sm font-semibold">{title}</p>
                     {trail !== "" && <p className="truncate text-[11px] text-muted-foreground">{trail}</p>}
                 </div>
-                {libraryId !== undefined && (
+                {(libraryId !== undefined || timeline || search) && (
                     <ModeSwitch
                         libraryId={libraryId}
-                        mode={search ? "search" : timelineLibraryId ? "timeline" : "folder"}
+                        mode={search ? "search" : timeline ? "timeline" : "folder"}
                         compact
                     />
-                )}
-                {libraryId !== undefined && !search && (
-                    <SearchEntry libraryId={libraryId} path={location?.path ?? "/"} />
                 )}
                 {actions}
                 <UserMenu />
             </header>
-            {search !== undefined && (
-                <div className="shrink-0 border-b p-2">
-                    <SearchBox search={search} libraryName={libraryName} />
-                </div>
-            )}
+            {search !== undefined && <div className="shrink-0 border-b p-2">{search.field}</div>}
         </>
     );
 }
@@ -140,41 +143,10 @@ function useLibraryName(libraryId: string | undefined): string {
     return libraries.data?.find((library) => library.id === libraryId)?.name ?? libraryId ?? "Pxna";
 }
 
-/// 検索モードへ移る入口。起点の既定として、今のフォルダ（タイムラインでは Library 全体）を渡す。
-function SearchEntry({ libraryId, path, shortcut = false }: { libraryId: string; path: string; shortcut?: boolean }) {
-    const navigate = useNavigate();
-    const enter = () => void navigate({ href: searchHref({ libraryId, path }) });
-    useEffect(() => {
-        if (!shortcut) return;
-        const keyDown = (event: KeyboardEvent) => {
-            if (event.key !== "/" || event.altKey || event.ctrlKey || event.metaKey || isTypingTarget(event.target))
-                return;
-            event.preventDefault();
-            void navigate({ href: searchHref({ libraryId, path }) });
-        };
-        window.addEventListener("keydown", keyDown);
-        return () => window.removeEventListener("keydown", keyDown);
-    }, [shortcut, libraryId, path, navigate]);
-    return (
-        <Button variant="ghost" size="icon" aria-label="検索" onClick={enter}>
-            <Search />
-        </Button>
-    );
-}
-
-/// タイムラインで、Library の名前を出す。
-function TimelineTitle({ libraryId }: { libraryId: string }) {
-    const libraries = useQuery(librariesQuery);
-    const name = libraries.data?.find((library) => library.id === libraryId)?.name ?? libraryId;
-    return <span className="min-w-0 truncate font-medium">{name}</span>;
-}
-
-/// Library から今のフォルダまでの経路。最後の項目だけが現在の位置で、ほかは移動できる。
+/// Library の直下から今のフォルダまでの経路。最後の項目だけが現在の位置で、ほかは移動できる。Library のルートでは何も出さない。
 function PathBreadcrumb({ location }: { location: BrowseLocation }) {
-    const libraries = useQuery(librariesQuery);
-    const libraryName =
-        libraries.data?.find((library) => library.id === location.libraryId)?.name ?? location.libraryId;
-    const crumbs = breadcrumbs(location, libraryName);
+    const crumbs = breadcrumbs(location);
+    if (crumbs.length === 0) return null;
     return (
         <Breadcrumb className="min-w-0">
             <BreadcrumbList className="flex-nowrap">

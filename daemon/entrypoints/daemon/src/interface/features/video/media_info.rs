@@ -67,6 +67,7 @@ mod tests {
             width: 64,
             height: 32,
             rotation,
+            has_alpha: false,
             exif: ImageExif::default(),
         };
         MediaInfoModel::from(MediaInfo::Image(info)).0.image

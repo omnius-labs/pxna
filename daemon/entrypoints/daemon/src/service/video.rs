@@ -9,7 +9,7 @@ use std::{
 };
 
 use omnius_core_base::tsid::TsidProvider;
-use omnius_pxna_engine::service::{MaterializedFile, MediaInfoService, MediaOptions};
+use omnius_pxna_engine::service::{MaterializedFile, MediaInfoService, MediaOptions, PriorityPool, WorkClass};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncRead, ReadBuf},
@@ -195,6 +195,8 @@ pub struct VideoService {
     ffmpeg: PathBuf,
     root: PathBuf,
     sessions: TokioMutex<VecDeque<Arc<VideoSession>>>,
+    /// セグメントを待たせている間、Interactive が動いているものとして数える外部プロセスの資源。
+    processes: PriorityPool,
 }
 
 impl VideoService {
@@ -205,6 +207,7 @@ impl VideoService {
         root: &Path,
         options: VideoOptions,
         tools: &MediaOptions,
+        processes: PriorityPool,
     ) -> Result<Arc<Self>> {
         options.validate()?;
         tokio::fs::create_dir_all(root).await?;
@@ -224,6 +227,7 @@ impl VideoService {
             ffmpeg: tools.ffmpeg_path.clone(),
             root: root.to_path_buf(),
             sessions: TokioMutex::new(VecDeque::new()),
+            processes,
         });
         let weak = Arc::downgrade(&service);
         tokio::spawn(async move {
@@ -307,6 +311,8 @@ impl VideoService {
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
         let mut generation = None;
+        // 再生が止まっている間だけ、サムネイルの生成と背景処理を保留させる。
+        let mut interactive_wait = None;
         loop {
             if session.cancel.is_cancelled() {
                 return Err(Error::new(ErrorKind::NotFound).with_message("video session ended"));
@@ -320,6 +326,7 @@ impl VideoService {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
             }
+            interactive_wait.get_or_insert_with(|| self.processes.occupy(WorkClass::Interactive));
             {
                 let mut process = session.process.lock().await;
                 if session.cancel.is_cancelled() {

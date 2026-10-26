@@ -2,7 +2,8 @@ import { type QueryClient, queryOptions } from "@tanstack/react-query";
 
 import { ApiError, api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
-import { relativePath } from "../location";
+import { relativePath, scopedKey } from "../location";
+import type { SearchCriteria } from "./listing";
 import type { SortPreference } from "./preferences";
 
 export type DetailedEntry = components["schemas"]["FileSystemEntry"];
@@ -22,7 +23,7 @@ export const capabilitiesQuery = queryOptions({
             return unwrap(await api.GET("/capabilities"));
         } catch (error) {
             if (error instanceof ApiError && [404, 405, 501].includes(error.status)) {
-                return { summaryListing: false, entryDetails: false, childProbes: false };
+                return { summaryListing: false, entryDetails: false, childProbes: false, performanceLogging: false };
             }
             throw error;
         }
@@ -92,9 +93,6 @@ interface ListOptions {
     foldersOnly?: boolean;
     sort?: SortPreference["key"];
     order?: SortPreference["order"];
-    /// 評価とタグでの絞り込み。どちらも画像と動画だけを選び、詳細一覧だけが受け付ける。
-    rating?: components["schemas"]["RatingValue"];
-    tag?: string;
 }
 
 export async function fetchFolderPage(
@@ -108,6 +106,41 @@ export async function fetchFolderPage(
     return unwrap(
         await api.GET("/libraries/{libraryId}/folders/entries", { params: { path: { libraryId }, query }, signal }),
     );
+}
+
+/// Library を横断する検索のページ。Entry の path は、Library を含む鍵（`scopedKey`）に置き換える。
+export async function fetchSearchPage(
+    criteria: SearchCriteria,
+    offset: number,
+    order: { sort: SortPreference["key"]; order: SortPreference["order"] },
+    signal: AbortSignal,
+): Promise<FolderListing> {
+    const query = criteria.query.trim();
+    const page = unwrap(
+        await api.GET("/search/entries", {
+            params: {
+                query: {
+                    libraryIds: [...criteria.libraryIds],
+                    ...(criteria.path === "/" ? {} : { path: criteria.path }),
+                    recursive: criteria.recursive,
+                    ...(query === "" ? {} : { query }),
+                    ...(criteria.rating === undefined ? {} : { rating: criteria.rating }),
+                    ...(criteria.tags.length === 0 ? {} : { tag: [...criteria.tags] }),
+                    ...order,
+                    foldersFirst: true,
+                    offset,
+                    limit: PAGE_SIZE,
+                },
+            },
+            signal,
+        }),
+    );
+    return {
+        entries: page.entries.map(({ libraryId, entry }) => ({ ...entry, path: scopedKey(libraryId, entry.path) })),
+        totalCount: page.totalCount,
+        snapshot: page.snapshot,
+        truncated: page.truncatedLibraryIds.length > 0,
+    };
 }
 
 /// ツリーの子。フォルダ扱いの Entry だけで、件数が少ないので、すべてのページを読んでから返す。
@@ -148,12 +181,7 @@ export async function fetchListingPage(
     options: ListOptions,
     signal: AbortSignal,
 ): Promise<FolderListing> {
-    if (
-        options.recursive ||
-        options.rating !== undefined ||
-        options.tag !== undefined ||
-        (options.sort !== undefined && options.sort !== "name" && options.sort !== "kind")
-    ) {
+    if (options.recursive || (options.sort !== undefined && options.sort !== "name" && options.sort !== "kind")) {
         return fetchFolderPage(libraryId, path, offset, options, signal);
     }
     const capabilities = await client.fetchQuery(capabilitiesQuery);

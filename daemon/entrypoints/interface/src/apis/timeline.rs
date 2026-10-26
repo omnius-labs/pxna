@@ -12,8 +12,10 @@ use crate::{models, types::*};
 #[must_use]
 #[allow(clippy::large_enum_variant)]
 pub enum GetTimelineStatusResponse {
-    /// State of the scan.
-    Status200_StateOfTheScan(models::TimelineStatus),
+    /// State of the scans.
+    Status200_StateOfTheScans(models::TimelineStatuses),
+    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::ErrorResponse),
     /// Missing or invalid authentication.
     Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
     /// Resource not found.
@@ -44,6 +46,8 @@ pub enum ListTimelineEntriesResponse {
 pub enum ListTimelineMonthsResponse {
     /// Entry counts per month.
     Status200_EntryCountsPerMonth(models::TimelineMonths),
+    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::ErrorResponse),
     /// Missing or invalid authentication.
     Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
     /// Resource not found.
@@ -56,8 +60,10 @@ pub enum ListTimelineMonthsResponse {
 #[must_use]
 #[allow(clippy::large_enum_variant)]
 pub enum RefreshTimelineResponse {
-    /// The scan is running.
-    Status202_TheScanIsRunning(models::TimelineStatus),
+    /// The scans are running.
+    Status202_TheScansAreRunning(models::TimelineStatuses),
+    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::ErrorResponse),
     /// Missing or invalid authentication.
     Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
     /// Resource not found.
@@ -72,9 +78,9 @@ pub enum RefreshTimelineResponse {
 pub trait Timeline<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHandler<E> {
     type Claims;
 
-    /// Get the state of the timeline scan.
+    /// Get the state of the timeline scans.
     ///
-    /// GetTimelineStatus - GET /api/v1/libraries/{libraryId}/timeline/status
+    /// GetTimelineStatus - GET /api/v1/timeline/status
     async fn get_timeline_status(
         &self,
 
@@ -82,12 +88,12 @@ pub trait Timeline<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Erro
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        path_params: &models::GetTimelineStatusPathParams,
+        query_params: &models::GetTimelineStatusQueryParams,
     ) -> Result<GetTimelineStatusResponse, E>;
 
     /// List timeline entries.
     ///
-    /// ListTimelineEntries - GET /api/v1/libraries/{libraryId}/timeline/entries
+    /// ListTimelineEntries - GET /api/v1/timeline/entries
     async fn list_timeline_entries(
         &self,
 
@@ -95,13 +101,12 @@ pub trait Timeline<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Erro
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        path_params: &models::ListTimelineEntriesPathParams,
         query_params: &models::ListTimelineEntriesQueryParams,
     ) -> Result<ListTimelineEntriesResponse, E>;
 
     /// List the months that have timeline entries.
     ///
-    /// ListTimelineMonths - GET /api/v1/libraries/{libraryId}/timeline/months
+    /// ListTimelineMonths - GET /api/v1/timeline/months
     async fn list_timeline_months(
         &self,
 
@@ -109,12 +114,12 @@ pub trait Timeline<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Erro
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        path_params: &models::ListTimelineMonthsPathParams,
+        query_params: &models::ListTimelineMonthsQueryParams,
     ) -> Result<ListTimelineMonthsResponse, E>;
 
-    /// Start a full timeline scan.
+    /// Start full timeline scans.
     ///
-    /// RefreshTimeline - POST /api/v1/libraries/{libraryId}/timeline/refresh
+    /// RefreshTimeline - POST /api/v1/timeline/refresh
     async fn refresh_timeline(
         &self,
 
@@ -122,6 +127,6 @@ pub trait Timeline<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Erro
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        path_params: &models::RefreshTimelinePathParams,
+        body: &models::TimelineRefreshRequest,
     ) -> Result<RefreshTimelineResponse, E>;
 }

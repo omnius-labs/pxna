@@ -4,8 +4,10 @@ use std::{
     time::Instant,
 };
 
-use crate::core::work::{WorkBudget, WorkClass, WorkKind};
-use tokio::sync::OwnedSemaphorePermit;
+use crate::core::{
+    schedule::SchedulePermit,
+    work::{WorkBudget, WorkClass, WorkKind},
+};
 use tokio_util::sync::CancellationToken;
 
 use super::{ArchiveFormat, FileStorageLocal};
@@ -93,7 +95,7 @@ impl LocalListingRuntime {
         }
     }
 
-    pub async fn enter(&self) -> Result<OwnedSemaphorePermit> {
+    pub async fn enter(&self) -> Result<SchedulePermit> {
         self.budget.enter(WorkClass::current()).await
     }
 
@@ -283,7 +285,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn foreground_details_and_background_listing_share_reserved_workers_test() -> TestResult {
+    async fn background_listing_waits_until_foreground_details_finish_test() -> TestResult {
         let (probe, mut entered) = Probe::new(false);
         let _release = ReleaseOnDrop(probe.clone());
         let runtime = runtime(probe.clone());
@@ -292,13 +294,13 @@ mod tests {
             let runtime = runtime.clone();
             jobs.push(tokio::spawn(class.scope(async move { runtime.read_entry("/one").await })));
         }
-        for _ in 0..4 {
+        for _ in 0..3 {
             entered.recv().await.unwrap();
         }
-        assert_eq!(probe.peak.load(Ordering::SeqCst), 4);
         let waiting = runtime.read_entry("/next");
         tokio::pin!(waiting);
         assert!(futures::poll!(&mut waiting).is_pending());
+        assert_eq!(runtime.budget.workers().running(WorkClass::Background), 0, "Foreground の間は Background を始めない");
         assert!(runtime.budget.try_probe().is_none());
         probe.release();
         waiting.await?;
@@ -306,7 +308,7 @@ mod tests {
             job.await??;
         }
         assert_eq!(probe.calls.load(Ordering::SeqCst), 5);
-        assert_eq!(probe.peak.load(Ordering::SeqCst), 4);
+        assert_eq!(probe.peak.load(Ordering::SeqCst), 3);
         Ok(())
     }
 
@@ -356,7 +358,7 @@ mod tests {
             entered.recv().await.unwrap();
         }
         assert_eq!(probe.calls.load(Ordering::SeqCst), LocalListingRuntime::MAX_WORKERS);
-        assert_eq!(runtime.budget.foreground_workers().available_permits(), 0);
+        assert_eq!(runtime.budget.workers().running(WorkClass::Foreground), LocalListingRuntime::MAX_WORKERS);
         probe.release();
         for job in jobs {
             job.await??;
@@ -385,7 +387,7 @@ mod tests {
         let summaries = runtime.read_summaries(directory, CancellationToken::new());
         tokio::pin!(summaries);
         assert!(futures::poll!(&mut summaries).is_pending());
-        assert_eq!(runtime.budget.foreground_workers().available_permits(), 0);
+        assert_eq!(runtime.budget.workers().running(WorkClass::Foreground), LocalListingRuntime::MAX_WORKERS);
         probe.release();
         let summaries = summaries.await?;
         for job in jobs {
@@ -450,12 +452,10 @@ mod tests {
         }
         drop(stream);
         probe.release();
-        let _all_permits = runtime
-            .budget
-            .foreground_workers()
-            .clone()
-            .acquire_many_owned(LocalListingRuntime::MAX_WORKERS as u32)
-            .await?;
+        let mut all_permits = Vec::new();
+        for _ in 0..LocalListingRuntime::MAX_WORKERS {
+            all_permits.push(runtime.budget.workers().acquire(WorkClass::Foreground).await);
+        }
         assert!(probe.calls.load(Ordering::SeqCst) <= LocalListingRuntime::PARALLEL_BATCHES);
         assert_eq!(probe.active.load(Ordering::SeqCst), 0);
         Ok(())

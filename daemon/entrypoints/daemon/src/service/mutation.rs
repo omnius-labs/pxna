@@ -300,6 +300,8 @@ pub(crate) mod tests {
             logging: LoggingConfig {
                 level: "info".to_string(),
                 json: false,
+                file: None,
+                performance: false,
             },
             libraries: vec![LibraryConfig {
                 id: "test".to_string(),
@@ -311,6 +313,7 @@ pub(crate) mod tests {
             listing,
             timeline: Default::default(),
             thumbnail: Default::default(),
+            scheduler: Default::default(),
             media: Default::default(),
             video: Default::default(),
             web: Default::default(),

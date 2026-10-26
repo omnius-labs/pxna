@@ -11,7 +11,7 @@ A record of checking C8b's move, copy, and bring-in against the design and the a
 | This document | The diff review and the results of verification against the real API and real screens |
 | [Client Design](../design/client.md#37-entry-operations) | The contracts for operations, conflicts, bringing in folders, and notifications, and the reasons for adopting them |
 | [design.md](../design.md#82-determining-sync-and-async) | The API contracts for sync and async, conflict, readonly, and uploads |
-| [knowledges.md](../knowledges.md) | Measurements of Chromium's reading and leave confirmation |
+| [knowledge.md](../knowledge.md) | Measurements of Chromium's reading and leave confirmation |
 | [issues.md](../issues.md) | Unaddressed defects |
 
 For the map of the document family, see [design.md](../design.md#11-division-of-responsibility-between-documents).
@@ -131,11 +131,11 @@ The browser verification scripts and raw logs were kept in the working directory
 ### 5.3 Machine Checks and External Behavior
 
 `npm run typecheck`, `npm run lint`, and `npm test` of `ui-web` succeeded. Lint had 0 errors and the same 9 existing warnings. 48 files and 314 tests passed. `RUSTC_WRAPPER= cargo make lint` of `daemon` also succeeded. There are no Rust changes.
-The 101 files of a real Chromium directory were fetched from the same reader as `[100,1,0]`. We recorded the checks of [directory reading](../knowledges/chromium-directory-reader.md) and [beforeunload](../knowledges/chromium-beforeunload.md) in external knowledge.
+The 101 files of a real Chromium directory were fetched from the same reader as `[100,1,0]`. We recorded the checks of [directory reading](../knowledge/chromium-directory-reader.md) and [beforeunload](../knowledge/chromium-beforeunload.md) in external knowledge.
 The 404 for folders without a representative thumbnail, and the 409, 404, and aborted requests triggered by interruptions, remained in the console/network. The operations under check proceeded to the expected end states.
 
 ## 6. Afterward
 
 - 2026-10-07: Reflected the partial success of mixed transfers and the conflict policy for bringing in folders in §5.1 of client.md, and the current features in §6.1. Removed C8b from the remaining work and marked M13 complete.
-- 2026-10-07: Moved the measurements of Chromium's directory reading and leave confirmation to knowledges. In the review of the new documents, we fixed the division of responsibility and the format of this section.
+- 2026-10-07: Moved the measurements of Chromium's directory reading and leave confirmation to knowledge. In the review of the new documents, we fixed the division of responsibility and the format of this section.
 - 2026-10-07: Confirmed acceptance conditions 1 to 10 and where things moved to, and deleted the plan document and the plans.md row in the same change as the document updates. No unaddressed findings remain.

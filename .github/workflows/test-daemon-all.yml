@@ -120,17 +120,30 @@ jobs:
           workspaces: |
             daemon -> target
 
-      - name: Install ffmpeg (Linux)
+      - name: Install libheif and ffmpeg 9 (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libheif-examples libheif-plugin-libde265 libheif-plugin-dav1d
+          curl -fsSL -o /tmp/ffmpeg.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz"
+          echo "68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269  /tmp/ffmpeg.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/ffmpeg"
+          tar -xJf /tmp/ffmpeg.tar.xz -C "$RUNNER_TEMP/ffmpeg" --strip-components=1
+          echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
 
-      - name: Install ffmpeg (macOS)
+      - name: Install ffmpeg and libheif (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg
+        run: brew install ffmpeg libheif
 
-      - name: Install ffmpeg (Windows)
+      - name: Install ffmpeg 9 (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg --no-progress -y
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n9.0.2-17-g2a571b6068-win64-gpl-9.0.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\ffmpeg.zip"
+          Expand-Archive "$env:RUNNER_TEMP\ffmpeg.zip" -DestinationPath "$env:RUNNER_TEMP\ffmpeg"
+          $bin = Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Directory | Select-Object -First 1
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $bin.FullName "bin")
 
       - name: Use system unwinder (macOS)
         if: runner.os == 'macOS'
@@ -142,6 +155,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           PXNA_REQUIRE_FFMPEG: "1"
+          PXNA_REQUIRE_HEIF_DEC: "1"
         run: cargo make test
 
       - name: Test (macOS and Windows)

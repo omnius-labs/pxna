@@ -7,11 +7,13 @@ import type { FolderListing } from "./entries";
 import {
     folderPageKey,
     type Listing,
-    type ListingFilter,
     ListingSnapshotChanged,
+    type ListingSource,
     refreshLibrary,
+    type SearchCriteria,
+    searchPageKey,
     staleSnapshotPages,
-    useFolderListing,
+    useListing,
 } from "./listing";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
@@ -36,29 +38,30 @@ const page = (snapshot = "one", count = 1000): FolderListing => ({
 });
 const response = (data: FolderListing) => ({ data, response: new Response() });
 
-async function harness(wanted: number[] = [], strict = false, filter?: ListingFilter) {
+const folderSource: ListingSource = { kind: "folder", libraryId: "big", path: "/" };
+async function harness(wanted: number[] = [], strict = false, source: ListingSource = folderSource) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     const client = new QueryClient();
     const root = createRoot(document.createElement("div"));
     const current: { listing?: Listing } = {};
-    function Harness({ wanted, filter }: { wanted: number[]; filter?: ListingFilter }) {
-        current.listing = useFolderListing("big", "/", { key: "name", order: "asc" }, new Set(wanted), filter);
+    function Harness({ wanted, source }: { wanted: number[]; source: ListingSource }) {
+        current.listing = useListing(source, { key: "name", order: "asc" }, new Set(wanted));
         return null;
     }
-    const render = async (wanted: number[], filter?: ListingFilter) => {
+    const render = async (wanted: number[], next: ListingSource = source) => {
         await act(async () =>
             root.render(
                 createElement(
                     QueryClientProvider,
                     { client },
                     strict
-                        ? createElement(StrictMode, null, createElement(Harness, { wanted, filter }))
-                        : createElement(Harness, { wanted, filter }),
+                        ? createElement(StrictMode, null, createElement(Harness, { wanted, source: next }))
+                        : createElement(Harness, { wanted, source: next }),
                 ),
             ),
         );
     };
-    await render(wanted, filter);
+    await render(wanted);
     return {
         client,
         current,
@@ -91,40 +94,80 @@ it("requests only zero and wanted pages, with offsets from page indexes", async 
         await h.dispose();
     }
 });
-it("sends the rating and the tag to the detailed listing, with or without a name", async () => {
-    get.mockResolvedValue(response(page()));
-    const h = await harness([0], false, { query: "", recursive: true, rating: "good", tag: "trip" });
+const searchSource = (patch: Partial<SearchCriteria> = {}): ListingSource => ({
+    kind: "search",
+    criteria: { libraryIds: ["a", "b"], path: "/", recursive: true, query: "", tags: [], ...patch },
+});
+const searchResponse = (snapshot = "one") => ({
+    data: {
+        entries: [{ libraryId: "b", entry: { name: "x.png", path: "/dir/x.png", kind: "file" } }],
+        totalCount: 1,
+        snapshot,
+        truncatedLibraryIds: ["a"],
+    },
+    response: new Response(),
+});
+it("sends a search to the cross-Library API with every condition, and keys paths by Library", async () => {
+    get.mockResolvedValue(searchResponse());
+    const h = await harness([0], false, searchSource({ query: " cat ", rating: "good", tags: ["trip", "sea"] }));
     try {
         await wait(() => expect(h.current.listing?.pageStatus(0)).toBe("loaded"));
         const [route, options] = get.mock.calls[0]!;
-        expect(route).toBe("/libraries/{libraryId}/folders/entries");
-        expect(options.params.query).toMatchObject({ recursive: true, rating: "good", tag: "trip" });
-        expect(options.params.query).not.toHaveProperty("query");
+        expect(route).toBe("/search/entries");
+        expect(options.params.query).toMatchObject({
+            libraryIds: ["a", "b"],
+            recursive: true,
+            query: "cat",
+            rating: "good",
+            tag: ["trip", "sea"],
+            offset: 0,
+        });
+        expect(options.params.query).not.toHaveProperty("path");
+        expect(h.current.listing?.entryAt(0)?.path).toBe("/b/dir/x.png");
+        expect(h.current.listing?.truncated).toBe(true);
+        expect(h.current.listing?.totalCount).toBe(1);
     } finally {
         await h.dispose();
     }
 });
-it("does not use the summary listing when a rating or a tag is given, even for a flat name sort", async () => {
-    get.mockImplementation((route: string) => Promise.resolve(response(page(route))));
-    const h = await harness([0], false, { query: "", recursive: false, rating: "none" });
+it("sends the start only when it is not the Library root", async () => {
+    get.mockResolvedValue(searchResponse());
+    const h = await harness([0], false, searchSource({ libraryIds: ["a"], path: "/photos", query: "x" }));
     try {
         await wait(() => expect(h.current.listing?.pageStatus(0)).toBe("loaded"));
-        expect(get.mock.calls.map(([route]) => route)).toEqual(["/libraries/{libraryId}/folders/entries"]);
-        expect(get.mock.calls[0]![1].params.query).toMatchObject({ rating: "none" });
-        expect(get.mock.calls[0]![1].params.query).not.toHaveProperty("recursive");
+        expect(get.mock.calls[0]![1].params.query).toMatchObject({ libraryIds: ["a"], path: "/photos" });
     } finally {
         await h.dispose();
     }
 });
-it("keys a page by the rating and the tag so filtered and unfiltered pages never mix", () => {
+it("keys a page by every search condition so different searches never mix", () => {
     const sort = { key: "name", order: "asc" } as const;
+    const base = { libraryIds: ["a"], path: "/", recursive: true, query: "", tags: [] as string[] };
     const keys = [
-        folderPageKey("big", "/", sort, 0),
-        folderPageKey("big", "/", sort, 0, { query: "", recursive: false, rating: "good" }),
-        folderPageKey("big", "/", sort, 0, { query: "", recursive: false, rating: "bad" }),
-        folderPageKey("big", "/", sort, 0, { query: "", recursive: false, tag: "x" }),
+        searchPageKey(base, sort, 0),
+        searchPageKey({ ...base, libraryIds: ["a", "b"] }, sort, 0),
+        searchPageKey({ ...base, path: "/x" }, sort, 0),
+        searchPageKey({ ...base, recursive: false }, sort, 0),
+        searchPageKey({ ...base, query: "q" }, sort, 0),
+        searchPageKey({ ...base, rating: "good" }, sort, 0),
+        searchPageKey({ ...base, rating: "bad" }, sort, 0),
+        searchPageKey({ ...base, tags: ["x"] }, sort, 0),
+        searchPageKey({ ...base, tags: ["x", "y"] }, sort, 0),
+        folderPageKey("a", "/", sort, 0),
     ].map((key) => JSON.stringify(key));
-    expect(new Set(keys).size).toBe(4);
+    expect(new Set(keys).size).toBe(keys.length);
+});
+it("rereads a search that covers a refreshed Library", async () => {
+    get.mockResolvedValue(searchResponse("old"));
+    const search = await harness([0], false, searchSource());
+    try {
+        await wait(() => expect(search.current.listing?.snapshot).toBe("old"));
+        get.mockResolvedValue(searchResponse("new"));
+        await act(async () => refreshLibrary(search.client, "b"));
+        await wait(() => expect(search.current.listing?.snapshot).toBe("new"));
+    } finally {
+        await search.dispose();
+    }
 });
 it("cancels an unobserved request", async () => {
     get.mockImplementation((_, options) =>
@@ -240,9 +283,9 @@ it("starts only one request during StrictMode setup", async () => {
     }
 });
 
-it.each([undefined, { query: "   ", recursive: true }])("通常の一覧では検索のクエリを付けない %s", async (filter) => {
+it("フォルダの一覧には検索の条件を付けない", async () => {
     get.mockResolvedValue(response(page()));
-    const h = await harness([], false, filter);
+    const h = await harness();
     try {
         await wait(() => expect(h.current.listing?.pageStatus(0)).toBe("loaded"));
         expect(get.mock.calls[0]![1].params.query).toEqual({
@@ -257,15 +300,18 @@ it.each([undefined, { query: "   ", recursive: true }])("通常の一覧では�
         await h.dispose();
     }
 });
-it("語を整え、配下の検索を要求する", async () => {
-    get.mockResolvedValue(response({ ...page(), truncated: true }));
-    const h = await harness([], false, { query: " alpha ", recursive: true });
+it("検索語を整え、打ち切りを Library の一覧から知る", async () => {
+    get.mockResolvedValue(searchResponse());
+    const h = await harness([], false, searchSource({ query: " alpha " }));
     try {
         await wait(() => expect(h.current.listing?.pageStatus(0)).toBe("loaded"));
         expect(get.mock.calls[0]![1].params.query).toMatchObject({ query: "alpha", recursive: true });
         expect(h.current.listing?.truncated).toBe(true);
-        get.mockResolvedValue(response(page()));
-        await h.render([2], { query: "alpha", recursive: true });
+        get.mockResolvedValue({
+            ...searchResponse(),
+            data: { ...searchResponse().data, truncatedLibraryIds: [] },
+        });
+        await h.render([2], searchSource({ query: "alpha" }));
         await wait(() => expect(h.current.listing?.pageStatus(2)).toBe("loaded"));
         expect(h.current.listing?.truncated).toBe(false);
     } finally {
@@ -273,44 +319,51 @@ it("語を整え、配下の検索を要求する", async () => {
     }
 });
 it("語を変えると未完了の要求を止め、前の語のページを混ぜない", async () => {
-    let finish: ((value: ReturnType<typeof response>) => void) | undefined;
+    let finish: ((value: ReturnType<typeof searchResponse>) => void) | undefined;
+    const resultFor = (query: string) => {
+        const answer = searchResponse();
+        return {
+            ...answer,
+            data: {
+                ...answer.data,
+                entries: [{ libraryId: "a", entry: { ...answer.data.entries[0]!.entry, path: `/${query}` } }],
+            },
+        };
+    };
     get.mockImplementation((_, options) =>
         options.params.query.query === "old" && options.params.query.offset === 200
             ? new Promise((done) => {
                   finish = done;
               })
-            : Promise.resolve(
-                  response({ ...page(), entries: [{ ...page().entries[0]!, path: `/${options.params.query.query}` }] }),
-              ),
+            : Promise.resolve(resultFor(options.params.query.query)),
     );
-    const h = await harness([1], false, { query: "old", recursive: false });
+    const h = await harness([1], false, searchSource({ query: "old", recursive: false }));
     try {
-        await wait(() => expect(h.current.listing?.entryAt(0)?.path).toBe("/old"));
+        await wait(() => expect(h.current.listing?.entryAt(0)?.path).toBe("/a/old"));
         const previous = h.current.listing;
         const signal = get.mock.calls.find(([, options]) => options.params.query.offset === 200)![1]
             .signal as AbortSignal;
-        await h.render([], { query: "new", recursive: false });
-        await wait(() => expect(h.current.listing?.entryAt(0)?.path).toBe("/new"));
+        await h.render([], searchSource({ query: "new", recursive: false }));
+        await wait(() => expect(h.current.listing?.entryAt(0)?.path).toBe("/a/new"));
         expect(signal.aborted).toBe(true);
         expect(h.current.listing).not.toBe(previous);
-        await act(async () => finish!(response(page())));
+        await act(async () => finish!(resultFor("old")));
         expect(h.current.listing?.entryAt(200)).toBeUndefined();
-        expect(h.current.listing?.entryAt(0)?.path).toBe("/new");
-        expect(get.mock.calls.at(-1)![1].params.query).not.toHaveProperty("recursive");
+        expect(h.current.listing?.entryAt(0)?.path).toBe("/a/new");
     } finally {
         await h.dispose();
     }
 });
 it("再帰の条件でもストアとページを分ける", async () => {
-    get.mockResolvedValue(response(page()));
-    const h = await harness([], false, { query: "alpha", recursive: false });
+    get.mockResolvedValue(searchResponse());
+    const h = await harness([], false, searchSource({ query: "alpha", recursive: false }));
     try {
         await wait(() => expect(h.current.listing?.pageStatus(0)).toBe("loaded"));
         const previous = h.current.listing;
-        await h.render([], { query: "alpha", recursive: true });
+        await h.render([], searchSource({ query: "alpha", recursive: true }));
         await wait(() => expect(h.current.listing?.pageStatus(0)).toBe("loaded"));
         expect(h.current.listing).not.toBe(previous);
-        expect(get.mock.calls.map(([, options]) => options.params.query.recursive)).toEqual([undefined, true]);
+        expect(get.mock.calls.map(([, options]) => options.params.query.recursive)).toEqual([false, true]);
     } finally {
         await h.dispose();
     }

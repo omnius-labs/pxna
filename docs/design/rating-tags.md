@@ -159,14 +159,16 @@ The path, parameters, schemas, and status codes of each operation are authoritat
 
 ### 7.1 Filtering Listings
 
-The folder listing API can narrow Entries by conditions on ratings and tags.
-The rating can be one of good, bad, or none (unrated), and the tag one word; when specified together, it narrows to Entries that satisfy both.
-It can also be combined with name terms, recursion, and sorting.
+The search API ([Listing and Search Design §5.3](./listing.md#53-searching-across-libraries)) can narrow Entries by conditions on ratings and tags.
+The rating can be one of good, bad, or none (unrated), and tags can be any number of words; an Entry matches only when it has all the given tags and, if a rating is given, that rating.
+It can also be combined with name terms, recursion, the Libraries searched, and sorting.
 
 - Filtering selects only images and videos. Folders and files that are neither images nor videos cannot be rated or tagged, so they are not included under any condition. Unrated means images and videos that have not been rated, and does not include folders and the like.
 - Filtering is not put into the listing's snapshot, and is done when cutting the page, with the set of paths looked up from the user's ratings and tags. Giving a rating or tag does not rescan, and the snapshot can be shared independently of the filtering conditions, as with names and sort order.
+- A recursive listing answered from the name index is the exception. It starts from the user's rated or tagged paths under the start (for unrated, from the images and videos of the index minus the rated paths), keeps those the name index holds, and puts only the result in the snapshot, together with the conditions and the version of ratings and tags ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)). Writing a rating or tag rebuilds that snapshot from the index without walking the file system. A row left by an Entry deleted outside Pxna does not appear there after the next aggregation, because the index no longer holds the path.
+- The sets of rated and tagged paths are looked up for each Library searched, and each Library's listing is filtered with its own sets before the listings are merged.
 - During filtering, the version of ratings and tags is added to the listing's identifier. The version advances inside the daemon each time ratings or tags are written. If a rating were given in the middle of reading pages in succession, the preceding and following pages would be cut from different sets, so the identifier is changed to make the client reread. The identifier of an unfiltered listing does not change.
-- Only the detail listing accepts the conditions. The summary listing does not, and the client uses the detail listing when there are conditions.
+- Only the search API accepts the conditions. The folder listing and the summary listing do not.
 - The timeline does not accept conditions (§8.2).
 
 ## 8. Design Decisions
@@ -180,7 +182,7 @@ The rating's value is the two values good and bad, and is held in three states b
 
 **Reason**
 Sorting is the work of looking and deciding whether to keep or drop.
-With two choices, rate mode's operations fit in the three of "good", "bad", and "do not rate", and can proceed with one key operation per image.
+With two choices, rate mode's operations fit in the three of "good", "bad", and "unrated", and can proceed with one key operation per image.
 
 **Rejected alternative**
 Making ratings with many levels, like 5-level stars.
@@ -260,12 +262,15 @@ No implementation would be needed, but the results of sorting would be lost ever
 **Decision**
 Filtering by ratings and tags is done as a condition of search mode. The server does not change the snapshot, and at page cutting, matches against the set looked up from the user's ratings and tags (§7.1).
 The version of ratings and tags is added to the identifier of a listing during filtering.
+A recursive listing answered from the name index starts from the set of rated or tagged paths, or for unrated from the index's images and videos minus the rated paths, and its snapshot holds only the result (§7.1).
 
 **Reason**
 Search mode is a screen for choosing a start and a scope and searching, so "only good in this folder" and "tagged videos across the whole Library" can be expressed with the same operation.
 Ratings and tags change each time they are given, so if they were put in the snapshot's conditions, each time a rating is given it would rescan.
 If matched at page cutting, the scan result can be shared as with name conditions.
 Ratings and tags are a set of paths that can be looked up one by one per Entry, so at the scale of personal use, reading the set on every request is cheap.
+Matching at page cutting needs a snapshot of all Entries under the start, which a recursive listing answered from the name index does not build.
+Rated and tagged Entries are a small part of a Library, so starting from them and rebuilding when a rating is written costs one lookup in the index. Only the unrated condition starts from the index's images and videos, and is bounded by the count limit of listings.
 
 **Rejected alternative 1**
 A method that also places filtering in the folder view.
@@ -274,6 +279,24 @@ Search entrances would be two, and the way of choosing the start and scope would
 **Rejected alternative 2**
 A method that has each Entry of the listing snapshot hold its rating and tags.
 Filtering matching would be faster, but the snapshot would have to be rebuilt each time a rating is given, so we rejected it.
+
+#### Combine Several Tag Conditions as All of Them
+
+**Decision**
+A search can be given any number of tags, and an Entry matches only when it has all of them (§7.1).
+
+**Reason**
+Tags are a set of words on one Entry, and adding a word to the condition is the natural way to narrow, as adding a name term narrows by name.
+With all of them required, tags combine with the rating and the name terms by one rule, so the screen needs no choice of how they combine.
+The sets of tagged paths are already looked up per word, and intersecting them costs no more than looking them up.
+
+**Rejected alternative 1**
+A method that switches between all of the tags and any of them.
+Both needs could be met, but the combinations with the rating and the name terms and their tests would double, while the need for any of them has not appeared, so we deferred it (§8.2).
+
+**Rejected alternative 2**
+A method that keeps one tag word as the condition.
+No API change would be needed, but a photo tagged with both a place and a person could not be found by both, so we rejected it.
 
 ### 8.2 Deferred
 
@@ -293,15 +316,15 @@ When the user moves or renames an Entry without going through Pxna and is actual
 #### Filtering in the Timeline, and Sorting by Ratings and Tags
 
 **Current state**
-Filtering is only in folder listings (search mode), and the timeline API does not accept conditions.
-In neither listing is sorting in the order of ratings or tags possible. Only one tag can be used as a filtering condition.
+Filtering is only in the search API (search mode), and the timeline API does not accept conditions.
+In neither listing is sorting in the order of ratings or tags possible. Several tags combine only as all of them, not as any of them.
 
 **Why not decide now**
 The timeline index is in a separate SQLite and pages are cut by the index's cursor, so adding conditions would change the count per page and the meaning of the cursor.
 Sorting would be a design that adds ratings and tags to the listing's sort order, and would affect the sharing of the snapshot's order.
 
 **Conditions for deciding**
-When the need to view the timeline narrowed by ratings or tags actually arises, or when the need to search by combinations of multiple tags actually arises.
+When the need to view the timeline narrowed by ratings or tags actually arises, or when the need to search for Entries that have any one of several tags actually arises.
 
 #### Organizing the Vocabulary, and Completion for a Large Vocabulary
 
@@ -321,10 +344,10 @@ When words have grown to the point that organizing the vocabulary is needed, or 
 The engine's `RatingTagService` handles saving and reading ratings and tags.
 The tables are migrated at construction time.
 The daemon's handlers check the target (an existing file that is an image or video) and then call `RatingTagService`.
-The API is the 5 operations of reading and writing ratings, reading and writing an Entry's tags, and listing the vocabulary, plus the filtering conditions on the folder listing, and the contract and generated artifacts are in [openapi.yaml](../../daemon/openapi.yaml).
+The API is the 5 operations of reading and writing ratings, reading and writing an Entry's tags, and listing the vocabulary, plus the filtering conditions on the search API, and the contract and generated artifacts are in [openapi.yaml](../../daemon/openapi.yaml).
 At the end of mutating operations, `LibraryMutation` calls the reassignment and deletion of ratings and tags.
 
-The web client has ratings of images and videos (display only) and attaching and detaching tags in the info panel, rate mode in the viewer, and filtering by ratings and tags in search mode ([Client Design §6.1](./client.md#61-current-code)).
+The web client has ratings of images and videos (display only) and attaching and detaching tags in the info panel, rate mode in the viewer, and filtering by a rating and several tags in search mode ([Client Design §6.1](./client.md#61-current-code)).
 
 ### 9.2 Roadmap
 

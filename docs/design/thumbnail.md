@@ -53,7 +53,7 @@ The boundaries with other concerns are as follows.
   This avoids having to follow changes and generating files nobody looks at.
 - Compatibility with Susie plugins (loading Windows DLLs) is not provided.
   This avoids having a per-OS plugin mechanism.
-  Formats the `image` crate cannot read are left to ffmpeg (§3).
+  Formats the `image` crate cannot read are left to ffmpeg, with libheif only for images with alpha (§3).
 - For animated GIFs and animated WebPs, only the first still frame becomes the thumbnail.
   This avoids having a path that extracts a frame sequence per image format.
 - Delivering the original image for the viewer is not covered.
@@ -68,7 +68,8 @@ The set of supported extensions is a property of the server, and the client is n
 | Kind | Determination | Generation method |
 | --- | --- | --- |
 | Image | An extension the `image` crate can read | Shrunk with `ImageConverter` |
-| Other images | Extensions such as HEIC and AVIF that are not read by the `image` crate but are decided to be read with ffmpeg | Extract the first frame with ffmpeg and then shrink |
+| HEIF images | The extensions `heic` and `heif` | Decode with ffmpeg 9 to a PPM and then shrink. If it has alpha, decode it with libheif's heif-dec instead |
+| Other images | Extensions such as AVIF that are not read by the `image` crate but are decided to be read with ffmpeg | AVIF is decoded to a PPM and shrunk; AVIF with alpha uses heif-dec. JXL and JP2 keep the PNG path |
 | Video | Video extensions decided to be read with ffmpeg | Extract the frame sequence with ffmpeg (§6) |
 | Folders and archives | The Entry's kind and the archive flag | Return the representative thumbnail (§5) |
 
@@ -79,10 +80,15 @@ The listing response puts the MIME type decided from the extension in the `metad
 The client decides image and video tiles and the viewer from the `image/` and `video/` prefixes (the reason is in §10.1).
 It is not put on files that match none of them.
 
-ffmpeg is started by the daemon as an external process.
-The path of a physical file is passed to ffmpeg.
+An image encoded as a tile grid has one stream per tile, and the image is assembled from the stream group that bundles them.
+Pointing at the first stream gives only one tile, so ffmpeg is not given a stream for images and is left to its default selection, which assembles the grid in ffmpeg 9.0 ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)).
+ffmpeg 9 also applies the rotation of `irot`.
+heif-dec assembles the grid and applies the rotation and alpha for HEIC/HEIF/AVIF with alpha ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
+
+ffmpeg, ffprobe, and heif-dec are started by the daemon as external processes.
+The path of a physical file is passed to them.
 For an entry in an archive, it is made a physical file with `materialize_file` and then passed, and the lease is held until generation finishes.
-If the lease were released, a file ffmpeg is reading could be deleted by the extraction cache's LRU.
+If the lease were released, a file being read could be deleted by the extraction cache's LRU.
 
 ## 4. Size and Shape
 
@@ -123,7 +129,7 @@ For that reason the quality values are separated.
 PNG is compressed losslessly and does not use a quality value.
 
 libwebp is used for lossy WebP encoding.
-This is because the image crate's WebP encoder has only lossless compression ([The image crate's WebP encoder](../knowledges/image-webp-encoder.md) in [knowledges.md](../knowledges.md)).
+This is because the image crate's WebP encoder has only lossless compression ([The image crate's WebP encoder](../knowledge/image-webp-encoder.md) in [knowledge.md](../knowledge.md)).
 JPEG cannot represent transparency, so the combination of `pad` and JPEG is `InvalidRequest`.
 WebP and PNG can represent transparency, so they can be combined with `pad`.
 
@@ -149,6 +155,11 @@ It does not need to sort all the direct children, and the smallest name can be c
 The selection of the representative is reused after checking the target's version and a short expiry ([design decision](#representative-selection-cache)).
 The chosen Entry's attributes are checked on every request, and the cache key of the image itself and the cache key of the representative selection are kept separate.
 The direct children of an archive can be looked up from the index cache, so each file is not extracted to make the selection.
+
+The URL of a representative thumbnail is the folder's or archive's path, so it stays the same when the chosen Entry changes.
+For that reason, the response for a folder or archive carries `Cache-Control: private, no-cache` and the `ETag` of the chosen Entry's key, and the browser revalidates it on every request.
+While the representative is the same, revalidation returns 304 and the image is not transferred again.
+The response for a file can be cached for a day, because a replaced file gets a new key and therefore a new `ETag` ([design decision](#representative-revalidation)).
 
 ## 6. Video Frame Sequence
 
@@ -196,16 +207,24 @@ Each run has a deadline of `video_timeout_secs`, and when it passes the process 
 ## 7. Order and Concurrency of Generation
 
 Generation is done when a request is received.
-Which Entry is generated when is decided only by the order of the client's requests.
+Which tile is generated when is decided by the order of the client's requests, and the display image a viewer shows now goes ahead of them.
 
-**It is the client that has priority, and the server processes in arrival order.**
+**Among tiles, it is the client that has priority, and the server processes in arrival order.**
 The server does not know, at the time it receives a request, whether that tile is still on screen.
 Only the client that has the screen knows that.
 The client requests only the tiles in the visible range and the prefetch margin, limits the number it sends at the same time, and cancels requests for tiles that left the screen ([Client Design §4](./client.md#4-thumbnail-requests)).
 
+**The display image a viewer shows now is Interactive.**
+A display image requested with `Pxna-Priority: interactive`, the default, is Interactive, and one requested with `prefetch` is Foreground like the tiles.
+Image conversion and the ffmpeg and heif-dec runs are each one resource of the scheduler ([Storage Layer Design §9.1](./storage.md#listing-work-budget)).
+While an Interactive generation runs or waits in a resource, no new Foreground generation starts there, and no Background work starts anywhere.
+Interactive also has slots of its own besides the shared slots, so a display image does not wait for tile generations that already started.
+The viewer requests the image it shows as `interactive` and its neighbors as `prefetch`, and cancels the requests of images it no longer shows or neighbors.
+When it moves to an image whose prefetch is still loading, it cancels the prefetch and requests the image again as `interactive`.
+
 The server-side rules are the following three.
 
-- Upper limits on concurrency are set for image conversion and for ffmpeg runs respectively. Requests that reach the limit wait in arrival order
+- Image conversion and ffmpeg and heif-dec runs each have a limit on concurrency. Requests that reach the limit wait in priority order, and in arrival order within the same priority
 - Concurrent requests for the same cache key are merged into one generation by single-flight
 - A request whose connection was cut while waiting is discarded without starting generation. A request cut after generation started is generated to the end and put in the cache
 
@@ -277,7 +296,7 @@ If the conversion implementation, the encoder's quality, or the way frames are e
 
 ### 9.1 Where the Configuration Belongs
 
-The thumbnail configuration goes in the top-level `[thumbnail]`, and the locations of the ffmpeg and ffprobe executables go in `[media]`, shared with video playback.
+The thumbnail configuration goes in the top-level `[thumbnail]`, and the locations of the ffmpeg, ffprobe, and heif-dec executables go in `[media]`, shared with video playback.
 Byte sizes, counts, times, and parallelism allow only positive values and are validated at daemon startup.
 
 | key | Default | Applies to |
@@ -289,14 +308,17 @@ Byte sizes, counts, times, and parallelism allow only positive values and are va
 | `[thumbnail] display_quality` | 90 | Quality of lossy compression for display images (1 to 100) |
 | `[thumbnail] cache_capacity_bytes` | 2 GiB | Capacity budget for thumbnails and sprite sheets |
 | `[thumbnail] display_cache_capacity_bytes` | 2 GiB | Capacity budget for display images |
-| `[thumbnail] max_concurrent_images` | 4 | Number of image conversions running at the same time |
-| `[thumbnail] max_concurrent_videos` | 2 | Number of ffmpeg runs for frame extraction at the same time |
+| `[scheduler] image_slots` | 4 | Number of image conversions running at the same time for Interactive and Foreground |
+| `[scheduler] image_interactive_slots` | 1 | Additional image conversions that only Interactive uses |
+| `[scheduler] process_slots` | 2 | Number of ffmpeg and heif-dec runs at the same time for Interactive and Foreground (heif-dec is used for alpha and as a fallback) |
+| `[scheduler] process_interactive_slots` | 1 | Additional ffmpeg and heif-dec runs that only Interactive uses |
 | `[thumbnail] video_timeout_secs` | 60 | Deadline for one frame extraction |
 | `[media] ffmpeg_path` | `ffmpeg` | The ffmpeg executable |
 | `[media] ffprobe_path` | `ffprobe` | The ffprobe executable |
+| `[media] heif_dec_path` | `heif-dec` | libheif's heif-dec executable, used for HEIC/HEIF/AVIF with alpha and as a fallback. `heif-convert` of libheif before 1.17 takes the same arguments |
 
 The defaults of `[media]` are names searched from `PATH`.
-The Docker image for distribution bundles both ([design.md §9.3](../design.md#93-distribution)).
+The Docker image for distribution bundles all three ([design.md §9.3](../design.md#93-distribution)).
 
 ## 10. Design Decisions
 
@@ -369,6 +391,49 @@ The cost of needing ffmpeg in the execution environment is paid by making the Do
 A method that links ffmpeg as a library with bindings such as `ffmpeg-next`.
 The dependency on the execution environment goes away, but the 3-OS CI would have to prepare ffmpeg's development libraries, and decoder anomalies would spread to the daemon's process, so we rejected it.
 
+#### Read HEIF and AVIF as PPM, and Use heif-dec for Alpha
+
+**Decision**
+HEIC/HEIF and AVIF are decoded by ffmpeg 9 to a PPM (P6, 8-bit RGB) on stdout, then resized and encoded in Rust.
+JXL and JP2 keep the PNG path, because ffmpeg's JXL decode carries the alpha channel in the primary stream and the current PNG path preserves it.
+HEIC/HEIF/AVIF images with alpha are decoded with libheif's heif-dec instead, so the alpha channel is kept.
+If ffmpeg fails for a HEIC/HEIF/AVIF image, the cause is logged and heif-dec reads it.
+If alpha was detected and heif-dec fails, the request fails instead of silently dropping the transparency.
+If the alpha probe fails, HEIC/HEIF/AVIF are decoded with heif-dec rather than risk dropping alpha.
+ffmpeg and ffprobe must be version 9 or newer at startup. heif-dec is required at startup on Linux and macOS; on Windows it is only needed when an image with alpha is requested.
+
+**Reason**
+heif-dec writes the decoded image as a PNG. In the measured workload, heif-dec took 0.61 to 0.74 seconds, while ffmpeg's PPM extraction took 0.13 to 0.20 seconds; the difference includes writing and reading the intermediate PNG. Avoiding it makes a first display image about 2.3 times faster and a thumbnail about 3.5 times faster ([measurement](../measurements/2026-10-24-heif-ppm.md)).
+ffmpeg 9 assembles tile grids, applies `irot`, and writes PPM with the dimensions after rotation ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)). PPM is uncompressed pixels with a small header, so it is as fast as raw output and does not need a separate size probe.
+JXL keeps the PNG path because its alpha is in the primary stream and already preserved there; moving it to PPM would drop the transparency for no benefit to the formats this change is about.
+ffmpeg's default selection does not read the auxiliary alpha image of HEIC/AVIF, while libheif does, including tiled and rotated images. That is why alpha is the one case that stays with heif-dec ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
+A gray video stream next to another video stream is treated as alpha. A tiled grayscale image without alpha is therefore also routed to heif-dec; it is slower but still correct.
+Requiring ffmpeg 9 at startup keeps an older ffmpeg from silently reading only one tile of a tile grid.
+
+**Rejected alternative 1**
+Keeping heif-dec as the primary decoder.
+It works on old libheif and ffmpeg versions, but the intermediate PNG dominates the time and makes HEIF about 3 to 4 times slower than JPEG, so we rejected it.
+
+**Rejected alternative 2**
+A method that links libheif as a library through bindings.
+It removes the PNG and the process boundary, but a decoder anomaly would spread to the daemon's process, and the 3-OS CI would need libheif's development files, so we rejected it (same reason as §10.1 "Call ffmpeg as an External Process").
+
+**Rejected alternative 3**
+Having ffmpeg write WebP directly instead of PPM.
+It is faster only when the request is WebP and no resizing is needed (0.27 to 0.32 seconds). For JPEG/PNG requests, images larger than the display step, and thumbnails, it needs a second decode and encode and loses quality twice. PPM keeps one path for all formats and sizes.
+
+**Rejected alternative 4**
+Merging the alpha stream with ffmpeg's `alphamerge`.
+It preserves alpha for an untiled image, but for a tile grid it produces only one tile. libheif already handles the grid and the alpha together, so we rejected it.
+
+**Rejected alternative 5**
+Keeping AVIF on the old PNG path.
+The same PPM path is faster and the rotation behavior is unchanged. We unified it with HEIC/HEIF.
+
+**Rejected alternative 6**
+Moving JXL and JP2 to PPM for a single ffmpeg path.
+ffmpeg's JXL decode carries alpha in the primary stream, and the current PNG path preserves it. PPM would drop that transparency. JXL is not the target of this change, so it keeps the PNG path.
+
 #### Announce Images and Videos with the Listing's contentType
 
 **Decision**
@@ -427,9 +492,9 @@ The default format is lossy WebP.
 Encoding calls libwebp-sys directly and fixes the compression effort (`method`) at 2.
 
 **Reason**
-By Google's comparison, lossy WebP is 25% to 34% smaller than JPEG at the same SSIM ([The size of lossy WebP](../knowledges/webp-lossy-size.md) in [knowledges.md](../knowledges.md)).
+By Google's comparison, lossy WebP is 25% to 34% smaller than JPEG at the same SSIM ([The size of lossy WebP](../knowledge/webp-lossy-size.md) in [knowledge.md](../knowledge.md)).
 The main subjects are photos and video frames, so the transfer volume of listings and the viewer is expected to decrease.
-The libwebp used for lossy encoding is built by libwebp-sys from its bundled C source, so no system libraries need to be added to the 3-OS CI and the container images ([Building libwebp-sys](../knowledges/libwebp-sys-build.md) in [knowledges.md](../knowledges.md)).
+The libwebp used for lossy encoding is built by libwebp-sys from its bundled C source, so no system libraries need to be added to the 3-OS CI and the container images ([Building libwebp-sys](../knowledge/libwebp-sys-build.md) in [knowledge.md](../knowledge.md)).
 The cost is that the build needs a C compiler and there is one more dependency on a C library.
 libwebp-sys calls C functions, so the calls need unsafe.
 We close creating the configuration, importing pixels, encoding, and freeing the allocated output into one function, and confine unsafe to inside that function.
@@ -458,7 +523,7 @@ It makes it easy to try and compare formats, but if each browser requested with 
 
 **Rejected alternative 6**
 A method that uses the `webp` crate, which has a safe API.
-It avoids writing unsafe, but the libwebp-sys that `webp` crate 0.3.1 depends on is the 0.9 series, different from the version whose build method we confirmed (0.14.4), so we rejected it ([The webp crate's dependency](../knowledges/webp-crate-libwebp-sys-version.md) in [knowledges.md](../knowledges.md)).
+It avoids writing unsafe, but the libwebp-sys that `webp` crate 0.3.1 depends on is the 0.9 series, different from the version whose build method we confirmed (0.14.4), so we rejected it ([The webp crate's dependency](../knowledge/webp-crate-libwebp-sys-version.md) in [knowledge.md](../knowledge.md)).
 
 #### Keep the Thumbnail Cache as an LRU of a SQLite Index and Real Files
 
@@ -504,6 +569,28 @@ It omits the full scan of direct children that was repeated even for requests th
 **Rejected alternative**
 The previous method of selecting again every time is simple, but repeats enumeration and attribute fetching even after caching, so it is replaced. Holding forever hides external changes, so we do not adopt it.
 
+<a id="representative-revalidation"></a>
+#### Revalidate Representative Thumbnails and Request Them Again After Our Own Changes
+
+**Decision**
+The response for a folder or archive is revalidated by the browser on every request (§5).
+After the daemon's own change, when the web client rereads the listing, it discards the states of the folder and archive tiles in the thumbnail queue, whether read or failed, and requests them again ([Client Design §4](./client.md#4-thumbnail-requests)).
+External changes appear when the tile leaves the request targets and returns, within the 30-second expiry of the representative selection ([representative-selection-cache](#representative-selection-cache)).
+
+**Reason**
+With the one-day cache of file responses, a request that the client makes again still receives the old representative from the browser cache.
+Revalidation fixes that without changing the URL, and costs a 304 while the representative is the same.
+Requesting again only right after our own change keeps scrolling back and forth in the same listing from adding requests or generation.
+The tiles requested again are at most those in the request targets, and the server's selection has already been invalidated by the same change.
+
+**Rejected alternative 1**
+A method that changes only the server's cache header.
+A tile that stays in the request targets would keep showing the old image until it leaves them, so we rejected it.
+
+**Rejected alternative 2**
+A method that leaves the current behavior as it is.
+There is no data loss, but a tile could show a stale representative for up to a day, so we rejected it.
+
 <a id="folder-thumbnail-delay"></a>
 #### Request Folder Thumbnails After the Listing Is Displayed
 
@@ -541,19 +628,6 @@ We do not know how much demand there is for browsing animated images.
 **Conditions for deciding**
 When, while browsing a folder with many animated images, it turns out that the first frame alone cannot tell the contents apart.
 
-#### Whether to Reflect a Folder's Representative Thumbnail on Screen Immediately
-
-**Current state**
-The representative selection follows changes in contents with the version and the 30-second expiry, and for a request after the contents change, it returns the re-selected representative if candidates remain, and returns `NotFound` with no candidate only when images and videos have run out (§5, [representative-selection-cache](#representative-selection-cache)).
-The web client does not re-request the image of a tile it has displayed as long as the row remains a request target, so there is a period in which the folder and archive tiles right after deleting the contents show a stale image.
-
-**Why not decide now**
-Reflecting immediately would need a mechanism to discard and re-request the relevant tile's request after a change.
-It has to be decided together with the condition of not increasing requests and generation with each round trip of scrolling in the same listing, and not addressing it (status quo) is also an option.
-
-**Conditions for deciding**
-When the operation of deleting contents while looking at the folder view is repeated in actual use, and stale representative thumbnails become a problem in actual use.
-
 ## 11. Current State and Remaining Work
 
 ### 11.1 Current Code
@@ -565,9 +639,10 @@ Grid and List target only the folders and archives of visible rows, and wait 200
 Representative selection, candidate attributes, the lookup, read, and LRU update of the image cache, and generation are recorded at separate measurement points. Connection acquisition and execution of the LRU update are also distinguished. The format and keys of the image cache are not changed, and LRU updates are taken out of the response and written together as in [§8.2](#82-capacity-budgets-and-lru). The comparison is in the [measurement record](../measurements/2026-10-15-browse-thumbnails.md).
 
 `ThumbnailGenerator` generates according to the rules of §3 through §8.
-It handles images, images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
+It handles images, HEIF images read with ffmpeg (or heif-dec for alpha), images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
 The cache is a SQLite index and real files in `state_dir/thumbnail/`, with a budget for thumbnails and sprite sheets and a budget for display images.
 The thumbnail API is returned by a hand-written route outside the generated router ([design.md §11.1](../design.md#return-thumbnail-responses-outside-the-generated-router)).
+Responses for folders and archives carry the same `Cache-Control: private, max-age=86400` as files, and the web client does not request the tiles again after the daemon's own changes, so the revalidation of §5 is not in place.
 
 All the keys in §9.1 can be specified from the configuration file.
 The output formats are WebP, JPEG, and PNG, and if the request does not specify one, it is `[thumbnail] format` (the default is WebP).
@@ -577,11 +652,22 @@ The number and positions of frames cannot be configured and are fixed to the def
 A video's duration is obtained from the media info service shared with video playback. The LRU and the merging of concurrent requests are common with the video's media info ([Video Playback Design §3](./video.md#3-media-info)).
 
 In environments where ffmpeg and ffprobe are not on `PATH`, the tests for videos and images read with ffmpeg are skipped with the reason printed.
-CI installs ffmpeg and makes the video tests mandatory with `PXNA_REQUIRE_FFMPEG=1`.
+The tests that assemble tile grids with ffmpeg are also skipped when ffmpeg is older than 8, and the test that reads the rotation of a tile grid with ffprobe when it is older than 9.
+The HEIF tests use ffmpeg 9 and heif-dec or heif-convert from `PATH`, and are skipped without them.
+Linux CI installs a pinned ffmpeg 9 and libheif, and makes these tests mandatory with `PXNA_REQUIRE_FFMPEG=1` and `PXNA_REQUIRE_HEIF_DEC=1`.
 
 ### 11.2 Roadmap
 
-This milestone (M4 and M11 of [design.md §12.2](../design.md#122-roadmap)) has no remaining work.
+M4 and M11 of [design.md §12.2](../design.md#122-roadmap) have no remaining work.
 The API that returns media info and transcoded playback are covered by [Video Playback Design §8.2](./video.md#82-roadmap), and the issues held as deferred by §10.2.
+
+The order is provisional.
+Only the dependencies must be respected.
+
+| No. | Content | Dependencies assumed | State |
+| --- | --- | --- | --- |
+| T1 | Return folder and archive responses with `no-cache` revalidation, and have the web client request folder and archive tiles again after the daemon's own changes ([design decision](#representative-revalidation)) | None | Not started |
+
+T1 corresponds to M20 of [design.md §12.2](../design.md#122-roadmap).
 
 For confirmed defects, see [issues.md](../issues.md).

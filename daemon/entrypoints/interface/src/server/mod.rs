@@ -27,8 +27,10 @@ where
         + apis::health::Health<E>
         + apis::libraries::Libraries<E, Claims = C>
         + apis::operations::Operations<E, Claims = C>
+        + apis::performance::Performance<E, Claims = C>
         + apis::preferences::Preferences<E, Claims = C>
         + apis::rating::Rating<E, Claims = C>
+        + apis::search::Search<E, Claims = C>
         + apis::setup::Setup<E>
         + apis::tags::Tags<E, Claims = C>
         + apis::thumbnails::Thumbnails<E, Claims = C>
@@ -72,10 +74,6 @@ where
         .route("/api/v1/libraries/{library_id}/rating", get(get_rating::<I, A, E, C>).put(put_rating::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/tags", get(get_entry_tags::<I, A, E, C>).put(put_entry_tags::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/thumbnails", get(get_thumbnail::<I, A, E, C>))
-        .route("/api/v1/libraries/{library_id}/timeline/entries", get(list_timeline_entries::<I, A, E, C>))
-        .route("/api/v1/libraries/{library_id}/timeline/months", get(list_timeline_months::<I, A, E, C>))
-        .route("/api/v1/libraries/{library_id}/timeline/refresh", post(refresh_timeline::<I, A, E, C>))
-        .route("/api/v1/libraries/{library_id}/timeline/status", get(get_timeline_status::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/uploads", post(create_upload::<I, A, E, C>))
         .route(
             "/api/v1/libraries/{library_id}/uploads/{upload_id}",
@@ -96,10 +94,16 @@ where
         .route("/api/v1/operations", get(list_operations::<I, A, E, C>))
         .route("/api/v1/operations/{operation_id}", get(get_operation::<I, A, E, C>))
         .route("/api/v1/operations/{operation_id}/cancel", post(cancel_operation::<I, A, E, C>))
+        .route("/api/v1/performance/client-timings", post(report_client_timings::<I, A, E, C>))
         .route("/api/v1/preferences", get(get_preferences::<I, A, E, C>).put(put_preferences::<I, A, E, C>))
+        .route("/api/v1/search/entries", get(list_search_entries::<I, A, E, C>))
         .route("/api/v1/setup", post(create_initial_setup::<I, A, E>))
         .route("/api/v1/setup/status", get(get_setup_status::<I, A, E>))
         .route("/api/v1/tags", get(list_tags::<I, A, E, C>))
+        .route("/api/v1/timeline/entries", get(list_timeline_entries::<I, A, E, C>))
+        .route("/api/v1/timeline/months", get(list_timeline_months::<I, A, E, C>))
+        .route("/api/v1/timeline/refresh", post(refresh_timeline::<I, A, E, C>))
+        .route("/api/v1/timeline/status", get(get_timeline_status::<I, A, E, C>))
         .with_state(api_impl)
 }
 
@@ -4457,6 +4461,131 @@ where
     })
 }
 
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct ReportClientTimingsBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::ClientTimingReport,
+}
+
+#[tracing::instrument(skip_all)]
+fn report_client_timings_validation(body: models::ClientTimingReport) -> std::result::Result<(models::ClientTimingReport,), ValidationErrors> {
+    let b = ReportClientTimingsBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// ReportClientTimings - POST /api/v1/performance/client-timings
+#[tracing::instrument(skip_all)]
+async fn report_client_timings<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+    Json(body): Json<models::ClientTimingReport>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::performance::Performance<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || report_client_timings_validation(body)).await.unwrap();
+
+    let Ok((body,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().report_client_timings(&method, &host, &cookies, &claims, &body).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::performance::ReportClientTimingsResponse::Status204_TheTimingsWereAccepted => {
+                let mut response = response.status(204);
+                response.body(Body::empty())
+            }
+            apis::performance::ReportClientTimingsResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::performance::ReportClientTimingsResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::performance::ReportClientTimingsResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
 #[tracing::instrument(skip_all)]
 fn get_preferences_validation() -> std::result::Result<(), ValidationErrors> {
     Ok(())
@@ -5021,6 +5150,187 @@ where
                 response.body(Body::from(body_content))
             }
             apis::rating::PutRatingResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
+                let mut response = response.status(504);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn list_search_entries_validation(query_params: models::ListSearchEntriesQueryParams) -> std::result::Result<(models::ListSearchEntriesQueryParams,), ValidationErrors> {
+    query_params.validate()?;
+
+    Ok((query_params,))
+}
+/// ListSearchEntries - GET /api/v1/search/entries
+#[tracing::instrument(skip_all)]
+async fn list_search_entries<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    QueryExtra(query_params): QueryExtra<models::ListSearchEntriesQueryParams>,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::search::Search<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || list_search_entries_validation(query_params)).await.unwrap();
+
+    let Ok((query_params,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().list_search_entries(&method, &host, &cookies, &claims, &query_params).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::search::ListSearchEntriesResponse::Status200_MatchingEntriesOfTheLibraries(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::search::ListSearchEntriesResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::search::ListSearchEntriesResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::search::ListSearchEntriesResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::search::ListSearchEntriesResponse::Status404_ResourceNotFound(body) => {
+                let mut response = response.status(404);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::search::ListSearchEntriesResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::search::ListSearchEntriesResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -5730,13 +6040,15 @@ where
 
 #[tracing::instrument(skip_all)]
 fn get_thumbnail_validation(
+    header_params: models::GetThumbnailHeaderParams,
     path_params: models::GetThumbnailPathParams,
     query_params: models::GetThumbnailQueryParams,
-) -> std::result::Result<(models::GetThumbnailPathParams, models::GetThumbnailQueryParams), ValidationErrors> {
+) -> std::result::Result<(models::GetThumbnailHeaderParams, models::GetThumbnailPathParams, models::GetThumbnailQueryParams), ValidationErrors> {
+    header_params.validate()?;
     path_params.validate()?;
     query_params.validate()?;
 
-    Ok((path_params, query_params))
+    Ok((header_params, path_params, query_params))
 }
 /// GetThumbnail - GET /api/v1/libraries/{libraryId}/thumbnails
 #[tracing::instrument(skip_all)]
@@ -5765,17 +6077,47 @@ where
         return response_with_status_code_only(StatusCode::UNAUTHORIZED);
     };
 
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_thumbnail_validation(path_params, query_params)).await.unwrap();
+    // Header parameters
+    let header_params = {
+        let header_pxna_priority = headers.get(HeaderName::from_static("pxna-priority"));
 
-    let Ok((path_params, query_params)) = validation else {
+        let header_pxna_priority = match header_pxna_priority {
+            Some(v) => match header::IntoHeaderValue::<String>::try_from((*v).clone()) {
+                Ok(result) => Some(result.0),
+                Err(err) => {
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(Body::from(format!("Invalid header Pxna-Priority - {err}")))
+                        .map_err(|e| {
+                            error!(error = ?e);
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        });
+                }
+            },
+            None => None,
+        };
+
+        models::GetThumbnailHeaderParams {
+            pxna_priority: header_pxna_priority,
+        }
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || get_thumbnail_validation(header_params, path_params, query_params))
+        .await
+        .unwrap();
+
+    let Ok((header_params, path_params, query_params)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().get_thumbnail(&method, &host, &cookies, &claims, &path_params, &query_params).await;
+    let result = api_impl
+        .as_ref()
+        .get_thumbnail(&method, &host, &cookies, &claims, &header_params, &path_params, &query_params)
+        .await;
 
     let mut response = Response::builder();
 
@@ -5987,19 +6329,19 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-fn get_timeline_status_validation(path_params: models::GetTimelineStatusPathParams) -> std::result::Result<(models::GetTimelineStatusPathParams,), ValidationErrors> {
-    path_params.validate()?;
+fn get_timeline_status_validation(query_params: models::GetTimelineStatusQueryParams) -> std::result::Result<(models::GetTimelineStatusQueryParams,), ValidationErrors> {
+    query_params.validate()?;
 
-    Ok((path_params,))
+    Ok((query_params,))
 }
-/// GetTimelineStatus - GET /api/v1/libraries/{libraryId}/timeline/status
+/// GetTimelineStatus - GET /api/v1/timeline/status
 #[tracing::instrument(skip_all)]
 async fn get_timeline_status<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    Path(path_params): Path<models::GetTimelineStatusPathParams>,
+    QueryExtra(query_params): QueryExtra<models::GetTimelineStatusQueryParams>,
     State(api_impl): State<I>,
 ) -> Result<Response, StatusCode>
 where
@@ -6019,23 +6361,40 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_timeline_status_validation(path_params)).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || get_timeline_status_validation(query_params)).await.unwrap();
 
-    let Ok((path_params,)) = validation else {
+    let Ok((query_params,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().get_timeline_status(&method, &host, &cookies, &claims, &path_params).await;
+    let result = api_impl.as_ref().get_timeline_status(&method, &host, &cookies, &claims, &query_params).await;
 
     let mut response = Response::builder();
 
     let resp = match result {
         Ok(rsp) => match rsp {
-            apis::timeline::GetTimelineStatusResponse::Status200_StateOfTheScan(body) => {
+            apis::timeline::GetTimelineStatusResponse::Status200_StateOfTheScans(body) => {
                 let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::timeline::GetTimelineStatusResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -6117,23 +6476,18 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-fn list_timeline_entries_validation(
-    path_params: models::ListTimelineEntriesPathParams,
-    query_params: models::ListTimelineEntriesQueryParams,
-) -> std::result::Result<(models::ListTimelineEntriesPathParams, models::ListTimelineEntriesQueryParams), ValidationErrors> {
-    path_params.validate()?;
+fn list_timeline_entries_validation(query_params: models::ListTimelineEntriesQueryParams) -> std::result::Result<(models::ListTimelineEntriesQueryParams,), ValidationErrors> {
     query_params.validate()?;
 
-    Ok((path_params, query_params))
+    Ok((query_params,))
 }
-/// ListTimelineEntries - GET /api/v1/libraries/{libraryId}/timeline/entries
+/// ListTimelineEntries - GET /api/v1/timeline/entries
 #[tracing::instrument(skip_all)]
 async fn list_timeline_entries<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    Path(path_params): Path<models::ListTimelineEntriesPathParams>,
     QueryExtra(query_params): QueryExtra<models::ListTimelineEntriesQueryParams>,
     State(api_impl): State<I>,
 ) -> Result<Response, StatusCode>
@@ -6154,21 +6508,16 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || list_timeline_entries_validation(path_params, query_params))
-        .await
-        .unwrap();
+    let validation = tokio::task::spawn_blocking(move || list_timeline_entries_validation(query_params)).await.unwrap();
 
-    let Ok((path_params, query_params)) = validation else {
+    let Ok((query_params,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl
-        .as_ref()
-        .list_timeline_entries(&method, &host, &cookies, &claims, &path_params, &query_params)
-        .await;
+    let result = api_impl.as_ref().list_timeline_entries(&method, &host, &cookies, &claims, &query_params).await;
 
     let mut response = Response::builder();
 
@@ -6274,19 +6623,19 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-fn list_timeline_months_validation(path_params: models::ListTimelineMonthsPathParams) -> std::result::Result<(models::ListTimelineMonthsPathParams,), ValidationErrors> {
-    path_params.validate()?;
+fn list_timeline_months_validation(query_params: models::ListTimelineMonthsQueryParams) -> std::result::Result<(models::ListTimelineMonthsQueryParams,), ValidationErrors> {
+    query_params.validate()?;
 
-    Ok((path_params,))
+    Ok((query_params,))
 }
-/// ListTimelineMonths - GET /api/v1/libraries/{libraryId}/timeline/months
+/// ListTimelineMonths - GET /api/v1/timeline/months
 #[tracing::instrument(skip_all)]
 async fn list_timeline_months<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    Path(path_params): Path<models::ListTimelineMonthsPathParams>,
+    QueryExtra(query_params): QueryExtra<models::ListTimelineMonthsQueryParams>,
     State(api_impl): State<I>,
 ) -> Result<Response, StatusCode>
 where
@@ -6306,16 +6655,16 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || list_timeline_months_validation(path_params)).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || list_timeline_months_validation(query_params)).await.unwrap();
 
-    let Ok((path_params,)) = validation else {
+    let Ok((query_params,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().list_timeline_months(&method, &host, &cookies, &claims, &path_params).await;
+    let result = api_impl.as_ref().list_timeline_months(&method, &host, &cookies, &claims, &query_params).await;
 
     let mut response = Response::builder();
 
@@ -6323,6 +6672,23 @@ where
         Ok(rsp) => match rsp {
             apis::timeline::ListTimelineMonthsResponse::Status200_EntryCountsPerMonth(body) => {
                 let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::timeline::ListTimelineMonthsResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -6403,21 +6769,29 @@ where
     })
 }
 
-#[tracing::instrument(skip_all)]
-fn refresh_timeline_validation(path_params: models::RefreshTimelinePathParams) -> std::result::Result<(models::RefreshTimelinePathParams,), ValidationErrors> {
-    path_params.validate()?;
-
-    Ok((path_params,))
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct RefreshTimelineBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::TimelineRefreshRequest,
 }
-/// RefreshTimeline - POST /api/v1/libraries/{libraryId}/timeline/refresh
+
+#[tracing::instrument(skip_all)]
+fn refresh_timeline_validation(body: models::TimelineRefreshRequest) -> std::result::Result<(models::TimelineRefreshRequest,), ValidationErrors> {
+    let b = RefreshTimelineBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// RefreshTimeline - POST /api/v1/timeline/refresh
 #[tracing::instrument(skip_all)]
 async fn refresh_timeline<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    Path(path_params): Path<models::RefreshTimelinePathParams>,
     State(api_impl): State<I>,
+    Json(body): Json<models::TimelineRefreshRequest>,
 ) -> Result<Response, StatusCode>
 where
     I: AsRef<A> + Send + Sync,
@@ -6436,23 +6810,40 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || refresh_timeline_validation(path_params)).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || refresh_timeline_validation(body)).await.unwrap();
 
-    let Ok((path_params,)) = validation else {
+    let Ok((body,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().refresh_timeline(&method, &host, &cookies, &claims, &path_params).await;
+    let result = api_impl.as_ref().refresh_timeline(&method, &host, &cookies, &claims, &body).await;
 
     let mut response = Response::builder();
 
     let resp = match result {
         Ok(rsp) => match rsp {
-            apis::timeline::RefreshTimelineResponse::Status202_TheScanIsRunning(body) => {
+            apis::timeline::RefreshTimelineResponse::Status202_TheScansAreRunning(body) => {
                 let mut response = response.status(202);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::timeline::RefreshTimelineResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));

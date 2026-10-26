@@ -1,44 +1,11 @@
-use std::{
-    path::{Path, PathBuf},
-    process::Stdio,
-    time::Duration,
-};
+use std::path::Path;
 
 use tokio::process::Command;
 
+use super::process;
 use crate::prelude::*;
 
-/// ffmpeg と ffprobe の実行ファイルの場所。`PATH` から探す名前か、絶対 path を指定する。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MediaOptions {
-    pub ffmpeg_path: PathBuf,
-    pub ffprobe_path: PathBuf,
-}
-
-impl Default for MediaOptions {
-    fn default() -> Self {
-        Self {
-            ffmpeg_path: PathBuf::from("ffmpeg"),
-            ffprobe_path: PathBuf::from("ffprobe"),
-        }
-    }
-}
-
-/// ffmpeg と ffprobe を外部プロセスとして呼ぶ。
-///
-/// daemon にリンクしないので、壊れた動画で ffmpeg が異常終了しても daemon は巻き込まれず、期限を過ぎたプロセスは kill すれば止まる。
-/// 呼び出しが drop されたときも、子プロセスは kill される。
-#[derive(Debug, Clone)]
-pub struct MediaTools {
-    options: MediaOptions,
-    timeout: Duration,
-}
-
-impl MediaTools {
-    pub fn new(options: MediaOptions, timeout: Duration) -> Self {
-        Self { options, timeout }
-    }
-
+impl super::MediaTools {
     /// ffprobe で動画の長さ（秒）を得る。長さを読めない file は `UnsupportedType` にする。
     #[cfg(test)]
     pub async fn probe_duration_secs(&self, file: &Path) -> Result<f64> {
@@ -55,11 +22,25 @@ impl MediaTools {
     }
 
     /// ffmpeg で読む画像（HEIC、AVIF など）の幅と高さと、回転（反時計回りの 0、90、180、270 度）を得る。幅と高さは符号化されたままで、回転を反映しない。
-    pub async fn probe_image_size(&self, file: &Path) -> Result<(u32, u32, u16)> {
-        let mut command = Command::new(&self.options.ffprobe_path);
-        command.args(["-v", "error", "-show_streams", "-of", "json", "-i"]).arg(file);
+    ///
+    /// タイルに分けて符号化された画像は、タイルの stream ではなく、それらを束ねる stream group の寸法を使う。
+    /// stream group を出力できない ffprobe（確かめた範囲では 5.1 と 6.1）は、そのオプションを知らずに失敗するので、オプションを外してやり直す。
+    pub async fn probe_image_size(&self, file: &Path) -> Result<(u32, u32, u16, bool)> {
+        let probe = |with_stream_groups: bool| {
+            let mut command = Command::new(&self.options.ffprobe_path);
+            command.args(["-v", "error", "-show_streams"]);
+            if with_stream_groups {
+                command.arg("-show_stream_groups");
+            }
+            command.args(["-of", "json", "-i"]).arg(file);
+            self.run(command)
+        };
 
-        let output = self.run(command).await?;
+        let output = match probe(true).await {
+            Ok(output) => output,
+            Err(error) if error.message().is_some_and(|message| message.contains("show_stream_groups")) => probe(false).await?,
+            Err(error) => return Err(error),
+        };
         super::ImageInfo::parse_probe_size(&output)
     }
 
@@ -72,6 +53,45 @@ impl MediaTools {
 
         let output = self.run(command).await?;
         Ok(super::CreationTime::parse(&output))
+    }
+
+    /// ffmpeg で読む画像（HEIC、AVIF など）を、1 枚の PPM（P6、8-bit RGB）として取り出す。
+    ///
+    /// PPM は raw 画素に寸法のヘッダを付けるだけなので、PNG の圧縮より速い。stream を指定せず、ffmpeg の既定の選択に任せる。
+    /// タイルの組み立てと `irot` の回転は ffmpeg が反映する（確かめた範囲では ffmpeg 9.0）。
+    pub async fn extract_image_pixels(&self, file: &Path) -> Result<Vec<u8>> {
+        let mut command = Command::new(&self.options.ffmpeg_path);
+        command.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"]).arg(file).args([
+            "-frames:v",
+            "1",
+            "-an",
+            "-sn",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "ppm",
+            "-",
+        ]);
+        self.run(command).await
+    }
+
+    /// ffmpeg で読む画像（HEIC、AVIF など）を、1 枚の PNG として取り出す。
+    ///
+    /// JXL のように、ffmpeg が主画像のアルファをそのまま返す形式で使う。stream を指定せず、ffmpeg の既定の選択に任せる。
+    pub async fn extract_image(&self, file: &Path) -> Result<Vec<u8>> {
+        let output_dir = tempfile::tempdir()?;
+        let output_path = output_dir.path().join("image.png");
+
+        let mut command = Command::new(&self.options.ffmpeg_path);
+        command
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"])
+            .arg(file)
+            .args(["-frames:v", "1", "-an", "-sn"])
+            .arg(&output_path);
+        self.run(command).await?;
+        process::read_output(&output_path, file).await
     }
 
     /// 指定した位置（秒）のフレームを、1 回の ffmpeg の実行で PNG として取り出す。
@@ -110,27 +130,6 @@ impl MediaTools {
         }
         Ok(frames)
     }
-
-    /// 期限付きで実行し、標準出力を返す。失敗したときは、ffmpeg の標準エラーを message に残す。
-    async fn run(&self, mut command: Command) -> Result<Vec<u8>> {
-        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-        let program = command.as_std().get_program().to_string_lossy().into_owned();
-        let child = command.spawn().map_err(|error| {
-            // 実行ファイルがないのは、利用者のファイルの問題ではなく、daemon の環境の問題である。
-            Error::from_error(error, ErrorKind::UnexpectedError).with_message(format!("failed to start {program}"))
-        })?;
-
-        let output = match tokio::time::timeout(self.timeout, child.wait_with_output()).await {
-            Ok(output) => output?,
-            Err(_) => return Err(Error::new(ErrorKind::Timeout).with_message(format!("{program} did not finish in {:?}", self.timeout))),
-        };
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let detail = stderr.lines().next().unwrap_or_default();
-            return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("{program} failed: {detail}")));
-        }
-        Ok(output.stdout)
-    }
 }
 
 /// 動画から取り出すフレームの数と位置。長さに対する割合で決める。
@@ -166,6 +165,10 @@ impl FrameSpec {
 
 #[cfg(test)]
 mod tests {
+    use std::{path::PathBuf, time::Duration};
+
+    use crate::core::media::{MediaOptions, MediaTools};
+
     use super::*;
 
     #[test]
@@ -199,12 +202,17 @@ mod tests {
             MediaOptions {
                 ffmpeg_path: PathBuf::from("/nonexistent/ffmpeg"),
                 ffprobe_path: PathBuf::from("/nonexistent/ffprobe"),
+                heif_dec_path: PathBuf::from("/nonexistent/heif-dec"),
             },
             Duration::from_secs(5),
         );
         let error = tools.probe_duration_secs(Path::new("a.mp4")).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
         let error = tools.extract_frames(Path::new("a.mp4"), &[1.0]).await.unwrap_err();
+        assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
+        let error = tools.extract_image_pixels(Path::new("a.avif")).await.unwrap_err();
+        assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
+        let error = tools.decode_heif(Path::new("a.heic")).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
     }
 }

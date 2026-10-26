@@ -3,11 +3,23 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
+import { CROSS_LIBRARY_SCOPE, entryAddress, scopedKey } from "../location";
 import type { Entry } from "./entries";
 import { type Listing, ListingSnapshotChanged, type PageStatus } from "./listing";
 
 export type TimelineMonth = components["schemas"]["TimelineMonth"];
 export type TimelineStatus = components["schemas"]["TimelineStatus"];
+
+/// タイムラインに並べる Library の id。保存した選択のうち今ある Library を、Library の一覧の順に並べる。
+/// 保存した選択がないか、今ある Library が 1 つも残らないときは、すべての Library を並べる。
+export function timelineLibraryIds(
+    libraries: readonly { id: string }[],
+    saved: readonly string[] | undefined,
+): string[] {
+    const chosen = saved === undefined ? undefined : new Set(saved);
+    const ids = libraries.map((library) => library.id).filter((id) => chosen?.has(id) ?? true);
+    return ids.length > 0 ? ids : libraries.map((library) => library.id);
+}
 
 /// 1 回の要求で読む件数。
 export const TIMELINE_PAGE_SIZE = 200;
@@ -59,9 +71,9 @@ export function keepRange(
         : { first: Math.min(...points) - margin, last: Math.max(...points) + margin };
 }
 
-/// サーバの cursor と同じ形（並びの日時の 19 文字に Library 相対パスを続けた文字列）にする。
+/// サーバの cursor と同じ形（並びの日時の 19 文字に Library の id と Library 相対パスを続けた文字列）にする。
 function cursorOf(item: TimelineItem): string {
-    return `${item.date}${item.entry.path}`;
+    return `${item.date}${item.libraryId}${item.path}`;
 }
 
 /// 読み込みの起点。
@@ -69,11 +81,15 @@ export type TimelineAnchor =
     | { kind: "newest" }
     /// `YYYY-MM` の月の、最も新しい Entry から。`nonce` は、同じ月を選び直したときに、読み直した別の範囲として扱うための番号である。
     | { kind: "month"; month: string; nonce?: number }
-    /// Library 相対パスの Entry を中央に含む範囲。
+    /// 鍵（`scopedKey`）の Entry を中央に含む範囲。
     | { kind: "around"; path: string };
 
+/// タイムラインに並べる Entry。`entry.path` は Library の id を含む鍵で、選択、ビューア、範囲の中の位置はこの鍵で Entry を区別する。
 export interface TimelineItem {
     entry: Entry;
+    libraryId: string;
+    /// Library 相対パス。
+    path: string;
     /// `YYYY-MM-DDTHH:MM:SS`。
     date: string;
     source: string;
@@ -112,7 +128,7 @@ export class TimelineStore implements Listing {
     holders = 0;
 
     constructor(
-        readonly libraryId: string,
+        readonly libraryIds: readonly string[],
         readonly anchor: TimelineAnchor,
     ) {}
 
@@ -196,7 +212,7 @@ export class TimelineStore implements Listing {
         this.emit();
     }
 
-    /// 再読み込みで、見えている位置の近くから読み直すための目印。
+    /// 再読み込みで、見えている位置の近くから読み直すための目印。鍵（`scopedKey`）で渡す。
     setFocus(path: string | undefined) {
         this.focus = path;
     }
@@ -282,7 +298,7 @@ export class TimelineStore implements Listing {
         request = (async () => {
             try {
                 const page = await fetchPage(
-                    this.libraryId,
+                    this.libraryIds,
                     direction === "previous" ? { before: cursor } : { after: cursor },
                 );
                 if (generation !== this.generation) return;
@@ -309,7 +325,7 @@ export class TimelineStore implements Listing {
         void this.loadMore(direction).catch(() => {});
     }
 
-    /// 指定した Entry を中央に含む範囲へ読み直す。
+    /// 指定した鍵の Entry を中央に含む範囲へ読み直す。
     recenter(path: string) {
         this.focus = path;
         void this.reload();
@@ -338,10 +354,10 @@ export class TimelineStore implements Listing {
     }
 
     private async fetchInitial(anchor: TimelineAnchor) {
-        return fetchPage(
-            this.libraryId,
-            anchor.kind === "month" ? { month: anchor.month } : anchor.kind === "around" ? { around: anchor.path } : {},
-        );
+        if (anchor.kind !== "around")
+            return fetchPage(this.libraryIds, anchor.kind === "month" ? { month: anchor.month } : {});
+        const { libraryId, path } = entryAddress(CROSS_LIBRARY_SCOPE, anchor.path);
+        return fetchPage(this.libraryIds, { around: path, aroundLibraryId: libraryId });
     }
 
     /// 範囲を差し替える。版が変わるので、選択の起点とビューアの位置が捨てられる。
@@ -386,19 +402,21 @@ interface TimelineChunk {
 }
 
 async function fetchPage(
-    libraryId: string,
-    query: { before?: string; after?: string; month?: string; around?: string },
+    libraryIds: readonly string[],
+    query: { before?: string; after?: string; month?: string; around?: string; aroundLibraryId?: string },
     signal?: AbortSignal,
 ): Promise<TimelineChunk> {
     const listing = unwrap(
-        await api.GET("/libraries/{libraryId}/timeline/entries", {
-            params: { path: { libraryId }, query: { ...query, limit: TIMELINE_PAGE_SIZE } },
+        await api.GET("/timeline/entries", {
+            params: { query: { libraryIds: [...libraryIds], ...query, limit: TIMELINE_PAGE_SIZE } },
             signal,
         }),
     );
     return {
         items: listing.entries.map((item) => ({
-            entry: item.entry,
+            entry: { ...item.entry, path: scopedKey(item.libraryId, item.entry.path) },
+            libraryId: item.libraryId,
+            path: item.entry.path,
             date: item.timelineDate,
             source: item.timelineDateSource,
         })),
@@ -409,27 +427,31 @@ async function fetchPage(
 
 const stores = new WeakMap<QueryClient, Map<string, TimelineStore>>();
 
-function storeFor(client: QueryClient, libraryId: string, anchor: TimelineAnchor): TimelineStore {
+function storeKey(libraryIds: readonly string[], anchor: TimelineAnchor): string {
+    return JSON.stringify([libraryIds, anchorKey(anchor)]);
+}
+
+function storeFor(client: QueryClient, libraryIds: readonly string[], anchor: TimelineAnchor): TimelineStore {
     let byKey = stores.get(client);
     if (!byKey) {
         byKey = new Map();
         stores.set(client, byKey);
     }
-    const key = JSON.stringify([libraryId, anchorKey(anchor)]);
+    const key = storeKey(libraryIds, anchor);
     let store = byKey.get(key);
     if (!store) {
-        store = new TimelineStore(libraryId, anchor);
+        store = new TimelineStore(libraryIds, anchor);
         byKey.set(key, store);
     }
     return store;
 }
 
 /// 画面が使っている間だけ範囲を持つ。使われなくなったら捨て、次に開くときは読み直す。
-export function useTimelineStore(libraryId: string, anchor: TimelineAnchor): TimelineStore {
+export function useTimelineStore(libraryIds: readonly string[], anchor: TimelineAnchor): TimelineStore {
     const client = useQueryClient();
-    const key = anchorKey(anchor);
-    // biome-ignore lint/correctness/useExhaustiveDependencies: anchor は key から作り直せる値で、key の変化だけを gate にする
-    const store = useMemo(() => storeFor(client, libraryId, anchor), [client, libraryId, key]);
+    const key = storeKey(libraryIds, anchor);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: libraryIds と anchor は key から作り直せる値で、key の変化だけを gate にする
+    const store = useMemo(() => storeFor(client, libraryIds, anchor), [client, key]);
     useEffect(() => {
         store.holders += 1;
         void store.ensureInitial().catch(() => {});
@@ -439,54 +461,61 @@ export function useTimelineStore(libraryId: string, anchor: TimelineAnchor): Tim
             queueMicrotask(() => {
                 if (store.holders > 0) return;
                 const byKey = stores.get(client);
-                const registered = byKey?.get(JSON.stringify([libraryId, anchorKey(store.anchor)]));
-                if (registered === store) byKey?.delete(JSON.stringify([libraryId, anchorKey(store.anchor)]));
+                const registered = byKey?.get(storeKey(store.libraryIds, store.anchor));
+                if (registered === store) byKey?.delete(storeKey(store.libraryIds, store.anchor));
             });
         };
-    }, [client, libraryId, store]);
+    }, [client, store]);
     useSyncExternalStore(store.subscribe, store.getRevision);
     return store;
 }
 
-/// Library の変更の後に、使われている範囲を読み直し、使われていない範囲を捨てる。月ごとの件数と状態も読み直す。
-export async function refreshTimeline(client: QueryClient, libraryId: string): Promise<void> {
+/// Library の変更や集計の後に、それらの Library を並べている範囲のうち、使われている範囲を読み直し、使われていない範囲を捨てる。月ごとの件数と状態も読み直す。
+export async function refreshTimeline(client: QueryClient, libraryIds: readonly string[]): Promise<void> {
+    const touches = (ids: readonly string[] | undefined) => ids?.some((id) => libraryIds.includes(id)) ?? false;
     const byKey = stores.get(client);
     const reloads: Promise<void>[] = [];
     for (const [key, store] of byKey ?? []) {
-        if (store.libraryId !== libraryId) continue;
+        if (!touches(store.libraryIds)) continue;
         if (store.holders > 0) reloads.push(store.reload());
         else byKey?.delete(key);
     }
-    await Promise.all([...reloads, client.invalidateQueries({ queryKey: ["timeline", libraryId] })]);
+    await Promise.all([
+        ...reloads,
+        client.invalidateQueries({
+            queryKey: ["timeline"],
+            predicate: (query) => touches(query.queryKey[2] as readonly string[] | undefined),
+        }),
+    ]);
 }
 
-export function timelineMonthsQuery(libraryId: string) {
+export function timelineMonthsQuery(libraryIds: readonly string[]) {
     return queryOptions({
-        queryKey: ["timeline", libraryId, "months"],
+        queryKey: ["timeline", "months", libraryIds],
         queryFn: async ({ signal }): Promise<TimelineMonth[]> =>
             unwrap(
-                await api.GET("/libraries/{libraryId}/timeline/months", {
-                    params: { path: { libraryId } },
+                await api.GET("/timeline/months", {
+                    params: { query: { libraryIds: [...libraryIds] } },
                     signal,
                 }),
             ).months,
     });
 }
 
-export function timelineStatusQuery(libraryId: string) {
+export function timelineStatusQuery(libraryIds: readonly string[]) {
     return queryOptions({
-        queryKey: ["timeline", libraryId, "status"],
-        queryFn: async ({ signal }): Promise<TimelineStatus> =>
+        queryKey: ["timeline", "status", libraryIds],
+        queryFn: async ({ signal }): Promise<TimelineStatus[]> =>
             unwrap(
-                await api.GET("/libraries/{libraryId}/timeline/status", {
-                    params: { path: { libraryId } },
+                await api.GET("/timeline/status", {
+                    params: { query: { libraryIds: [...libraryIds] } },
                     signal,
                 }),
-            ),
+            ).libraries,
     });
 }
 
-/// 全体の集計を始め、今の状態を返す。
-export async function startTimelineScan(libraryId: string): Promise<TimelineStatus> {
-    return unwrap(await api.POST("/libraries/{libraryId}/timeline/refresh", { params: { path: { libraryId } } }));
+/// 並べている Library の全体の集計を始め、今の状態を返す。
+export async function startTimelineScan(libraryIds: readonly string[]): Promise<TimelineStatus[]> {
+    return unwrap(await api.POST("/timeline/refresh", { body: { libraryIds: [...libraryIds] } })).libraries;
 }

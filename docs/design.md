@@ -16,7 +16,7 @@ Definitions of words are not in this document.
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | This document                                 | Design rationale, invariants, rejected alternatives, open issues                                                                                       |
 | [Storage Layer Design](./design/storage.md)   | Driver contract, conventions for paths and entries, how archives are extracted, limits and caches, the procedure for publishing one entry              |
-| [Listing and Search Design](./design/listing.md) | Sorting and filtering of listings, snapshots, name search, recursion limits                                                                         |
+| [Listing and Search Design](./design/listing.md) | Sorting and filtering of listings, snapshots, name search, the name index, recursion limits                                                         |
 | [Thumbnail Design](./design/thumbnail.md)     | Generating thumbnails, sprite sheets, and display images, how representative thumbnails are chosen, generation concurrency, caches                      |
 | [Video Playback Design](./design/video.md)    | Media info for images and videos, direct playback, HLS transcoded delivery and transcode sessions                                                       |
 | [Client Design](./design/client.md)           | Screen structure of the web client, behavior of tiles and the viewer, how thumbnails and listings are requested, Entry operations, display preferences |
@@ -24,7 +24,7 @@ Definitions of words are not in this document.
 | [Rating and Tag Design](./design/rating-tags.md) | What can be rated and tagged, value rules, storage, following changes, filtering listings, API conventions                                          |
 | [terms.md](./terms.md)                        | Definitions of terms, spelling, aliases, boundaries with neighboring terms                                                                              |
 | [issues.md](./issues.md)                      | Clear defects confirmed in code and handling policies                                                                                                    |
-| [knowledges.md](./knowledges.md)              | Facts verified about the libraries and external components depended on                                                                                   |
+| [knowledge.md](./knowledge.md)                | Facts verified about the libraries and external components depended on                                                                                   |
 | [plans.md](./plans.md)                        | Work in progress and dependencies                                                                                                                        |
 | [measurements.md](./measurements.md)          | Measurement records specifying commits and environments, comparison procedures, aggregate values, measurement conditions and limits                      |
 | [reviews.md](./reviews.md)                    | History of reviews and transcription status of findings                                                                                                  |
@@ -63,7 +63,7 @@ By using the assets on the home server as they are, it meets both the demand of 
 The assumed operation is as follows.
 
 - One server, one owner
-- Exposed on a LAN, or over a trusted network
+- Exposed in plaintext HTTP on a LAN, and reached from outside the LAN only through a VPN such as Tailscale
 - Mainly a large number of files including images, emphasizing thumbnail display and browsing inside archives
 
 ### 2.1 Out of Scope
@@ -78,10 +78,12 @@ The following have been decided not to be built.
 - SMB compatibility
 - Video editing
 - Image processing
+- TLS termination and certificate management
 
-By excluding these, we avoid having a permission model, restoring deletions, maintaining index consistency, resolving cloud sync conflicts, an SMB compatibility layer, and an operation system for editing and processing.
+By excluding these, we avoid having a permission model, restoring deletions, maintaining index consistency, resolving cloud sync conflicts, an SMB compatibility layer, an operation system for editing and processing, and issuing and renewing certificates.
 For the timeline (§6.3), aggregation builds a timeline index that holds only the timeline dates of images and videos.
-This index is not used for search, and external changes are reflected in the next aggregation, so it does not always keep consistency with the actual files.
+The same walk also updates a name index that holds only the names of Entries, for subtree search (§8.9).
+Neither index is used for full-text or metadata search, and external changes are reflected in the next aggregation, so they do not always keep consistency with the actual files.
 When deciding to widen the scope, first read the deferred items in §11.2.
 Some of them even state the conditions for "when to decide".
 
@@ -114,24 +116,27 @@ flowchart TB
         iface["omnius-pxna-interface<br/>generated router"]
         stream["Hand-written routes<br/>file content, thumbnails, HLS"]
         handler["ApiServer<br/>implementation of generated traits"]
+        video["Video transcode sessions<br/>src/service/video"]
+        timeline["Timeline aggregation<br/>src/service/timeline"]
     end
 
     subgraph engine["omnius-pxna-engine"]
         fs["StorageService"]
         thumb["ThumbnailGenerator"]
-        video["Video transcoding"]
         auth["AuthService"]
         prefs["Display preferences"]
+        ratings["Ratings and tags"]
     end
 
-    ffmpeg["ffmpeg / ffprobe<br/>external processes"]
+    ffmpeg["ffmpeg / ffprobe / heif-dec<br/>external processes"]
 
     subgraph persist["Persistence"]
         localfs[("Local FS<br/>Library")]
-        sqlite[("SQLite<br/>users, sessions, display preferences")]
+        sqlite[("SQLite<br/>users, sessions, display preferences, ratings and tags")]
         thumbcache[("SQLite + files<br/>thumbnail cache")]
         archivecache[("SQLite + files<br/>archive extraction cache")]
         segments[("files<br/>HLS segments")]
+        timelineidx[("Timeline index")]
     end
 
     web -->|"HTTP + Cookie"| iface
@@ -145,6 +150,10 @@ flowchart TB
     handler --> video
     handler --> auth
     handler --> prefs
+    handler --> ratings
+    handler --> timeline
+    timeline --> fs
+    timeline --> timelineidx
     thumb --> fs
     video --> fs
     thumb --> ffmpeg
@@ -155,6 +164,7 @@ flowchart TB
     video --> segments
     auth --> sqlite
     prefs --> sqlite
+    ratings --> sqlite
 ```
 
 The web client is served from the same process and the same port as the daemon.
@@ -164,7 +174,8 @@ This premise is what makes the CSRF protection in §8.5 hold.
 Only the responses for file content, thumbnails, and HLS are returned by hand-written routes that do not go through the generated router (§11.1).
 This is because the generated router cannot return the response body as a stream or vary the response's `Content-Type` according to the request.
 Authentication and Library boundary checks go through the same daemon-layer processing as other paths.
-ffmpeg and ffprobe are not linked into the daemon and are started as external processes.
+ffmpeg, ffprobe, and libheif's heif-dec are not linked into the daemon and are started as external processes.
+ffmpeg decodes HEIC/HEIF and the other ffmpeg-read images; heif-dec is used for images with alpha and as a fallback.
 
 ## 4. Internal Structure of the Daemon
 
@@ -244,7 +255,7 @@ Because this boundary is settled before being passed to the engine, the engine d
 
 The procedure is as follows.
 
-1. Normalize the `RelativePath` and remove `.` and `..`, and treat a remaining `..` and absolute paths as `InvalidInput`
+1. Normalize the `RelativePath` and remove `.` and `..`, and treat a remaining `..` and absolute paths as `InvalidRequest`
 2. `stat` the full path joined with the Library root, and if it succeeds, settle it as rank 0 with no boundary
 3. Only on `ENOENT` or `ENOTDIR`, `stat` one segment at a time from the start, and take the first thing that is not a directory as the boundary
 4. Recurse the same procedure on the remaining segments inside the boundary against that archive's index
@@ -280,9 +291,9 @@ The individual definitions and the authoritative responses are in `daemon/openap
 | `PasswordRequired`    | 403    | Password-protected archive                                                                                                             |
 | `NotFound`            | 404    | No target, no parent folder, an expired operation                                                                                      |
 | `Conflict`            | 409    | An existing conflict with `conflict=fail`, chunk offset mismatch, non-recursive deletion of a non-empty folder, an archive changing during processing |
+| `AlreadyInitialized`  | 409    | `POST /setup` when the owner is already registered                                                                                     |
 | `PayloadTooLarge`     | 413    | A one-shot PUT over 32 MiB                                                                                                             |
 | `RangeNotSatisfiable` | 416    | `Range` is out of range                                                                                                                |
-| `AlreadyInitialized`  | 409    | `POST /setup` when the owner is already registered                                                                                     |
 | `InsufficientStorage` | 507    | Insufficient capacity at the write destination                                                                                         |
 | `Timeout`             | 504    | Exceeding the deadline for extracting an archive or generating a thumbnail with ffmpeg                                                 |
 | `InternalServerError` | 500    | Anything else                                                                                                                          |
@@ -336,8 +347,8 @@ The transcode sessions, output, concurrency, configuration, and reasons for adop
 
 ### 6.3 Timeline
 
-The timeline lists a Library's images and videos in descending order of timeline date, decided from the shooting date and time (or else the modification time), without folder hierarchy.
-The daemon aggregates the Library periodically, writes the timeline dates to the timeline index, and answers page requests from the web client from the index.
+The timeline lists the images and videos of the chosen Libraries in one sequence in descending order of timeline date, decided from the shooting date and time (or else the modification time), without folder hierarchy.
+The daemon aggregates each Library periodically, writes the timeline dates to the timeline index, and answers page requests from the web client from the index.
 Images and videos inside archives are also extracted and their timeline dates read, and the extraction for aggregation is done in a concurrency budget separate from browsing.
 The daemon's own mutating operations immediately reflect only the range they changed in the index.
 
@@ -407,6 +418,7 @@ Even when the username does not exist, a dummy hash is verified, to make it hard
 
 This section gathers the mutating conventions scattered across `openapi.yaml` from the viewpoint of judgment.
 For individual paths and schemas, see `openapi.yaml`.
+API paths in this document are written relative to the server base `/api/v1`, such as `/libraries/{id}/files/...`.
 
 ### 8.1 Namespaces
 
@@ -428,7 +440,7 @@ This is so that, at the same path, one can both list its contents and download, 
 
 ### 8.2 Determining Sync and Async
 
-There is one criterion: **whether the time taken is proportional to the content size**.
+There is one criterion: **whether the time taken is proportional to the content size or to the number of entries**.
 Those that are not proportional respond synchronously, and those that are proportional return `202` and `{operation}`, with the identifier carried in `operation.id`.
 
 | Operation                   | Condition                                          | Response |
@@ -541,11 +553,12 @@ sequenceDiagram
         C->>D: PUT /uploads/{id}/content?offset=N
         D->>D: Check offset == committedSize (409 on mismatch)
         D->>S: Append
-        D-->>C: 204 {committedSize updated}
+        D-->>C: 204
     end
 
     C->>D: POST /uploads/{id}/commit
     D->>D: Check actual bytes == size (400 on mismatch)
+    D->>L: Conflict check again (409 if one exists with conflict=fail)
     D->>L: Publish atomically with rename
     D-->>C: 201 {file}
 ```
@@ -591,7 +604,8 @@ Completed ones are pruned after about an hour.
 
 ### 8.9 Search
 
-Search has no dedicated API; it is done by adding a name condition to the folder listing, and when searching under a folder, the same condition is added to the recursive listing.
+Search is a listing with conditions. The search API applies name, rating, and tag conditions to the listing of each chosen Library, recursive when searching under a folder, and merges them into one sequence.
+A recursive listing with conditions is answered from the name index that aggregation updates, and walks the file system only while that index is not usable.
 The sorting of listings, snapshots, name matching, recursion limits, and the reasons for adopting these are authoritative in [Listing and Search Design](./design/listing.md).
 How the client reads listings and search is covered by [Client Design §3.5](./design/client.md#35-loading-listings) and [§3.6](./design/client.md#36-search).
 
@@ -610,6 +624,8 @@ state_dir = "./state"
 [logging]
 level = "info"
 json = false
+# file = "./pxna.log"
+# performance = false
 
 [web]
 dir = "/usr/share/pxna/web"
@@ -621,10 +637,14 @@ path = "/srv/photos"
 readonly = false
 ```
 
+`[logging] file` appends the log to that file in addition to standard output, and a relative path is based on the configuration directory.
+`[logging] performance = true` turns on the `pxna::performance` measurement logs at debug level even when `level` is `info`, and `RUST_LOG` overrides both.
+While it is on, `/capabilities` reports `performanceLogging`, and the web client sends the load times of display images, original images, and thumbnails, and the time until the viewer shows an entry, to `/performance/client-timings`, which writes them to the same log as `client_timing`.
 `[web] dir` is the directory of the web build output the daemon serves, and relative paths are based on the configuration directory.
 If omitted, the daemon provides only the API (§10.1).
 `[web] insecure_cookie = true` removes `Secure` and the `__Host-` prefix from the session cookie and makes the name `pxna_session`.
-Use it only when opening over `http://` from anywhere other than `localhost` in an environment, such as Tailscale, where the path is protected by other means than HTTPS. The default is `false`.
+Browsers reject a `Secure` cookie over `http://` from anywhere other than `localhost`, so the plaintext operation of §2 needs it.
+The daemon's default is `false`, and the template `config/pxna.toml.example`, from which `start.sh` creates the `config/pxna.toml` that `compose.yaml` mounts, sets it to `true` (§11.1).
 
 Libraries can be defined only here.
 There is no means of adding or removing a Library through the API.
@@ -655,6 +675,7 @@ At startup it takes a process lock to prevent multiple instances.
 | `state_dir/storage/archive`       | archive extraction cache                                           | Re-inspect and re-extract are needed                               |
 | `state_dir/video`                 | HLS segments of transcode sessions                                 | Transcoded playback in progress is interrupted                     |
 | `state_dir/timeline`              | Timeline index                                                     | Rebuilt by the next aggregation, and until it finishes, Entries to list in the timeline are missing |
+| `state_dir/listing`               | Browse index and name index                                        | Summary listings are enumerated again. Recursive search walks the file system until the next full aggregation finishes |
 | Staging area                      | Bytes of uploads in progress                                       | Uploads in progress are lost                                       |
 | Memory                            | Operations, transcode sessions, media info, listing snapshots      | Tracking of operations and transcodes in progress is lost. Listings are rescanned on the next request |
 
@@ -665,14 +686,15 @@ This is so that engine tests can create the same tables without going through th
 ### 9.3 Distribution
 
 The daemon is distributed as a Docker image.
-The image is built for two architectures, amd64 and arm64, and contains the daemon's executable, the web build output, and ffmpeg and ffprobe.
+The image is built for two architectures, amd64 and arm64, on Debian trixie, and contains the daemon's executable, the web build output, a pinned ffmpeg 9 and ffprobe, and libheif's heif-dec for images with alpha.
+The daemon checks at startup that ffmpeg and ffprobe are version 9 or newer.
 
 | What is passed in from outside the container | How it is passed |
 | --- | --- |
 | Configuration directory | A volume. `PXNA_DAEMON_CONFIG_DIR` points to its location inside the container |
 | `state_dir` | A volume. It holds the locations in §9.2 together |
 | Library | A bind mount. The configuration's `path` is written as a path inside the container |
-| The listening port | Publish the port of `listen_addr` |
+| The listening port | Publish the port of `listen_addr`. `compose.yaml` publishes it on the address of `PXNA_BIND`, `127.0.0.1` by default (§11.1) |
 
 The container starts as a user with UID and GID 10001.
 The configuration directory is passed in writable by this user for creating the lock, and state and writable Libraries for saving.
@@ -972,7 +994,7 @@ A configuration that puts nginx in front of the daemon, with nginx handling stat
 The daemon would no longer have static-serving code, but there would be two images and two processes.
 nginx's defaults such as the body size limit, response wait time limit, response buffering, and rewriting `Host` each collide with uploads, waiting for archive extraction, streamed responses, and the `Origin` validation in §8.5.
 Mistakes in those settings cannot be detected by the daemon's tests, so we rejected it.
-A configuration that optionally puts a reverse proxy in front to terminate TLS is handled in "TLS and exposure outside the LAN" in §11.2.
+A configuration that optionally puts a reverse proxy in front to terminate TLS is rejected in "Leave Encryption to the Network and Serve Plain HTTP".
 
 **Rejected alternative 4**
 A configuration that embeds the web build output in the daemon's executable.
@@ -1069,7 +1091,7 @@ The implementation is small, but it would rewrite the generated output's respons
 #### Make the Docker Image the Basis of Distribution
 
 **Decision**
-The daemon is distributed as a Docker image containing ffmpeg, ffprobe, and the web build output, for amd64 and arm64 (§9.3).
+The daemon is distributed as a Docker image containing ffmpeg 9, ffprobe, heif-dec for images with alpha, and the web build output, for amd64 and arm64 (§9.3).
 
 **Reason**
 Thumbnails and video transcoding call ffmpeg as an external process ([Thumbnail Design](./design/thumbnail.md#call-ffmpeg-as-an-external-process)), so the execution environment needs ffmpeg.
@@ -1080,6 +1102,25 @@ We also build for arm64 so that it can run on ARM NAS devices and small servers.
 **Rejected alternative**
 Distributing only native executables per OS.
 The operator would have to install ffmpeg separately, and differences in version can change the behavior of frame extraction and conversion, so we rejected it.
+
+#### Bundle a Pinned Static Build of ffmpeg
+
+**Decision**
+The image bundles the GPL static build of ffmpeg 9.0 published by BtbN/FFmpeg-Builds, instead of Debian's package.
+The build is pinned by the month-end autobuild release, the file name, and the SHA-256 for each of amd64 and arm64 in `Dockerfile`.
+
+**Reason**
+Debian's ffmpeg is 5.1 on bookworm, which cannot open HEIC, and 7.1 on trixie, which reads only one tile of a tile grid; ffprobe of 8.1 does not report the rotation of a tile grid ([ffmpeg and HEIF tile grids](./knowledge/ffmpeg-heif-tile-grid.md)).
+The GPL build is needed because transcoding uses libx264 ([Video Playback Design §5.3](./design/video.md#53-output)).
+BtbN deletes daily autobuilds after about a month and keeps month-end ones for longer, so pinning a month-end one keeps the image buildable.
+
+**Rejected alternative 1**
+Copying ffmpeg from a third-party Docker image such as `mwader/static-ffmpeg`.
+It takes one line, but it depends on a further third party's image, so we rejected it.
+
+**Rejected alternative 2**
+Installing jellyfin-ffmpeg from Jellyfin's apt repository.
+It would add the management of a repository and its signing key, and installs under a non-standard path, so we rejected it.
 
 #### Publish the Container Only After Verifying Both Architectures
 
@@ -1097,27 +1138,43 @@ By starting as non-root, permissions on the Library can be specified on the host
 A method that verifies execution on only one architecture and only passes the build for the other.
 Runtime problems of the other could not be confirmed before publication, so we rejected it.
 
+#### Leave Encryption to the Network and Serve Plain HTTP
+
+**Decision**
+The daemon serves plain HTTP and does not terminate TLS.
+Devices on the LAN connect directly, and access from outside the LAN goes through a VPN such as Tailscale.
+`compose.yaml` publishes the listening port on the address given by the environment variable `PXNA_BIND`, which defaults to `127.0.0.1`.
+The operator who wants other devices to connect sets `PXNA_BIND`, for example to `0.0.0.0`.
+The bundled template `config/pxna.toml.example` sets `[web] insecure_cookie = true` (§9.1, §9.3), and the daemon's own default of `insecure_cookie` stays `false`.
+
+**Reason**
+The daemon does not need to issue or renew certificates, and the operator does not need a proxy in front of it.
+The VPN encrypts the path outside the LAN, and the operation of §2 already trusts the LAN.
+Nothing is exposed until the operator chooses to, which matters because `POST /setup` accepts the first request regardless of its source (§7.1).
+Once the operator sets `PXNA_BIND`, enabling `insecure_cookie` in the bundled configuration lets a phone on the LAN or the VPN log in over plain HTTP.
+Keeping the daemon's default at `false` keeps a daemon started by other means, or opened through `localhost`, on the stricter cookie.
+When `PXNA_BIND` is a specific address such as a VPN's, Docker fails to publish if the host does not have that address yet when the container starts, so an operator who cannot guarantee that uses `0.0.0.0`.
+
+**Rejected alternative 1**
+A configuration that puts Tailscale Serve in front to receive HTTPS and forward it to `127.0.0.1`.
+The cookie would keep `Secure` and the `__Host-` prefix and `compose.yaml` would not change, but the operator would have to set up the proxy, and whether it keeps `Host` as received, which the `Origin` validation of §8.5 depends on, would have to be confirmed, so we rejected it.
+
+**Rejected alternative 2**
+A configuration in which the daemon terminates TLS itself.
+It would need certificate issuance and renewal in the daemon, so we rejected it.
+
+**Rejected alternative 3**
+A configuration in which `compose.yaml` publishes the port on all interfaces of the host by default.
+A phone on the LAN or the VPN could log in right after `docker compose up`, but the container would be exposed before the operator chose to, and anyone who could reach it before setup could register as the owner (§7.1), so we rejected it.
+
+**Rejected alternative 4**
+A configuration that changes the daemon's default of `insecure_cookie` to `true`.
+Every way of starting the daemon would work in plaintext, but a daemon opened through `localhost` or behind HTTPS would also lose `Secure`, so we rejected it.
+
 ### 11.2 Deferred
 
 The following are intentionally undecided.
 Until the "conditions for deciding" are met, they stay in the current form.
-
-#### TLS and Exposure Outside the LAN
-
-**Current state**
-Plaintext HTTP only.
-The server in `openapi.yaml` is also `http://localhost:6050`.
-The session cookie has the `__Host-` prefix and the `Secure` attribute.
-Major browsers treat `http://localhost` as a secure context, so it works during development, but when accessed in plaintext from another device on the LAN, the cookie is rejected.
-As a workaround when the path is protected by Tailscale or similar, `[web] insecure_cookie = true` (§9.1) removes `Secure` and `__Host-`.
-
-**Why not decide now**
-Where to put obtaining and renewing certificates (built into the daemon, or assuming a reverse proxy) cannot be chosen until the form of exposure is decided.
-The problem of the cookie being rejected does not surface until the web client is opened from another device on the LAN.
-
-**Conditions for deciding**
-When the web client is actually used from another device on the LAN, or when access from outside the LAN is actually needed.
-Because of the cookie constraint, the former is needed before external exposure.
 
 #### Limiting Login Attempts
 
@@ -1129,7 +1186,23 @@ Under the operating premise of §2, those who can try to log in are limited to d
 The unit of limiting (the source or the username) and the rules that do not lock out the legitimate owner change with the form of exposure.
 
 **Conditions for deciding**
-When access from outside the LAN is actually needed (decided together with "TLS and exposure outside the LAN"), or when brute-force logins are actually observed.
+When the daemon is exposed beyond the LAN and a VPN, or when brute-force logins are actually observed.
+
+#### Validating the Host Header for Setup and Login
+
+**Current state**
+`POST /setup` and `POST /auth/login` accept any `Host`.
+On an uninitialized daemon, a page that passes DNS rebinding to a local address can therefore create the first owner with its own credentials.
+`OriginCheck` does not help: it compares `Origin` with `Host`, and both belong to the attacker under rebinding.
+
+**Why not decide now**
+The right rule depends on how the daemon is reached.
+An allowlist of the configured listen address and `localhost` is simple but breaks access through a reverse proxy or a tunnel, where the browser sends the proxy's name.
+Requiring a one-time setup token shifts the problem to how the owner learns the token.
+Requiring `Origin` on these two endpoints is weaker than either, because the browser omits it for some requests.
+
+**Conditions for deciding**
+When the setup window is exposed beyond the host itself, or when the first deployment guide names a proxy or tunnel as the supported way to reach the daemon.
 
 #### Multi-User and Permission Model
 
@@ -1221,6 +1294,7 @@ The container passes build and smoke tests in native CI for amd64 and arm64.
 
 The order is provisional.
 Only the dependencies must be respected.
+M7 is a retired number and is not used.
 
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
@@ -1232,16 +1306,20 @@ Only the dependencies must be respected.
 | M5 | Implement the storage service and archive driver of the [Storage Layer Design](./design/storage.md), and enable browsing inside archives | M1 | Done |
 | M6 | Switch the web client to a Vite SPA served from the daemon on the same origin, add sorting and cursors of listings and the `Timeout` response to the server, and implement the tree, grid, and image viewer of the [Client Design](./design/client.md) | M0, M1, M2, M4 | Done |
 | M8 | Implement the stream routes, media info, and transcoded playback of the [Video Playback Design](./design/video.md), and the web client's video viewer | M1, M6 | Done |
-| M9 | Build the amd64 and arm64 Docker images that include ffmpeg and the web build output | M0 | Done |
+| M9 | Build the amd64 and arm64 Docker images that include ffmpeg and the web build output | M0, M6 | Done |
 | M10 | Implement the snapshots, `offset`-based page extraction, name matching, and recursion limits of the [Listing and Search Design](./design/listing.md), and abolish cursors and `searchEntries` | M1 | Done |
 | M11 | Implement thumbnail WebP output and the quality setting, the display preferences API and storage, and media info for images | M2, M4, M8 | Done |
 | M12 | Implement the web client's screen skeleton, the display preferences screen, grids and lists that secure the overall height, and search | M10, M11 | Done |
 | M13 | Implement the web client's Entry operations and activity panel | M3, M12 | Done |
 | M14 | Implement the web client's viewer enhancements, swapping to the original image, and the info panel, and put the rotation of images read with ffmpeg in the media info | M11, M13 | Done |
-| M15 | Implement the web client's viewer touch operations (flicks to move back and forth, pinch to zoom) | M6, M14 | Not started |
+| M15 | Implement the web client's viewer touch operations (flicks to move back and forth, pinch and double-tap to zoom, a downward swipe to close) | M6, M14 | Not started |
 | M16 | Implement the index, aggregation, reflection of the daemon's own changes, and the timeline API of the [Timeline Design](./design/timeline.md) | M5, M8, M10 | Done |
 | M17 | Implement the web client's timeline screen | M13, M14, M16 | Done |
 | M18 | Implement the storage and API of the [Rating and Tag Design](./design/rating-tags.md), the info panel's tags, and the viewer's rate mode | M2, M14 | Done |
+| M19 | Implement the name index of the [Listing and Search Design](./design/listing.md), its update by aggregation, answering recursive listings with conditions from it, and the web client's notice for walked results | M10, M16, M18 | Not started |
+| M20 | Revalidate folder and archive thumbnails, and have the web client request them again after the daemon's own changes | M4, M13 | Not started |
+| M21 | Make the address the compose port is published on configurable with `PXNA_BIND` (default `127.0.0.1`) and enable `insecure_cookie` in the bundled configuration (§11.1) | M9 | Not started |
+| M22 | Implement the search API across Libraries of the [Listing and Search Design](./design/listing.md#53-searching-across-libraries), and the web client's search mode with its conditions in the left area and the three-choice mode switch | M12, M17, M18 | Done |
 
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
@@ -1249,6 +1327,7 @@ M3 is not included in this milestone, but may proceed in parallel.
 The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap), of M5 in [Storage Layer Design §10.2](./design/storage.md#102-roadmap), of M8 in [Video Playback Design §8.2](./design/video.md#82-roadmap), of M10 in [Listing and Search Design §9.2](./design/listing.md#92-roadmap), and of M11 only V4 of [Video Playback Design §8.2](./design/video.md#82-roadmap); the thumbnail output and the display preferences API are done and have no remaining work.
 The server side of M14 is V5 of the same §8.2.
 The current state of the completed M13 and M14, and the client-side remaining work of M15, are in [Client Design §6](./design/client.md#6-current-state-and-remaining-work).
+The breakdown of M19 is L1 of [Listing and Search Design §9.2](./design/listing.md#92-roadmap) and C12 of [Client Design §6.2](./design/client.md#62-roadmap), and of M20 is T1 of [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap) and C11 of the same Client Design §6.2.
 M16, M17, and M18 have no remaining work. The current state of M16 is in [Timeline Design §10](./design/timeline.md#10-current-state-and-remaining-work), of M17 in [Client Design §6.1](./design/client.md#61-current-code), and of M18 in [Rating and Tag Design §9](./design/rating-tags.md#9-current-state-and-remaining-work).
 
 For confirmed defects, see [issues.md](./issues.md).

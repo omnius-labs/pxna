@@ -1,8 +1,8 @@
 # Representative Thumbnails Are Not Reflected on Screen After Their Contents Are Deleted
 
-**Severity: medium** (visible today; fixing it needs a design decision on the approach)
+**Severity: medium** (visible today)
 
-Investigated 2026-10-16 / Target commit `5668d4a`
+Investigated 2026-10-23 / Target commit `47b81b0`
 
 One item of [issues.md](../issues.md).
 
@@ -10,32 +10,39 @@ One item of [issues.md](../issues.md).
 
 While looking at folder and archive tiles in folder view, if you delete the images and videos inside them or move them elsewhere, the tile's representative thumbnail stays as the image from before the deletion.
 It remains for as long as the row stays in the visible range.
-If you move the row off screen and bring it back, the result of requesting again is reflected.
+Reading the code, a request made after the row leaves the screen and returns can also receive the old image from the browser's HTTP cache for up to a day after the first response. This has not been confirmed in a browser.
 
 ## Locations
 
 - [queue.ts#L127](../../ui-web/src/thumbnails/queue.ts#L127) — where `#next` excludes keys that have a state (both ready and failed) from the requests
-- [queue.ts#L84](../../ui-web/src/thumbnails/queue.ts#L84) — a ready state is discarded only when the row leaves the request targets. A failed state is not discarded
+- [queue.ts#L85](../../ui-web/src/thumbnails/queue.ts#L85) — a ready state is discarded only when the row leaves the request targets. A failed state is not discarded
 - [queue.ts#L1](../../ui-web/src/thumbnails/queue.ts#L1) — a comment that says only of failed that it "is not requested again while the queue is alive"
 - [useThumbnailQueue.ts#L29](../../ui-web/src/thumbnails/useThumbnailQueue.ts#L29) — the dependencies for rebuilding the queue. They do not include reloading the listing
-- A request for the representative after a change returns the re-selected representative if images and videos remain, and only when they run out does [selection.rs#L137](../../daemon/modules/engine/src/core/thumbnail/selection.rs#L137) return `NotFound` with no candidate. The server side follows changes at [selection.rs#L86](../../daemon/modules/engine/src/core/thumbnail/selection.rs#L86) (stops reusing an update within 2 seconds), [selection.rs#L18](../../daemon/modules/engine/src/core/thumbnail/selection.rs#L18) (a 30-second expiry), and [selection.rs#L127](../../daemon/modules/engine/src/core/thumbnail/selection.rs#L127) (forbids publishing a selection whose generation advanced because of the daemon's own change)
+- [route.rs#L113](../../daemon/entrypoints/daemon/src/interface/features/thumbnails/route.rs#L113) — every thumbnail response, including folders and archives, carries `Cache-Control: private, max-age=86400`
+- [api.ts#L28](../../ui-web/src/thumbnails/api.ts#L28) — `fetchThumbnail` does not specify a cache mode, so the request goes through the browser's HTTP cache
+- A request for the representative after a change returns the re-selected representative if images and videos remain, and only when they run out does [selection.rs#L140](../../daemon/modules/engine/src/core/thumbnail/selection.rs#L140) return `NotFound` with no candidate. The server side follows changes at [selection.rs#L86](../../daemon/modules/engine/src/core/thumbnail/selection.rs#L86) (stops reusing an update within 2 seconds), [selection.rs#L18](../../daemon/modules/engine/src/core/thumbnail/selection.rs#L18) (a 30-second expiry), and [selection.rs#L127](../../daemon/modules/engine/src/core/thumbnail/selection.rs#L127) (forbids publishing a selection whose generation advanced because of the daemon's own change)
 
 ## Cause
 
+There are two layers.
+
 As long as a row remains a request target, `ThumbnailQueue` keeps the ready image without requesting again, and it does not request a failed one again while the queue is alive.
 Reloading the listing does not rebuild the queue, so the old image is reused even on the first redraw after a change.
-For a request to a folder whose images and videos have run out, the representative selection returns `NotFound`, and when other candidates remain it returns a re-selected representative (selection.rs#L137).
-In every case, the cause of the stale display is that the screen does not make a request.
-There is no description in the code of how the request suppression came about, and it reads as an extension of the design that suppresses requests for off-screen tiles ([queue.ts#L23](../../ui-web/src/thumbnails/queue.ts#L23)) (this is a reading of intent, not a stated reason).
+There is no description in the code of how the request suppression came about, and it reads as an extension of the design that suppresses requests for off-screen tiles ([queue.ts#L21](../../ui-web/src/thumbnails/queue.ts#L21)) (this is a reading of intent, not a stated reason).
+
+The URL of a representative is the folder's or archive's path, so it does not change when the chosen Entry changes.
+The response is allowed to be cached for a day, the same as a file's, so a request made again can be answered by the browser cache without reaching the server.
+The comment at [route.rs#L112](../../daemon/entrypoints/daemon/src/interface/features/thumbnails/route.rs#L112) gives the reason for the one-day expiry only in terms of files, whose key changes when they are replaced.
 
 ## Impact
 
 There is no data loss.
-A period occurs in which the server's response (`NotFound` for a request after the candidates have run out) and the image the screen holds disagree, only while the row stays in the visible range.
+The server's response (the re-selected representative, or `NotFound` after the candidates have run out) and the image the screen shows disagree while the row stays in the visible range, and possibly for up to a day after that through the browser cache.
 Representative thumbnails are used only for folder and archive tiles in folder view, so the timeline is not affected.
 
 ## Handling Policy
 
-For now, this item is not addressed (status quo).
-The tile shows the stale image after a content change only until the row leaves the visible range, and there is no data loss.
-The question of choosing the approach to take (such as discarding and re-requesting after a change) belongs to the deferred item "Whether to Reflect a Folder's Representative Thumbnail on Screen Immediately" in [Thumbnail Design §10.2](../design/thumbnail.md#whether-to-reflect-a-folders-representative-thumbnail-on-screen-immediately), and this section will be updated when that is decided.
+Fix both layers as decided in [Thumbnail Design §10.1](../design/thumbnail.md#representative-revalidation).
+The server returns folder and archive responses with `Cache-Control: private, no-cache` and the existing `ETag`, and the web client discards the states of folder and archive tiles and requests them again when it rereads the listing after the daemon's own change.
+First reproduce in a browser that the old image is served from the HTTP cache, so that the server-side fix can be shown to be needed.
+A test that a folder response does not carry `max-age`, and a test that the queue requests folder tiles again after its states are discarded, prevent a recurrence.

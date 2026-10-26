@@ -14,7 +14,9 @@ use omnius_pxna_interface::models;
 use crate::{
     config::LibraryConfig,
     prelude::*,
-    service::listing::{ListOptions, ListingEntries, ListingSnapshots, SnapshotKey, SnapshotVersion, SummaryData, SummaryKey, SummaryOptions},
+    service::listing::{
+        ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, SearchResults, SearchSource, SnapshotKey, SnapshotVersion, SummaryData, SummaryKey, SummaryOptions,
+    },
 };
 
 mod children;
@@ -64,21 +66,29 @@ impl LibraryBrowser {
     }
 
     pub async fn list_folder_entries(&self, library_id: &str, path: &str, options: &ListOptions) -> Result<models::FolderListing> {
-        let library = self.library(library_id)?;
-        let (folder, entry) = self.resolve_folder(library, path).await?;
-        let key = SnapshotKey::new(library_id, path, options)?;
-        let version = SnapshotVersion::for_folder(&folder, &entry, options.recursive());
-        let root = library.path.clone();
-        let recursive = options.recursive();
-        let include_hidden = options.include_hidden();
-        let max_entries = self.snapshots.recursive_max_entries();
-        let snapshot = self
-            .snapshots
-            .get_or_scan(key, version, move || async move {
-                ListingEntries::scan(&folder, &root, recursive, include_hidden, max_entries).await
-            })
-            .await?;
-        Ok(snapshot.page(options))
+        Ok(self.snapshot(library_id, path, options).await?.page(options))
+    }
+
+    /// Library ごとの一覧を並べ方の順にまとめる。`libraries` は要求の順の Library の id と、その Library の評価とタグで引いた条件の組である。
+    /// 起点の `path` は Library が 1 つのときだけ指定でき、複数のときは各 Library のルートから探す。
+    pub async fn search_entries(&self, libraries: Vec<(String, ListOptions)>, path: &str, options: &ListOptions) -> Result<models::SearchListing> {
+        let mut seen = HashSet::new();
+        for (library_id, _) in &libraries {
+            self.library(library_id)?;
+            if !seen.insert(library_id.as_str()) {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("duplicate library id: {library_id}")));
+            }
+        }
+        if libraries.len() > 1 && !LibraryRelativePath::parse(path)?.segments().is_empty() {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message("path can be given only with one library"));
+        }
+        let snapshots = futures::future::try_join_all(libraries.iter().map(|(library_id, options)| self.snapshot(library_id, path, options))).await?;
+        let sources = libraries
+            .into_iter()
+            .zip(snapshots)
+            .map(|((library_id, options), snapshot)| SearchSource::new(&library_id, snapshot, options))
+            .collect();
+        Ok(SearchResults::new(sources).page(options))
     }
 
     pub async fn list_folder_summaries(&self, library_id: &str, path: &str, options: &SummaryOptions) -> Result<models::FolderSummaryListing> {
@@ -170,6 +180,22 @@ impl LibraryBrowser {
 }
 
 impl LibraryBrowser {
+    async fn snapshot(&self, library_id: &str, path: &str, options: &ListOptions) -> Result<Arc<ListingSnapshot>> {
+        let library = self.library(library_id)?;
+        let (folder, entry) = self.resolve_folder(library, path).await?;
+        let key = SnapshotKey::new(library_id, path, options)?;
+        let version = SnapshotVersion::for_folder(&folder, &entry, options.recursive());
+        let root = library.path.clone();
+        let recursive = options.recursive();
+        let include_hidden = options.include_hidden();
+        let max_entries = self.snapshots.recursive_max_entries();
+        self.snapshots
+            .get_or_scan(key, version, move || async move {
+                ListingEntries::scan(&folder, &root, recursive, include_hidden, max_entries).await
+            })
+            .await
+    }
+
     fn library(&self, library_id: &str) -> Result<&LibraryConfig> {
         self.libraries
             .iter()

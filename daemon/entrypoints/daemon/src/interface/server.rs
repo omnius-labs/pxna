@@ -260,6 +260,8 @@ pub(crate) mod tests {
             logging: LoggingConfig {
                 level: "info".to_string(),
                 json: false,
+                file: None,
+                performance: false,
             },
             libraries: vec![
                 LibraryConfig {
@@ -279,6 +281,7 @@ pub(crate) mod tests {
             listing: Default::default(),
             timeline: Default::default(),
             thumbnail,
+            scheduler: Default::default(),
             media: Default::default(),
             video: Default::default(),
             web: WebConfig {
@@ -634,8 +637,8 @@ pub(crate) mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
         let paths = || async {
-            let page = state.timeline.page("photos", &crate::service::timeline::TimelineAnchor::Newest, 100).await?;
-            Ok::<_, Error>(page.rows.into_iter().map(|row| row.path).collect::<Vec<_>>())
+            let page = state.timeline.page(&["photos".to_string()], &crate::service::timeline::TimelineAnchor::Newest, 100).await?;
+            Ok::<_, Error>(page.rows.into_iter().map(|listed| listed.row.path).collect::<Vec<_>>())
         };
         assert!(paths().await?.contains(&"/src/sub/y.png".to_string()));
 
@@ -650,8 +653,11 @@ pub(crate) mod tests {
     }
 
     async fn timeline_paths(state: &DaemonState) -> TestResult<Vec<String>> {
-        let page = state.timeline.page("photos", &crate::service::timeline::TimelineAnchor::Newest, 1000).await?;
-        Ok(page.rows.into_iter().map(|row| row.path).collect())
+        let page = state
+            .timeline
+            .page(&["photos".to_string()], &crate::service::timeline::TimelineAnchor::Newest, 1000)
+            .await?;
+        Ok(page.rows.into_iter().map(|listed| listed.row.path).collect())
     }
 
     async fn timeline_scanned(state: &DaemonState) -> TestResult {
@@ -747,26 +753,27 @@ pub(crate) mod tests {
         let auth = [("authorization", bearer.as_str())];
 
         assert_eq!(
-            send(&router, Method::GET, "/api/v1/libraries/photos/timeline/months", &[], None).await?.status,
+            send(&router, Method::GET, "/api/v1/timeline/months?libraryIds=photos", &[], None).await?.status,
             StatusCode::UNAUTHORIZED
         );
         assert_eq!(
-            send(&router, Method::GET, "/api/v1/libraries/missing/timeline/months", &auth, None).await?.status,
+            send(&router, Method::GET, "/api/v1/timeline/months?libraryIds=missing", &auth, None).await?.status,
             StatusCode::NOT_FOUND
         );
 
-        let refresh = send(&router, Method::POST, "/api/v1/libraries/photos/timeline/refresh", &auth, None).await?;
+        let refresh = send(&router, Method::POST, "/api/v1/timeline/refresh", &auth, Some(json!({"libraryIds": ["photos"]}))).await?;
         assert_eq!(refresh.status, StatusCode::ACCEPTED);
         for _ in 0..200 {
-            let status = send(&router, Method::GET, "/api/v1/libraries/photos/timeline/status", &auth, None).await?;
+            let status = send(&router, Method::GET, "/api/v1/timeline/status?libraryIds=photos", &auth, None).await?;
             assert_eq!(status.status, StatusCode::OK);
-            if status.body["running"] == false && status.body.get("completedAt").is_some() {
+            let status = &status.body["libraries"][0];
+            if status["running"] == false && status.get("completedAt").is_some() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
 
-        let entries = send(&router, Method::GET, "/api/v1/libraries/photos/timeline/entries", &auth, None).await?;
+        let entries = send(&router, Method::GET, "/api/v1/timeline/entries?libraryIds=photos", &auth, None).await?;
         assert_eq!(entries.status, StatusCode::OK);
         let mut paths = entries.body["entries"]
             .as_array()
@@ -781,9 +788,10 @@ pub(crate) mod tests {
         assert!(["modified", "archiveModified"].contains(&first["timelineDateSource"].as_str().unwrap_or_default()));
         assert_eq!(first["entry"]["metadata"]["contentType"], "image/png");
         assert_eq!(first["entry"]["metadata"]["readonly"], true);
+        assert_eq!(first["libraryId"], "photos");
         assert!(entries.body.get("previous").is_none() && entries.body.get("next").is_none());
 
-        let months = send(&router, Method::GET, "/api/v1/libraries/photos/timeline/months", &auth, None).await?;
+        let months = send(&router, Method::GET, "/api/v1/timeline/months?libraryIds=photos", &auth, None).await?;
         assert_eq!(
             months.body["months"]
                 .as_array()
@@ -794,13 +802,13 @@ pub(crate) mod tests {
             2
         );
 
-        let one = send(&router, Method::GET, "/api/v1/libraries/photos/timeline/entries?limit=1", &auth, None).await?;
+        let one = send(&router, Method::GET, "/api/v1/timeline/entries?libraryIds=photos&limit=1", &auth, None).await?;
         let next = one.body["next"].as_str().ok_or("next cursor is missing")?.to_string();
         assert!(one.body.get("previous").is_none());
         let second = send(
             &router,
             Method::GET,
-            &format!("/api/v1/libraries/photos/timeline/entries?limit=1&after={}", next.replace(':', "%3A").replace('/', "%2F")),
+            &format!("/api/v1/timeline/entries?libraryIds=photos&limit=1&after={}", next.replace(':', "%3A").replace('/', "%2F")),
             &auth,
             None,
         )
@@ -809,8 +817,13 @@ pub(crate) mod tests {
         assert_ne!(second.body["entries"][0]["entry"]["path"], one.body["entries"][0]["entry"]["path"]);
         assert!(second.body.get("next").is_none());
 
-        for query in ["after=x&month=2024-01", "after=invalid", "month=2024-13", "around=/photos/missing.png"] {
-            let response = send(&router, Method::GET, &format!("/api/v1/libraries/photos/timeline/entries?{query}"), &auth, None).await?;
+        for query in [
+            "after=x&month=2024-01",
+            "after=invalid",
+            "month=2024-13",
+            "around=/photos/missing.png&aroundLibraryId=photos",
+        ] {
+            let response = send(&router, Method::GET, &format!("/api/v1/timeline/entries?libraryIds=photos&{query}"), &auth, None).await?;
             assert!(
                 response.status == StatusCode::BAD_REQUEST || response.status == StatusCode::NOT_FOUND,
                 "{query}: {}",

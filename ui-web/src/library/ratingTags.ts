@@ -2,6 +2,7 @@ import { type QueryClient, queryOptions } from "@tanstack/react-query";
 
 import { api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
+import { entryAddress } from "../location";
 
 /// 評価の値。`none` は評価していない状態である。
 export type Rating = components["schemas"]["RatingValue"];
@@ -14,7 +15,9 @@ export const MAX_TAG_CHARS = 64;
 
 export const RATING_LABELS: Record<Rating, string> = { good: "良い", bad: "悪い", none: "未評価" };
 
-export function ratingQuery(libraryId: string, path: string) {
+/// `scope` は Library の id か、タイムラインの範囲である。キーは Entry の所在で作り、フォルダ表示とタイムラインで共有する。
+export function ratingQuery(scope: string, scopedPath: string) {
+    const { libraryId, path } = entryAddress(scope, scopedPath);
     return queryOptions({
         queryKey: ["rating", libraryId, path],
         queryFn: async ({ signal }): Promise<Rating> =>
@@ -30,7 +33,8 @@ export function ratingQuery(libraryId: string, path: string) {
 }
 
 /// 評価を保存する。保存の結果を待たずに画面へ反映するため、先にキャッシュを書き換え、失敗したら元へ戻して例外を投げる。
-export async function putRating(client: QueryClient, libraryId: string, path: string, rating: Rating): Promise<void> {
+export async function putRating(client: QueryClient, scope: string, scopedPath: string, rating: Rating): Promise<void> {
+    const { libraryId, path } = entryAddress(scope, scopedPath);
     const key = ratingQuery(libraryId, path).queryKey;
     const previous = client.getQueryData<Rating>(key);
     client.setQueryData(key, rating);
@@ -45,7 +49,8 @@ export async function putRating(client: QueryClient, libraryId: string, path: st
     }
 }
 
-export function entryTagsQuery(libraryId: string, path: string) {
+export function entryTagsQuery(scope: string, scopedPath: string) {
+    const { libraryId, path } = entryAddress(scope, scopedPath);
     return queryOptions({
         queryKey: ["entry-tags", libraryId, path],
         queryFn: async ({ signal }): Promise<string[]> =>
@@ -71,10 +76,11 @@ export const tagVocabularyQuery = queryOptions({
 /// Entry のタグを、与えた語の集合に置き換える。保存された結果をキャッシュへ入れ、新しい語を語彙へ足す。
 export async function putEntryTags(
     client: QueryClient,
-    libraryId: string,
-    path: string,
+    scope: string,
+    scopedPath: string,
     tags: string[],
 ): Promise<string[]> {
+    const { libraryId, path } = entryAddress(scope, scopedPath);
     const saved = unwrap(
         await api.PUT("/libraries/{libraryId}/tags", { params: { path: { libraryId } }, body: { path, tags } }),
     ).tags;

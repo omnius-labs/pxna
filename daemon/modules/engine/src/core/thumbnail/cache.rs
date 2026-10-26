@@ -6,15 +6,16 @@ use std::{
         Arc, Mutex as StdMutex,
         atomic::{AtomicBool, AtomicI64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use sqlx::sqlite::SqlitePool;
 use tokio_util::bytes::Bytes;
+use tracing::Instrument as _;
 
 use omnius_core_migration::sqlite::{MigrationRequest, SqliteMigrator};
 
-use crate::prelude::*;
+use crate::{perf_span, prelude::*};
 
 use super::key::ThumbnailKey;
 
@@ -112,25 +113,22 @@ impl ThumbnailCache {
     }
 
     pub async fn get(&self, key: &ThumbnailKey) -> Result<Option<CachedImage>> {
-        let lookup_started = Instant::now();
         let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT frame_count FROM entries WHERE key = ?1")
             .bind(key.hex())
             .fetch_optional(&self.db)
+            .instrument(perf_span!("thumbnail_cache_lookup"))
             .await?;
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_cache_lookup", elapsed_sec = lookup_started.elapsed().as_secs_f64(), "thumbnail index read completed");
         let Some((frame_count,)) = row else {
             return Ok(None);
         };
 
-        let read_started = Instant::now();
-        let bytes = match tokio::fs::read(self.file_path(key)).await {
+        let bytes = match tokio::fs::read(self.file_path(key)).instrument(perf_span!("thumbnail_cache_read")).await {
             Ok(bytes) => Bytes::from(bytes),
             // eviction と競合して実ファイルが先に消えた場合は、ない扱いにする。
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.into()),
         };
 
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_cache_read", elapsed_sec = read_started.elapsed().as_secs_f64(), "thumbnail file read completed");
         self.touch_later(key);
         Ok(Some(CachedImage {
             bytes,

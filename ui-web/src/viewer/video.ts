@@ -1,5 +1,6 @@
 import { api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
+import { entryAddress } from "../location";
 
 export type VideoSession = components["schemas"]["VideoSession"];
 export type PlaybackMode = "direct" | "native-hls" | "hls-js" | "unsupported";
@@ -24,9 +25,10 @@ let creationQueue: Promise<unknown> = Promise.resolve();
 
 /** StrictMode の再接続では同じ要求を使い、作成中に閉じられたセッションも応答後に終了する。 */
 export function acquireVideoSession(
-    libraryId: string,
-    path: string,
+    scope: string,
+    scopedPath: string,
 ): { session: Promise<VideoSession>; release: () => void } {
+    const { libraryId, path } = entryAddress(scope, scopedPath);
     const key = JSON.stringify([libraryId, path]);
     let pending = sessions.get(key);
     if (!pending) {

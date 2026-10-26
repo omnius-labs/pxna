@@ -22,9 +22,17 @@ Line numbers change, so recheck the relevant location when filing and when fixin
 
 | Item | Severity | Investigated | Issue |
 | --- | --- | --- | --- |
-| [Representative thumbnails are not reflected on screen after their contents are deleted](./issues/representative-thumbnail-stale.md) | Medium | 2026-10-16 | - |
+| [Deep folder trees overflow the worker stack and abort the daemon](./issues/deep-folder-trees-overflow-the-worker-stack.md) | High | 2026-10-25 | - |
+| [Media decoding has no size or dimension cap](./issues/media-decoding-has-no-size-cap.md) | High | 2026-10-25 | - |
+| [Recursive operations follow a symlink swapped in after the listing](./issues/recursive-operations-follow-swapped-symlinks.md) | Medium | 2026-10-25 | - |
+| [Pre-auth password hashing has no concurrency limit](./issues/pre-auth-hashing-has-no-concurrency-limit.md) | Medium | 2026-10-25 | - |
+| [The owner SPA can be framed by a same-site origin](./issues/owner-spa-can-be-framed.md) | Medium | 2026-10-25 | - |
+| [Malformed archives are reported as internal server errors](./issues/malformed-archives-are-reported-as-internal-errors.md) | Low | 2026-10-25 | - |
+| [Representative thumbnails are not reflected on screen after their contents are deleted](./issues/representative-thumbnail-stale.md) | Medium | 2026-10-23 | - |
 
-There is only one item at present, and it has no relationship with other items.
+The six items at the top come from the security audit of 2026-10-24; the representative-thumbnail item is unrelated to them.
+The stack overflow, the media caps and the pre-auth hashing all spend the daemon's memory or availability, so they are best fixed as one group.
+The TOCTOU and the framing header are boundary and defence issues with their own fixes, and the archive error classification stands alone.
 
 ## 3. What Is Not Included Here
 
@@ -32,13 +40,12 @@ The following are design issues whose fix has not been decided, so they are not 
 
 | Issue | Reference |
 | --- | --- |
-| TLS and exposure outside the LAN | [design.md §11.2](./design.md#tls-and-exposure-outside-the-lan) |
 | Limiting login attempts | [design.md §11.2](./design.md#limiting-login-attempts) |
+| Validating the Host header for setup and login | [design.md §11.2](./design.md#validating-the-host-header-for-setup-and-login) |
 | Multi-user and permission model | [design.md §11.2](./design.md#multi-user-and-permission-model) |
 | Persisting Operations | [design.md §11.2](./design.md#persisting-operations) |
 | Optimistic locking with ETag and If-Match | [design.md §11.2](./design.md#optimistic-locking-with-etag--if-match) |
 | Separating the admin port | [design.md §11.2](./design.md#separating-the-admin-port) |
-| Indexing search | [Listing and Search Design §8.2](./design/listing.md#indexing-search) |
 | Whether to reflect external changes in listings immediately | [Listing and Search Design §8.2](./design/listing.md#whether-to-reflect-external-changes-in-listings-immediately) |
 | Process isolation for archive handling | [Storage Layer Design §9.2](./design/storage.md#process-isolation-for-archive-handling) |
 | Password-protected archives and decrypted caches | [Storage Layer Design §9.2](./design/storage.md#password-protected-archives-and-decrypted-caches) |

@@ -1,0 +1,721 @@
+{
+ "schema": 1,
+ "measured_utc": "2026-10-24",
+ "build": {
+  "base_commit": "1773c4a",
+  "change": "HEIC/HEIF and AVIF use the ffmpeg PPM path; heif-dec is used only for alpha and fallback; JXL/JP2 keep PNG; a temporary ignored benchmark test was not committed",
+  "profile": "release"
+ },
+ "environment": {
+  "os": "Debian GNU/Linux 13 (trixie) arm64",
+  "kernel": "Linux 6.12.76-linuxkit aarch64",
+  "cpu_cores": 10,
+  "memory_bytes": 8321712128,
+  "rust": "1.96.0",
+  "ffmpeg": "n9.0.2-17-g2a571b6068 (BtbN static)",
+  "libheif": "1.23.6",
+  "note": "heif-dec was not used for these non-alpha fixtures"
+ },
+ "fixture": {
+  "synthetic": "ffmpeg lavfi mandelbrot 4032x3024, JPEG q:v 2, HEIC q90 tiled/untiled, AVIF q90",
+  "jpeg": {
+   "bytes": 1485854,
+   "sha256": "8642fda4062244434ad795a0ffa972dca967996a838bc22ced906abf9bd68b1e"
+  },
+  "heic_tiled": {
+   "bytes": 1617544,
+   "sha256": "6d90d07b7835532ef3e45b667a650a740e04a00425ee361189f27ec5e0546e41"
+  },
+  "heic_untiled": {
+   "bytes": 1599877,
+   "sha256": "4d0515e3d98faaa9d4a5af5b9d616c1e103218c0c3849ab00cf784723a61e132"
+  },
+  "avif": {
+   "bytes": 659274,
+   "sha256": "304ff053a1dfa17177a476b71ab1d2aaf678204f7de72997a5ae347853c6f67b"
+  }
+ },
+ "request": {
+  "display": {
+   "width": 2880,
+   "height": 1800,
+   "resize": "fit",
+   "format": "webp",
+   "quality": 90,
+   "rounded_long_edge": 4096
+  },
+  "thumbnail": {
+   "width": 512,
+   "height": 512,
+   "resize": "fit",
+   "format": "webp",
+   "quality": 80
+  },
+  "settings": "ThumbnailOptions::default()"
+ },
+ "procedure": {
+  "display": "5 fresh copies per format; generate on a cache miss, then cache hit",
+  "thumbnail": "another 5 fresh copies per format",
+  "breakdown": "ffmpeg PPM extraction, ImageConverter decode of PPM, resize, and WebP encode measured outside the generator"
+ },
+ "display": {
+  "tiled": {
+   "total_ms": {
+    "median": 408.5,
+    "min": 359.6,
+    "max": 653.0,
+    "runs": [
+     653.0,
+     398.2,
+     452.3,
+     359.6,
+     408.5
+    ]
+   },
+   "read_ms": {
+    "median": 132.2,
+    "min": 123.0,
+    "max": 165.0,
+    "runs": [
+     165.0,
+     123.0,
+     132.2,
+     129.8,
+     158.1
+    ]
+   },
+   "decode_ms": {
+    "median": 16.2,
+    "min": 15.2,
+    "max": 28.6,
+    "runs": [
+     17.1,
+     15.2,
+     28.6,
+     16.2,
+     15.9
+    ]
+   },
+   "resize_ms": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "runs": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "encode_ms": {
+    "median": 212.9,
+    "min": 210.0,
+    "max": 226.4,
+    "runs": [
+     210.0,
+     212.9,
+     212.8,
+     222.7,
+     226.4
+    ]
+   },
+   "bytes": 596946,
+   "runs": [
+    {
+     "run": 0,
+     "total_ms": 653.0,
+     "read_ms": 165.0,
+     "decode_ms": 17.1,
+     "resize_ms": 0.0,
+     "encode_ms": 210.0,
+     "bytes": 596946
+    },
+    {
+     "run": 1,
+     "total_ms": 398.2,
+     "read_ms": 123.0,
+     "decode_ms": 15.2,
+     "resize_ms": 0.0,
+     "encode_ms": 212.9,
+     "bytes": 596946
+    },
+    {
+     "run": 2,
+     "total_ms": 452.3,
+     "read_ms": 132.2,
+     "decode_ms": 28.6,
+     "resize_ms": 0.0,
+     "encode_ms": 212.8,
+     "bytes": 596946
+    },
+    {
+     "run": 3,
+     "total_ms": 359.6,
+     "read_ms": 129.8,
+     "decode_ms": 16.2,
+     "resize_ms": 0.0,
+     "encode_ms": 222.7,
+     "bytes": 596946
+    },
+    {
+     "run": 4,
+     "total_ms": 408.5,
+     "read_ms": 158.1,
+     "decode_ms": 15.9,
+     "resize_ms": 0.0,
+     "encode_ms": 226.4,
+     "bytes": 596946
+    }
+   ],
+   "cache_hit_ms": {
+    "median": 0.55,
+    "min": 0.45,
+    "max": 0.79,
+    "runs": [
+     0.45,
+     0.79,
+     0.45,
+     0.63,
+     0.55
+    ]
+   }
+  },
+  "untiled": {
+   "total_ms": {
+    "median": 452.5,
+    "min": 419.6,
+    "max": 495.8,
+    "runs": [
+     459.5,
+     419.6,
+     495.8,
+     438.0,
+     452.5
+    ]
+   },
+   "read_ms": {
+    "median": 201.0,
+    "min": 188.2,
+    "max": 258.4,
+    "runs": [
+     205.1,
+     194.4,
+     258.4,
+     201.0,
+     188.2
+    ]
+   },
+   "decode_ms": {
+    "median": 22.9,
+    "min": 15.2,
+    "max": 44.3,
+    "runs": [
+     15.5,
+     22.9,
+     43.1,
+     44.3,
+     15.2
+    ]
+   },
+   "resize_ms": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "runs": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "encode_ms": {
+    "median": 217.5,
+    "min": 208.1,
+    "max": 228.7,
+    "runs": [
+     208.1,
+     219.3,
+     210.3,
+     228.7,
+     217.5
+    ]
+   },
+   "bytes": 596968,
+   "runs": [
+    {
+     "run": 0,
+     "total_ms": 459.5,
+     "read_ms": 205.1,
+     "decode_ms": 15.5,
+     "resize_ms": 0.0,
+     "encode_ms": 208.1,
+     "bytes": 596968
+    },
+    {
+     "run": 1,
+     "total_ms": 419.6,
+     "read_ms": 194.4,
+     "decode_ms": 22.9,
+     "resize_ms": 0.0,
+     "encode_ms": 219.3,
+     "bytes": 596968
+    },
+    {
+     "run": 2,
+     "total_ms": 495.8,
+     "read_ms": 258.4,
+     "decode_ms": 43.1,
+     "resize_ms": 0.0,
+     "encode_ms": 210.3,
+     "bytes": 596968
+    },
+    {
+     "run": 3,
+     "total_ms": 438.0,
+     "read_ms": 201.0,
+     "decode_ms": 44.3,
+     "resize_ms": 0.0,
+     "encode_ms": 228.7,
+     "bytes": 596968
+    },
+    {
+     "run": 4,
+     "total_ms": 452.5,
+     "read_ms": 188.2,
+     "decode_ms": 15.2,
+     "resize_ms": 0.0,
+     "encode_ms": 217.5,
+     "bytes": 596968
+    }
+   ],
+   "cache_hit_ms": {
+    "median": 0.57,
+    "min": 0.37,
+    "max": 0.79,
+    "runs": [
+     0.37,
+     0.48,
+     0.57,
+     0.62,
+     0.79
+    ]
+   }
+  },
+  "avif": {
+   "total_ms": {
+    "median": 476.2,
+    "min": 459.3,
+    "max": 515.6,
+    "runs": [
+     515.6,
+     476.2,
+     459.3,
+     489.5,
+     468.9
+    ]
+   },
+   "read_ms": {
+    "median": 162.6,
+    "min": 137.5,
+    "max": 198.2,
+    "runs": [
+     162.6,
+     198.2,
+     143.2,
+     164.9,
+     137.5
+    ]
+   },
+   "decode_ms": {
+    "median": 16.5,
+    "min": 12.9,
+    "max": 61.3,
+    "runs": [
+     12.9,
+     61.3,
+     15.8,
+     16.5,
+     16.9
+    ]
+   },
+   "resize_ms": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "runs": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "encode_ms": {
+    "median": 207.1,
+    "min": 206.1,
+    "max": 265.6,
+    "runs": [
+     207.1,
+     265.6,
+     207.0,
+     225.4,
+     206.1
+    ]
+   },
+   "bytes": 591570,
+   "runs": [
+    {
+     "run": 0,
+     "total_ms": 515.6,
+     "read_ms": 162.6,
+     "decode_ms": 12.9,
+     "resize_ms": 0.0,
+     "encode_ms": 207.1,
+     "bytes": 591570
+    },
+    {
+     "run": 1,
+     "total_ms": 476.2,
+     "read_ms": 198.2,
+     "decode_ms": 61.3,
+     "resize_ms": 0.0,
+     "encode_ms": 265.6,
+     "bytes": 591570
+    },
+    {
+     "run": 2,
+     "total_ms": 459.3,
+     "read_ms": 143.2,
+     "decode_ms": 15.8,
+     "resize_ms": 0.0,
+     "encode_ms": 207.0,
+     "bytes": 591570
+    },
+    {
+     "run": 3,
+     "total_ms": 489.5,
+     "read_ms": 164.9,
+     "decode_ms": 16.5,
+     "resize_ms": 0.0,
+     "encode_ms": 225.4,
+     "bytes": 591570
+    },
+    {
+     "run": 4,
+     "total_ms": 468.9,
+     "read_ms": 137.5,
+     "decode_ms": 16.9,
+     "resize_ms": 0.0,
+     "encode_ms": 206.1,
+     "bytes": 591570
+    }
+   ],
+   "cache_hit_ms": {
+    "median": 0.36,
+    "min": 0.34,
+    "max": 1.39,
+    "runs": [
+     0.36,
+     1.39,
+     0.34,
+     0.42,
+     0.34
+    ]
+   }
+  },
+  "jpeg": {
+   "total_ms": {
+    "median": 251.7,
+    "min": 238.8,
+    "max": 314.9,
+    "runs": [
+     238.8,
+     314.9,
+     249.6,
+     261.8,
+     251.7
+    ]
+   },
+   "read_ms": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "runs": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "decode_ms": {
+    "median": 31.0,
+    "min": 27.3,
+    "max": 36.4,
+    "runs": [
+     27.3,
+     36.4,
+     27.7,
+     35.7,
+     31.0
+    ]
+   },
+   "resize_ms": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "runs": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "encode_ms": {
+    "median": 223.2,
+    "min": 208.3,
+    "max": 248.0,
+    "runs": [
+     208.3,
+     248.0,
+     208.3,
+     234.2,
+     223.2
+    ]
+   },
+   "bytes": 583396,
+   "runs": [
+    {
+     "run": 0,
+     "total_ms": 238.8,
+     "read_ms": 0.0,
+     "decode_ms": 27.3,
+     "resize_ms": 0.0,
+     "encode_ms": 208.3,
+     "bytes": 583396
+    },
+    {
+     "run": 1,
+     "total_ms": 314.9,
+     "read_ms": 0.0,
+     "decode_ms": 36.4,
+     "resize_ms": 0.0,
+     "encode_ms": 248.0,
+     "bytes": 583396
+    },
+    {
+     "run": 2,
+     "total_ms": 249.6,
+     "read_ms": 0.0,
+     "decode_ms": 27.7,
+     "resize_ms": 0.0,
+     "encode_ms": 208.3,
+     "bytes": 583396
+    },
+    {
+     "run": 3,
+     "total_ms": 261.8,
+     "read_ms": 0.0,
+     "decode_ms": 35.7,
+     "resize_ms": 0.0,
+     "encode_ms": 234.2,
+     "bytes": 583396
+    },
+    {
+     "run": 4,
+     "total_ms": 251.7,
+     "read_ms": 0.0,
+     "decode_ms": 31.0,
+     "resize_ms": 0.0,
+     "encode_ms": 223.2,
+     "bytes": 583396
+    }
+   ],
+   "cache_hit_ms": {
+    "median": 0.38,
+    "min": 0.33,
+    "max": 1.02,
+    "runs": [
+     0.33,
+     1.02,
+     0.37,
+     0.46,
+     0.38
+    ]
+   }
+  }
+ },
+ "thumbnail": {
+  "tiled": {
+   "total_ms": {
+    "median": 209.3,
+    "min": 199.4,
+    "max": 254.5,
+    "runs": [
+     254.5,
+     209.3,
+     208.0,
+     211.3,
+     199.4
+    ]
+   },
+   "bytes": 14202,
+   "runs": [
+    {
+     "run": 0,
+     "total_ms": 254.5,
+     "bytes": 14202
+    },
+    {
+     "run": 1,
+     "total_ms": 209.3,
+     "bytes": 14202
+    },
+    {
+     "run": 2,
+     "total_ms": 208.0,
+     "bytes": 14202
+    },
+    {
+     "run": 3,
+     "total_ms": 211.3,
+     "bytes": 14202
+    },
+    {
+     "run": 4,
+     "total_ms": 199.4,
+     "bytes": 14202
+    }
+   ]
+  },
+  "untiled": {
+   "total_ms": {
+    "median": 264.6,
+    "min": 259.1,
+    "max": 292.8,
+    "runs": [
+     292.8,
+     261.8,
+     264.6,
+     282.5,
+     259.1
+    ]
+   },
+   "bytes": 14130,
+   "runs": [
+    {
+     "run": 0,
+     "total_ms": 292.8,
+     "bytes": 14130
+    },
+    {
+     "run": 1,
+     "total_ms": 261.8,
+     "bytes": 14130
+    },
+    {
+     "run": 2,
+     "total_ms": 264.6,
+     "bytes": 14130
+    },
+    {
+     "run": 3,
+     "total_ms": 282.5,
+     "bytes": 14130
+    },
+    {
+     "run": 4,
+     "total_ms": 259.1,
+     "bytes": 14130
+    }
+   ]
+  },
+  "avif": {
+   "total_ms": {
+    "median": 274.3,
+    "min": 271.1,
+    "max": 320.1,
+    "runs": [
+     320.1,
+     273.5,
+     280.4,
+     274.3,
+     271.1
+    ]
+   },
+   "bytes": 14088,
+   "runs": [
+    {
+     "run": 0,
+     "total_ms": 320.1,
+     "bytes": 14088
+    },
+    {
+     "run": 1,
+     "total_ms": 273.5,
+     "bytes": 14088
+    },
+    {
+     "run": 2,
+     "total_ms": 280.4,
+     "bytes": 14088
+    },
+    {
+     "run": 3,
+     "total_ms": 274.3,
+     "bytes": 14088
+    },
+    {
+     "run": 4,
+     "total_ms": 271.1,
+     "bytes": 14088
+    }
+   ]
+  },
+  "jpeg": {
+   "total_ms": {
+    "median": 101.5,
+    "min": 100.9,
+    "max": 102.9,
+    "runs": [
+     101.5,
+     101.6,
+     102.9,
+     100.9,
+     101.2
+    ]
+   },
+   "bytes": 14186,
+   "runs": [
+    {
+     "run": 0,
+     "total_ms": 101.5,
+     "bytes": 14186
+    },
+    {
+     "run": 1,
+     "total_ms": 101.6,
+     "bytes": 14186
+    },
+    {
+     "run": 2,
+     "total_ms": 102.9,
+     "bytes": 14186
+    },
+    {
+     "run": 3,
+     "total_ms": 100.9,
+     "bytes": 14186
+    },
+    {
+     "run": 4,
+     "total_ms": 101.2,
+     "bytes": 14186
+    }
+   ]
+  }
+ }
+}

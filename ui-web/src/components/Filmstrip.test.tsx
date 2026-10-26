@@ -91,7 +91,6 @@ async function render(props: Partial<React.ComponentProps<typeof Filmstrip>> = {
     const onPages = vi.fn();
     const all = {
         listing: listingOf(1000, 200),
-        base: "/dir",
         index: 3,
         queue,
         onSelect,
@@ -129,7 +128,7 @@ it("1000 件の一覧に、1 件 56 px の横の仮想スクロールで、全�
     }
 });
 
-it("画像の位置はボタンで、押すと起点からの相対パスで移動し、開いている位置を強調する", async () => {
+it("画像の位置はボタンで、押すとその位置と Entry で移動し、開いている位置を強調する", async () => {
     mock.first = 2;
     mock.last = 4;
     const h = await render({ index: 3 });
@@ -139,7 +138,7 @@ it("画像の位置はボタンで、押すと起点からの相対パスで移�
         expect(current?.getAttribute("aria-current")).toBe("true");
         expect(byName(h.host, "img-4.png")?.hasAttribute("aria-current")).toBe(false);
         await act(async () => byName(h.host, "img-4.png")?.click());
-        expect(h.onSelect).toHaveBeenCalledExactlyOnceWith("img-4.png");
+        expect(h.onSelect).toHaveBeenCalledExactlyOnceWith({ index: 4, entry: image(4) });
         await act(async () => current?.click());
         expect(h.onSelect).toHaveBeenCalledTimes(1);
     } finally {
@@ -147,19 +146,31 @@ it("画像の位置はボタンで、押すと起点からの相対パスで移�
     }
 });
 
-it("画像でない Entry の位置は、ボタンにせず、種類のアイコンを出す", async () => {
+it("動画の位置もボタンで、押すと動画へ移動する", async () => {
     mock.first = 0;
     mock.last = 2;
     const h = await render();
     try {
-        for (const name of ["clip.mp4", "sub"]) {
-            const element = byName(h.host, name);
-            expect(element?.tagName).toBe("DIV");
-            expect(element?.querySelector("svg")).not.toBeNull();
-            await act(async () => element?.click());
-        }
+        const element = byName(h.host, "clip.mp4");
+        expect(element?.tagName).toBe("BUTTON");
+        await act(async () => element?.click());
+        expect(h.onSelect).toHaveBeenCalledExactlyOnceWith({ index: 0, entry: video });
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("画像でも動画でもない Entry の位置は、ボタンにせず、種類のアイコンを出す", async () => {
+    mock.first = 0;
+    mock.last = 2;
+    const h = await render();
+    try {
+        const element = byName(h.host, "sub");
+        expect(element?.tagName).toBe("DIV");
+        expect(element?.querySelector("svg")).not.toBeNull();
+        await act(async () => element?.click());
         expect(h.onSelect).not.toHaveBeenCalled();
-        expect(h.host.querySelectorAll("button")).toHaveLength(1);
+        expect(h.host.querySelectorAll("button")).toHaveLength(2);
     } finally {
         await h.dispose();
     }
@@ -204,13 +215,13 @@ it("見えている範囲のページを渡し、範囲が動くと前のペー�
     expect([...(h.onPages.mock.lastCall?.[0] ?? [])]).toEqual([]);
 });
 
-it("見えている範囲の画像だけサムネイルを要求し、閉じると要求を取り消す", async () => {
+it("見えている範囲の画像と動画だけサムネイルを要求し、閉じると要求を取り消す", async () => {
     mock.first = 0;
     mock.last = 4;
     const h = await render();
     const wanted = h.setWanted.mock.lastCall?.[0] as ReadonlyMap<string, number>;
     expect(wanted.has("/dir/img-2.png")).toBe(true);
-    expect(wanted.has("/dir/clip.mp4")).toBe(false);
+    expect(wanted.has("/dir/clip.mp4")).toBe(true);
     expect(wanted.has("/dir/sub")).toBe(false);
     await h.dispose();
     expect(h.setWanted.mock.lastCall?.[0]).toEqual(new Map());

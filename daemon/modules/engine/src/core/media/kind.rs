@@ -8,6 +8,8 @@ pub enum MediaKind {
     Image,
     /// `image` crate では読まず、ffmpeg で 1 枚目を取り出して読む画像。
     FfmpegImage,
+    /// HEVC で符号化された HEIF の画像。libheif の heif-dec で読み、heif-dec で読めなければ ffmpeg で読む。寸法は ffprobe で得る。
+    HeifImage,
     /// ffmpeg でフレームを取り出す動画。
     Video,
 }
@@ -33,8 +35,8 @@ impl MediaKind {
         ("ppm", Self::Image, "image/x-portable-pixmap"),
         ("hdr", Self::Image, "image/vnd.radiance"),
         ("exr", Self::Image, "image/x-exr"),
-        ("heic", Self::FfmpegImage, "image/heic"),
-        ("heif", Self::FfmpegImage, "image/heif"),
+        ("heic", Self::HeifImage, "image/heic"),
+        ("heif", Self::HeifImage, "image/heif"),
         ("avif", Self::FfmpegImage, "image/avif"),
         ("jxl", Self::FfmpegImage, "image/jxl"),
         ("jp2", Self::FfmpegImage, "image/jp2"),
@@ -82,7 +84,8 @@ mod tests {
     fn classifies_by_extension_ignoring_case_test() {
         assert_eq!(MediaKind::of_name("a.PNG"), Some(MediaKind::Image));
         assert_eq!(MediaKind::of_name("photo.final.jpeg"), Some(MediaKind::Image));
-        assert_eq!(MediaKind::of_name("IMG_0001.HEIC"), Some(MediaKind::FfmpegImage));
+        assert_eq!(MediaKind::of_name("IMG_0001.HEIC"), Some(MediaKind::HeifImage));
+        assert_eq!(MediaKind::of_name("photo.avif"), Some(MediaKind::FfmpegImage));
         assert_eq!(MediaKind::of_name("clip.Mp4"), Some(MediaKind::Video));
     }
 

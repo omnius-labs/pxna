@@ -1,10 +1,12 @@
-import { Download, FolderPlus, FolderSearch, Pencil, Trash2 } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { ClipboardPaste, Download, FolderPlus, FolderSearch, Pencil, Trash2 } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 import { actionAvailability, useEntryActions } from "../library/actionContext";
 import { beginEntryDrag, endEntryDrag, useEntryDrop } from "../library/dnd";
 import type { Entry } from "../library/entries";
 import { selectionItem, selectionValue } from "../library/selection";
 import { useTransfer } from "../library/transfer";
+import { searchHref } from "../location";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "./ui/context-menu";
 
 export function EntryMenu({
@@ -17,8 +19,9 @@ export function EntryMenu({
     allowDrop?: boolean;
 }) {
     const transfer = useTransfer();
+    const navigate = useNavigate();
     const actions = useEntryActions();
-    const dropAllowed = allowDrop && !actions?.timeline;
+    const dropAllowed = allowDrop && !actions?.crossLibrary;
     const drop = useEntryDrop(
         entry?.kind === "folder" && dropAllowed && actions
             ? { libraryId: actions.libraryId, path: entry.path }
@@ -28,7 +31,7 @@ export function EntryMenu({
             actions.libraryReadonly ||
             (entry ? entry.metadata?.readonly !== false || !!entry.file?.archive : !actions.canCreate),
         undefined,
-        actions && !actions.timeline && (!entry || (entry.kind === "folder" && allowDrop) || !!entry.file?.archive)
+        actions && !actions.crossLibrary && (!entry || (entry.kind === "folder" && allowDrop) || !!entry.file?.archive)
             ? { libraryId: actions.libraryId, path: entry?.path ?? actions.folderPath ?? "/" }
             : undefined,
     );
@@ -47,7 +50,7 @@ export function EntryMenu({
                 <div
                     {...drop}
                     className="h-full data-[drop-state=allowed]:rounded data-[drop-state=allowed]:ring-2 data-[drop-state=allowed]:ring-ring data-[drop-state=blocked]:cursor-not-allowed data-[drop-state=blocked]:ring-2 data-[drop-state=blocked]:ring-destructive"
-                    draggable={!!entry && !actions.editing && !actions.timeline}
+                    draggable={!!entry && !actions.editing && !actions.crossLibrary}
                     onDragStart={(event) => {
                         event.stopPropagation();
                         if (!entry || actions.editing) {
@@ -92,7 +95,7 @@ export function EntryMenu({
                     }
                 }}
             >
-                {!actions.timeline && (
+                {!actions.crossLibrary && (
                     <ContextMenuItem
                         disabled={!available.create}
                         onSelect={() => {
@@ -121,7 +124,7 @@ export function EntryMenu({
                 <ContextMenuItem disabled={!actions.selection.items.size} onSelect={() => actions.copy?.()}>
                     コピー
                 </ContextMenuItem>
-                {!actions.timeline && (
+                {!actions.crossLibrary && (
                     <ContextMenuItem
                         disabled={
                             !transfer?.canPaste ||
@@ -143,9 +146,24 @@ export function EntryMenu({
                         貼り付け
                     </ContextMenuItem>
                 )}
-                {actions.timeline && (
+                {actions.crossLibrary && (
                     <ContextMenuItem disabled={actions.selection.items.size !== 1} onSelect={() => actions.reveal?.()}>
                         フォルダで表示
+                    </ContextMenuItem>
+                )}
+                {!actions.crossLibrary && !entry && (
+                    <ContextMenuItem
+                        onSelect={() =>
+                            void navigate({
+                                href: searchHref({
+                                    libraryIds: [actions.libraryId],
+                                    path: actions.folderPath ?? "/",
+                                    tags: [],
+                                }),
+                            })
+                        }
+                    >
+                        このフォルダ内を検索
                     </ContextMenuItem>
                 )}
                 <ContextMenuItem disabled={!available.download} asChild={available.download}>
@@ -169,7 +187,7 @@ export function EntryToolbar() {
     const downloadName = [...actions.selection.items.keys()][0]?.split("/").at(-1);
     return (
         <div className="flex items-center gap-1">
-            {!actions.timeline && (
+            {!actions.crossLibrary && (
                 <button
                     type="button"
                     aria-label="新しいフォルダ"
@@ -201,7 +219,7 @@ export function EntryToolbar() {
             >
                 <Trash2 className="size-4" />
             </button>
-            {!actions.timeline && (
+            {!actions.crossLibrary && (
                 <button
                     type="button"
                     aria-label="貼り付け"
@@ -212,10 +230,10 @@ export function EntryToolbar() {
                     }}
                     className="rounded p-1.5 disabled:opacity-40"
                 >
-                    貼り付け
+                    <ClipboardPaste className="size-4" />
                 </button>
             )}
-            {actions.timeline && (
+            {actions.crossLibrary && (
                 <button
                     type="button"
                     aria-label="フォルダで表示"

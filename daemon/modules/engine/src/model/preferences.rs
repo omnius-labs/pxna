@@ -65,12 +65,17 @@ pub struct SortPreference {
 
 /// オーナーが選んでサーバに保存する、web の見た目と振る舞いの値の組。
 ///
-/// 広い画面と狭い画面の 2 組と、画面の幅に関係しない並べ替えを持つ。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// 広い画面と狭い画面の 2 組と、画面の幅に関係しない並べ替えとタイムラインに並べる Library を持つ。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Preferences {
     pub wide: DisplaySet,
     pub narrow: DisplaySet,
     pub sort: SortPreference,
+    /// タイムラインに並べる Library の id。`None` はすべての Library である。
+    ///
+    /// 設定から消えた Library の id も保存したまま持ち、web が読み飛ばす。
+    #[serde(rename = "timelineLibraries", default, skip_serializing_if = "Option::is_none")]
+    pub timeline_libraries: Option<Vec<String>>,
 }
 
 impl DisplaySet {
@@ -86,10 +91,25 @@ impl DisplaySet {
 }
 
 impl Preferences {
+    pub const MAX_TIMELINE_LIBRARIES: usize = 64;
+    const MAX_LIBRARY_ID_LENGTH: usize = 64;
+
     /// 値の範囲を確かめる。列挙の値は、読み込みの時点で既知の値に限られる。
     pub fn validate(&self) -> Result<()> {
         self.wide.validate("wide")?;
-        self.narrow.validate("narrow")
+        self.narrow.validate("narrow")?;
+        if let Some(libraries) = &self.timeline_libraries {
+            if libraries.is_empty() || libraries.len() > Self::MAX_TIMELINE_LIBRARIES {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("timelineLibraries must have 1 to {} ids", Self::MAX_TIMELINE_LIBRARIES)));
+            }
+            for id in libraries {
+                let valid = !id.is_empty() && id.len() <= Self::MAX_LIBRARY_ID_LENGTH && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+                if !valid {
+                    return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("timelineLibraries has an invalid library id: {id:?}")));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -112,6 +132,7 @@ impl Default for Preferences {
                 key: SortKey::Name,
                 order: SortOrder::Asc,
             },
+            timeline_libraries: None,
         }
     }
 }
@@ -140,6 +161,31 @@ mod tests {
                 assert_eq!(*preferences.validate().unwrap_err().kind(), ErrorKind::InvalidInput, "{tile_size} {narrow}");
             }
         }
+    }
+
+    #[test]
+    fn rejects_invalid_timeline_libraries_test() {
+        for libraries in [vec![], vec!["a/b".to_string()], vec![String::new()], vec!["x".to_string(); 65]] {
+            let preferences = Preferences {
+                timeline_libraries: Some(libraries.clone()),
+                ..Preferences::default()
+            };
+            assert_eq!(*preferences.validate().unwrap_err().kind(), ErrorKind::InvalidInput, "{libraries:?}");
+        }
+        let preferences = Preferences {
+            timeline_libraries: Some(vec!["photos".to_string(), "gone.lib".to_string()]),
+            ..Preferences::default()
+        };
+        assert!(preferences.validate().is_ok());
+    }
+
+    #[test]
+    fn reads_values_saved_before_timeline_libraries_test() -> testresult::TestResult {
+        let mut json = serde_json::to_value(Preferences::default())?;
+        assert!(json.get("timelineLibraries").is_none(), "None は書かない");
+        json.as_object_mut().unwrap().remove("timelineLibraries");
+        assert_eq!(serde_json::from_value::<Preferences>(json)?.timeline_libraries, None);
+        Ok(())
     }
 
     #[test]

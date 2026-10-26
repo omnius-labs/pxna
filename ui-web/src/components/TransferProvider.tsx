@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useActivity } from "../library/activity";
-import { type ClipboardContents, useClipboard } from "../library/clipboard";
+import { type TransferSource, useClipboard } from "../library/clipboard";
 import { type CollisionChoice, findCollisions, resolveConflict, type TransferDestination } from "../library/collision";
 import { canMutate, childPath, transferSelection } from "../library/entryActions";
 import { useNarrowScreen } from "../library/preferences";
@@ -56,7 +56,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
             setDuplicateOnly(duplicate);
             setNames(collisions);
         });
-    const transfer = async (source: ClipboardContents, destination: TransferDestination) => {
+    const transfer = async (source: TransferSource, destination: TransferDestination) => {
         if (lock.current || narrow || !source.entries.length) return;
         lock.current = true;
         setBusy(true);
@@ -173,8 +173,9 @@ export function TransferProvider({ children }: { children: ReactNode }) {
                 canPaste: !!clipboard.contents && !busy && !narrow,
                 transfer,
                 upload,
+                // タイムラインで複数の Library から選んだときは、送り元の Library ごとに順に送る。
                 paste: async (destination) => {
-                    if (clipboard.contents) await transfer(clipboard.contents, destination);
+                    for (const source of clipboard.contents?.sources ?? []) await transfer(source, destination);
                 },
             }}
         >

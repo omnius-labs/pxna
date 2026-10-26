@@ -22,6 +22,7 @@ impl apis::thumbnails::Thumbnails for ApiServer {
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
+        header_params: &models::GetThumbnailHeaderParams,
         path_params: &models::GetThumbnailPathParams,
         query_params: &models::GetThumbnailQueryParams,
     ) -> std::result::Result<apis::thumbnails::GetThumbnailResponse, ()> {
@@ -100,6 +101,54 @@ mod tests {
 
         let default_size = get("path=/photos/wide.png".to_string()).await?;
         assert_eq!(default_size.image_size()?, (256, 256), "width と height の既定値は 256");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn thumbnail_request_spans_share_one_request_test() -> TestResult {
+        use crate::logging::SpanCapture;
+
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        write_png(&fixture._dir.path().join("library/photos/spans.png"), 600, 300)?;
+        let router = router(&fixture);
+        let cookie = owner_cookie(&router).await?;
+
+        let capture = SpanCapture::start();
+        let response = send(&router, Method::GET, &thumbnail_uri("path=/photos/spans.png&variant=display"), &[("cookie", &cookie)], None).await?;
+        assert_eq!(response.status, StatusCode::OK);
+
+        // 並行する別のテストの span も入るので、この要求の `request` で絞る。
+        let names = ["thumbnail_request", "thumbnail_generate", "thumbnail_production", "thumbnail_store"];
+        let spans = capture
+            .wait_for(|fields| {
+                let request = fields.iter().find(|line| line["operation"] == "thumbnail_request" && line["path"] == "/photos/spans.png")?;
+                let mine: Vec<_> = fields.iter().filter(|line| line["request"] == request["request"]).cloned().collect();
+                names.iter().all(|name| mine.iter().any(|line| line["operation"] == *name)).then_some(mine)
+            })
+            .await;
+        let span = |name: &str| spans.iter().find(|line| line["operation"] == name).cloned().unwrap_or_default();
+        assert_eq!(span("thumbnail_request")["ok"].as_bool(), Some(true));
+        for (name, parent) in [
+            ("thumbnail_generate", "thumbnail_request"),
+            ("thumbnail_production", "thumbnail_generation"),
+            ("thumbnail_store", "thumbnail_production"),
+        ] {
+            assert_eq!(span(name)["parent"].as_str(), Some(parent), "spawn した生成も同じ要求に入る: {name}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn display_priority_header_selects_prefetch_or_rejects_unknown_values_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        write_png(&fixture._dir.path().join("library/photos/wide.png"), 600, 300)?;
+        let router = router(&fixture);
+        let cookie = owner_cookie(&router).await?;
+        let uri = thumbnail_uri("path=/photos/wide.png&variant=display");
+        for (priority, status) in [("prefetch", StatusCode::OK), ("interactive", StatusCode::OK), ("urgent", StatusCode::BAD_REQUEST)] {
+            let response = send(&router, Method::GET, &uri, &[("cookie", &cookie), ("pxna-priority", priority)], None).await?;
+            assert_eq!(response.status, status, "{priority}");
+        }
         Ok(())
     }
 
