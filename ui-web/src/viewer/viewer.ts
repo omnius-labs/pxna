@@ -36,35 +36,35 @@ export async function findEntry(
     return undefined;
 }
 
-/// 前後への移動で止まる Entry の種類。操作による移動は画像だけで、スライドショーの自動の移動は動画も含む。
-export type StepKinds = readonly ("image" | "video")[];
-const IMAGES: StepKinds = ["image"];
-export const SLIDESHOW_KINDS: StepKinds = ["image", "video"];
+/// 前後への移動で止まる Entry か。ビューアで開ける画像と動画に止まり、それ以外は飛ばす。
+export function isViewable(entry: Entry): boolean {
+    const kind = entryKind(entry);
+    return kind === "image" || kind === "video";
+}
 
-/// 動画は単独で開き、操作による前後への移動では画像以外を飛ばす。未読のページも読み終えてから移る。
+/// 前後の画像か動画へ移る。未読のページも読み終えてから移る。
 export async function neighbor(
     listing: Listing,
     index: number,
     step: -1 | 1,
     signal: AbortSignal,
-    kinds: StepKinds = IMAGES,
 ): Promise<IndexedEntry | undefined> {
     const snapshot = listing.snapshot;
     for (let next = index + step; next >= (listing.firstIndex ?? 0) && next < (listing.totalCount ?? 0); next += step) {
         await readIndex(listing, next, signal, snapshot);
         const entry = listing.entryAt(next);
-        if (entry && (kinds as readonly string[]).includes(entryKind(entry))) return { index: next, entry };
+        if (entry && isViewable(entry)) return { index: next, entry };
     }
     signal.throwIfAborted();
     return undefined;
 }
 
-/// 先読みで一覧の未読のページを増やさない。未読なら移動の操作を待ち、端まで画像がなければボタンを無効にする。
+/// 先読みで一覧の未読のページを増やさない。未読なら移動の操作を待ち、端まで画像も動画もなければボタンを無効にする。
 export function loadedNeighbor(listing: Listing, index: number, step: -1 | 1): IndexedEntry | "unread" | undefined {
     for (let next = index + step; next >= (listing.firstIndex ?? 0) && next < (listing.totalCount ?? 0); next += step) {
         const entry = listing.entryAt(next);
         if (!entry) return "unread";
-        if (entryKind(entry) === "image") return { index: next, entry };
+        if (isViewable(entry)) return { index: next, entry };
     }
     return undefined;
 }

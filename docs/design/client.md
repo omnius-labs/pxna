@@ -192,14 +192,16 @@ The order of previous and next follows the same sort as the listing.
 When moving to an Entry on a page not yet read, that page is read.
 The display images of one before and one after are requested in advance, so they are shown without waiting when moved to.
 The original images before and after are not requested in advance.
-The targets of moving back and forth are only the images in the current listing, and Entries that are not images are skipped.
+The targets of moving back and forth are the images and videos in the current listing, and Entries that are neither are skipped. Arrow keys pressed while focus is on the video player are left to the player.
+When the destination is already known from back and forth movement, the filmstrip, or undo in rate mode, the viewer opens it at that position without waiting for the listing to be searched again, so neither "読み込み中…" (Loading…) nor a rebuilt filmstrip appears between Entries.
 Opening the viewer pushes onto the URL history, and moving back and forth and closing do not.
 The browser's back operation also closes the viewer, and even when a URL is opened directly with the viewer open, the same image appears.
 
-The wide-screen image viewer has a filmstrip at the bottom edge.
+The wide-screen image and video viewer has a filmstrip at the bottom edge.
 The filmstrip assigns the same width to every Entry of the current listing (including search results), and lays them out horizontally in the same order as the listing.
-At image positions it shows thumbnails, highlights the open image, and moves to the clicked image.
-At the positions of Entries that are not images it shows a faint icon indicating the kind and does not accept clicks.
+At image and video positions it shows thumbnails, highlights the open Entry, and moves to the clicked Entry.
+At the positions of other Entries it shows a faint icon indicating the kind and does not accept clicks.
+While the open Entry is being searched for, the filmstrip stays at the previous position instead of being rebuilt.
 The overall width is decided from `totalCount`, and only the pages of the range that became visible by scrolling horizontally are read (§3.5).
 When the open image changes, it scrolls until that position comes to the center.
 Thumbnails use the crop shape and are requested under the same queue rules as the listing (§4).
@@ -209,9 +211,11 @@ The image viewer has a slideshow and full-screen display through the Fullscreen 
 The slideshow advances to the next image 5 seconds after the display image appears, and stops at the last image.
 When moving back or forth midway, the 5 seconds are counted again from the image moved to.
 Even for an image whose display image could not be read, it advances to the next once 5 seconds have passed since the failure was known.
-The slideshow's automatic movement stops at videos as well as images. When it arrives at a video it starts playback automatically, does not advance in 5 seconds, and advances to the next after playing to the end. When it becomes known that playback is impossible, such as when the video's information cannot be read, it advances without stopping. It stops after the last video finishes playing. Back and forth movement by operation continues to follow only images. A slideshow can be started only from an image, and even while it is at a video, the operation to stop the slideshow is shown.
+The slideshow's automatic movement stops at videos as well as images. When it arrives at a video it starts playback automatically, does not advance in 5 seconds, and advances to the next after playing to the end. When it becomes known that playback is impossible, such as when the video's information cannot be read, it advances without stopping. It stops after the last video finishes playing. A slideshow can be started only from an image, and even while it is at a video, the operation to stop the slideshow is shown.
 The wide-screen image and video viewer has rate mode, used to record ratings.
-It is entered with the header button or `r`, and exited by pressing again. While in it, ← records bad and moves to the next Entry, → records good and moves to the next Entry, and ↑ moves to the next Entry without rating. Rating and moving are done in one key operation, and it moves without waiting for the record to complete.
+It is entered with the header button or `r`, and exited by pressing again. While in it, ← records bad and moves to the next Entry, → records good and moves to the next Entry, and ↓ records unrated (`none`) and moves to the next Entry. Rating and moving are done in one key operation, and it moves without waiting for the record to complete.
+↑ undoes the last of these operations: it returns to the Entry that was rated and writes back the rating it had before. Undo goes back one operation at a time, newest first, and the history is kept only while the viewer is open. The rating before an operation is taken from the cache, or read from the server before the record is sent. If that read fails, the record is still sent, and undoing that operation fails with a toast. Records to the same Entry are sent in order, so an undo does not overtake the record it undoes.
+During rate mode, four buttons laid out in a cross like the arrow keys are shown at the bottom right of the display area, and do the same as the keys. For a video they are raised above the player's controls.
 The next Entry stops at videos as well as images. At the last Entry it does not move and only records the rating.
 The open Entry's rating is shown beside the name. For an Entry that is not rated, a guide to the keys is shown. A saved rating is also shown when reopened.
 It is not used at the same time as the slideshow, and starting one stops the other. When saving a rating fails, a toast notifies.
@@ -507,7 +511,7 @@ When it finishes changing Entries, the timelines that list a changed Library and
 "フォルダで表示" (Show in folder) opens the selected Entry's parent folder in folder view, selects that Entry, and scrolls to the display position.
 For an Entry inside an archive, it opens the folder inside that archive.
 
-The viewer moves to the previous and next images in timeline order. The range the viewer holds also discards Entries farther than 1000 items from the open Entry and the filmstrip's range. The filmstrip does not read beyond 3000 items from the open Entry. This is to avoid holding everything between the open Entry and distant positions, since the range read is one contiguous range.
+The viewer moves to the previous and next images and videos in timeline order. The range the viewer holds also discards Entries farther than 1000 items from the open Entry and the filmstrip's range. The filmstrip does not read beyond 3000 items from the open Entry. This is to avoid holding everything between the open Entry and distant positions, since the range read is one contiguous range.
 The filmstrip lines up the Entries of the range read and reads the continuation when scrolled to the end.
 When opened directly from the URL's `view`, the range containing that Entry in the center is read.
 
@@ -740,19 +744,29 @@ The operation is light, but both the listing and the tree would need editing par
 A method where rename is in place and only new folder uses a dialog.
 There would be two kinds of operation and the explanation of the rules would be doubled, so we rejected it.
 
-#### Rate Mode Bundles Rating and Moving into ← → ↑
+#### Rate Mode Bundles Rating and Moving into ← → ↓, and Undoes with ↑
 
 **Decision**
-In rate mode, → is used for recording good and moving to the next Entry, ← for recording bad and moving to the next Entry, and ↑ for moving to the next Entry without rating. Recording does not make moving wait (§3.4).
+In rate mode, → is used for recording good and moving to the next Entry, ← for recording bad and moving to the next Entry, and ↓ for recording unrated and moving to the next Entry. ↑ undoes the last of these operations, returning to that Entry and writing back its previous rating. Recording does not make moving wait (§3.4). The same four operations are also buttons laid out in a cross.
 
 **Reason**
 Sorting is work of looking at images one by one and deciding, so if rating and moving to the next were separate operations, the operations would double in proportion to the number of images.
 The left and right keys are assigned to the two-choice rating, and both advance to the next Entry. The ordinary meaning of ← → as "move back and forth" is replaced only during rate mode, so the direction of rating and the direction of moving do not coincide. A separate operation for entering is prepared so that it is not mistaken for ordinary movement.
 By moving without waiting for the record, communication delay does not become a delay in consecutive operations.
+Because every rating key advances, a wrong key moves past the Entry at once. Undo returns to it and restores the rating in one operation, without leaving rate mode.
+The buttons mirror the arrow keys so that the assignment can be read from the screen, and rating can be done with the mouse alone.
 
-**Rejected alternative**
+**Rejected alternative 1**
 A method that puts the rating keys at another position such as number keys and leaves moving to the existing keys.
 The inputs would not be mixed, but two operations would be needed for rating and moving, so we rejected it.
+
+**Rejected alternative 2**
+A method where ↑ moves to the next Entry without rating (the previous method).
+A mistake could only be fixed by leaving rate mode, moving back, and rating again, so we rejected it.
+
+**Rejected alternative 3**
+A method where undo only returns to the previous Entry without writing back its rating.
+The wrong rating would stay unless rated again, and an Entry that should be unrated could not be restored without another key, so we rejected it.
 
 #### Use shadcn/ui for Parts Such as Menus and Dialogs
 
@@ -865,7 +879,7 @@ A method that discards the results on the first failure loses sight of Operation
 #### The Slideshow Plays a Video to the End Before Advancing
 
 **Decision**
-The slideshow's automatic movement also stops at videos, and a video is played to the end before advancing to the next. Back and forth movement by operation follows only images (§3.4).
+The slideshow's automatic movement also stops at videos, and a video is played to the end before advancing to the next (§3.4).
 
 **Reason**
 If videos were skipped, a folder mixing images and videos could not be viewed as a flow.
@@ -1004,16 +1018,16 @@ The user could decide the transfer volume, but an operation would be needed ever
 
 **Decision**
 The filmstrip assigns the same width to every Entry of the current listing, lays them out in the same order as the listing, and reads only the pages of the range that became visible (§3.4).
-Only images show thumbnails and can be moved to by clicking, and at the positions of Entries that are not images, an icon showing the kind is shown.
+Images and videos show thumbnails and can be moved to by clicking, and at the positions of other Entries, an icon showing the kind is shown.
 
 **Reason**
 The listing API cannot filter by kind (§5.2's "Whether to filter listings by kind"), and `totalCount` counts all Entries.
 How many images there are and where they are in the listing is not known until all pages are read.
 If the filmstrip's positions are aligned with the listing's order, the overall width is decided from `totalCount` alone, and as with the listing, it can be displayed by reading only the page jumped to by scrolling (§3.5).
 The width is not varied by Entry kind because the positions of Entries on unread pages are computed without knowing their kind.
-Entries that are not images are not made targets for moving by click, to align with the rule limiting the targets of moving back and forth to images (§3.4).
-The cost is that in ranges where Entries that are not images continue, only icons line up.
-The number of images is not known, so it also does not indicate which number the open image is.
+Other Entries are not made targets for moving by click, to align with the rule limiting the targets of moving back and forth to images and videos (§3.4).
+The cost is that in ranges where other Entries continue, only icons line up.
+The number of images and videos is not known, so it also does not indicate which number the open Entry is.
 
 **Rejected alternative 1**
 A method that places the open image in the center and lines up only a few images before and after.
@@ -1551,8 +1565,8 @@ Range selection reads unread pages first, shows progress in the status bar, and 
 Search is handled by search mode in [SearchPage.tsx](../../ui-web/src/pages/SearchPage.tsx), which spans Libraries like the timeline: its Entries carry `/{libraryId}{Library-relative path}` as their path, and it shares the grid, list, viewer, selection, info panel, and Entry operations with the timeline's rules (§3.6). The conditions are in the left area ([SearchPanel.tsx](../../ui-web/src/components/SearchPanel.tsx)) in place of the tree: the search terms field, a checkbox per Library, the start (a popover holding the picking mode of [Tree.tsx](../../ui-web/src/components/Tree.tsx), only while one Library is checked), "サブフォルダを含めない", the rating, and a checkbox per tag word. Terms are put in the URL when input stops for 300 ms ([useDebouncedParam.ts](../../ui-web/src/library/useDebouncedParam.ts)), and the other conditions immediately, replacing the URL. On a narrow screen only the terms field stays under the header and the rest is in the drawer, whose button shows the number of narrowing conditions. The last conditions are kept for the tab by [searchReturn.ts](../../ui-web/src/library/searchReturn.ts) for the switch's "検索". The old `/search/{libraryId}` and the `/browse` with `q` and `deep=1` are replaced with a `/search` URL.
 The paged listing store in [listing.ts](../../ui-web/src/library/listing.ts) reads either a folder or a search (`ListingSource`), and a search is requested with `listSearchEntries` through `fetchSearchPage` in [entries.ts](../../ui-web/src/library/entries.ts), which turns each Entry's path into the keyed path. Grid, List, and the viewer take the source; the viewer moves among the search results. For subtree results, the parent folder is shown below the name in the grid, in the "場所" (Location) column in a wide screen's list, and at the start of the second line in a narrow screen's list; direct children of the start are shown as ".". During a subtree search, "検索中…" (Searching…) is displayed, and if the search results are 0, "一致する項目がありません。" (No matching items.) is displayed, and on truncation of any Library it guides narrowing the Libraries or moving the start down and searching again. Opening a folder or archive result moves to that position in folder view and ends the search.
 The tree reads folder-like Entries in order by `offset` and shows children after fetching all pages. When the snapshot's id changes, it rereads from the start.
-The image and video viewer also uses the same listing data, and reads pages in order until the Entry of the relative path that `view` of a directly opened URL points to is found. Moving to the previous and next images skips non-images, and moves in one operation after finishing reading unread pages too. The display images of one before and one after in the loaded range are prefetched. The original image is fetched at a timing decided from the format, size, and the display preferences' value for swapping to the original image, and the size of the display image request is also decided by the same result ([viewer.ts](../../ui-web/src/viewer/viewer.ts)). Zoom is done only with the wheel.
-The wide-screen image viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), and the header's slideshow, full-screen, download, and delete buttons. On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1).
+The image and video viewer also uses the same listing data, and reads pages in order until the Entry of the relative path that `view` of a directly opened URL points to is found. Moving to the previous and next Entries stops at images and videos and skips the rest, and moves in one operation after finishing reading unread pages too. When the destination is known, it is opened at that position without waiting for the search. The display images of the image before and after in the loaded range are prefetched. The original image is fetched at a timing decided from the format, size, and the display preferences' value for swapping to the original image, and the size of the display image request is also decided by the same result ([viewer.ts](../../ui-web/src/viewer/viewer.ts)). Zoom is done only with the wheel.
+The wide-screen image and video viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), and the image viewer has the header's slideshow, full-screen, download, and delete buttons. Rate mode's buttons and undo history are in [Viewer.tsx](../../ui-web/src/components/Viewer.tsx). On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1).
 Parts are built with Tailwind, the shadcn/ui parts in `ui-web/src/components/ui`, and in-house code.
 On a wide screen, from the listing's context menu and the toolbar, one can create folders, rename, delete, and download a single file. Creating, renaming, and deleting can also use key operations. In the tree too, one can create inside, rename, and delete the right-clicked folder. Creating and renaming are done in the modal dialog of [NameDialog.tsx](../../ui-web/src/components/NameDialog.tsx), which shows the target's path. Whether something can be changed is decided by the logical OR of the Library's `readonly` and the Entry's or the current folder's `metadata.readonly`. After success, that Library's listing and tree are reread.
 [clipboard.ts](../../ui-web/src/library/clipboard.ts) holds the targets of cut and copy across authenticated screens. They can be operated with the menu and Ctrl or ⌘ X, C, and V, and during cut the targets in the grid and list are shown faintly. Paste targets the current folder, or a tile or tree folder, and transfer to another Library is also possible.
