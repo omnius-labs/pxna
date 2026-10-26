@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use axum::{
     body::Body,
@@ -42,13 +42,32 @@ impl ThumbnailRoute {
             return ApiError::unauthorized().into_response();
         }
 
+        let started = Instant::now();
+        let mut resolve_sec = 0.0;
+        let mut path = String::new();
+        let mut variant = None;
         let result = async {
             let Query(params) = query.map_err(|rejection| Error::new(ErrorKind::InvalidInput).with_message(rejection.body_text()))?;
+            path = params.path.clone();
             let request = Self::request(&params, state.conf.thumbnail.format)?;
+            variant = Some(request.variant);
             let source = state.library.thumbnail_source(&library_id, &params.path).await?;
+            resolve_sec = started.elapsed().as_secs_f64();
             Ok::<_, Error>(state.thumbnails.generate_resolved(source, &request).await?)
         }
         .await;
+        tracing::debug!(
+            target: "pxna::performance",
+            operation = "thumbnail_request",
+            library_id,
+            path,
+            variant = ?variant,
+            ok = result.is_ok(),
+            bytes = result.as_ref().map_or(0, |thumbnail| thumbnail.bytes.len()),
+            resolve_sec,
+            elapsed_sec = started.elapsed().as_secs_f64(),
+            "thumbnail request handled"
+        );
 
         match result {
             Ok(thumbnail) => Self::response(thumbnail),

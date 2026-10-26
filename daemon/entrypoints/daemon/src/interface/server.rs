@@ -260,6 +260,8 @@ pub(crate) mod tests {
             logging: LoggingConfig {
                 level: "info".to_string(),
                 json: false,
+                file: None,
+                performance: false,
             },
             libraries: vec![
                 LibraryConfig {

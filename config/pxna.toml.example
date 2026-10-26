@@ -9,6 +9,8 @@ state_dir = "/state"         # compose.yaml mounts ./.pxna/state here
 [logging]
 level = "info" # "trace" | "debug" | "info" | "warn" | "error"
 json = true
+# file = "/state/pxna.log" # Also append the log to this file (./.pxna/state/pxna.log on the host)
+# performance = true       # Log processing times (pxna::performance) at debug level even when level is "info"
 
 [web]
 dir = "/opt/pxna/web" # The web UI built into the image

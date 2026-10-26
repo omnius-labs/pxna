@@ -110,6 +110,12 @@ The configuration is `config/pxna.toml`, created from [config/pxna.toml.example]
 `TZ` (default `Asia/Tokyo`) sets the time zone used by the timeline.
 The image built from the `Dockerfile` runs as UID/GID `10001:10001`, and its configuration directory must be writable so the daemon can create its process lock. Set `[web] dir` to `/opt/pxna/web` when supplying another configuration.
 
+Run `stop.sh` to stop and remove the container. `.pxna/state` and `config/pxna.toml` are kept (arguments are passed to `docker compose down`):
+
+```sh
+./stop.sh
+```
+
 ### Adding Libraries
 
 `.env` sets only one directory. To add more, copy the override template; `docker compose` merges `compose.override.yaml` automatically, and it is not tracked by git:

@@ -624,6 +624,8 @@ state_dir = "./state"
 [logging]
 level = "info"
 json = false
+# file = "./pxna.log"
+# performance = false
 
 [web]
 dir = "/usr/share/pxna/web"
@@ -635,6 +637,8 @@ path = "/srv/photos"
 readonly = false
 ```
 
+`[logging] file` appends the log to that file in addition to standard output, and a relative path is based on the configuration directory.
+`[logging] performance = true` turns on the `pxna::performance` measurement logs at debug level even when `level` is `info`, and `RUST_LOG` overrides both.
 `[web] dir` is the directory of the web build output the daemon serves, and relative paths are based on the configuration directory.
 If omitted, the daemon provides only the API (§10.1).
 `[web] insecure_cookie = true` removes `Secure` and the `__Host-` prefix from the session cookie and makes the name `pxna_session`.

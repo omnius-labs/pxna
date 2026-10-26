@@ -1,10 +1,7 @@
-use std::io::Cursor;
+use std::{io::Cursor, time::Instant};
 
-use image::{
-    DynamicImage, ImageDecoder as _, ImageReader, Rgba, RgbaImage,
-    codecs::jpeg::JpegEncoder,
-    imageops::{self, FilterType},
-};
+use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
+use image::{DynamicImage, ImageDecoder as _, ImageReader, Rgba, RgbaImage, codecs::jpeg::JpegEncoder, imageops};
 
 use super::WebpEncoder;
 use crate::{
@@ -32,8 +29,34 @@ pub struct ImageConverter;
 impl ImageConverter {
     pub fn convert(input: &[u8], opts: &ImageConvertOptions) -> Result<Vec<u8>> {
         Self::validate(opts)?;
-        let image = Self::resize(Self::decode(input)?, opts)?;
-        Self::encode(&image, opts.format_type, opts.quality)
+        let started = Instant::now();
+        let decoded = Self::decode(input)?;
+        let decode_sec = started.elapsed().as_secs_f64();
+        let (source_width, source_height) = (decoded.width(), decoded.height());
+
+        let resizing = Instant::now();
+        let image = Self::resize(decoded, opts)?;
+        let resize_sec = resizing.elapsed().as_secs_f64();
+
+        let encoding = Instant::now();
+        let output = Self::encode(&image, opts.format_type, opts.quality)?;
+        tracing::debug!(
+            target: "pxna::performance",
+            operation = "image_convert",
+            input_bytes = input.len(),
+            source_width,
+            source_height,
+            output_width = image.width(),
+            output_height = image.height(),
+            output_bytes = output.len(),
+            format = ?opts.format_type,
+            decode_sec,
+            resize_sec,
+            encode_sec = encoding.elapsed().as_secs_f64(),
+            total_sec = started.elapsed().as_secs_f64(),
+            "image converted"
+        );
+        Ok(output)
     }
 
     /// EXIF の向きを反映して読む。反映しないと、縦に撮った写真が横向きのまま並ぶ。
@@ -62,18 +85,18 @@ impl ImageConverter {
 
         Ok(match opts.resize_type {
             // 縦横比を無視して、枠の大きさにする。
-            ImageResizeType::Manual => image.resize_exact(target_w, target_h, filter),
+            ImageResizeType::Manual => Self::scale(&image, target_w, target_h, filter)?,
             // 枠を覆うまで拡大縮小し、anchor の位置で枠の大きさに切り抜く。
             ImageResizeType::Crop => {
                 let scale = f32::max(target_w as f32 / src_w, target_h as f32 / src_h);
-                let scaled = image.resize_exact((src_w * scale).ceil().max(1.0) as u32, (src_h * scale).ceil().max(1.0) as u32, filter);
+                let scaled = Self::scale(&image, (src_w * scale).ceil().max(1.0) as u32, (src_h * scale).ceil().max(1.0) as u32, filter)?;
                 let (x, y) = Self::anchor_offset(opts.anchor_position_type, scaled.width(), scaled.height(), target_w, target_h);
                 scaled.crop_imm(x, y, target_w, target_h)
             }
             // 枠に収まるまで拡大縮小し、透明な余白で枠を埋める。
             ImageResizeType::Pad => {
                 let scale = f32::min(target_w as f32 / src_w, target_h as f32 / src_h);
-                let scaled = image.resize_exact((src_w * scale).floor().max(1.0) as u32, (src_h * scale).floor().max(1.0) as u32, filter);
+                let scaled = Self::scale(&image, (src_w * scale).floor().max(1.0) as u32, (src_h * scale).floor().max(1.0) as u32, filter)?;
                 let (x, y) = Self::anchor_offset(opts.anchor_position_type, target_w, target_h, scaled.width(), scaled.height());
                 let mut canvas = RgbaImage::from_pixel(target_w, target_h, Rgba([0; 4]));
                 imageops::replace(&mut canvas, &scaled.to_rgba8(), x.into(), y.into());
@@ -84,11 +107,24 @@ impl ImageConverter {
                 if image.width() <= target_w && image.height() <= target_h {
                     image
                 } else {
-                    image.resize(target_w, target_h, filter)
+                    let ratio = f64::min(target_w as f64 / image.width() as f64, target_h as f64 / image.height() as f64);
+                    let width = ((image.width() as f64 * ratio).round() as u32).clamp(1, target_w);
+                    let height = ((image.height() as f64 * ratio).round() as u32).clamp(1, target_h);
+                    Self::scale(&image, width, height, filter)?
                 }
             }
             ImageResizeType::Unknown => unreachable!("validate rejects an unknown resize type"),
         })
+    }
+
+    /// SIMD で width × height へ縮小する。`image` crate の `resize_exact` は、同じ Lanczos3 でも数倍遅い。
+    fn scale(image: &DynamicImage, width: u32, height: u32, filter: FilterType) -> Result<DynamicImage> {
+        let mut output = DynamicImage::new(width, height, image.color());
+        let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(filter));
+        Resizer::new()
+            .resize(image, &mut output, &options)
+            .map_err(|error| Error::from_error(error, ErrorKind::ImageError))?;
+        Ok(output)
     }
 
     pub fn encode(image: &DynamicImage, format_type: ImageFormatType, quality: u8) -> Result<Vec<u8>> {

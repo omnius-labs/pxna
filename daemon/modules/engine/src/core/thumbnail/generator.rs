@@ -11,7 +11,7 @@ use crate::{
     base::util::SingleFlight,
     core::{
         image::{ImageConvertOptions, ImageConverter, SizeSteps},
-        media::{FrameSpec, MediaKind, MediaOptions, MediaTools},
+        media::{FrameSpec, MediaKind, MediaOptions, MediaTools, ProcessPriority},
         thumbnail::{
             cache::{CacheBucket, CachedImage, ThumbnailCache, ThumbnailCacheOptions},
             key::{ThumbnailKey, ThumbnailKeyHasher},
@@ -255,10 +255,10 @@ impl ThumbnailGenerator {
         if let Some(key) = &requested_key
             && let Some(hit) = inner.cache.get(key).await?
         {
-            tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = true, "thumbnail image cache checked");
+            tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = true, variant = ?request.variant, "thumbnail image cache checked");
             return Ok(plan.thumbnail(hit, Some(key)));
         }
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = false, eligible = requested_key.is_some(), "thumbnail image cache checked");
+        tracing::debug!(target: "pxna::performance", operation = "thumbnail_image_cache", hit = false, variant = ?request.variant, name, eligible = requested_key.is_some(), "thumbnail image cache checked");
 
         // 動画のサムネイルとスプライトシートは 1 回の ffmpeg の実行で両方を作るため、同じ flight にまとめる。
         let shares_a_run = kind == MediaKind::Video && request.variant != ThumbnailVariant::Display;
@@ -271,6 +271,19 @@ impl ThumbnailGenerator {
         };
         let flight_key = job.primary_key.clone();
         let semaphore = inner.semaphore_for(kind, request.variant);
+        let file_name = name.to_string();
+        let gate = {
+            let inner = inner.clone();
+            let file_name = file_name.clone();
+            let variant = request.variant;
+            async move {
+                let available = semaphore.available_permits();
+                let waiting = Instant::now();
+                let permit = inner.acquire(semaphore).await?;
+                tracing::debug!(target: "pxna::performance", operation = "thumbnail_permit_wait", elapsed_sec = waiting.elapsed().as_secs_f64(), available_when_requested = available, variant = ?variant, kind = ?kind, name = file_name, "thumbnail permit acquired");
+                Ok(permit)
+            }
+        };
 
         // 生成枠と同じ key の生成を待つ時間も含む。生成そのものは `thumbnail_production` が測る。
         let generating = Instant::now();
@@ -279,17 +292,17 @@ impl ThumbnailGenerator {
                 let work = inner.clone();
                 let produced = inner
                     .flights
-                    .run_gated(flight_key, inner.acquire(semaphore), move |permit| async move { work.produce(job, permit).await })
+                    .run_gated(flight_key, gate, move |permit| async move { work.produce(job, permit).await })
                     .await?;
                 (*produced).clone()
             }
             None => {
-                let permit = inner.acquire(semaphore).await?;
+                let permit = gate.await?;
                 inner.clone().produce(job, permit).await?
             }
         };
 
-        tracing::debug!(target: "pxna::performance", operation = "thumbnail_generation", elapsed_sec = generating.elapsed().as_secs_f64(), variant = ?request.variant, "thumbnail generation completed");
+        tracing::debug!(target: "pxna::performance", operation = "thumbnail_generation", elapsed_sec = generating.elapsed().as_secs_f64(), variant = ?request.variant, kind = ?kind, name = file_name, "thumbnail generation completed");
         let image = match request.variant {
             ThumbnailVariant::Sprite => produced
                 .sprite
@@ -402,14 +415,18 @@ impl Inner {
         let converting = Instant::now();
         let produced = match job.kind {
             MediaKind::Image => {
+                let reading = Instant::now();
                 let input = tokio::fs::read(file.path()).await?;
+                tracing::debug!(target: "pxna::performance", operation = "thumbnail_source_read", elapsed_sec = reading.elapsed().as_secs_f64(), bytes = input.len(), "source file read");
                 Produced {
                     image: self.convert_one(input, &job.plan).await?,
                     sprite: None,
                 }
             }
             MediaKind::FfmpegImage | MediaKind::HeifImage => {
-                let input = self.decode_ffmpeg_image(&job.source, file.path(), job.kind).await?;
+                let decoding = Instant::now();
+                let input = self.decode_ffmpeg_image(&job.source, file.path(), job.kind, job.plan.priority()).await?;
+                tracing::debug!(target: "pxna::performance", operation = "thumbnail_external_decode", elapsed_sec = decoding.elapsed().as_secs_f64(), kind = ?job.kind, bytes = input.len(), "external decoder finished");
                 Produced {
                     image: self.convert_one(input, &job.plan).await?,
                     sprite: None,
@@ -480,7 +497,7 @@ impl Inner {
         if plan.variant == ThumbnailVariant::Display {
             positions.truncate(1);
         }
-        let frames = self.extract_frames(file, &positions).await?;
+        let frames = self.extract_frames(file, &positions, plan.priority()).await?;
 
         let plan = plan.clone();
         tokio::task::spawn_blocking(move || -> Result<Produced> {
@@ -512,27 +529,27 @@ impl Inner {
         .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?
     }
 
-    async fn extract_frames(&self, file: &Path, positions_secs: &[f64]) -> Result<Vec<Vec<u8>>> {
+    async fn extract_frames(&self, file: &Path, positions_secs: &[f64], priority: ProcessPriority) -> Result<Vec<Vec<u8>>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.extract_frames(file, positions_secs).await
+        self.tools.extract_frames(file, positions_secs, priority).await
     }
 
     /// ffmpeg で読む画像をデコードする。HEIC/HEIF/AVIF は PPM、それ以外（JXL、JP2）は PNG を使う。
     /// アルファ付きの HEIC/HEIF/AVIF は heif-dec に回し、ffmpeg が失敗したときも heif-dec で読み直す。
-    async fn decode_ffmpeg_image(&self, source: &ResolvedStoragePath, file: &Path, kind: MediaKind) -> Result<Vec<u8>> {
+    async fn decode_ffmpeg_image(&self, source: &ResolvedStoragePath, file: &Path, kind: MediaKind, priority: ProcessPriority) -> Result<Vec<u8>> {
         let heif_decodable = kind == MediaKind::HeifImage || Self::is_avif(source);
         if !heif_decodable {
-            return self.extract_image(file).await;
+            return self.extract_image(file, priority).await;
         }
         if self.has_alpha(source).await? {
-            return self.decode_heif(file).await;
+            return self.decode_heif(file, priority).await;
         }
-        match self.extract_image_pixels(file).await {
+        match self.extract_image_pixels(file, priority).await {
             Ok(image) => Ok(image),
             Err(error) => {
                 warn!(error = ?error, "ffmpeg failed to decode a HEIF or AVIF image, so heif-dec reads it instead");
-                self.decode_heif(file).await
+                self.decode_heif(file, priority).await
             }
         }
     }
@@ -556,23 +573,23 @@ impl Inner {
         }
     }
 
-    async fn extract_image(&self, file: &Path) -> Result<Vec<u8>> {
+    async fn extract_image(&self, file: &Path, priority: ProcessPriority) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.extract_image(file).await
+        self.tools.extract_image(file, priority).await
     }
 
-    async fn extract_image_pixels(&self, file: &Path) -> Result<Vec<u8>> {
+    async fn extract_image_pixels(&self, file: &Path, priority: ProcessPriority) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.extract_image_pixels(file).await
+        self.tools.extract_image_pixels(file, priority).await
     }
 
     /// heif-dec で読む。アルファ付きの HEIC/HEIF/AVIF と、ffmpeg が読めなかったときのフォールバックに使う。
-    async fn decode_heif(&self, file: &Path) -> Result<Vec<u8>> {
+    async fn decode_heif(&self, file: &Path, priority: ProcessPriority) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.heif_dec_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.decode_heif(file).await
+        self.tools.decode_heif(file, priority).await
     }
 
     /// 拡張子が合っていても中身が読めない file は、`UnsupportedType` にする。
@@ -585,6 +602,14 @@ impl Inner {
 }
 
 impl Plan {
+    /// 表示用画像はユーザーが待っているため、外部プロセスの CPU を優先する。サムネイルとスプライトシートは譲る。
+    fn priority(&self) -> ProcessPriority {
+        match self.variant {
+            ThumbnailVariant::Display => ProcessPriority::Foreground,
+            ThumbnailVariant::Thumbnail | ThumbnailVariant::Sprite => ProcessPriority::Background,
+        }
+    }
+
     /// 動画のキーは、フレームの数と位置を含める。
     fn key(&self, source: &SourceId, variant: ThumbnailVariant, kind: MediaKind) -> ThumbnailKey {
         let mut hasher = ThumbnailKeyHasher::new();

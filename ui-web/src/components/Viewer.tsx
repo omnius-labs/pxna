@@ -23,6 +23,7 @@ import { keepRange, reachablePages, useTimelineStore } from "../library/timeline
 import { type BrowseLocation, CROSS_LIBRARY_SCOPE, relativePath, viewKey } from "../location";
 import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { FILMSTRIP_ITEM_WIDTH } from "../viewer/filmstrip";
+import { logImageTiming } from "../viewer/perf";
 import { displayImageUrl, fileContentUrl, originalImageUrl } from "../viewer/urls";
 import { useFullscreen } from "../viewer/useFullscreen";
 import { type SlideshowStep, useSlideshow } from "../viewer/useSlideshow";
@@ -919,6 +920,7 @@ function ViewerImage({ libraryId, entry, size, timing, onSettled }: ViewerImageP
                     draggable={false}
                     className="absolute inset-0 h-full w-full object-contain"
                     onLoad={(event) => {
+                        logImageTiming(`display ${entry.name}`, event.currentTarget.currentSrc);
                         setNatural({
                             width: event.currentTarget.naturalWidth,
                             height: event.currentTarget.naturalHeight,
@@ -939,7 +941,10 @@ function ViewerImage({ libraryId, entry, size, timing, onSettled }: ViewerImageP
                         draggable={false}
                         data-original=""
                         className={`absolute inset-0 h-full w-full object-contain ${originalReady ? "" : "invisible"}`}
-                        onLoad={() => setOriginalReady(true)}
+                        onLoad={(event) => {
+                            logImageTiming(`original ${entry.name}`, event.currentTarget.currentSrc);
+                            setOriginalReady(true);
+                        }}
                         onError={() => setOriginalFailed(true)}
                     />
                 )}

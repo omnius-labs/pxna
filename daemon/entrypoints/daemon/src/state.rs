@@ -158,6 +158,8 @@ mod tests {
             logging: LoggingConfig {
                 level: "info".to_string(),
                 json: false,
+                file: None,
+                performance: false,
             },
             libraries: Vec::new(),
             storage: StorageConfig { archive: Default::default() },
