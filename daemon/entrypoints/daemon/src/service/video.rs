@@ -9,13 +9,17 @@ use std::{
 };
 
 use omnius_core_base::tsid::TsidProvider;
-use omnius_pxna_engine::service::{MaterializedFile, MediaInfoService, MediaOptions, PriorityPool, WorkClass};
+use omnius_pxna_engine::{
+    perf_span,
+    service::{MaterializedFile, MediaInfoService, MediaOptions, PriorityPool, WorkClass},
+};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncRead, ReadBuf},
     process::{Child, Command},
 };
 use tokio_util::sync::CancellationToken;
+use tracing::{Instrument as _, field::Empty};
 
 use crate::{
     prelude::*,
@@ -244,13 +248,20 @@ impl VideoService {
     }
 
     pub async fn create(&self, library: &str, path: &str) -> Result<VideoSessionInfo> {
+        let span = perf_span!("video_session_create", library_id = library, path, ok = Empty);
+        let result = self.create_traced(library, path).instrument(span.clone()).await;
+        span.record("ok", result.is_ok());
+        result
+    }
+
+    async fn create_traced(&self, library: &str, path: &str) -> Result<VideoSessionInfo> {
         let source = self.mutation.source(library, path, false, false).await?;
-        let media = self.media.probe_video(&source).await?;
+        let media = self.media.probe_video(&source).instrument(perf_span!("video_probe")).await?;
         let count = (media.duration_secs / f64::from(self.options.segment_secs)).ceil();
         if !(1.0..=100_000.0).contains(&count) || media.width < 2 || media.height < 2 {
             return Err(Error::new(ErrorKind::LimitExceeded).with_message("video has no playable segments or exceeds 100000 segments"));
         }
-        let file = source.materialize_file().await?;
+        let file = source.materialize_file().instrument(perf_span!("video_materialize")).await?;
         let id = format!("vid_{}", self.ids.lock().create());
         let info = VideoSessionInfo {
             playlist_url: format!("/api/v1/libraries/{library}/video/sessions/{id}/playlist.m3u8"),
@@ -283,7 +294,7 @@ impl VideoService {
         }
         {
             let mut process = session.process.lock().await;
-            self.restart(&session, &mut process, 0).await?;
+            self.restart(&session, &mut process, 0).instrument(perf_span!("video_transcode_start")).await?;
         }
         sessions.push_back(session);
         Ok(info)
@@ -305,7 +316,26 @@ impl VideoService {
     }
 
     pub async fn segment(&self, library: &str, id: &str, index: u32) -> Result<SegmentReader> {
+        let span = perf_span!("video_segment_wait", library_id = library, path = Empty, index, restarted = false, outcome = Empty);
+        let result = self.segment_traced(library, id, index, &span).instrument(span.clone()).await;
+        span.record(
+            "outcome",
+            match &result {
+                Ok(_) => "ready",
+                Err(error) => match error.kind() {
+                    ErrorKind::Timeout => "timeout",
+                    ErrorKind::AlreadyExists => "superseded",
+                    ErrorKind::NotFound => "ended",
+                    _ => "failed",
+                },
+            },
+        );
+        result
+    }
+
+    async fn segment_traced(&self, library: &str, id: &str, index: u32, span: &tracing::Span) -> Result<SegmentReader> {
         let session = self.session(library, id).await?;
+        span.record("path", session.info.path.as_str());
         if index >= session.count {
             return Err(Error::new(ErrorKind::NotFound).with_message("segment not found"));
         }
@@ -340,6 +370,7 @@ impl VideoService {
                 }
                 let far = index < process.start || index > process.frontier.saturating_add(self.options.restart_threshold_segments);
                 if far {
+                    span.record("restarted", true);
                     self.restart(&session, &mut process, index).await?;
                 }
                 generation = Some(process.generation);

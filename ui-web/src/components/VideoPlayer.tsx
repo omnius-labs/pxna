@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
+import { clientTimings } from "../api/clientTimings";
 import { mediaInfoQuery } from "../library/queries";
+import { entryAddress } from "../location";
 import { originalImageUrl } from "../viewer/urls";
 import { acquireVideoSession, playbackMode } from "../viewer/video";
 
@@ -23,6 +25,15 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
             return video;
         },
     });
+    // 開いてから最初のフレームが出るまでを測る。動画ごとに 1 回だけ記録し、開始前に閉じたり失敗したりした分は記録しない。
+    const timing = useRef<{ startedAt: number; mode?: "direct" | "native-hls" | "hls-js"; recorded: boolean }>({
+        startedAt: performance.now(),
+        recorded: false,
+    });
+    // biome-ignore lint/correctness/useExhaustiveDependencies: 動画が変わったときだけ測り直す
+    useEffect(() => {
+        timing.current = { startedAt: performance.now(), recorded: false };
+    }, [libraryId, path]);
     const done = useRef(onDone);
     useEffect(() => {
         done.current = onDone;
@@ -41,6 +52,7 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
         let destroy: (() => void) | undefined;
         const start = async () => {
             if (video.canPlayType(info.contentType)) {
+                timing.current.mode = "direct";
                 video.src = originalImageUrl(libraryId, path);
                 return;
             }
@@ -48,6 +60,7 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
             if (closed) return;
             const mode = playbackMode(info.contentType, (type) => video.canPlayType(type), Hls.isSupported());
             if (mode === "unsupported") throw new Error("このブラウザは動画再生に対応していません。");
+            timing.current.mode = mode === "native-hls" ? "native-hls" : "hls-js";
             const resource = acquireVideoSession(libraryId, path);
             release = resource.release;
             const session = await resource.session;
@@ -101,6 +114,17 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
                 tabIndex={0}
                 aria-label="動画プレイヤー"
                 className="h-full max-h-full w-full object-contain"
+                onPlaying={() => {
+                    const { startedAt, mode, recorded } = timing.current;
+                    if (recorded) return;
+                    timing.current.recorded = true;
+                    clientTimings.record({
+                        ...entryAddress(libraryId, path),
+                        operation: "video_start",
+                        durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+                        mode,
+                    });
+                }}
                 onEnded={() => done.current?.()}
                 onError={() => setError("動画を再生できませんでした。閉じて、もう一度開いてください。")}
             />
