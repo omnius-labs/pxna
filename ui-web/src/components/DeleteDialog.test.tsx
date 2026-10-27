@@ -89,11 +89,11 @@ async function harness(extra: { container?: HTMLElement; toasters?: { success?: 
 it("確認の件数・不可逆性・中身を示し、取り消しでは送信しない", async () => {
     const h = await harness();
     try {
-        expect(document.body.textContent).toContain("2 件");
-        expect(document.body.textContent).toContain("取り消せません");
-        expect(document.body.textContent).toContain("中身ごと");
+        expect(document.body.textContent).toContain("2 items");
+        expect(document.body.textContent).toContain("cannot be undone");
+        expect(document.body.textContent).toContain("with their contents");
         expect(remove).not.toHaveBeenCalled();
-        await h.click("取り消す");
+        await h.click("Cancel");
         expect(remove).not.toHaveBeenCalled();
         expect(h.close).toHaveBeenCalled();
     } finally {
@@ -105,11 +105,11 @@ it.each([false, true])("確定でのみ送信し、同期はトースト、非�
     const operations = asyncOperation ? [op("files"), op("folders")] : [];
     try {
         remove.mockResolvedValue(operations);
-        await h.click("削除する");
+        await h.click("Delete");
         expect(remove).toHaveBeenCalledOnce();
         expect(h.deleted).toHaveBeenCalledOnce();
         if (asyncOperation) expect(h.show).toHaveBeenCalledWith(operations);
-        else expect(success).toHaveBeenCalledWith("削除しました。");
+        else expect(success).toHaveBeenCalledWith("Deleted.");
     } finally {
         await h.dispose();
     }
@@ -118,7 +118,7 @@ it("片方失敗でも成功Operationを表示し、失敗を知らせる", asyn
     const h = await harness();
     try {
         remove.mockRejectedValue(new DeleteEntriesError([new ApiError(403, "Forbidden", "denied")], [op("files")], 1));
-        await h.click("削除する");
+        await h.click("Delete");
         expect(h.show).toHaveBeenCalledWith([op("files")]);
         expect(error).toHaveBeenCalledOnce();
         expect(h.deleted).toHaveBeenCalledOnce();
@@ -136,8 +136,8 @@ it("渡した描画先へダイアログを描き、結果のトーストを指�
         expect(dialog).not.toBeNull();
         expect(container.contains(dialog)).toBe(true);
         remove.mockResolvedValue([]);
-        await h.click("削除する");
-        expect(success).toHaveBeenCalledExactlyOnceWith("削除しました。", { toasterId: "viewer" });
+        await h.click("Delete");
+        expect(success).toHaveBeenCalledExactlyOnceWith("Deleted.", { toasterId: "viewer" });
     } finally {
         await h.dispose();
         container.remove();
@@ -148,9 +148,9 @@ it("失敗のトーストだけを指定した Toaster に出し、成功のト�
     const h = await harness({ toasters: { failure: "viewer" } });
     try {
         remove.mockRejectedValue(new ApiError(403, "Forbidden", "denied"));
-        await h.click("削除する");
-        expect(error).toHaveBeenCalledExactlyOnceWith("削除できない項目があります。", {
-            description: "denied",
+        await h.click("Delete");
+        expect(error).toHaveBeenCalledExactlyOnceWith("Some items could not be deleted.", {
+            description: "This is not allowed.",
             toasterId: "viewer",
         });
     } finally {
@@ -171,8 +171,8 @@ it("成功のトーストの出し先を指定しなければ、失敗の出し�
     const h = await harness({ toasters: { failure: "viewer" } });
     try {
         remove.mockResolvedValue([]);
-        await h.click("削除する");
-        expect(success).toHaveBeenCalledExactlyOnceWith("削除しました。");
+        await h.click("Delete");
+        expect(success).toHaveBeenCalledExactlyOnceWith("Deleted.");
     } finally {
         await h.dispose();
     }

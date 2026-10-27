@@ -73,7 +73,7 @@ async function wait(assertion: () => void) {
 }
 /// 名前のダイアログの入力欄。
 function nameInput(): HTMLInputElement | null {
-    return document.querySelector<HTMLInputElement>('[role="dialog"] input[aria-label="名前"]');
+    return document.querySelector<HTMLInputElement>('[role="dialog"] input[aria-label="Name"]');
 }
 
 /// キー操作が入力欄では効かないことを確かめるための、一覧の外の入力欄。
@@ -162,7 +162,7 @@ async function harness(view: "grid" | "list" = "grid", initial: Entry[] = []) {
     );
     await wait(() => {
         if (initial.length) expect(host.querySelector("[role=option]")).not.toBeNull();
-        else expect(host.textContent).toContain("このフォルダは空です。");
+        else expect(host.textContent).toContain("This folder is empty.");
     });
     const key = async (key: string, target: EventTarget = document.body, modifiers: KeyboardEventInit = {}) => {
         await act(async () => target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...modifiers })));
@@ -181,7 +181,7 @@ async function harness(view: "grid" | "list" = "grid", initial: Entry[] = []) {
         );
     };
     const create = async () => {
-        await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="新しいフォルダ"]')!.click());
+        await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="New folder"]')!.click());
     };
     return {
         host,
@@ -215,7 +215,7 @@ it.each(["grid", "list"] as const)("空の %s で、ダイアログに作成先�
         await h.create();
         const input = await h.type("made");
         expect(document.activeElement).toBe(input);
-        expect(document.querySelector('[role="dialog"]')?.textContent).toContain("作成先: /empty");
+        expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Create in: /empty");
         await h.submit();
         await wait(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
         expect(post).toHaveBeenCalledOnce();
@@ -291,7 +291,7 @@ it("右クリックメニューを閉じた後も新しい名前の入力にフ�
                 .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, button: 2 })),
         );
         const menuitem = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-            (item) => item.textContent === "新しいフォルダ",
+            (item) => item.textContent === "New folder",
         )!;
         await act(async () => menuitem.click());
         await wait(() => expect(nameInput()).not.toBeNull());
@@ -317,7 +317,7 @@ it.each(["grid", "list"] as const)(
             await wait(() => expect(nameInput()).not.toBeNull());
             const input = nameInput()!;
             expect([input.selectionStart, input.selectionEnd, input.value]).toEqual([0, 1, "a.txt"]);
-            expect(document.querySelector('[role="dialog"]')?.textContent).toContain("対象: /empty/a.txt");
+            expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Target: /empty/a.txt");
             await h.type("changed.txt");
             await h.submit();
             await wait(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
@@ -339,7 +339,7 @@ it("名前の変更は、409 の後も入力を保ち、直して送り直せる
                 .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, button: 2 })),
         );
         const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-            (item) => item.textContent === "名前の変更",
+            (item) => item.textContent === "Rename",
         )!;
         await act(async () => rename.click());
         await wait(() => expect(nameInput()).not.toBeNull());
@@ -368,24 +368,22 @@ it("Delete は確認後に混在削除を送り、ダイアログ内のキーと
         await act(async () => options[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true })));
         await h.key("Backspace", document.body, { metaKey: true });
         const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]')!;
-        expect(dialog.textContent).toContain("2 件");
+        expect(dialog.textContent).toContain("2 items");
         expect(post).not.toHaveBeenCalled();
         await h.key("F2", dialog);
         await h.key("N", dialog, { altKey: true, shiftKey: true, code: "KeyN" });
         expect(nameInput()).toBeNull();
         await act(async () =>
-            [...dialog.querySelectorAll<HTMLButtonElement>("button")]
-                .find((b) => b.textContent === "取り消す")!
-                .click(),
+            [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Cancel")!.click(),
         );
         expect(post).not.toHaveBeenCalled();
         await h.key("Delete");
         await act(async () =>
             [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
-                .find((b) => b.textContent === "削除する")!
+                .find((b) => b.textContent === "Delete")!
                 .click(),
         );
-        await wait(() => expect(h.host.textContent).toContain("このフォルダは空です。"));
+        await wait(() => expect(h.host.textContent).toContain("This folder is empty."));
         expect(post.mock.calls.map(([route]) => route)).toEqual([
             "/libraries/{libraryId}/files/delete",
             "/libraries/{libraryId}/folders/delete",
@@ -536,7 +534,7 @@ it.each(["cut", "copy"] as const)(
             );
             await act(async () =>
                 [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
-                    .find((button) => button.textContent === (mode === "cut" ? "スキップ" : "両方残す"))!
+                    .find((button) => button.textContent === (mode === "cut" ? "Skip" : "Keep both"))!
                     .click(),
             );
             await wait(() => expect(post).toHaveBeenCalledOnce());
@@ -549,9 +547,8 @@ it.each(["cut", "copy"] as const)(
             });
             await h.navigate("/empty");
             await wait(() => expect(h.host.querySelector<HTMLElement>('[role="option"]')!.style.opacity).toBe(""));
-            if (mode === "copy")
-                expect(h.host.querySelector('[aria-label="アクティビティ"]')?.textContent).toContain("コピー");
-            else expect(h.host.querySelector<HTMLButtonElement>('button[aria-label="貼り付け"]')?.disabled).toBe(true);
+            if (mode === "copy") expect(h.host.querySelector('[aria-label="Activity"]')?.textContent).toContain("Copy");
+            else expect(h.host.querySelector<HTMLButtonElement>('button[aria-label="Paste"]')?.disabled).toBe(true);
         } finally {
             await h.dispose();
         }
@@ -592,7 +589,7 @@ it("混在切り取りの一方が失敗したら拒否された項目と受理�
         }).mockResolvedValueOnce({ error: { kind: "Forbidden" }, response: new Response(null, { status: 403 }) });
         await act(async () =>
             [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
-                .find((button) => button.textContent === "両方残す")!
+                .find((button) => button.textContent === "Keep both")!
                 .click(),
         );
         await wait(() => expect(post).toHaveBeenCalledTimes(2));
@@ -600,7 +597,7 @@ it("混在切り取りの一方が失敗したら拒否された項目と受理�
         const remaining = h.host.querySelectorAll<HTMLElement>('[role="option"]');
         expect(remaining[0]!.style.opacity).toBe("");
         expect(remaining[1]!.style.opacity).toBe("0.4");
-        expect(h.host.querySelector('[aria-label="アクティビティ"]')?.textContent).toContain("移動");
+        expect(h.host.querySelector('[aria-label="Activity"]')?.textContent).toContain("Move");
     } finally {
         await h.dispose();
     }
@@ -633,11 +630,11 @@ it("混在moveの同期結果はトースト、非同期結果はパネルで知
         }).mockResolvedValueOnce({ data: { entries: [dir] }, response: new Response(null, { status: 200 }) });
         await act(async () =>
             [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
-                .find((button) => button.textContent === "置き換える")!
+                .find((button) => button.textContent === "Replace")!
                 .click(),
         );
-        await wait(() => expect(success).toHaveBeenCalledWith("移動しました。"));
-        expect(h.host.querySelector('[aria-label="アクティビティ"]')?.textContent).toContain("ファイルの移動");
+        await wait(() => expect(success).toHaveBeenCalledWith("Moved."));
+        expect(h.host.querySelector('[aria-label="Activity"]')?.textContent).toContain("Move files");
     } finally {
         success.mockRestore();
         await h.dispose();
@@ -651,18 +648,18 @@ it("読み取り専用はcutを無効にしcopyを許可する", async () => {
         await act(async () => option.click());
         await h.key("x", document.body, { ctrlKey: true });
         expect(option.style.opacity).toBe("");
-        expect(h.host.querySelector<HTMLButtonElement>('button[aria-label="貼り付け"]')!.disabled).toBe(true);
+        expect(h.host.querySelector<HTMLButtonElement>('button[aria-label="Paste"]')!.disabled).toBe(true);
         await act(async () => option.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, button: 2 })));
         const cut = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-            (item) => item.textContent === "切り取り",
+            (item) => item.textContent === "Cut",
         )!;
         const copy = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-            (item) => item.textContent === "コピー",
+            (item) => item.textContent === "Copy",
         )!;
         expect(cut.getAttribute("aria-disabled")).toBe("true");
         expect(copy.getAttribute("aria-disabled")).not.toBe("true");
         await act(async () => copy.click());
-        expect(h.host.querySelector<HTMLButtonElement>('button[aria-label="貼り付け"]')!.disabled).toBe(false);
+        expect(h.host.querySelector<HTMLButtonElement>('button[aria-label="Paste"]')!.disabled).toBe(false);
     } finally {
         await h.dispose();
     }

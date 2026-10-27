@@ -168,8 +168,8 @@ async function searchHarness(
             await act(async () => {
                 await Promise.resolve();
             });
-            expect(host.textContent).not.toContain("読み込み中");
-            expect(host.textContent).not.toContain("検索中");
+            expect(host.textContent).not.toContain("Loading");
+            expect(host.textContent).not.toContain("Searching");
         });
     return {
         host,
@@ -202,7 +202,7 @@ it.each([true, false])("グリッドは配下の検索のときだけ名前の�
 it.each([true, false])("グリッドは配下の最初のページだけ検索中と示す %s", async (recursive) => {
     const h = await searchHarness(searchSource(recursive), null, recursive ? placeUnder : undefined);
     try {
-        expect(h.host.textContent).toBe(recursive ? "検索中…" : "読み込み中…");
+        expect(h.host.textContent).toBe(recursive ? "Searching…" : "Loading…");
     } finally {
         await h.dispose();
     }
@@ -210,9 +210,11 @@ it.each([true, false])("グリッドは配下の最初のページだけ検索�
 it.each([false, true])("グリッドは検索の 0 件と打ち切りを示す %s", async (truncated) => {
     const h = await searchHarness(searchSource(true, "missing"), searchPage([], 0, "empty", truncated), placeUnder);
     try {
-        expect(h.host.textContent).toContain("一致する項目がありません。");
+        expect(h.host.textContent).toContain("No matching items.");
         expect(h.host.querySelector('[role="status"]')?.textContent).toBe(
-            truncated ? "結果の一部を表示しています。Library を絞るか、場所を下げて探し直してください。" : undefined,
+            truncated
+                ? "Showing part of the results. Narrow the Libraries or go deeper into a location and search again."
+                : undefined,
         );
     } finally {
         await h.dispose();
@@ -224,7 +226,7 @@ it("グリッドは 0 件の通常の一覧を空のフォルダと示す", asyn
         { entries: [], totalCount: 0, snapshot: "empty", truncated: false },
     );
     try {
-        expect(h.host.textContent).toBe("このフォルダは空です。");
+        expect(h.host.textContent).toBe("This folder is empty.");
     } finally {
         await h.dispose();
     }
@@ -232,7 +234,7 @@ it("グリッドは 0 件の通常の一覧を空のフォルダと示す", asyn
 it("グリッドは結果があるときも打ち切りを示す", async () => {
     const h = await searchHarness(searchSource(true), searchPage(searchEntries, 2, "search", true), placeUnder);
     try {
-        expect(h.host.querySelector('[role="status"]')?.textContent).toContain("Library を絞るか");
+        expect(h.host.querySelector('[role="status"]')?.textContent).toContain("Narrow the Libraries");
     } finally {
         await h.dispose();
     }

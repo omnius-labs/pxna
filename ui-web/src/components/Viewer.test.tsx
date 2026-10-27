@@ -57,7 +57,7 @@ vi.mock("../api/client", async (original) => ({
 vi.mock("./VideoPlayer", () => ({
     VideoPlayer: ({ onDone }: { onDone?: () => void }) => (
         // biome-ignore lint/a11y/useMediaCaption: テスト用の代役で、字幕を扱わない
-        <video aria-label="動画プレイヤー" onEnded={() => onDone?.()} />
+        <video aria-label="Video player" onEnded={() => onDone?.()} />
     ),
 }));
 vi.mock("./Modal", () => ({
@@ -207,7 +207,7 @@ it("keeps the current image while reading and moves after one arrow press", asyn
         await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" })));
         await wait(() => expect(resolve).toBeDefined());
         expect(h.host.querySelector("img")?.alt).toBe("199.png");
-        expect(h.host.querySelector("[role=status]")?.textContent).toBe("読み込み中…");
+        expect(h.host.querySelector("[role=status]")?.textContent).toBe("Loading…");
         expect(h.onChange).not.toHaveBeenCalled();
         await act(async () => {
             resolve!(response([entry(200)]));
@@ -285,7 +285,7 @@ const zoomIn = (h: { host: HTMLElement }) =>
             ?.dispatchEvent(new WheelEvent("wheel", { deltaY: -500, cancelable: true }));
     });
 
-describe("元の画像への差し替え", () => {
+describe("Switch to the original image", () => {
     it("「自動」で 30 MB 以下の画像は、表示用画像が出た後に拡大しなくても差し替える", async () => {
         listed([image("a.png", "image/png", 30_000_000)]);
         const h = await harness("a.png", "/", "auto");
@@ -365,7 +365,7 @@ describe("元の画像への差し替え", () => {
     });
 });
 
-describe("フィルムストリップ", () => {
+describe("Filmstrip", () => {
     const page = (offset: number) => Array.from({ length: 200 }, (_, index) => entry(offset + index));
     const thousand = () =>
         get.mockImplementation((_, options) =>
@@ -380,7 +380,7 @@ describe("フィルムストリップ", () => {
             }),
         );
     const offsets = () => get.mock.calls.map(([, options]) => options.params.query.offset as number);
-    const strip = (h: { host: HTMLElement }) => h.host.querySelector("[aria-label=フィルムストリップ]");
+    const strip = (h: { host: HTMLElement }) => h.host.querySelector("[aria-label=Filmstrip]");
 
     it("広い画面の画像と動画のビューアに出し、狭い画面には出さない", async () => {
         thousand();
@@ -435,11 +435,11 @@ describe("フィルムストリップ", () => {
             await wait(() => expect(h.onChange).toHaveBeenCalledExactlyOnceWith("6.png"));
             await h.render("6.png");
             expect(h.host.querySelector("img")?.alt).toBe("6.png");
-            expect(h.host.textContent).not.toContain("読み込み中…");
+            expect(h.host.textContent).not.toContain("Loading…");
             expect(strip(h)).toBe(before);
-            expect(
-                h.host.querySelector("[aria-label=フィルムストリップ] [aria-current=true]")?.getAttribute("aria-label"),
-            ).toBe("6.png");
+            expect(h.host.querySelector("[aria-label=Filmstrip] [aria-current=true]")?.getAttribute("aria-label")).toBe(
+                "6.png",
+            );
         } finally {
             await h.dispose();
         }
@@ -471,10 +471,10 @@ describe("フィルムストリップ", () => {
         const h = await harness("5.png", "/", "onZoom", undefined, false);
         try {
             await wait(() =>
-                expect(h.host.querySelector("[aria-label=フィルムストリップ] [aria-label='9.png']")).not.toBeNull(),
+                expect(h.host.querySelector("[aria-label=Filmstrip] [aria-label='9.png']")).not.toBeNull(),
             );
             await act(async () =>
-                h.host.querySelector<HTMLElement>("[aria-label=フィルムストリップ] [aria-label='9.png']")?.click(),
+                h.host.querySelector<HTMLElement>("[aria-label=Filmstrip] [aria-label='9.png']")?.click(),
             );
             expect(h.onChange).toHaveBeenCalledExactlyOnceWith("9.png");
             await h.render("9.png");
@@ -485,10 +485,10 @@ describe("フィルムストリップ", () => {
     });
 });
 
-describe("スライドショー", () => {
+describe("Slideshow", () => {
     const wideViewer = (view: string) => harness(view, "/", "onZoom", undefined, false);
     const button = (h: { host: HTMLElement }) =>
-        h.host.querySelector<HTMLButtonElement>("button[aria-label^=スライドショー]");
+        h.host.querySelector<HTMLButtonElement>("button[aria-label*=lideshow]");
     const label = (h: { host: HTMLElement }) => button(h)?.getAttribute("aria-label");
     /// モックの一覧は応答済みなので、移動の探索は、タイマーに頼らずマイクロタスクだけで終わる。
     const settle = async () => {
@@ -503,9 +503,9 @@ describe("スライドショー", () => {
         try {
             await wait(() => expect(findDisplayImage(h)).not.toBeNull());
             vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-            expect(label(h)).toBe("スライドショー");
+            expect(label(h)).toBe("Slideshow");
             await act(async () => button(h)?.click());
-            expect(label(h)).toBe("スライドショーを止める");
+            expect(label(h)).toBe("Stop the slideshow");
 
             await elapse(20_000);
             expect(h.onChange).not.toHaveBeenCalled();
@@ -526,7 +526,7 @@ describe("スライドショー", () => {
             await loadDisplay(h);
             await elapse(5000);
             expect(h.onChange).toHaveBeenCalledTimes(2);
-            expect(label(h)).toBe("スライドショー");
+            expect(label(h)).toBe("Slideshow");
             await elapse(20_000);
             expect(h.onChange).toHaveBeenCalledTimes(2);
         } finally {
@@ -548,7 +548,7 @@ describe("スライドショー", () => {
             await h.render("1.mp4");
             await settle();
             expect(h.host.querySelector("video")).not.toBeNull();
-            expect(label(h)).toBe("スライドショーを止める");
+            expect(label(h)).toBe("Stop the slideshow");
             await elapse(60_000);
             expect(h.onChange).toHaveBeenCalledTimes(1);
             await act(async () => h.host.querySelector("video")!.dispatchEvent(new Event("ended")));
@@ -602,7 +602,7 @@ describe("スライドショー", () => {
             await loadDisplay(stopped);
             await elapse(3000);
             await act(async () => button(stopped)?.click());
-            expect(label(stopped)).toBe("スライドショー");
+            expect(label(stopped)).toBe("Slideshow");
             await elapse(20_000);
             expect(stopped.onChange).not.toHaveBeenCalled();
         } finally {
@@ -644,14 +644,14 @@ describe("スライドショー", () => {
             expect(resolve).toBeDefined();
             expect(h.onChange).not.toHaveBeenCalled();
             await act(async () => button(h)?.click());
-            expect(label(h)).toBe("スライドショー");
+            expect(label(h)).toBe("Slideshow");
             await act(async () => {
                 resolve?.(response([entry(200)]));
             });
             await settle();
             await elapse(20_000);
             expect(h.onChange).not.toHaveBeenCalled();
-            expect(h.host.querySelector<HTMLButtonElement>("button[aria-label=次へ]")?.disabled).toBe(false);
+            expect(h.host.querySelector<HTMLButtonElement>("button[aria-label=Next]")?.disabled).toBe(false);
         } finally {
             await h.dispose();
         }
@@ -709,7 +709,7 @@ describe("全画面表示と「その他」のメニュー", () => {
         return h;
     };
     const byLabel = (h: { host: HTMLElement }, label: string) =>
-        h.host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+        h.host.querySelector<HTMLButtonElement>(`button[aria-label='${label}']`);
     const outer = (h: { host: HTMLElement }) => h.host.querySelector("dialog > div");
     const key = (target: EventTarget, name: string) =>
         act(async () =>
@@ -723,14 +723,14 @@ describe("全画面表示と「その他」のメニュー", () => {
     it("広い画面のボタンは外枠の要素を全画面にし、状態に合わせて表示が変わり、もう一度で戻る", async () => {
         const h = await open(false);
         try {
-            expect(byLabel(h, "全画面表示")).not.toBeNull();
-            await act(async () => byLabel(h, "全画面表示")?.click());
+            expect(byLabel(h, "Full screen")).not.toBeNull();
+            await act(async () => byLabel(h, "Full screen")?.click());
             expect(requestFullscreen).toHaveBeenCalledOnce();
             expect(requestFullscreen.mock.contexts[0]).toBe(outer(h));
-            expect(byLabel(h, "全画面表示を終える")).not.toBeNull();
-            await act(async () => byLabel(h, "全画面表示を終える")?.click());
+            expect(byLabel(h, "Exit full screen")).not.toBeNull();
+            await act(async () => byLabel(h, "Exit full screen")?.click());
             expect(exitFullscreen).toHaveBeenCalledOnce();
-            expect(byLabel(h, "全画面表示")).not.toBeNull();
+            expect(byLabel(h, "Full screen")).not.toBeNull();
         } finally {
             await h.dispose();
         }
@@ -739,7 +739,7 @@ describe("全画面表示と「その他」のメニュー", () => {
     it("全画面の間の Esc は全画面だけを終え、ビューアを閉じない。全画面でなければ閉じる", async () => {
         const h = await open(false);
         try {
-            await act(async () => byLabel(h, "全画面表示")?.click());
+            await act(async () => byLabel(h, "Full screen")?.click());
             await key(window, "Escape");
             expect(exitFullscreen).toHaveBeenCalledOnce();
             expect(h.onChange).not.toHaveBeenCalled();
@@ -753,7 +753,7 @@ describe("全画面表示と「その他」のメニュー", () => {
     it("全画面の間にダイアログの cancel が届いても、全画面だけを終える", async () => {
         const h = await open(false);
         try {
-            await act(async () => byLabel(h, "全画面表示")?.click());
+            await act(async () => byLabel(h, "Full screen")?.click());
             const event = new Event("cancel", { cancelable: true });
             await act(async () => h.host.querySelector("dialog")?.dispatchEvent(event));
             expect(exitFullscreen).toHaveBeenCalledOnce();
@@ -765,7 +765,7 @@ describe("全画面表示と「その他」のメニュー", () => {
 
     it("全画面のままビューアを閉じると、全画面を終える", async () => {
         const h = await open(false);
-        await act(async () => byLabel(h, "全画面表示")?.click());
+        await act(async () => byLabel(h, "Full screen")?.click());
         expect(exitFullscreen).not.toHaveBeenCalled();
         await h.dispose();
         expect(exitFullscreen).toHaveBeenCalledOnce();
@@ -775,15 +775,15 @@ describe("全画面表示と「その他」のメニュー", () => {
         stubFullscreen(false);
         const wide = await open(false);
         try {
-            expect(byLabel(wide, "全画面表示")).toBeNull();
-            expect(byLabel(wide, "スライドショー")).not.toBeNull();
+            expect(byLabel(wide, "Full screen")).toBeNull();
+            expect(byLabel(wide, "Slideshow")).not.toBeNull();
         } finally {
             await wide.dispose();
         }
         const narrow = await open(true);
         try {
-            await pointerOpen(byLabel(narrow, "その他"));
-            expect(menuItems(narrow)).toEqual(["スライドショー"]);
+            await pointerOpen(byLabel(narrow, "More"));
+            expect(menuItems(narrow)).toEqual(["Slideshow"]);
         } finally {
             await narrow.dispose();
         }
@@ -792,20 +792,20 @@ describe("全画面表示と「その他」のメニュー", () => {
     it("狭い画面は「その他」のメニューにスライドショーと全画面表示を置き、選ぶとボタンと同じ動作になる", async () => {
         const h = await open(true);
         try {
-            expect(byLabel(h, "スライドショー")).toBeNull();
-            expect(byLabel(h, "全画面表示")).toBeNull();
-            await pointerOpen(byLabel(h, "その他"));
-            expect(menuItems(h)).toEqual(["スライドショー", "全画面表示"]);
+            expect(byLabel(h, "Slideshow")).toBeNull();
+            expect(byLabel(h, "Full screen")).toBeNull();
+            await pointerOpen(byLabel(h, "More"));
+            expect(menuItems(h)).toEqual(["Slideshow", "Full screen"]);
             // メニューは、全画面にする外枠の要素の中に描く。
             expect(outer(h)?.contains(h.host.querySelector("[role=menu]"))).toBe(true);
             await act(async () => h.host.querySelectorAll<HTMLElement>("[role=menuitem]")[1]?.click());
             expect(requestFullscreen).toHaveBeenCalledOnce();
             expect(requestFullscreen.mock.contexts[0]).toBe(outer(h));
-            await pointerOpen(byLabel(h, "その他"));
-            expect(menuItems(h)).toEqual(["スライドショー", "全画面表示を終える"]);
+            await pointerOpen(byLabel(h, "More"));
+            expect(menuItems(h)).toEqual(["Slideshow", "Exit full screen"]);
             await act(async () => h.host.querySelectorAll<HTMLElement>("[role=menuitem]")[0]?.click());
-            await pointerOpen(byLabel(h, "その他"));
-            expect(menuItems(h)).toEqual(["スライドショーを止める", "全画面表示を終える"]);
+            await pointerOpen(byLabel(h, "More"));
+            expect(menuItems(h)).toEqual(["Stop the slideshow", "Exit full screen"]);
         } finally {
             await h.dispose();
         }
@@ -814,7 +814,7 @@ describe("全画面表示と「その他」のメニュー", () => {
     it("メニューが開いている間は、矢印キーで移らず、Esc はメニューだけを閉じる", async () => {
         const h = await open(true);
         try {
-            await pointerOpen(byLabel(h, "その他"));
+            await pointerOpen(byLabel(h, "More"));
             expect(h.host.querySelector("[role=menu]")).not.toBeNull();
             await key(window, "ArrowRight");
             await key(window, "ArrowLeft");
@@ -839,8 +839,8 @@ describe("全画面表示と「その他」のメニュー", () => {
         try {
             await wait(() => expect(wide.host.querySelector("video")).not.toBeNull());
             await wait(() => expect(narrow.host.querySelector("video")).not.toBeNull());
-            expect(byLabel(wide, "全画面表示")).toBeNull();
-            expect(byLabel(narrow, "その他")).toBeNull();
+            expect(byLabel(wide, "Full screen")).toBeNull();
+            expect(byLabel(narrow, "More")).toBeNull();
         } finally {
             await wide.dispose();
             await narrow.dispose();
@@ -868,7 +868,7 @@ describe("動画との行き来", () => {
             await key(window, "ArrowRight");
             await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("2.png"));
             await h.render("1.mp4");
-            await act(async () => h.host.querySelector<HTMLButtonElement>("button[aria-label=前へ]")?.click());
+            await act(async () => h.host.querySelector<HTMLButtonElement>("button[aria-label=Previous]")?.click());
             await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("0.png"));
         } finally {
             await h.dispose();
@@ -905,7 +905,7 @@ describe("ダウンロードと削除", () => {
         return h;
     };
     const control = (h: { host: HTMLElement }, label: string) =>
-        h.host.querySelector<HTMLButtonElement & HTMLAnchorElement>(`[aria-label="${label}"]`);
+        h.host.querySelector<HTMLButtonElement & HTMLAnchorElement>(`[aria-label='${label}']`);
     const outer = (h: { host: HTMLElement }) => h.host.querySelector("dialog > div");
     const confirmation = (h: { host: HTMLElement }) => h.host.querySelector("[role=alertdialog]");
     const press = async (text: string) =>
@@ -917,7 +917,7 @@ describe("ダウンロードと削除", () => {
             target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true })),
         );
     const askDeletion = async (h: { host: HTMLElement }) => {
-        await act(async () => control(h, "削除")?.click());
+        await act(async () => control(h, "Delete")?.click());
         await wait(() => expect(confirmation(h)).not.toBeNull());
     };
 
@@ -926,7 +926,7 @@ describe("ダウンロードと削除", () => {
         for (const readonly of [false, true]) {
             const h = await open("1.png", { readonly });
             try {
-                const link = control(h, "ダウンロード");
+                const link = control(h, "Download");
                 expect(link?.tagName).toBe("A");
                 expect(link?.getAttribute("href")).toContain("/files/content?path=%2F1.png");
                 expect(link?.getAttribute("download")).toBe("1.png");
@@ -940,20 +940,20 @@ describe("ダウンロードと削除", () => {
         trio();
         const writable = await open("1.png");
         try {
-            expect(control(writable, "削除")?.disabled).toBe(false);
+            expect(control(writable, "Delete")?.disabled).toBe(false);
         } finally {
             await writable.dispose();
         }
         const locked = await open("1.png", { readonly: true });
         try {
-            expect(control(locked, "削除")?.disabled).toBe(true);
+            expect(control(locked, "Delete")?.disabled).toBe(true);
         } finally {
             await locked.dispose();
         }
         trio({ readonly: true });
         const entryLocked = await open("1.png");
         try {
-            expect(control(entryLocked, "削除")?.disabled).toBe(true);
+            expect(control(entryLocked, "Delete")?.disabled).toBe(true);
         } finally {
             await entryLocked.dispose();
         }
@@ -963,8 +963,8 @@ describe("ダウンロードと削除", () => {
         trio();
         const narrow = await open("1.png", { narrow: true });
         try {
-            expect(control(narrow, "ダウンロード")).toBeNull();
-            expect(control(narrow, "削除")).toBeNull();
+            expect(control(narrow, "Download")).toBeNull();
+            expect(control(narrow, "Delete")).toBeNull();
         } finally {
             await narrow.dispose();
         }
@@ -972,8 +972,8 @@ describe("ダウンロードと削除", () => {
         const video = await harness("clip.mp4", "/", "onZoom", undefined, false);
         try {
             await wait(() => expect(video.host.querySelector("video")).not.toBeNull());
-            expect(control(video, "ダウンロード")).toBeNull();
-            expect(control(video, "削除")).toBeNull();
+            expect(control(video, "Download")).toBeNull();
+            expect(control(video, "Delete")).toBeNull();
         } finally {
             await video.dispose();
         }
@@ -987,7 +987,7 @@ describe("ダウンロードと削除", () => {
             await askDeletion(h);
             expect(outer(h)?.contains(confirmation(h))).toBe(true);
             expect(remove).not.toHaveBeenCalled();
-            await press("削除する");
+            await press("Delete");
             expect(remove).toHaveBeenCalledOnce();
             expect([...(remove.mock.calls[0]?.[2] ?? [])]).toEqual([["/1.png", { folder: false }]]);
             expect(h.onChange).toHaveBeenCalledExactlyOnceWith("2.png");
@@ -1003,7 +1003,7 @@ describe("ダウンロードと削除", () => {
         const last = await open("2.png");
         try {
             await askDeletion(last);
-            await press("削除する");
+            await press("Delete");
             expect(last.onChange).toHaveBeenCalledExactlyOnceWith("1.png");
         } finally {
             await last.dispose();
@@ -1012,7 +1012,7 @@ describe("ダウンロードと削除", () => {
         const only = await open("only.png");
         try {
             await askDeletion(only);
-            await press("削除する");
+            await press("Delete");
             expect(only.onChange).toHaveBeenCalledExactlyOnceWith(undefined);
         } finally {
             await only.dispose();
@@ -1024,7 +1024,7 @@ describe("ダウンロードと削除", () => {
         const h = await open("1.png");
         try {
             await askDeletion(h);
-            await press("取り消す");
+            await press("Cancel");
             await wait(() => expect(confirmation(h)).toBeNull());
             expect(remove).not.toHaveBeenCalled();
             expect(h.onChange).not.toHaveBeenCalled();
@@ -1039,8 +1039,8 @@ describe("ダウンロードと削除", () => {
         const h = await open("1.png");
         try {
             await askDeletion(h);
-            await press("削除する");
-            await wait(() => expect(outer(h)?.textContent).toContain("削除できない項目があります。"));
+            await press("Delete");
+            await wait(() => expect(outer(h)?.textContent).toContain("Some items could not be deleted."));
             expect(h.onChange).not.toHaveBeenCalled();
             expect(confirmation(h)).toBeNull();
             expect(findDisplayImage(h)?.alt).toBe("1.png");
@@ -1072,10 +1072,10 @@ describe("ダウンロードと削除", () => {
         trio();
         const h = await open("1.png");
         try {
-            await act(async () => control(h, "スライドショー")?.click());
-            expect(control(h, "スライドショーを止める")).not.toBeNull();
+            await act(async () => control(h, "Slideshow")?.click());
+            expect(control(h, "Stop the slideshow")).not.toBeNull();
             await askDeletion(h);
-            expect(control(h, "スライドショー")).not.toBeNull();
+            expect(control(h, "Slideshow")).not.toBeNull();
         } finally {
             await h.dispose();
         }
@@ -1087,7 +1087,7 @@ describe("ダウンロードと削除", () => {
         const h = await open("only.png");
         try {
             await askDeletion(h);
-            await press("削除する");
+            await press("Delete");
             await wait(() => expect(outer(h)?.textContent).toContain("denied-for-only-image"));
             expect(h.onChange).not.toHaveBeenCalled();
         } finally {
@@ -1107,17 +1107,17 @@ describe("ダウンロードと削除", () => {
         const h = await harness("199.png", "/", "onZoom", undefined, false);
         try {
             await wait(() => expect(findDisplayImage(h)).not.toBeNull());
-            expect(control(h, "削除")?.disabled).toBe(false);
+            expect(control(h, "Delete")?.disabled).toBe(false);
             await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" })));
             await wait(() => expect(resolve).toBeDefined());
-            expect(control(h, "削除")?.disabled).toBe(true);
-            await act(async () => control(h, "削除")?.click());
+            expect(control(h, "Delete")?.disabled).toBe(true);
+            await act(async () => control(h, "Delete")?.click());
             expect(confirmation(h)).toBeNull();
             await act(async () => {
                 resolve?.(response([entry(200)]));
             });
             await wait(() => expect(h.onChange).toHaveBeenCalledExactlyOnceWith("200.png"));
-            await wait(() => expect(control(h, "削除")?.disabled).toBe(false));
+            await wait(() => expect(control(h, "Delete")?.disabled).toBe(false));
         } finally {
             await h.dispose();
         }
@@ -1137,18 +1137,18 @@ describe("ダウンロードと削除", () => {
             await wait(() => expect(findDisplayImage(h)).not.toBeNull());
             vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
             await loadDisplay(h);
-            await act(async () => control(h, "削除")?.click());
+            await act(async () => control(h, "Delete")?.click());
             await act(async () => vi.advanceTimersByTimeAsync(0));
             expect(resolve).toBeDefined();
-            await act(async () => control(h, "スライドショー")?.click());
-            expect(control(h, "スライドショー")).not.toBeNull();
+            await act(async () => control(h, "Slideshow")?.click());
+            expect(control(h, "Slideshow")).not.toBeNull();
             await act(async () => {
                 resolve?.(response([entry(200)]));
             });
             await wait(() => expect(confirmation(h)).not.toBeNull());
             await act(async () => vi.advanceTimersByTimeAsync(20_000));
             expect(h.onChange).not.toHaveBeenCalled();
-            expect(control(h, "スライドショー")).not.toBeNull();
+            expect(control(h, "Slideshow")).not.toBeNull();
         } finally {
             vi.useRealTimers();
             await h.dispose();
@@ -1169,10 +1169,10 @@ describe("ダウンロードと削除", () => {
     });
 });
 
-describe("レートモード", () => {
+describe("Rate mode", () => {
     const wideViewer = (view: string) => harness(view, "/", "onZoom", undefined, false);
     const rateButton = (h: { host: HTMLElement }) =>
-        h.host.querySelector<HTMLButtonElement>('button[aria-label="レートモード"]');
+        h.host.querySelector<HTMLButtonElement>('button[aria-label="Rate mode"]');
     const press = (key: string) => act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key })));
     const badge = (h: { host: HTMLElement }) => h.host.querySelector("[data-rating]");
     /// 一覧と、保存済みの評価を返す daemon の代わり。
@@ -1298,29 +1298,29 @@ describe("レートモード", () => {
         rate.mockResolvedValue(undefined);
         const h = await wideViewer("0.png");
         const pad = (label: string) =>
-            h.host.querySelector<HTMLButtonElement>(`fieldset[aria-label=評価] button[aria-label="${label}"]`);
+            h.host.querySelector<HTMLButtonElement>(`fieldset[aria-label=Rating] button[aria-label='${label}']`);
         try {
             await wait(() => expect(findDisplayImage(h)).not.toBeNull());
-            expect(h.host.querySelector("fieldset[aria-label=評価]")).toBeNull();
+            expect(h.host.querySelector("fieldset[aria-label=Rating]")).toBeNull();
             await press("r");
-            expect(pad("元に戻す")?.disabled).toBe(true);
-            await act(async () => pad("良い")?.click());
+            expect(pad("Undo")?.disabled).toBe(true);
+            await act(async () => pad("Good")?.click());
             await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("1.png"));
             expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/0.png", "good"]);
             await h.render("1.png");
-            await act(async () => pad("悪い")?.click());
+            await act(async () => pad("Bad")?.click());
             await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("2.png"));
             expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/1.png", "bad"]);
             await h.render("2.png");
-            await act(async () => pad("未評価")?.click());
+            await act(async () => pad("Unrated")?.click());
             await wait(() => expect(rate).toHaveBeenCalledTimes(3));
             expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/2.png", "none"]);
-            expect(pad("元に戻す")?.disabled).toBe(false);
-            await act(async () => pad("元に戻す")?.click());
+            expect(pad("Undo")?.disabled).toBe(false);
+            await act(async () => pad("Undo")?.click());
             await wait(() => expect(rate).toHaveBeenCalledTimes(4));
             expect(rate.mock.calls.at(-1)?.slice(1)).toEqual(["big", "/2.png", "none"]);
             await press("r");
-            expect(h.host.querySelector("fieldset[aria-label=評価]")).toBeNull();
+            expect(h.host.querySelector("fieldset[aria-label=Rating]")).toBeNull();
         } finally {
             await h.dispose();
         }
@@ -1333,12 +1333,12 @@ describe("レートモード", () => {
             await wait(() => expect(findDisplayImage(h)).not.toBeNull());
             await press("r");
             await wait(() => expect(badge(h)?.getAttribute("data-rating")).toBe("good"));
-            expect(badge(h)?.textContent).toContain("良い");
+            expect(badge(h)?.textContent).toContain("Good");
             await h.render("1.png");
             await wait(() => expect(badge(h)?.getAttribute("data-rating")).toBe("bad"));
             await h.render("2.png");
             await wait(() => expect(badge(h)?.getAttribute("data-rating")).toBe("none"));
-            expect(badge(h)?.textContent).toContain("→ 良い");
+            expect(badge(h)?.textContent).toContain("→ Good");
         } finally {
             await h.dispose();
         }
@@ -1370,13 +1370,11 @@ describe("レートモード", () => {
         try {
             await wait(() => expect(findDisplayImage(h)).not.toBeNull());
             await act(async () => rateButton(h)?.click());
-            await act(async () =>
-                h.host.querySelector<HTMLButtonElement>("button[aria-label=スライドショー]")?.click(),
-            );
+            await act(async () => h.host.querySelector<HTMLButtonElement>("button[aria-label=Slideshow]")?.click());
             expect(rateButton(h)?.getAttribute("aria-pressed")).toBe("false");
-            expect(h.host.querySelector("button[aria-label=スライドショーを止める]")).not.toBeNull();
+            expect(h.host.querySelector("button[aria-label='Stop the slideshow']")).not.toBeNull();
             await act(async () => rateButton(h)?.click());
-            expect(h.host.querySelector("button[aria-label=スライドショー]")).not.toBeNull();
+            expect(h.host.querySelector("button[aria-label=Slideshow]")).not.toBeNull();
             expect(rateButton(h)?.getAttribute("aria-pressed")).toBe("true");
         } finally {
             await h.dispose();
@@ -1405,7 +1403,7 @@ describe("レートモード", () => {
         try {
             await wait(() => expect(findDisplayImage(h)).not.toBeNull());
             await press("r");
-            await act(async () => h.host.querySelector<HTMLButtonElement>('button[aria-label="削除"]')?.click());
+            await act(async () => h.host.querySelector<HTMLButtonElement>('button[aria-label="Delete"]')?.click());
             await wait(() => expect(document.querySelector("[role=alertdialog]")).not.toBeNull());
             await press("ArrowRight");
             expect(rate).not.toHaveBeenCalled();
@@ -1415,9 +1413,9 @@ describe("レートモード", () => {
     });
 });
 
-describe("ビューアの設定", () => {
+describe("Viewer settings", () => {
     const gear = (h: { host: HTMLElement }) =>
-        h.host.querySelector<HTMLButtonElement>('button[aria-label="ビューアの設定"]');
+        h.host.querySelector<HTMLButtonElement>('button[aria-label="Viewer settings"]');
     const panel = (h: { host: HTMLElement }) => h.host.querySelector<HTMLElement>("[data-slot=popover-content]");
     const open = async (view: string, contentType: string, narrow: boolean, filmstripSize = 3) => {
         listed([image(view, contentType, 1), image("other.png", "image/png", 1)]);
@@ -1438,7 +1436,7 @@ describe("ビューアの設定", () => {
             expect(panel(h)).toBeNull();
             await act(async () => gear(h)?.click());
             expect(panel(h)?.querySelector("[role=slider]")?.getAttribute("aria-valuenow")).toBe("3");
-            expect(panel(h)?.querySelector('[aria-label="元の画像への差し替え"]')).not.toBeNull();
+            expect(panel(h)?.querySelector('[aria-label="Switch to the original image"]')).not.toBeNull();
             // ポップオーバーは、全画面にする外枠の要素の中に描く。
             expect(h.host.querySelector("dialog > div")?.contains(panel(h))).toBe(true);
         } finally {
@@ -1455,8 +1453,12 @@ describe("ビューアの設定", () => {
             await press(slider, "ArrowRight");
             expect(h.onDisplaySetChange).toHaveBeenLastCalledWith({ filmstripSize: 4 });
             await act(async () =>
-                [...(panel(h)?.querySelectorAll<HTMLButtonElement>('[aria-label="元の画像への差し替え"] button') ?? [])]
-                    .find((button) => button.textContent === "自動")
+                [
+                    ...(panel(h)?.querySelectorAll<HTMLButtonElement>(
+                        '[aria-label="Switch to the original image"] button',
+                    ) ?? []),
+                ]
+                    .find((button) => button.textContent === "Automatic")
                     ?.click(),
             );
             expect(h.onDisplaySetChange).toHaveBeenLastCalledWith({ originalImage: "auto" });
@@ -1477,11 +1479,11 @@ describe("ビューアの設定", () => {
         try {
             expect(gear(narrow)).not.toBeNull();
             // 狭い画面の歯車は「その他」のメニューの隣に置く。
-            const more = narrow.host.querySelector('button[aria-label="その他"]');
+            const more = narrow.host.querySelector('button[aria-label="More"]');
             expect(gear(narrow)?.nextElementSibling).toBe(more);
             await act(async () => gear(narrow)?.click());
             expect(panel(narrow)?.querySelector("[role=slider]")).toBeNull();
-            expect(panel(narrow)?.querySelector('[aria-label="元の画像への差し替え"]')).not.toBeNull();
+            expect(panel(narrow)?.querySelector('[aria-label="Switch to the original image"]')).not.toBeNull();
         } finally {
             await narrow.dispose();
         }
@@ -1492,7 +1494,7 @@ describe("ビューアの設定", () => {
         try {
             await act(async () => gear(h)?.click());
             expect(panel(h)?.querySelector("[role=slider]")).not.toBeNull();
-            expect(panel(h)?.querySelector('[aria-label="元の画像への差し替え"]')).toBeNull();
+            expect(panel(h)?.querySelector('[aria-label="Switch to the original image"]')).toBeNull();
         } finally {
             await h.dispose();
         }
@@ -1503,7 +1505,7 @@ describe("ビューアの設定", () => {
         const h = await harness("note.txt", "/", "onZoom", undefined, false);
         try {
             await wait(() => expect(h.host.querySelector("dialog")).not.toBeNull());
-            await wait(() => expect(h.host.textContent).toContain("この種類のファイルは、まだ表示できません。"));
+            await wait(() => expect(h.host.textContent).toContain("This type of file cannot be shown yet."));
             expect(gear(h)).toBeNull();
         } finally {
             await h.dispose();

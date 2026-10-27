@@ -1,5 +1,7 @@
+import { t } from "i18next";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { describeError } from "../i18n/errors";
 import type { TransferSource } from "./clipboard";
 import type { TransferDestination } from "./collision";
 import { useTransfer } from "./transfer";
@@ -168,8 +170,8 @@ export function useEntryDrop(
                     void droppedInputs(event.dataTransfer)
                         .then((inputs) => transfer.upload?.(inputs, uploadDestination))
                         .catch((error) =>
-                            toast.error("持ち込むファイルを読めませんでした。", {
-                                description: error instanceof Error ? error.message : undefined,
+                            toast.error(t("errors.dropFailed"), {
+                                description: error instanceof Error ? describeError(error, "") : undefined,
                             }),
                         );
                 }

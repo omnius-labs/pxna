@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { t } from "i18next";
 import { ClipboardPaste, Download, FolderPlus, FolderSearch, Pencil, Trash2 } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 import { actionAvailability, useEntryActions } from "../library/actionContext";
@@ -103,7 +104,7 @@ export function EntryMenu({
                             requestAnimationFrame(() => actions.create());
                         }}
                     >
-                        新しいフォルダ
+                        {t("common.newFolder")}
                     </ContextMenuItem>
                 )}
                 <ContextMenuItem
@@ -113,16 +114,16 @@ export function EntryMenu({
                         requestAnimationFrame(() => actions.rename?.());
                     }}
                 >
-                    名前の変更
+                    {t("common.rename")}
                 </ContextMenuItem>
                 <ContextMenuItem disabled={!available.delete} onSelect={() => actions.delete?.()}>
-                    削除
+                    {t("common.delete")}
                 </ContextMenuItem>
                 <ContextMenuItem disabled={!canCut} onSelect={() => actions.cut?.()}>
-                    切り取り
+                    {t("common.cut")}
                 </ContextMenuItem>
                 <ContextMenuItem disabled={!actions.selection.items.size} onSelect={() => actions.copy?.()}>
-                    コピー
+                    {t("common.copy")}
                 </ContextMenuItem>
                 {!actions.crossLibrary && (
                     <ContextMenuItem
@@ -143,12 +144,12 @@ export function EntryMenu({
                             });
                         }}
                     >
-                        貼り付け
+                        {t("common.paste")}
                     </ContextMenuItem>
                 )}
                 {actions.crossLibrary && (
                     <ContextMenuItem disabled={actions.selection.items.size !== 1} onSelect={() => actions.reveal?.()}>
-                        フォルダで表示
+                        {t("common.showInFolder")}
                     </ContextMenuItem>
                 )}
                 {!actions.crossLibrary && !entry && (
@@ -163,16 +164,16 @@ export function EntryMenu({
                             })
                         }
                     >
-                        このフォルダ内を検索
+                        {t("common.searchInFolder")}
                     </ContextMenuItem>
                 )}
                 <ContextMenuItem disabled={!available.download} asChild={available.download}>
                     {available.download ? (
                         <a href={actions.downloadHref} download={downloadName}>
-                            ダウンロード
+                            {t("common.download")}
                         </a>
                     ) : (
-                        "ダウンロード"
+                        t("common.download")
                     )}
                 </ContextMenuItem>
             </ContextMenuContent>
@@ -190,8 +191,8 @@ export function EntryToolbar() {
             {!actions.crossLibrary && (
                 <button
                     type="button"
-                    aria-label="新しいフォルダ"
-                    title="新しいフォルダ（Alt+Shift+N）"
+                    aria-label={t("common.newFolder")}
+                    title={t("entryMenu.newFolderTitle")}
                     disabled={!available.create}
                     onClick={actions.create}
                     className="rounded p-1.5 disabled:opacity-40"
@@ -201,8 +202,8 @@ export function EntryToolbar() {
             )}
             <button
                 type="button"
-                aria-label="名前の変更"
-                title="名前の変更（F2）"
+                aria-label={t("common.rename")}
+                title={t("entryMenu.renameTitle")}
                 disabled={!available.rename}
                 onClick={actions.rename}
                 className="rounded p-1.5 disabled:opacity-40"
@@ -211,8 +212,8 @@ export function EntryToolbar() {
             </button>
             <button
                 type="button"
-                aria-label="削除"
-                title="削除（Delete）"
+                aria-label={t("common.delete")}
+                title={t("entryMenu.deleteTitle")}
                 disabled={!available.delete}
                 onClick={actions.delete}
                 className="rounded p-1.5 disabled:opacity-40"
@@ -222,8 +223,8 @@ export function EntryToolbar() {
             {!actions.crossLibrary && (
                 <button
                     type="button"
-                    aria-label="貼り付け"
-                    title="貼り付け（Ctrl/⌘+V）"
+                    aria-label={t("common.paste")}
+                    title={t("entryMenu.pasteTitle")}
                     disabled={!transfer?.canPaste || !actions.canCreate}
                     onClick={() => {
                         void transfer?.paste({ libraryId: actions.libraryId, path: actions.folderPath ?? "/" });
@@ -236,8 +237,8 @@ export function EntryToolbar() {
             {actions.crossLibrary && (
                 <button
                     type="button"
-                    aria-label="フォルダで表示"
-                    title="フォルダで表示"
+                    aria-label={t("common.showInFolder")}
+                    title={t("common.showInFolder")}
                     disabled={actions.selection.items.size !== 1}
                     onClick={actions.reveal}
                     className="rounded p-1.5 disabled:opacity-40"
@@ -247,8 +248,8 @@ export function EntryToolbar() {
             )}
             {available.download ? (
                 <a
-                    aria-label="ダウンロード"
-                    title="ダウンロード"
+                    aria-label={t("common.download")}
+                    title={t("common.download")}
                     href={actions.downloadHref}
                     download={downloadName}
                     className="rounded p-1.5"
@@ -258,8 +259,8 @@ export function EntryToolbar() {
             ) : (
                 <button
                     type="button"
-                    aria-label="ダウンロード"
-                    title="ダウンロード"
+                    aria-label={t("common.download")}
+                    title={t("common.download")}
                     disabled
                     aria-disabled="true"
                     className="rounded p-1.5 opacity-40"

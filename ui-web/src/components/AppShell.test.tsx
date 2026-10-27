@@ -60,7 +60,7 @@ async function render(narrow: boolean, href = "/") {
 }
 
 const trees = () => document.querySelectorAll("[role=tree]").length;
-const menuButton = () => document.querySelector<HTMLButtonElement>("button[aria-label=フォルダ]");
+const menuButton = () => document.querySelector<HTMLButtonElement>("button[aria-label=Folder]");
 
 it("puts the toolbar, the tree and the content side by side on a wide screen", async () => {
     await render(false);
@@ -69,7 +69,7 @@ it("puts the toolbar, the tree and the content side by side on a wide screen", a
     expect(host.querySelector("main")).not.toBeNull();
     expect(menuButton()).toBeNull();
     expect(host.querySelector('input[type="search"]')).toBeNull();
-    expect(host.querySelector('button[aria-label="検索"]')).toBeNull();
+    expect(host.querySelector('button[aria-label="Search"]')).toBeNull();
 });
 
 it("folds the tree into a drawer on a narrow screen, opened by the menu button and closed with Escape", async () => {
@@ -87,20 +87,20 @@ it("folds the tree into a drawer on a narrow screen, opened by the menu button a
 });
 
 const switchLink = (title: string) =>
-    host.querySelector<HTMLAnchorElement>(`nav[aria-label="表示の切り替え"] a[title="${title}"]`);
+    host.querySelector<HTMLAnchorElement>(`nav[aria-label='Switch view'] a[title="${title}"]`);
 const modeIs = (title: string) => switchLink(title)?.getAttribute("aria-current") === "page";
 
 it("広い画面の切り替えは、フォルダ、タイムライン、検索を横に並べ、検索の専用のボタンを置かない", async () => {
     const router = await render(false, "/browse/photos/sub");
     try {
-        const labels = [...host.querySelectorAll('nav[aria-label="表示の切り替え"] a')].map((a) => a.textContent);
-        expect(labels).toEqual(["フォルダ", "タイムライン", "検索"]);
-        expect(modeIs("フォルダ")).toBe(true);
-        expect(modeIs("検索")).toBe(false);
-        expect(host.querySelector('header button[aria-label="検索"]')).toBeNull();
+        const labels = [...host.querySelectorAll('nav[aria-label="Switch view"] a')].map((a) => a.textContent);
+        expect(labels).toEqual(["Folder", "Timeline", "Search"]);
+        expect(modeIs("Folder")).toBe(true);
+        expect(modeIs("Search")).toBe(false);
+        expect(host.querySelector('header button[aria-label="Search"]')).toBeNull();
         expect(host.querySelector("nav[aria-label=Library] [role=tree]")).not.toBeNull();
-        expect(switchLink("検索")?.getAttribute("href")).toBe("/search");
-        await act(async () => switchLink("検索")!.click());
+        expect(switchLink("Search")?.getAttribute("href")).toBe("/search");
+        await act(async () => switchLink("Search")!.click());
         await vi.waitFor(() => expect(router.state.location.href).toBe("/search"));
     } finally {
         router.history.destroy();
@@ -110,14 +110,14 @@ it("広い画面の切り替えは、フォルダ、タイムライン、検索�
 it("広い画面の検索モードは、ツリーの代わりに左の領域へ検索の条件を置く", async () => {
     const router = await render(false, "/search?lib=photos&path=%2Fsub");
     try {
-        expect(modeIs("検索")).toBe(true);
+        expect(modeIs("Search")).toBe(true);
         expect(host.querySelector("[role=tree]")).toBeNull();
-        const conditions = host.querySelector("nav[aria-label=検索の条件]");
+        const conditions = host.querySelector("nav[aria-label='Search conditions']");
         expect(conditions?.querySelector('input[type="search"]')).not.toBeNull();
         expect(conditions?.textContent).toContain("Photos");
-        expect(conditions?.textContent).toContain("サブフォルダを含めない");
-        expect(conditions?.textContent).toContain("未評価");
-        expect(host.querySelector("header")?.textContent).toContain("検索");
+        expect(conditions?.textContent).toContain("Do not include subfolders");
+        expect(conditions?.textContent).toContain("Unrated");
+        expect(host.querySelector("header")?.textContent).toContain("Search");
     } finally {
         router.history.destroy();
     }
@@ -128,13 +128,13 @@ it("狭い画面の検索モードは、検索語の欄を常に出し、ほか�
     try {
         expect(host.querySelector('header input[type="search"]')).toBeNull();
         expect(host.querySelector('input[type="search"]')).not.toBeNull();
-        const button = host.querySelector<HTMLButtonElement>('button[aria-label^="検索の条件"]');
-        expect(button?.getAttribute("aria-label")).toBe("検索の条件（3 件）");
+        const button = host.querySelector<HTMLButtonElement>('button[aria-label^="Search conditions"]');
+        expect(button?.getAttribute("aria-label")).toBe("Search conditions (3)");
         expect(button?.textContent).toBe("3");
         expect(document.querySelector("[role=dialog]")).toBeNull();
         await act(async () => button!.click());
         const drawer = document.querySelector("[role=dialog]");
-        expect(drawer?.textContent).toContain("サブフォルダを含めない");
+        expect(drawer?.textContent).toContain("Do not include subfolders");
         expect(drawer?.querySelector('input[type="search"]')).toBeNull();
     } finally {
         router.history.destroy();
@@ -146,9 +146,9 @@ it("タイムラインからも「検索」で、最後に使った検索の条�
     (await render(false, "/search?lib=photos&q=cat&rating=good")).history.destroy();
     const router = await render(false, "/timeline");
     try {
-        expect(modeIs("タイムライン")).toBe(true);
-        expect(switchLink("検索")?.getAttribute("href")).toBe("/search?lib=photos&q=cat&rating=good");
-        const folder = switchLink("フォルダ");
+        expect(modeIs("Timeline")).toBe(true);
+        expect(switchLink("Search")?.getAttribute("href")).toBe("/search?lib=photos&q=cat&rating=good");
+        const folder = switchLink("Folder");
         // 前の検索の画面の前に開いていたフォルダへ戻る。
         expect(folder?.getAttribute("href")).toBe("/browse/photos/sub");
     } finally {
@@ -160,7 +160,7 @@ it("広い画面のツールバーは、表示の名前と Library の名前を�
     // 切り替えのほかに「タイムライン」「検索」「Photos」の文字がないこと。
     const outsideSwitch = () => {
         const header = host.querySelector("header")!.cloneNode(true) as HTMLElement;
-        header.querySelector('nav[aria-label="表示の切り替え"]')?.remove();
+        header.querySelector('nav[aria-label="Switch view"]')?.remove();
         return header.textContent ?? "";
     };
     const crumbs = () =>
@@ -168,7 +168,7 @@ it("広い画面のツールバーは、表示の名前と Library の名前を�
     for (const href of ["/timeline", "/search", "/browse/photos"]) {
         const router = await render(false, href);
         try {
-            expect(outsideSwitch()).not.toMatch(/タイムライン|検索|Photos/);
+            expect(outsideSwitch()).not.toMatch(/Timeline|Search|Photos/);
             expect(crumbs()).toEqual([]);
         } finally {
             router.history.destroy();
@@ -182,12 +182,12 @@ it("広い画面のツールバーは、表示の名前と Library の名前を�
     }
 });
 
-const panel = () => host.querySelector<HTMLElement>("aside[aria-label=情報パネル]");
-const toggle = () => host.querySelector<HTMLButtonElement>("button[aria-label=情報パネル]");
+const panel = () => host.querySelector<HTMLElement>("aside[aria-label='Info panel']");
+const toggle = () => host.querySelector<HTMLButtonElement>("button[aria-label='Info panel']");
 
 it("広い画面では、内容の右に情報パネルを開いた状態で出し、ボタンで畳み、リロードの後も畳んだままにする", async () => {
     await render(false, "/browse/photos");
-    expect(panel()?.textContent).toBe("Entry を選ぶと、詳細が出ます。");
+    expect(panel()?.textContent).toBe("Choose an item to see its details.");
     expect(host.querySelector("main")?.nextElementSibling?.nextElementSibling).toBe(panel());
     expect(toggle()?.getAttribute("aria-pressed")).toBe("true");
 
@@ -220,16 +220,16 @@ const drag = async (handle: HTMLElement, from: number, to: number) => {
     await fire("pointermove", to);
     await fire("pointerup", to);
 };
-const separator = (label: string) => host.querySelector<HTMLElement>(`[role=separator][aria-label="${label}"]`)!;
+const separator = (label: string) => host.querySelector<HTMLElement>(`[role=separator][aria-label='${label}']`)!;
 
 it("ツリーの端のドラッグで幅を変え、端末に保存し、再訪で復元する", async () => {
     await render(false, "/browse/photos");
     const tree = () => host.querySelector<HTMLElement>("nav[aria-label=Library]")!;
     expect(tree().style.width).toBe("224px");
-    await drag(separator("ツリーの幅"), 224, 300);
+    await drag(separator("Tree width"), 224, 300);
     expect(tree().style.width).toBe("300px");
     expect(window.localStorage.getItem("pxna.treeWidth")).toBe("300");
-    await drag(separator("ツリーの幅"), 300, 5000);
+    await drag(separator("Tree width"), 300, 5000);
     expect(tree().style.width).toBe("480px");
     await act(async () => root.unmount());
     root = createRoot(host);
@@ -239,18 +239,18 @@ it("ツリーの端のドラッグで幅を変え、端末に保存し、再訪�
 
 it("情報パネルは左端を左へ動かすと広がり、矢印キーでも変えられる", async () => {
     await render(false, "/browse/photos");
-    const aside = () => host.querySelector<HTMLElement>("aside[aria-label=情報パネル]")!;
+    const aside = () => host.querySelector<HTMLElement>("aside[aria-label='Info panel']")!;
     expect(aside().style.width).toBe("288px");
-    await drag(separator("情報パネルの幅"), 1000, 900);
+    await drag(separator("Info panel width"), 1000, 900);
     expect(aside().style.width).toBe("388px");
     expect(window.localStorage.getItem("pxna.infoPanelWidth")).toBe("388");
     await act(async () =>
-        separator("情報パネルの幅").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })),
+        separator("Info panel width").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })),
     );
     expect(aside().style.width).toBe("404px");
 });
 
 it("タイムラインの月の一覧には幅のつまみを出さず、狭い画面でもつまみを出さない", async () => {
     await render(false, "/timeline/photos");
-    expect(host.querySelector('[role=separator][aria-label="ツリーの幅"]')).toBeNull();
+    expect(host.querySelector('[role=separator][aria-label="Tree width"]')).toBeNull();
 });

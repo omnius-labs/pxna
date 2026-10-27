@@ -1,4 +1,5 @@
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
+import { t } from "i18next";
 
 import { ApiError, api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
@@ -51,11 +52,21 @@ export function isFolderLike(entry: Entry): boolean {
 
 /// 種類の表示名。
 export const ENTRY_KIND_LABELS: Record<EntryKind, string> = {
-    folder: "フォルダ",
-    archive: "アーカイブ",
-    image: "画像",
-    video: "動画",
-    other: "ファイル",
+    get folder() {
+        return t("entryKind.folder");
+    },
+    get archive() {
+        return t("entryKind.archive");
+    },
+    get image() {
+        return t("entryKind.image");
+    },
+    get video() {
+        return t("entryKind.video");
+    },
+    get other() {
+        return t("entryKind.other");
+    },
 };
 
 export function entryKind(entry: Entry): EntryKind {

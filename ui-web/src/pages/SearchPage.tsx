@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { t } from "i18next";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "../components/AppShell";
@@ -235,16 +236,16 @@ export function SearchPage() {
                     libraries.isError ? (
                         <LoadFailure
                             error={libraries.error}
-                            label="Library を読めませんでした。"
+                            label={t("common.librariesNotFound")}
                             onRetry={() => {
                                 void libraries.refetch();
                             }}
                         />
                     ) : (
-                        <p className="p-4 text-muted-foreground">Library を読み込み中…</p>
+                        <p className="p-4 text-muted-foreground">{t("common.librariesLoading")}</p>
                     )
                 ) : !searching ? (
-                    <p className="p-4 text-muted-foreground">検索語を入力するか、評価かタグを選んでください。</p>
+                    <p className="p-4 text-muted-foreground">{t("search.notEntered")}</p>
                 ) : set.view === "list" ? (
                     <List
                         key={`${viewState}:${sortKey}`}

@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import type { components } from "../api/schema";
 import { fetchFolderPage } from "./entries";
 
@@ -27,10 +28,10 @@ async function readNames(destination: TransferDestination, query?: string, signa
             for (const entry of page.entries) names.add(entry.name);
             offset += page.entries.length;
             if (offset >= page.totalCount) return names;
-            if (!page.entries.length) throw new Error("宛先の一覧を最後まで読めませんでした。");
+            if (!page.entries.length) throw new Error(t("errors.destinationListIncomplete"));
         }
     }
-    throw new Error("宛先が更新されています。もう一度お試しください。");
+    throw new Error(t("errors.destinationChanged"));
 }
 export async function findCollisions(
     names: readonly string[],

@@ -96,7 +96,7 @@ it("不正なcommittedSizeは失敗し、次のチャンクと公開を行わず
     get.mockResolvedValue(response({ upload: { status: "active", committedSize: 1 } }));
     await expect(
         uploadFile(file(ONE_SHOT_LIMIT + 1), destination, "fail", new AbortController().signal, () => {}),
-    ).rejects.toThrow("送信位置");
+    ).rejects.toThrow("resume the upload");
     expect(binary).toHaveBeenCalledOnce();
     expect(del).toHaveBeenCalledOnce();
 });
@@ -225,7 +225,7 @@ it("403の失敗理由と送信中の取り消しを保存し、次の待機項�
     store.cancel(store.getSnapshot()[0]!.id);
     await vi.waitFor(() => expect(store.getSnapshot()[2]?.status).toBe("failed"));
     expect(store.getSnapshot()[0]?.status).toBe("cancelled");
-    expect(store.getSnapshot()[2]?.error).toBe("readonly target");
+    expect(store.getSnapshot()[2]?.error).toBe("This is not allowed.");
     store.cancelAll();
     await vi.waitFor(() => expect(store.getSnapshot()[1]?.status).toBe("cancelled"));
 });

@@ -157,7 +157,7 @@ it("条件がないときは一覧を要求せず、入力を促す", async () =
     const h = await harness("/search");
     try {
         expect(h.host.querySelector("[data-grid]")).toBeNull();
-        expect(h.host.textContent).toContain("検索語を入力するか、評価かタグを選んでください。");
+        expect(h.host.textContent).toContain("Enter a search term, or choose a rating or tag.");
     } finally {
         await h.dispose();
     }
@@ -169,7 +169,7 @@ it.each(["rating=good", "tag=trip", "rating=none&tag=trip&tag=sea"])(
         const h = await harness(`/search?${filter}`);
         try {
             expect(h.host.querySelector("[data-grid]")).not.toBeNull();
-            expect(h.host.textContent).not.toContain("評価かタグを選んでください");
+            expect(h.host.textContent).not.toContain("choose a rating or tag");
         } finally {
             await h.dispose();
         }

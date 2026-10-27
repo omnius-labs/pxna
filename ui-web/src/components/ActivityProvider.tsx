@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { t } from "i18next";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import type { ActivityState } from "../library/activity";
@@ -29,7 +30,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
                 current.map((item) => (item.id === id ? operation : item)),
             );
         } catch {
-            toast.error("操作を取り消せませんでした。");
+            toast.error(t("activity.undoFailed"));
         }
     };
     return (

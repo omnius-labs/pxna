@@ -50,12 +50,12 @@ async function render(activeMonth: string | undefined) {
 }
 const headings = () => [...host.querySelectorAll("h2")].map((heading) => heading.textContent);
 const yearButton = (year: string) =>
-    [...host.querySelectorAll("button[aria-expanded]")].find((button) => button.textContent?.includes(`${year}年`))!;
+    [...host.querySelectorAll("button[aria-expanded]")].find((button) => button.textContent?.includes(`${year}`))!;
 const monthLabels = () => [...host.querySelectorAll("a")].map((link) => link.title);
 
 it("Library と年と月に見出しを付ける", async () => {
     await render(undefined);
-    expect(headings()).toEqual(["Library", "年と月"]);
+    expect(headings()).toEqual(["Library", "Years and months"]);
 });
 
 it("最初は見ている月の年だけを開き、年を押すと開け閉めする", async () => {
@@ -63,22 +63,22 @@ it("最初は見ている月の年だけを開き、年を押すと開け閉め�
     expect(yearButton("2024").getAttribute("aria-expanded")).toBe("true");
     expect(yearButton("2025").getAttribute("aria-expanded")).toBe("false");
     expect(yearButton("2025").textContent).toContain("5");
-    expect(monthLabels()).toEqual(["2024年5月"]);
+    expect(monthLabels()).toEqual(["May 2024"]);
 
     await act(async () => (yearButton("2025") as HTMLButtonElement).click());
-    expect(monthLabels()).toEqual(["2025年12月", "2025年11月", "2024年5月"]);
+    expect(monthLabels()).toEqual(["Dec 2025", "Nov 2025", "May 2024"]);
 
     await act(async () => (yearButton("2024") as HTMLButtonElement).click());
-    expect(monthLabels()).toEqual(["2025年12月", "2025年11月"]);
+    expect(monthLabels()).toEqual(["Dec 2025", "Nov 2025"]);
 });
 
 it("見ている月がなければ最新の年を開き、見ている月が別の年へ移ればその年も開く", async () => {
     await render(undefined);
-    expect(monthLabels()).toEqual(["2025年12月", "2025年11月"]);
+    expect(monthLabels()).toEqual(["Dec 2025", "Nov 2025"]);
 
     await render("2024-05");
-    expect(monthLabels()).toEqual(["2025年12月", "2025年11月", "2024年5月"]);
-    expect(host.querySelector("a[aria-current=true]")?.getAttribute("title")).toBe("2024年5月");
+    expect(monthLabels()).toEqual(["Dec 2025", "Nov 2025", "May 2024"]);
+    expect(host.querySelector("a[aria-current=true]")?.getAttribute("title")).toBe("May 2024");
 });
 
 it("見ている年を閉じても、同じ年の中で月が移るだけなら開き直さない", async () => {

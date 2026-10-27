@@ -71,9 +71,9 @@ describe("timeline layout", () => {
     });
 
     it("formats days and months from the calendar", () => {
-        expect(formatDay("2025-05-03")).toBe("2025年5月3日（土）");
-        expect(formatDay("2024-02-29")).toBe("2024年2月29日（木）");
-        expect(formatMonth("2025-05")).toBe("2025年5月");
+        expect(formatDay("2025-05-03")).toBe("May 3, 2025 (Sat)");
+        expect(formatDay("2024-02-29")).toBe("Feb 29, 2024 (Thu)");
+        expect(formatMonth("2025-05")).toBe("May 2025");
     });
 });
 

@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { type ReactNode, useState } from "react";
 
 import {
@@ -75,16 +76,25 @@ export function AppShell({
                 <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
                     <SheetContent side="left" className="w-72 p-0">
                         <SheetHeader className="border-b">
-                            <SheetTitle>{timeline ? "Library と年月" : search ? "検索の条件" : "フォルダ"}</SheetTitle>
+                            <SheetTitle>
+                                {timeline
+                                    ? t("appShell.libraryAndMonth")
+                                    : search
+                                      ? t("appShell.searchConditions")
+                                      : t("common.folder")}
+                            </SheetTitle>
                             <SheetDescription className="sr-only">
                                 {timeline
-                                    ? "並べる Library と、表示する年と月を選びます。"
+                                    ? t("appShell.timelineDescription")
                                     : search
-                                      ? "探す Library、場所、評価、タグを選びます。"
-                                      : "Library のフォルダを選んで移ります。"}
+                                      ? t("appShell.searchDescription")
+                                      : t("appShell.browseDescription")}
                             </SheetDescription>
                         </SheetHeader>
-                        <nav aria-label={search ? "検索の条件" : "Library"} className="min-h-0 flex-1 overflow-y-auto">
+                        <nav
+                            aria-label={search ? t("appShell.searchConditions") : t("appShell.libraryNav")}
+                            className="min-h-0 flex-1 overflow-y-auto"
+                        >
                             {left}
                         </nav>
                     </SheetContent>
@@ -98,7 +108,7 @@ export function AppShell({
             <Toolbar location={location} search={search} timeline={timeline} actions={actions} />
             <div className="flex min-h-0 flex-1">
                 <nav
-                    aria-label={search ? "検索の条件" : "Library"}
+                    aria-label={search ? t("appShell.searchConditions") : t("appShell.libraryNav")}
                     className="shrink-0 overflow-y-auto border-r bg-sidebar"
                     style={{ width: sidebar ? (search ? "16rem" : "14rem") : treeWidth.width }}
                 >
@@ -107,7 +117,7 @@ export function AppShell({
                 {/* 幅を変えられるのはツリーだけで、タイムラインの月の一覧と検索の条件（`sidebar`）は固定である。 */}
                 {!sidebar && (
                     <ResizeHandle
-                        label="ツリーの幅"
+                        label={t("appShell.treeWidth")}
                         range={TREE_WIDTH}
                         width={treeWidth.width}
                         grows="right"
@@ -119,7 +129,7 @@ export function AppShell({
                 {panel !== undefined && (
                     <>
                         <ResizeHandle
-                            label="情報パネルの幅"
+                            label={t("appShell.infoWidth")}
                             range={INFO_PANEL_WIDTH}
                             width={panelWidth.width}
                             grows="left"
@@ -127,7 +137,7 @@ export function AppShell({
                             onCommit={panelWidth.commit}
                         />
                         <aside
-                            aria-label="情報パネル"
+                            aria-label={t("appShell.infoPanel")}
                             className="shrink-0 overflow-y-auto border-l"
                             style={{ width: panelWidth.width }}
                         >

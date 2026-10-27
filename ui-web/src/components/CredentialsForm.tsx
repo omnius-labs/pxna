@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { type FormEvent, useState } from "react";
 
 import type { Credentials } from "../auth/session";
@@ -36,7 +37,7 @@ export function CredentialsForm({
                 <h1 className="text-lg font-semibold">{title}</h1>
                 {description && <p className="text-sm text-muted-foreground">{description}</p>}
                 <label className="block text-sm">
-                    ユーザ名
+                    {t("credentials.username")}
                     <input
                         name="username"
                         className="mt-1 w-full rounded border border-input bg-background px-2 py-1"
@@ -49,7 +50,7 @@ export function CredentialsForm({
                     />
                 </label>
                 <label className="block text-sm">
-                    パスワード
+                    {t("credentials.password")}
                     <input
                         name="password"
                         type="password"

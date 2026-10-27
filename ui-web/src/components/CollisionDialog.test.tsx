@@ -5,10 +5,10 @@ import { expect, it, vi } from "vitest";
 import { CollisionDialog } from "./CollisionDialog";
 
 it.each([
-    ["置き換える", "overwrite"],
-    ["両方残す", "rename"],
-    ["スキップ", "skip"],
-    ["中止", "cancel"],
+    ["Replace", "overwrite"],
+    ["Keep both", "rename"],
+    ["Skip", "skip"],
+    ["Abort", "cancel"],
 ])("衝突の件数と名前を表示し、%s を返す", async (label, choice) => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     const host = document.createElement("div");
@@ -21,9 +21,9 @@ it.each([
                 <CollisionDialog names={Array.from({ length: 12 }, (_, i) => `name-${i}`)} onChoice={selected} />,
             ),
         );
-        expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("12 件");
+        expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("12 names");
         expect(document.body.textContent).toContain("name-0");
-        expect(document.body.textContent).toContain("ほか 2 件");
+        expect(document.body.textContent).toContain("and 2 more");
         await act(async () =>
             [...document.querySelectorAll<HTMLButtonElement>("button")]
                 .find((button) => button.textContent === label)!

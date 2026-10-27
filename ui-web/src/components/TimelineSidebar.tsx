@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { t } from "i18next";
 import { type MouseEvent, useMemo, useState } from "react";
 
 import { librariesQuery } from "../library/queries";
 import { timelineMonthsQuery } from "../library/timeline";
-import { formatMonth } from "../library/timelineLayout";
+import { formatMonth, monthName } from "../library/timelineLayout";
 import { timelineHref } from "../location";
 import { Checkbox } from "./ui/checkbox";
 
@@ -76,7 +77,7 @@ export function TimelineSidebar({ libraryIds, onChangeLibraries, activeMonth, on
                             <li
                                 key={library.id}
                                 className={`${ROW} pl-1 ${last ? "" : "hover:bg-sidebar-accent"}`}
-                                title={last ? "少なくとも 1 つの Library を並べます。" : undefined}
+                                title={last ? t("timelineSidebar.minLibrary") : undefined}
                             >
                                 <Checkbox
                                     id={`timeline-library-${library.id}`}
@@ -105,14 +106,14 @@ export function TimelineSidebar({ libraryIds, onChangeLibraries, activeMonth, on
             </section>
             <section aria-labelledby="timeline-months-heading">
                 <h2 id="timeline-months-heading" className="px-1 py-1 text-xs font-semibold text-muted-foreground">
-                    年と月
+                    {t("timelineSidebar.yearsAndMonths")}
                 </h2>
                 {months.isError ? (
-                    <p className="px-1 text-muted-foreground">年と月を読めませんでした。</p>
+                    <p className="px-1 text-muted-foreground">{t("timelineSidebar.monthsFailed")}</p>
                 ) : months.data === undefined ? (
-                    <p className="px-1 text-muted-foreground">読み込み中…</p>
+                    <p className="px-1 text-muted-foreground">{t("common.loading")}</p>
                 ) : years.length === 0 ? (
-                    <p className="px-1 text-muted-foreground">画像と動画がありません。</p>
+                    <p className="px-1 text-muted-foreground">{t("timelineSidebar.empty")}</p>
                 ) : (
                     <ul>
                         {years.map(({ year, items, count }) => {
@@ -132,7 +133,9 @@ export function TimelineSidebar({ libraryIds, onChangeLibraries, activeMonth, on
                                         >
                                             {open ? "▾" : "▸"}
                                         </span>
-                                        <span className="min-w-0 flex-1 truncate">{year}年</span>
+                                        <span className="min-w-0 flex-1 truncate">
+                                            {t("timelineSidebar.year", { year })}
+                                        </span>
                                         <span className="font-normal tabular-nums text-muted-foreground">{count}</span>
                                     </button>
                                     {open && (
@@ -151,7 +154,9 @@ export function TimelineSidebar({ libraryIds, onChangeLibraries, activeMonth, on
                                                             className="inline-block w-4 shrink-0"
                                                         />
                                                         <span className="min-w-0 flex-1 truncate">
-                                                            {Number(item.month.slice(5))}月
+                                                            {t("timelineSidebar.month", {
+                                                                month: monthName(Number(item.month.slice(5))),
+                                                            })}
                                                         </span>
                                                         <span className="tabular-nums text-muted-foreground">
                                                             {item.count}

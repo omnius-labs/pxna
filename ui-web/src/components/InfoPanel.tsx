@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { t } from "i18next";
 import { PanelRight } from "lucide-react";
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import { IDLE } from "../images/spec";
@@ -32,9 +33,9 @@ export function InfoPanelToggle({ open, onToggle }: { open: boolean; onToggle: (
         <Button
             variant="ghost"
             size="icon"
-            aria-label="情報パネル"
+            aria-label={t("info.label")}
             aria-pressed={open}
-            title={open ? "情報パネルを畳む" : "情報パネルを開く"}
+            title={open ? t("info.collapse") : t("info.open")}
             onClick={onToggle}
         >
             <PanelRight />
@@ -68,7 +69,7 @@ export function InfoPanel({ libraryId, selection }: InfoPanelProps) {
         enabled: mediaTarget !== undefined,
     });
     if (only === undefined) {
-        return <p className="p-4 text-sm text-muted-foreground">Entry を選ぶと、詳細が出ます。</p>;
+        return <p className="p-4 text-sm text-muted-foreground">{t("info.chooseEntry")}</p>;
     }
     if (items.length > 1) {
         return <SelectionSummary count={items.length} bytes={selectionBytes(selection)} />;
@@ -89,8 +90,8 @@ export function InfoPanel({ libraryId, selection }: InfoPanelProps) {
 function SelectionSummary({ count, bytes }: { count: number; bytes: number | undefined }) {
     return (
         <div className="p-4">
-            <h2 className="font-heading text-sm font-semibold">{count} 件を選択中</h2>
-            <p className="text-xs text-muted-foreground">合計 {formatBytes(bytes)}</p>
+            <h2 className="font-heading text-sm font-semibold">{t("info.selectedCount", { count })}</h2>
+            <p className="text-xs text-muted-foreground">{t("info.total", { bytes: formatBytes(bytes) })}</p>
         </div>
     );
 }
@@ -145,24 +146,24 @@ function EntryDetail({
             </div>
             <Separator />
             <dl className="px-4 py-3">
-                <InfoRow label="種類" value={ENTRY_KIND_LABELS[kind]} />
-                {hasSize && <InfoRow label="サイズ" value={formatBytes(entry.metadata?.size)} />}
-                <InfoRow label="更新日時" value={formatModifiedAt(entry.metadata?.modifiedAt)} />
+                <InfoRow label={t("info.kind")} value={ENTRY_KIND_LABELS[kind]} />
+                {hasSize && <InfoRow label={t("info.size")} value={formatBytes(entry.metadata?.size)} />}
+                <InfoRow label={t("info.modified")} value={formatModifiedAt(entry.metadata?.modifiedAt)} />
                 {libraryId === CROSS_LIBRARY_SCOPE && <InfoRow label="Library" value={libraryName} />}
-                <InfoRow label="場所" value={address.path} />
+                <InfoRow label={t("info.place")} value={address.path} />
             </dl>
             {entry.detailError && (
                 <p role="alert" className="px-4 pb-3 text-xs text-muted-foreground">
-                    詳細を取得できませんでした。
+                    {t("info.detailFailed")}
                     <Button variant="link" onClick={onRetry}>
-                        再試行
+                        {t("common.retry")}
                     </Button>
                 </p>
             )}
-            {media?.isPending && <p className="px-4 pb-3 text-xs text-muted-foreground">読み込み中…</p>}
+            {media?.isPending && <p className="px-4 pb-3 text-xs text-muted-foreground">{t("common.loading")}</p>}
             {media?.isError && (
                 <p role="alert" className="px-4 pb-3 text-xs text-muted-foreground">
-                    メディア情報を読めませんでした。
+                    {t("info.mediaFailed")}
                 </p>
             )}
             {media?.data && <MediaDetail info={media.data} />}
@@ -193,10 +194,10 @@ function MediaDetail({ info }: { info: MediaInfo }) {
             <>
                 <Separator />
                 <dl className="px-4 py-3">
-                    <InfoRow label="長さ" value={formatDuration(video.durationSecs)} />
-                    <InfoRow label="解像度" value={formatDimensions(video.width, video.height)} />
+                    <InfoRow label={t("info.duration")} value={formatDuration(video.durationSecs)} />
+                    <InfoRow label={t("info.resolution")} value={formatDimensions(video.width, video.height)} />
                     <InfoRow
-                        label="コーデック"
+                        label={t("info.codec")}
                         value={video.audioCodec ? `${video.videoCodec} / ${video.audioCodec}` : video.videoCodec}
                     />
                 </dl>
@@ -207,29 +208,35 @@ function MediaDetail({ info }: { info: MediaInfo }) {
         const { image } = info;
         const { shooting } = image;
         const rows: [string, string | undefined][] = [
-            ["撮影日時", shooting.takenAt === undefined ? undefined : formatTakenAt(shooting.takenAt)],
-            ["カメラ", formatCamera(shooting.cameraMake, shooting.cameraModel)],
-            ["レンズ", shooting.lensModel],
-            ["焦点距離", shooting.focalLengthMm === undefined ? undefined : formatFocalLength(shooting.focalLengthMm)],
-            ["絞り値", shooting.fNumber === undefined ? undefined : formatFNumber(shooting.fNumber)],
+            [t("info.takenAt"), shooting.takenAt === undefined ? undefined : formatTakenAt(shooting.takenAt)],
+            [t("info.camera"), formatCamera(shooting.cameraMake, shooting.cameraModel)],
+            [t("info.lens"), shooting.lensModel],
             [
-                "露出時間",
+                t("info.focalLength"),
+                shooting.focalLengthMm === undefined ? undefined : formatFocalLength(shooting.focalLengthMm),
+            ],
+            [t("info.aperture"), shooting.fNumber === undefined ? undefined : formatFNumber(shooting.fNumber)],
+            [
+                t("info.exposure"),
                 shooting.exposureTimeSecs === undefined ? undefined : formatExposureTime(shooting.exposureTimeSecs),
             ],
-            ["ISO 感度", shooting.iso === undefined ? undefined : String(shooting.iso)],
+            [t("info.iso"), shooting.iso === undefined ? undefined : String(shooting.iso)],
         ];
         const present = rows.filter((row): row is [string, string] => row[1] !== undefined);
         return (
             <>
                 <Separator />
                 <dl className="px-4 py-3">
-                    <InfoRow label="寸法" value={formatDimensions(image.width, image.height, image.rotation)} />
+                    <InfoRow
+                        label={t("info.dimensions")}
+                        value={formatDimensions(image.width, image.height, image.rotation)}
+                    />
                 </dl>
                 {present.length > 0 && (
                     <>
                         <Separator />
                         <div className="px-4 py-3">
-                            <h3 className="mb-1 text-xs font-medium">撮影情報</h3>
+                            <h3 className="mb-1 text-xs font-medium">{t("info.shooting")}</h3>
                             <dl>
                                 {present.map(([label, value]) => (
                                     <InfoRow key={label} label={label} value={value} />

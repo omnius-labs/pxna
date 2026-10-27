@@ -1,4 +1,5 @@
 import { type QueryClient, queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
+import { t } from "i18next";
 import { useEffect, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
@@ -128,7 +129,7 @@ export class PreferencesWriter {
             if (this.saved !== undefined) {
                 this.client.setQueryData(preferencesQuery.queryKey, this.saved);
             }
-            (this.options.notify ?? ((message) => void toast.error(message)))("表示設定を保存できませんでした。");
+            (this.options.notify ?? ((message) => void toast.error(message)))(t("errors.preferencesSaveFailed"));
         } finally {
             this.saving = false;
         }

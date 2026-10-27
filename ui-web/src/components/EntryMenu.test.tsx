@@ -146,8 +146,8 @@ it.each([false, true])("切り取りはreadonlyで無効、コピーは選択が
             ),
         );
         for (const [label, callback] of [
-            ["切り取り", actions.cut],
-            ["コピー", actions.copy],
+            ["Cut", actions.cut],
+            ["Copy", actions.copy],
         ] as const) {
             await act(async () =>
                 host
@@ -157,7 +157,7 @@ it.each([false, true])("切り取りはreadonlyで無効、コピーは選択が
             const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
                 (item) => item.textContent === label,
             )!;
-            const enabled = selected && label === "コピー";
+            const enabled = selected && label === "Copy";
             expect(item.getAttribute("aria-disabled")).toBe(enabled ? null : "true");
             await act(async () => item.click());
             expect(callback).toHaveBeenCalledTimes(enabled ? 1 : 0);
@@ -202,7 +202,7 @@ it.each([false, true])(
                     </TransferContext.Provider>,
                 ),
             );
-            const button = host.querySelector<HTMLButtonElement>('button[aria-label="貼り付け"]')!;
+            const button = host.querySelector<HTMLButtonElement>('button[aria-label="Paste"]')!;
             expect(button.disabled).toBe(readonly);
             await act(async () => button.click());
             if (!readonly) expect(transfer.paste).toHaveBeenLastCalledWith({ libraryId: "ops", path: "/current" });
@@ -212,7 +212,7 @@ it.each([false, true])(
                     .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, button: 2 })),
             );
             const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-                (item) => item.textContent === "貼り付け",
+                (item) => item.textContent === "Paste",
             )!;
             expect(item.getAttribute("aria-disabled")).toBe(readonly ? "true" : null);
             await act(async () => item.click());
@@ -266,8 +266,8 @@ it("フォルダ表示の空き領域のメニューは、そのフォルダを�
     navigate.mockReset();
     const menu = await openMenu({ ...state(), folderPath: "/a/b" });
     try {
-        expect(menu.items()).toContain("このフォルダ内を検索");
-        await menu.select("このフォルダ内を検索");
+        expect(menu.items()).toContain("Search in this folder");
+        await menu.select("Search in this folder");
         expect(navigate).toHaveBeenCalledWith({ href: "/search?lib=ops&path=%2Fa%2Fb" });
     } finally {
         await menu.dispose();
@@ -277,14 +277,14 @@ it("Entry のメニューと、Library を横断する画面のメニューに�
     const entry = { path: "/a", name: "a", kind: "file" as const, metadata: { size: 1, readonly: false } };
     const onEntry = await openMenu({ ...state(), folderPath: "/" }, entry);
     try {
-        expect(onEntry.items()).not.toContain("このフォルダ内を検索");
+        expect(onEntry.items()).not.toContain("Search in this folder");
     } finally {
         await onEntry.dispose();
     }
     const cross = await openMenu({ ...state(), libraryId: "*", crossLibrary: true });
     try {
-        expect(cross.items()).not.toContain("このフォルダ内を検索");
-        expect(cross.items()).toContain("フォルダで表示");
+        expect(cross.items()).not.toContain("Search in this folder");
+        expect(cross.items()).toContain("Show in folder");
     } finally {
         await cross.dispose();
     }

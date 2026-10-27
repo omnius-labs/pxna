@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { FolderUp, Upload } from "lucide-react";
 import { useRef } from "react";
 import { useEntryActions } from "../library/actionContext";
@@ -22,8 +23,8 @@ export function UploadButton() {
         <div className="flex items-center gap-1">
             <button
                 type="button"
-                aria-label="ファイルをアップロード"
-                title="ファイルをアップロード"
+                aria-label={t("upload.file")}
+                title={t("upload.file")}
                 disabled={disabled}
                 onClick={() => files.current?.click()}
                 className="rounded p-1.5 disabled:opacity-40"
@@ -32,8 +33,8 @@ export function UploadButton() {
             </button>
             <button
                 type="button"
-                aria-label="フォルダをアップロード"
-                title="フォルダをアップロード"
+                aria-label={t("upload.folder")}
+                title={t("upload.folder")}
                 disabled={disabled}
                 onClick={() => folders.current?.click()}
                 className="rounded p-1.5 disabled:opacity-40"
@@ -43,7 +44,7 @@ export function UploadButton() {
             <input
                 ref={files}
                 type="file"
-                aria-label="アップロードするファイル"
+                aria-label={t("upload.fileInput")}
                 multiple
                 hidden
                 disabled={disabled}
@@ -52,7 +53,7 @@ export function UploadButton() {
             <input
                 ref={folders}
                 type="file"
-                aria-label="アップロードするフォルダ"
+                aria-label={t("upload.folderInput")}
                 multiple
                 hidden
                 {...{ webkitdirectory: "" }}

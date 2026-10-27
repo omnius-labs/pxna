@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { t } from "i18next";
 import { useEffect } from "react";
 
 import { ApiError } from "../api/client";
@@ -38,9 +39,9 @@ export function SetupPage() {
 
     return (
         <CredentialsForm
-            title="初期セットアップ"
-            description="Pxna のオーナーを登録します。オーナーは 1 人だけです。"
-            submitLabel="登録する"
+            title={t("pages.setupTitle")}
+            description={t("pages.setupDescription")}
+            submitLabel={t("pages.setupSubmit")}
             passwordAutoComplete="new-password"
             error={setup.error ? setupErrorMessage(setup.error) : undefined}
             pending={setup.isPending}
@@ -51,7 +52,7 @@ export function SetupPage() {
 
 function setupErrorMessage(error: Error): string {
     if (error instanceof ApiError && error.kind === "InvalidRequest") {
-        return "ユーザ名かパスワードの形式が正しくありません。";
+        return t("pages.setupInvalid");
     }
-    return "登録できませんでした。";
+    return t("pages.setupFailed");
 }

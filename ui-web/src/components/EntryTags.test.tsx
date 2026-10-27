@@ -58,7 +58,7 @@ async function render() {
     );
     await vi.waitFor(() => expect(host.querySelector("input")?.disabled).toBe(false));
 }
-const input = () => host.querySelector<HTMLInputElement>('input[aria-label="タグを追加"]')!;
+const input = () => host.querySelector<HTMLInputElement>('input[aria-label="Add a tag"]')!;
 const type = async (value: string) => {
     await act(async () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input(), value);
@@ -75,7 +75,7 @@ it("保存済みの評価とタグを出す", async () => {
     daemon({ rating: "good", tags: ["cat", "trip"] });
     await render();
     await vi.waitFor(() => expect(chips()).toEqual(["cat", "trip"]));
-    expect(host.querySelector("[data-rating]")?.textContent).toBe("良い");
+    expect(host.querySelector("[data-rating]")?.textContent).toBe("Good");
 });
 
 it("Enter で語を足し、足した語だけを含む集合を保存して、入力を空にする", async () => {
@@ -117,7 +117,9 @@ it("× で語を外すと、残りの集合を保存する", async () => {
     daemon({ tags: ["cat", "trip"] });
     await render();
     await vi.waitFor(() => expect(chips()).toEqual(["cat", "trip"]));
-    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="タグ「cat」を外す"]')!.click());
+    await act(async () =>
+        host.querySelector<HTMLButtonElement>("button[aria-label='Remove the tag \"cat\"']")!.click(),
+    );
     await vi.waitFor(() => expect(chips()).toEqual(["trip"]));
     expect(mocks.put.mock.calls[0]?.[1].body.tags).toEqual(["trip"]);
 });

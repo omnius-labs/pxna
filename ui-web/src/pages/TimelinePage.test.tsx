@@ -192,8 +192,8 @@ it("reads from the newest entry and lists the months with their counts", async (
         expect(JSON.parse(h.host.querySelector("[data-grid]")?.getAttribute("data-anchor") ?? "")).toEqual({
             kind: "newest",
         });
-        await vi.waitFor(() => expect(h.host.textContent).toContain("5月"));
-        expect(h.host.textContent).toContain("2024年");
+        await vi.waitFor(() => expect(h.host.textContent).toContain("May"));
+        expect(h.host.textContent).toContain("2024");
         expect(h.host.querySelector("[data-controls]")?.getAttribute("data-controls")).toBe("true");
         expect(h.host.querySelector("[data-status]")?.textContent).toBe("1:0");
     } finally {
@@ -204,7 +204,7 @@ it("reads from the newest entry and lists the months with their counts", async (
 it("reads again from a month when it is pressed and puts the month in the URL", async () => {
     const h = await harness();
     try {
-        await vi.waitFor(() => expect(h.host.textContent).toContain("4月"));
+        await vi.waitFor(() => expect(h.host.textContent).toContain("Apr"));
         const april = [...h.host.querySelectorAll("a")].find((link) =>
             link.getAttribute("href")?.includes("month=2024-04"),
         );
@@ -244,7 +244,7 @@ it("does not read again when the visible month is written to the URL", async () 
 it("reads again from the month when the month that is already shown is pressed", async () => {
     const h = await harness("/timeline?month=2024-05");
     try {
-        await vi.waitFor(() => expect(h.host.textContent).toContain("5月"));
+        await vi.waitFor(() => expect(h.host.textContent).toContain("May"));
         const before = h.entryQueries().length;
         const may = () =>
             [...h.host.querySelectorAll("a")].find((link) => link.getAttribute("href")?.includes("month=2024-05"));
@@ -264,7 +264,7 @@ it("keeps the month that was pressed even when the old range reported its visibl
     const h = await harness();
     try {
         await act(async () => h.host.querySelector<HTMLElement>("[data-visible]")?.click());
-        await vi.waitFor(() => expect(h.host.textContent).toContain("4月"));
+        await vi.waitFor(() => expect(h.host.textContent).toContain("Apr"));
         const april = [...h.host.querySelectorAll("a")].find((link) =>
             link.getAttribute("href")?.includes("month=2024-05"),
         );
@@ -291,7 +291,7 @@ it("opens an image in the viewer and the parent folder with the entry revealed",
         await act(async () => h.router.navigate({ href: "/timeline" }));
 
         await act(async () => h.host.querySelector<HTMLElement>("[data-tile='/photos/dir/a.png']")?.click());
-        const reveal = h.host.querySelector<HTMLButtonElement>("button[aria-label='フォルダで表示']");
+        const reveal = h.host.querySelector<HTMLButtonElement>("button[aria-label='Show in folder']");
         expect(reveal?.disabled).toBe(false);
         await act(async () => reveal?.click());
         expect(h.router.state.location.href).toBe("/browse/photos/dir?reveal=a.png");
@@ -304,9 +304,9 @@ it("shows that a scan is running and starts one on request", async () => {
     mock.status = { running: true, processedFiles: 42 };
     const h = await harness();
     try {
-        await vi.waitFor(() => expect(h.host.textContent).toContain("集計中… 42 件を処理しました。"));
-        expect(h.host.querySelector("[data-grid]")?.getAttribute("data-empty")).toContain("集計中");
-        await act(async () => h.host.querySelector<HTMLElement>("button[aria-label='今すぐ更新']")?.click());
+        await vi.waitFor(() => expect(h.host.textContent).toContain("Aggregating… 42 files processed."));
+        expect(h.host.querySelector("[data-grid]")?.getAttribute("data-empty")).toContain("Aggregating");
+        await act(async () => h.host.querySelector<HTMLElement>("button[aria-label='Refresh now']")?.click());
         expect(mock.post).toHaveBeenCalledWith("/timeline/refresh", { body: { libraryIds: ["photos"] } });
     } finally {
         await h.dispose();
@@ -316,9 +316,9 @@ it("shows that a scan is running and starts one on request", async () => {
 it("hides the operations that need a current folder", async () => {
     const h = await harness();
     try {
-        expect(h.host.querySelector("button[aria-label='新しいフォルダ']")).toBeNull();
-        expect(h.host.querySelector("button[aria-label='貼り付け']")).toBeNull();
-        expect(h.host.querySelector("button[aria-label='削除']")).not.toBeNull();
+        expect(h.host.querySelector("button[aria-label='New folder']")).toBeNull();
+        expect(h.host.querySelector("button[aria-label='Paste']")).toBeNull();
+        expect(h.host.querySelector("button[aria-label='Delete']")).not.toBeNull();
     } finally {
         await h.dispose();
     }
@@ -359,9 +359,9 @@ it("does not offer changes for an entry of a read-only Library", async () => {
     try {
         await vi.waitFor(() => expect(h.host.querySelector("[data-tile='/shared/b.png']")).not.toBeNull());
         await act(async () => h.host.querySelector<HTMLElement>("[data-tile='/shared/b.png']")?.click());
-        expect(h.host.querySelector<HTMLButtonElement>("button[aria-label='削除']")?.disabled).toBe(true);
+        expect(h.host.querySelector<HTMLButtonElement>("button[aria-label='Delete']")?.disabled).toBe(true);
         await act(async () => h.host.querySelector<HTMLElement>("[data-tile='/photos/dir/a.png']")?.click());
-        expect(h.host.querySelector<HTMLButtonElement>("button[aria-label='削除']")?.disabled).toBe(false);
+        expect(h.host.querySelector<HTMLButtonElement>("button[aria-label='Delete']")?.disabled).toBe(false);
     } finally {
         await h.dispose();
     }

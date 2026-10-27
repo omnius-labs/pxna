@@ -1,4 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { t } from "i18next";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useImageWants } from "../images/wants";
 import { type Entry, isThumbnailable } from "../library/entries";
@@ -212,9 +213,9 @@ export function TimelineGrid({
     const { focusedIndex, click, keyDown } = interaction;
 
     if (!store.isLoaded && store.error) {
-        return <LoadFailure error={store.error} label="タイムラインを読めませんでした。" onRetry={store.retry} />;
+        return <LoadFailure error={store.error} label={t("timelineGrid.loadFailed")} onRetry={store.retry} />;
     }
-    if (!store.isLoaded) return <p className="p-4 text-muted-foreground">読み込み中…</p>;
+    if (!store.isLoaded) return <p className="p-4 text-muted-foreground">{t("common.loading")}</p>;
     if (items.length === 0)
         return (
             <EntryMenu>
@@ -237,7 +238,7 @@ export function TimelineGrid({
                 {store.error && (
                     <LoadFailure
                         error={store.error}
-                        label="続きを読めませんでした。"
+                        label={t("timelineGrid.moreFailed")}
                         onRetry={() => {
                             store.retry();
                             if (hasPrevious) store.wantMore("previous");
@@ -251,7 +252,7 @@ export function TimelineGrid({
                     className="min-h-0 flex-1 overflow-auto"
                     role="listbox"
                     aria-multiselectable="true"
-                    aria-label="タイムライン"
+                    aria-label={t("common.timeline")}
                 >
                     <div style={{ height: total, position: "relative" }}>
                         {virtualRows.map((virtualRow) => {

@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { t } from "i18next";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { folderListingStore } from "../library/listing";
 import { folderQuery } from "../library/queries";
@@ -57,7 +58,7 @@ export function TreeMenu({
                         requestAnimationFrame(onCreate);
                     }}
                 >
-                    新しいフォルダ
+                    {t("common.newFolder")}
                 </ContextMenuItem>
                 <ContextMenuItem
                     disabled={!transfer?.canPaste || !canCreate}
@@ -65,14 +66,14 @@ export function TreeMenu({
                         void transfer?.paste({ libraryId: node.libraryId, path: node.path });
                     }}
                 >
-                    貼り付け
+                    {t("common.paste")}
                 </ContextMenuItem>
                 <ContextMenuItem
                     onSelect={() =>
                         void navigate({ href: searchHref({ libraryIds: [node.libraryId], path: node.path, tags: [] }) })
                     }
                 >
-                    このフォルダ内を検索
+                    {t("common.searchInFolder")}
                 </ContextMenuItem>
                 {node.path !== "/" && (
                     <>
@@ -83,10 +84,10 @@ export function TreeMenu({
                                 requestAnimationFrame(onRename);
                             }}
                         >
-                            名前の変更
+                            {t("common.rename")}
                         </ContextMenuItem>
                         <ContextMenuItem disabled={node.readonly} onSelect={onDelete}>
-                            削除
+                            {t("common.delete")}
                         </ContextMenuItem>
                     </>
                 )}

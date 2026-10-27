@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { t } from "i18next";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { librariesQuery } from "../library/queries";
@@ -44,8 +45,8 @@ export function SearchTermsField({ search, shortcut = false }: { search: SearchL
         <Input
             ref={input}
             type="search"
-            aria-label="検索語"
-            placeholder="名前で検索"
+            aria-label={t("search.query")}
+            placeholder={t("search.placeholder")}
             className="h-8 min-w-0"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -53,12 +54,13 @@ export function SearchTermsField({ search, shortcut = false }: { search: SearchL
     );
 }
 
-const RATINGS = [
-    { value: "", label: "すべて" },
-    { value: "good", label: "良い" },
-    { value: "bad", label: "悪い" },
-    { value: "none", label: "未評価" },
-] as const;
+const ratingOptions = () =>
+    [
+        { value: "", label: t("search.all") },
+        { value: "good", label: t("rating.good") },
+        { value: "bad", label: t("rating.bad") },
+        { value: "none", label: t("rating.none") },
+    ] as const;
 
 /// 検索モードの左の領域。Library、場所、範囲、評価、タグを選ぶ。検索語は、狭い画面ではヘッダーの下に出すので、`terms` のときだけここに出す。
 export function SearchPanel({ search, terms }: { search: SearchLocation; terms: boolean }) {
@@ -96,7 +98,7 @@ export function SearchPanel({ search, terms }: { search: SearchLocation; terms: 
                         <div
                             key={library.id}
                             className="flex items-center gap-2"
-                            title={last ? "少なくとも 1 つの Library を探します。" : undefined}
+                            title={last ? t("search.minLibrary") : undefined}
                         >
                             <Checkbox
                                 id={`search-library-${library.id}`}
@@ -114,16 +116,23 @@ export function SearchPanel({ search, terms }: { search: SearchLocation; terms: 
                     );
                 })}
             </section>
-            <section aria-label="場所" className="flex flex-col gap-1">
-                <h2 className="text-xs font-semibold text-muted-foreground">場所</h2>
+            <section aria-label={t("search.place")} className="flex flex-col gap-1">
+                <h2 className="text-xs font-semibold text-muted-foreground">{t("search.place")}</h2>
                 {only === undefined ? (
-                    <p className="text-muted-foreground">各 Library の全体</p>
+                    <p className="text-muted-foreground">{t("search.wholeEachLibrary")}</p>
                 ) : (
                     <Popover open={startOpen} onOpenChange={setStartOpen}>
                         <PopoverTrigger asChild>
-                            <Button variant="outline" size="sm" className="justify-between" aria-label="場所を選ぶ">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="justify-between"
+                                aria-label={t("search.choosePlace")}
+                            >
                                 <span className="min-w-0 truncate">
-                                    {search.path === "/" ? `${onlyName ?? only} 全体` : search.path}
+                                    {search.path === "/"
+                                        ? t("search.wholeOf", { name: onlyName ?? only })
+                                        : search.path}
                                 </span>
                                 <ChevronDown />
                             </Button>
@@ -138,7 +147,7 @@ export function SearchPanel({ search, terms }: { search: SearchLocation; terms: 
                                     setStartOpen(false);
                                 }}
                             >
-                                Library 全体
+                                {t("search.wholeLibrary")}
                             </Button>
                             <div className="h-72 overflow-hidden rounded border">
                                 <Tree
@@ -160,14 +169,14 @@ export function SearchPanel({ search, terms }: { search: SearchLocation; terms: 
                         onCheckedChange={(next) => change({ flat: next === true })}
                     />
                     <label htmlFor="search-flat" className="cursor-pointer">
-                        サブフォルダを含めない
+                        {t("search.noSubfolders")}
                     </label>
                 </div>
             </section>
-            <section aria-label="評価" className="flex flex-col gap-1">
-                <h2 className="text-xs font-semibold text-muted-foreground">評価</h2>
-                <div role="radiogroup" aria-label="評価" className="flex flex-wrap gap-x-3 gap-y-1">
-                    {RATINGS.map((rating) => (
+            <section aria-label={t("common.rating")} className="flex flex-col gap-1">
+                <h2 className="text-xs font-semibold text-muted-foreground">{t("common.rating")}</h2>
+                <div role="radiogroup" aria-label={t("common.rating")} className="flex flex-wrap gap-x-3 gap-y-1">
+                    {ratingOptions().map((rating) => (
                         <label key={rating.value} className="flex cursor-pointer items-center gap-1">
                             <input
                                 type="radio"
@@ -180,10 +189,10 @@ export function SearchPanel({ search, terms }: { search: SearchLocation; terms: 
                     ))}
                 </div>
             </section>
-            <section aria-label="タグ" className="flex flex-col gap-1">
-                <h2 className="text-xs font-semibold text-muted-foreground">タグ</h2>
+            <section aria-label={t("common.tags")} className="flex flex-col gap-1">
+                <h2 className="text-xs font-semibold text-muted-foreground">{t("common.tags")}</h2>
                 {words.length === 0 ? (
-                    <p className="text-muted-foreground">タグがありません。</p>
+                    <p className="text-muted-foreground">{t("search.noTags")}</p>
                 ) : (
                     words.map((word) => (
                         <div key={word} className="flex items-center gap-2">

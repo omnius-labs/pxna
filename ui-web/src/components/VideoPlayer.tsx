@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
+import { t } from "i18next";
 import { useEffect, useRef, useState } from "react";
-
 import { clientTimings } from "../api/clientTimings";
+import { describeError } from "../i18n/errors";
 import { mediaInfoQuery } from "../library/queries";
 import { entryAddress } from "../location";
 import { originalImageUrl } from "../viewer/urls";
@@ -21,7 +22,7 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
     const media = useQuery({
         ...mediaInfoQuery(libraryId, path),
         select: ({ video }) => {
-            if (!video) throw new Error("動画の情報を取得できませんでした。");
+            if (!video) throw new Error(t("video.infoFailed"));
             return video;
         },
     });
@@ -59,7 +60,7 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
             const { default: Hls } = await import("hls.js");
             if (closed) return;
             const mode = playbackMode(info.contentType, (type) => video.canPlayType(type), Hls.isSupported());
-            if (mode === "unsupported") throw new Error("このブラウザは動画再生に対応していません。");
+            if (mode === "unsupported") throw new Error(t("video.unsupported"));
             timing.current.mode = mode === "native-hls" ? "native-hls" : "hls-js";
             const resource = acquireVideoSession(libraryId, path);
             release = resource.release;
@@ -74,7 +75,7 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
                     if (data.fatal && !closed) {
                         hls.destroy();
                         release?.();
-                        setError("動画を再生できませんでした。閉じて、もう一度開いてください。");
+                        setError(t("video.playFailed"));
                     }
                 });
                 hls.loadSource(session.playlistUrl);
@@ -84,7 +85,7 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
         void start().catch((cause: unknown) => {
             if (!closed) {
                 release?.();
-                setError(cause instanceof Error ? cause.message : "動画を読み込めませんでした。");
+                setError(describeError(cause, t("video.loadFailed")));
             }
         });
         return () => {
@@ -99,10 +100,10 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
 
     return (
         <div className="flex h-full items-center justify-center p-4">
-            {media.isPending ? <p className="absolute text-neutral-300">読み込み中…</p> : null}
+            {media.isPending ? <p className="absolute text-neutral-300">{t("common.loading")}</p> : null}
             {media.isError || error ? (
                 <p role="alert" className="absolute z-10 rounded bg-black/80 p-4 text-neutral-200">
-                    {error ?? "動画情報を読み込めませんでした。"}
+                    {error ?? t("video.infoLoadFailed")}
                 </p>
             ) : null}
             {/* biome-ignore lint/a11y/useMediaCaption: 字幕トラックのない動画ソースを扱う。提供開始時に track を追加する */}
@@ -112,7 +113,7 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
                 autoPlay
                 playsInline
                 tabIndex={0}
-                aria-label="動画プレイヤー"
+                aria-label={t("video.player")}
                 className="h-full max-h-full w-full object-contain"
                 onPlaying={() => {
                     const { startedAt, mode, recorded } = timing.current;
@@ -126,7 +127,7 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
                     });
                 }}
                 onEnded={() => done.current?.()}
-                onError={() => setError("動画を再生できませんでした。閉じて、もう一度開いてください。")}
+                onError={() => setError(t("video.playFailed"))}
             />
         </div>
     );

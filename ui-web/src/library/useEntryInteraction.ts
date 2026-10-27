@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { type KeyboardEvent, type MouseEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -161,7 +162,7 @@ export function useEntryInteraction({
         } catch (error) {
             if (current.current === controller && !controller.signal.aborted) {
                 if (error instanceof ListingSnapshotChanged) onSelectionChange({ ...selection, anchor: undefined });
-                else toast.error("選択する範囲を読めませんでした。");
+                else toast.error(t("errors.selectionNotLoaded"));
             }
         } finally {
             if (current.current === controller) {

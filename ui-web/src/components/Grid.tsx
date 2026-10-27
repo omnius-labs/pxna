@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { useEffect, useState } from "react";
 import { useImageWants } from "../images/wants";
 import { useDragScroll } from "../library/dnd";
@@ -166,27 +167,27 @@ export function Grid({
 
     const notice = listing.truncated ? (
         <p role="status" className="shrink-0 border-b p-3 text-sm text-muted-foreground">
-            結果の一部を表示しています。Library を絞るか、場所を下げて探し直してください。
+            {t("common.partialResults")}
         </p>
     ) : null;
     if (totalCount === undefined && listing.pageStatus(0) === "error") {
         return (
             <LoadFailure
                 error={listing.pageError(0)}
-                label="中身を読めませんでした。"
+                label={t("common.contentsNotFound")}
                 onRetry={() => listing.retry(0)}
             />
         );
     }
     if (totalCount === undefined)
-        return <p className="p-4 text-muted-foreground">{recursive ? "検索中…" : "読み込み中…"}</p>;
+        return <p className="p-4 text-muted-foreground">{recursive ? t("common.searching") : t("common.loading")}</p>;
     if (totalCount === 0)
         return (
             <EntryMenu>
                 <div className="flex h-full flex-col">
                     {notice}
                     <p className="p-4 text-muted-foreground">
-                        {searching ? "一致する項目がありません。" : "このフォルダは空です。"}
+                        {searching ? t("common.nothingMatches") : t("common.folderEmpty")}
                     </p>
                 </div>
             </EntryMenu>
@@ -267,7 +268,7 @@ export function Grid({
                         <LoadFailure
                             key={page}
                             error={listing.pageError(page)}
-                            label="この範囲を読めませんでした。"
+                            label={t("common.rangeNotFound")}
                             onRetry={() => listing.retry(page)}
                             compact
                         />

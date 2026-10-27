@@ -175,8 +175,8 @@ async function harness(narrow = false, folderCount = 0, blockLaterPages = false,
         await act(async () => target.click());
     };
     const type = async (value: string) => {
-        await wait(() => expect(document.querySelector('input[aria-label="名前"]')).not.toBeNull());
-        const input = document.querySelector<HTMLInputElement>('input[aria-label="名前"]')!;
+        await wait(() => expect(document.querySelector('input[aria-label="Name"]')).not.toBeNull());
+        const input = document.querySelector<HTMLInputElement>('input[aria-label="Name"]')!;
         expect(document.activeElement).toBe(input);
         await act(async () => {
             Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
@@ -212,23 +212,25 @@ it("閉じたフォルダを展開し、その直下で作成・名前の変更�
     const h = await harness();
     try {
         await h.menu("tree");
-        await h.select("新しいフォルダ");
-        await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("作成先: /tree"));
+        await h.select("New folder");
+        await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Create in: /tree"));
         await h.type("made");
         await wait(() => expect(h.item("made")).toBeDefined());
         expect(h.item("tree").getAttribute("aria-expanded")).toBe("true");
         expect(post.mock.calls[0]![1].body).toEqual({ path: "/tree/made", createParents: false });
         await h.menu("made");
-        await h.select("名前の変更");
-        await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("対象: /tree/made"));
-        expect(document.querySelector<HTMLInputElement>('input[aria-label="名前"]')!.value).toBe("made");
+        await h.select("Rename");
+        await wait(() =>
+            expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Target: /tree/made"),
+        );
+        expect(document.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe("made");
         await h.type("made2");
         await wait(() => expect(h.item("made2")).toBeDefined());
         await h.menu("made2");
-        await h.select("削除");
+        await h.select("Delete");
         await act(async () =>
             [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
-                .find((b) => b.textContent === "削除する")!
+                .find((b) => b.textContent === "Delete")!
                 .click(),
         );
         await wait(() => expect(h.item("made2")).toBeUndefined());
@@ -241,15 +243,15 @@ it("archive は files/move、ルートは rename/delete 非表示、readonly は
     const h = await harness();
     try {
         await h.menu("pack.zip");
-        await h.select("名前の変更");
+        await h.select("Rename");
         await h.type("renamed.zip");
         await wait(() => expect(h.item("renamed.zip")).toBeDefined());
         expect(post.mock.calls[0]![0]).toBe("/libraries/{libraryId}/files/move");
         await h.menu("Ops");
         expect([...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual([
-            "新しいフォルダ",
-            "貼り付け",
-            "このフォルダ内を検索",
+            "New folder",
+            "Paste",
+            "Search in this folder",
         ]);
         await act(async () =>
             document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
@@ -264,7 +266,7 @@ it("「このフォルダ内を検索」は、そのフォルダを起点に条�
     const h = await harness();
     try {
         await h.menu("tree");
-        await h.select("このフォルダ内を検索");
+        await h.select("Search in this folder");
         expect(navigate).toHaveBeenLastCalledWith({ href: "/search?lib=ops&path=%2Ftree" });
     } finally {
         await h.dispose();
@@ -284,21 +286,21 @@ it("ツリーの入力と削除確認も狭い画面への切り替えで取り�
     const h = await harness();
     try {
         await h.menu("tree");
-        await h.select("新しいフォルダ");
-        await wait(() => expect(document.querySelector('input[aria-label="名前"]')).not.toBeNull());
+        await h.select("New folder");
+        await wait(() => expect(document.querySelector('input[aria-label="Name"]')).not.toBeNull());
         await h.resize(true);
-        expect(document.querySelector('input[aria-label="名前"]')).toBeNull();
+        expect(document.querySelector('input[aria-label="Name"]')).toBeNull();
         expect(post).not.toHaveBeenCalled();
         await h.resize(false);
         await h.menu("tree");
-        await h.select("名前の変更");
-        await wait(() => expect(document.querySelector('input[aria-label="名前"]')).not.toBeNull());
+        await h.select("Rename");
+        await wait(() => expect(document.querySelector('input[aria-label="Name"]')).not.toBeNull());
         await h.resize(true);
-        expect(document.querySelector('input[aria-label="名前"]')).toBeNull();
+        expect(document.querySelector('input[aria-label="Name"]')).toBeNull();
         expect(post).not.toHaveBeenCalled();
         await h.resize(false);
         await h.menu("tree");
-        await h.select("削除");
+        await h.select("Delete");
         expect(document.querySelector("[role=alertdialog]")).not.toBeNull();
         await h.resize(true);
         expect(document.querySelector("[role=alertdialog]")).toBeNull();

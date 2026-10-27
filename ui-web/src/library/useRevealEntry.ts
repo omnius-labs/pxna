@@ -1,5 +1,7 @@
+import { t } from "i18next";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { describeError } from "../i18n/errors";
 
 import { joinPath, pathSegments } from "../location";
 import type { Entry } from "./entries";
@@ -39,7 +41,7 @@ export function useRevealEntry({
                 if (controller.signal.aborted) return;
                 handled.current = name;
                 const entry = index === undefined ? undefined : listing.entryAt(index);
-                if (index === undefined || entry === undefined) toast.error("項目が見つかりませんでした。");
+                if (index === undefined || entry === undefined) toast.error(t("errors.revealNotFound"));
                 else {
                     latest.current.virtualizer.scrollToIndex(Math.floor(index / latest.current.columns));
                     latest.current.onSelect(entry, index);
@@ -49,7 +51,7 @@ export function useRevealEntry({
             .catch((error) => {
                 if (controller.signal.aborted) return;
                 handled.current = name;
-                toast.error(error instanceof Error ? error.message : "項目を読めませんでした。");
+                toast.error(describeError(error, t("errors.revealFailed")));
                 latest.current.onDone();
             });
         return () => controller.abort();

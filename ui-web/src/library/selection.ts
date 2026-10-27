@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import type { Entry } from "./entries";
 
 /// 選択時のサイズを残し、一覧のページを捨てても合計を数えられるようにする。
@@ -84,7 +85,7 @@ export function selectAll(count: number, itemAt: ItemAt): Selection {
     const items = new Map<string, SelectionValue>();
     for (let index = 0; index < count; index += 1) {
         const item = itemAt(index);
-        if (!item) throw new Error("選択する範囲に未読の位置があります。");
+        if (!item) throw new Error(t("errors.selectionUnread"));
         items.set(item.path, selectionValue(item));
     }
     return { items, anchor: count > 0 ? 0 : undefined };
