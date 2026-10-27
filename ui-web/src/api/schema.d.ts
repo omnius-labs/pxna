@@ -1423,9 +1423,16 @@ export interface components {
          * @description `display_image`, `original_image`, and `thumbnail_image` are the
          *     loads of those images. `viewer_display` is the time from moving
          *     the viewer to an entry until its display image is loaded.
+         *     `video_start` is the time from opening a video player until the
+         *     first frame is playing.
          * @enum {string}
          */
-        ClientTimingOperation: "display_image" | "original_image" | "thumbnail_image" | "viewer_display";
+        ClientTimingOperation: "display_image" | "original_image" | "thumbnail_image" | "video_start" | "viewer_display";
+        /**
+         * @description How a `video_start` plays the video. `direct` plays the original file, and the HLS modes play a converted session.
+         * @enum {string}
+         */
+        ClientTimingMode: "direct" | "native-hls" | "hls-js";
         /**
          * @description One timing in milliseconds. The phases come from the browser's
          *     Resource Timing and are omitted when the browser does not
@@ -1452,6 +1459,7 @@ export interface components {
             bytes?: number;
             /** @description Whether the browser served the response from its cache. */
             cached?: boolean;
+            mode?: components["schemas"]["ClientTimingMode"];
         };
         FileSystemEntrySummary: {
             path: components["schemas"]["RelativePath"];

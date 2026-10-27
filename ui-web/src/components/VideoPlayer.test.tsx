@@ -6,12 +6,16 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import { VideoPlayer } from "./VideoPlayer";
 
-const { get } = vi.hoisted(() => ({ get: vi.fn() }));
+const { get, record } = vi.hoisted(() => ({ get: vi.fn(), record: vi.fn() }));
+vi.mock("../api/clientTimings", () => ({ clientTimings: { record } }));
 vi.mock("../api/client", async (original) => ({
     ...(await original<typeof import("../api/client")>()),
     api: { GET: get },
 }));
-afterEach(() => get.mockReset());
+afterEach(() => {
+    get.mockReset();
+    record.mockReset();
+});
 
 async function render(onDone: () => void) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -57,4 +61,29 @@ it("動画の情報を読めなかったときも onDone を呼ぶ", async () =>
     } finally {
         await h.dispose();
     }
+});
+
+it("最初のフレームが出たら video_start を 1 回だけ記録する", async () => {
+    get.mockReturnValue(new Promise(() => {}));
+    const h = await render(vi.fn());
+    try {
+        const video = h.host.querySelector("video")!;
+        await act(async () => video.dispatchEvent(new Event("playing")));
+        await act(async () => video.dispatchEvent(new Event("playing")));
+        expect(record).toHaveBeenCalledOnce();
+        expect(record.mock.calls[0]?.[0]).toMatchObject({
+            operation: "video_start",
+            libraryId: "big",
+            path: "/clip.mp4",
+        });
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("再生が始まらないまま閉じたときは video_start を記録しない", async () => {
+    get.mockReturnValue(new Promise(() => {}));
+    const h = await render(vi.fn());
+    await h.dispose();
+    expect(record).not.toHaveBeenCalled();
 });

@@ -1427,6 +1427,11 @@ pub struct ClientTiming {
     #[serde(rename = "cached")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cached: Option<bool>,
+
+    #[serde(rename = "mode")]
+    #[validate(nested)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<models::ClientTimingMode>,
 }
 
 lazy_static::lazy_static! {
@@ -1447,6 +1452,7 @@ impl ClientTiming {
             after_response_ms: None,
             bytes: None,
             cached: None,
+            mode: None,
         }
     }
 }
@@ -1470,6 +1476,7 @@ impl std::fmt::Display for ClientTiming {
                 .map(|after_response_ms| ["afterResponseMs".to_string(), after_response_ms.to_string()].join(",")),
             self.bytes.as_ref().map(|bytes| ["bytes".to_string(), bytes.to_string()].join(",")),
             self.cached.as_ref().map(|cached| ["cached".to_string(), cached.to_string()].join(",")),
+            // Skipping mode in query parameter serialization
         ];
 
         write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
@@ -1497,6 +1504,7 @@ impl std::str::FromStr for ClientTiming {
             pub after_response_ms: Vec<f64>,
             pub bytes: Vec<u64>,
             pub cached: Vec<bool>,
+            pub mode: Vec<models::ClientTimingMode>,
         }
 
         let mut intermediate_rep = IntermediateRep::default();
@@ -1538,6 +1546,10 @@ impl std::str::FromStr for ClientTiming {
                     "bytes" => intermediate_rep.bytes.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "cached" => intermediate_rep.cached.push(<bool as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "mode" => intermediate_rep
+                        .mode
+                        .push(<models::ClientTimingMode as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     _ => return std::result::Result::Err("Unexpected key while parsing ClientTiming".to_string()),
                 }
             }
@@ -1566,6 +1578,7 @@ impl std::str::FromStr for ClientTiming {
             after_response_ms: intermediate_rep.after_response_ms.into_iter().next(),
             bytes: intermediate_rep.bytes.into_iter().next(),
             cached: intermediate_rep.cached.into_iter().next(),
+            mode: intermediate_rep.mode.into_iter().next(),
         })
     }
 }
@@ -1600,7 +1613,53 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<ClientTiming
     }
 }
 
-/// `display_image`, `original_image`, and `thumbnail_image` are the loads of those images. `viewer_display` is the time from moving the viewer to an entry until its display image is loaded.
+/// How a `video_start` plays the video. `direct` plays the original file, and the HLS modes play a converted session.
+/// Enumeration of values.
+/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
+/// which helps with FFI.
+#[allow(non_camel_case_types, clippy::large_enum_variant)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
+pub enum ClientTimingMode {
+    #[serde(rename = "direct")]
+    Direct,
+    #[serde(rename = "native-hls")]
+    NativeHls,
+    #[serde(rename = "hls-js")]
+    HlsJs,
+}
+
+impl validator::Validate for ClientTimingMode {
+    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
+        std::result::Result::Ok(())
+    }
+}
+
+impl std::fmt::Display for ClientTimingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            ClientTimingMode::Direct => write!(f, "direct"),
+            ClientTimingMode::NativeHls => write!(f, "native-hls"),
+            ClientTimingMode::HlsJs => write!(f, "hls-js"),
+        }
+    }
+}
+
+impl std::str::FromStr for ClientTimingMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "direct" => std::result::Result::Ok(ClientTimingMode::Direct),
+            "native-hls" => std::result::Result::Ok(ClientTimingMode::NativeHls),
+            "hls-js" => std::result::Result::Ok(ClientTimingMode::HlsJs),
+            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
+        }
+    }
+}
+
+/// `display_image`, `original_image`, and `thumbnail_image` are the loads of those images. `viewer_display` is the time from moving the viewer to an entry until its display image is loaded. `video_start` is the time from opening a video player until the first frame is playing.
 /// Enumeration of values.
 /// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
 /// which helps with FFI.
@@ -1615,6 +1674,8 @@ pub enum ClientTimingOperation {
     OriginalImage,
     #[serde(rename = "thumbnail_image")]
     ThumbnailImage,
+    #[serde(rename = "video_start")]
+    VideoStart,
     #[serde(rename = "viewer_display")]
     ViewerDisplay,
 }
@@ -1631,6 +1692,7 @@ impl std::fmt::Display for ClientTimingOperation {
             ClientTimingOperation::DisplayImage => write!(f, "display_image"),
             ClientTimingOperation::OriginalImage => write!(f, "original_image"),
             ClientTimingOperation::ThumbnailImage => write!(f, "thumbnail_image"),
+            ClientTimingOperation::VideoStart => write!(f, "video_start"),
             ClientTimingOperation::ViewerDisplay => write!(f, "viewer_display"),
         }
     }
@@ -1644,6 +1706,7 @@ impl std::str::FromStr for ClientTimingOperation {
             "display_image" => std::result::Result::Ok(ClientTimingOperation::DisplayImage),
             "original_image" => std::result::Result::Ok(ClientTimingOperation::OriginalImage),
             "thumbnail_image" => std::result::Result::Ok(ClientTimingOperation::ThumbnailImage),
+            "video_start" => std::result::Result::Ok(ClientTimingOperation::VideoStart),
             "viewer_display" => std::result::Result::Ok(ClientTimingOperation::ViewerDisplay),
             _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
         }

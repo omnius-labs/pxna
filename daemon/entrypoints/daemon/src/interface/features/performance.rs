@@ -37,6 +37,7 @@ impl apis::performance::Performance for ApiServer {
                     after_response_ms = timing.after_response_ms,
                     bytes = timing.bytes,
                     cached = timing.cached,
+                    mode = timing.mode.as_ref().map(tracing::field::display),
                     "client timing"
                 );
             }
@@ -66,7 +67,7 @@ mod tests {
         let capabilities = send(&router, Method::GET, "/api/v1/capabilities", &headers, None).await?;
         assert_eq!(capabilities.body["performanceLogging"], json!(false), "既定では計測を有効にしない");
 
-        let timing = json!({ "timings": [{ "operation": "display_image", "libraryId": "photos", "path": "/a.jpg", "durationMs": 12.5, "waitingMs": 10.0, "cached": false }] });
+        let timing = json!({ "timings": [{ "operation": "display_image", "libraryId": "photos", "path": "/a.jpg", "durationMs": 12.5, "waitingMs": 10.0, "cached": false }, { "operation": "video_start", "libraryId": "photos", "path": "/a.mp4", "durationMs": 800.0, "mode": "hls-js" }] });
         let accepted = send(&router, Method::POST, "/api/v1/performance/client-timings", &headers, Some(timing.clone())).await?;
         assert_eq!(accepted.status, StatusCode::NO_CONTENT);
 

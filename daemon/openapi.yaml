@@ -2974,11 +2974,22 @@ components:
                 `display_image`, `original_image`, and `thumbnail_image` are the
                 loads of those images. `viewer_display` is the time from moving
                 the viewer to an entry until its display image is loaded.
+                `video_start` is the time from opening a video player until the
+                first frame is playing.
             enum:
                 - display_image
                 - original_image
                 - thumbnail_image
+                - video_start
                 - viewer_display
+
+        ClientTimingMode:
+            type: string
+            description: How a `video_start` plays the video. `direct` plays the original file, and the HLS modes play a converted session.
+            enum:
+                - direct
+                - native-hls
+                - hls-js
 
         ClientTiming:
             type: object
@@ -3022,6 +3033,8 @@ components:
                 cached:
                     type: boolean
                     description: Whether the browser served the response from its cache.
+                mode:
+                    $ref: "#/components/schemas/ClientTimingMode"
 
         FileSystemEntrySummary:
             type: object
