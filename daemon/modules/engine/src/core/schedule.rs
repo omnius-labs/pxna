@@ -248,19 +248,29 @@ impl PriorityPool {
     pub fn limits(&self) -> PoolLimits {
         self.scheduler.state.lock().pools[self.index].limits()
     }
+
+    /// 枠を待っている数。テストと計測に使う。
+    pub fn waiting(&self, class: WorkClass) -> usize {
+        self.scheduler.state.lock().pools[self.index].waiting[class.index()].len()
+    }
 }
 
 /// `[scheduler]` の設定。画像の変換と外部プロセス（ffmpeg、heif-dec）の同時実行の枠の数。
+/// External processes have two pools: `process_*` for the images that ffmpeg or heif-dec decode, and `video_*` for videos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScheduleOptions {
     /// 画像の変換の共有の枠。
     pub image_slots: usize,
     /// 画像の変換の、Interactive だけが使う枠。
     pub image_interactive_slots: usize,
-    /// 外部プロセスの共有の枠。
+    /// 外部プロセスの共有の枠。Images only (HEIF, AVIF, JXL, JP2); videos use `video_slots`.
     pub process_slots: usize,
     /// 外部プロセスの、Interactive だけが使う枠。
     pub process_interactive_slots: usize,
+    /// The shared slots of ffmpeg runs for videos. They are apart from `process_slots`, so a slow video does not block image decodes.
+    pub video_slots: usize,
+    /// The slots only Interactive uses in the video pool.
+    pub video_interactive_slots: usize,
 }
 
 impl Default for ScheduleOptions {
@@ -270,14 +280,16 @@ impl Default for ScheduleOptions {
             image_interactive_slots: 1,
             process_slots: 2,
             process_interactive_slots: 1,
+            video_slots: 1,
+            video_interactive_slots: 1,
         }
     }
 }
 
 impl ScheduleOptions {
     pub fn validate(&self) -> Result<()> {
-        if self.image_slots == 0 || self.process_slots == 0 {
-            return Err(Error::new(ErrorKind::InvalidInput).with_message("scheduler image_slots and process_slots must be greater than zero"));
+        if self.image_slots == 0 || self.process_slots == 0 || self.video_slots == 0 {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message("scheduler image_slots, process_slots, and video_slots must be greater than zero"));
         }
         Ok(())
     }
@@ -288,8 +300,10 @@ impl ScheduleOptions {
 pub struct MediaPools {
     /// 画像の変換（decode、縮小、encode）。
     pub images: PriorityPool,
-    /// 外部プロセス（ffmpeg、heif-dec）。動画の変換をユーザーが待っている間も、ここで数える。
+    /// External processes for images: ffmpeg and heif-dec for HEIF, AVIF, JXL, and JP2.
     pub processes: PriorityPool,
+    /// ffmpeg runs for videos: frame extraction, and what the video service runs. A slow video does not take a slot of `processes`.
+    pub videos: PriorityPool,
 }
 
 impl MediaPools {
@@ -304,6 +318,11 @@ impl MediaPools {
             processes: scheduler.pool(PoolLimits {
                 shared: options.process_slots,
                 interactive: options.process_interactive_slots,
+                background: 1,
+            }),
+            videos: scheduler.pool(PoolLimits {
+                shared: options.video_slots,
+                interactive: options.video_interactive_slots,
                 background: 1,
             }),
         }
@@ -325,6 +344,28 @@ mod tests {
     fn pools() -> (PriorityPool, PriorityPool) {
         let scheduler = Arc::new(Scheduler::default());
         (scheduler.pool(LIMITS), scheduler.pool(LIMITS))
+    }
+
+    #[tokio::test]
+    async fn a_video_permit_does_not_block_the_image_pools_test() -> TestResult {
+        let pools = MediaPools::new(&Arc::new(Scheduler::default()), &ScheduleOptions::default());
+        let _video = pools.videos.acquire(WorkClass::Foreground).await;
+        // The video pool has one shared slot, and it is taken.
+        assert!(pools.videos.try_acquire(WorkClass::Foreground).is_none());
+        let first = pools.processes.try_acquire(WorkClass::Foreground);
+        let second = pools.processes.try_acquire(WorkClass::Foreground);
+        assert!(first.is_some() && second.is_some(), "both shared slots of the image process pool are free");
+        assert!(pools.images.try_acquire(WorkClass::Foreground).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn defaults_and_validation_cover_the_video_pool_test() {
+        let defaults = ScheduleOptions::default();
+        assert_eq!((defaults.video_slots, defaults.video_interactive_slots), (1, 1));
+        assert_eq!((defaults.process_slots, defaults.process_interactive_slots), (2, 1));
+        assert!(defaults.validate().is_ok());
+        assert!(ScheduleOptions { video_slots: 0, ..defaults }.validate().is_err());
     }
 
     async fn is_pending<F: Future>(future: std::pin::Pin<&mut F>) -> bool {

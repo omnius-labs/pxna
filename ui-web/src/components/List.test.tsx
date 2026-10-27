@@ -3,13 +3,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-
+import { ImageWants } from "../images/wants";
 import { type Entry, entryPlace, type FolderListing } from "../library/entries";
 import type { ListingSource } from "../library/listing";
 import type { SortPreference } from "../library/preferences";
 import { emptySelection } from "../library/selection";
 import { CROSS_LIBRARY_SCOPE, entryAddress } from "../location";
-import { ThumbnailQueue } from "../thumbnails/queue";
 import { List } from "./List";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
@@ -236,7 +235,7 @@ it("リストは 0 件の通常の一覧を空のフォルダと示す", async (
 });
 
 it("only schedules visible folders but retains prefetched images and videos", async () => {
-    const spy = vi.spyOn(ThumbnailQueue.prototype, "setWanted").mockImplementation(() => {});
+    const spy = vi.spyOn(ImageWants.prototype, "setWanted").mockImplementation(() => {});
     const data: FolderListing = {
         entries: [
             { name: "dir", path: "/dir", kind: "folder" },

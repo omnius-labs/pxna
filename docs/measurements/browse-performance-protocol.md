@@ -84,8 +84,9 @@ The measurement points kept in the implementation are as follows.
 | `representative_selection`, `representative_scan`, `representative_metadata` | Choosing the representative file of a folder or an archive, its scan, and reading its attributes |
 | `thumbnail_cache_lookup`, `thumbnail_cache_read` | The cache index query and the read of the cached file |
 | `thumbnail_permit_wait` | The wait for a generation permit, with the number of free permits at the request |
-| `thumbnail_generation` | The wait for the permit and for a running generation of the same key, plus the generation |
-| `thumbnail_production` | The generation itself: `thumbnail_materialize`, `thumbnail_convert`, and `thumbnail_store` |
+| `thumbnail_generation` | The whole wait of a request that missed the cache, until its image is made: the wait for a source job (`thumbnail_job_wait`), and with it the permit wait and the production when this request started the job |
+| `thumbnail_job_wait` | The wait of one request for a source job of its source, with `created` telling whether the request started that job. A job that another request started shows no `thumbnail_permit_wait` or `thumbnail_production` under this request |
+| `thumbnail_production` | The generation itself, recorded under the request that started the job: `thumbnail_materialize`, `thumbnail_convert`, and `thumbnail_store` |
 | `thumbnail_source_read`, `thumbnail_external_decode` | Reading the source file, and the ffmpeg or heif-dec decode, with the byte count |
 | `image_convert`, `image_decode`, `image_resize`, `image_encode` | The image conversion and its stages, with the sizes and the output bytes |
 | `client_timing` | A time the web client measured, with `client_operation`, the path, `duration_ms`, and the Resource Timing phases in milliseconds. It is an event, not a span, and has no `request` |

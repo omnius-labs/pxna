@@ -196,7 +196,7 @@ pub struct VideoService {
     root: PathBuf,
     sessions: TokioMutex<VecDeque<Arc<VideoSession>>>,
     /// セグメントを待たせている間、Interactive が動いているものとして数える外部プロセスの資源。
-    processes: PriorityPool,
+    videos: PriorityPool,
 }
 
 impl VideoService {
@@ -207,7 +207,7 @@ impl VideoService {
         root: &Path,
         options: VideoOptions,
         tools: &MediaOptions,
-        processes: PriorityPool,
+        videos: PriorityPool,
     ) -> Result<Arc<Self>> {
         options.validate()?;
         tokio::fs::create_dir_all(root).await?;
@@ -227,7 +227,7 @@ impl VideoService {
             ffmpeg: tools.ffmpeg_path.clone(),
             root: root.to_path_buf(),
             sessions: TokioMutex::new(VecDeque::new()),
-            processes,
+            videos,
         });
         let weak = Arc::downgrade(&service);
         tokio::spawn(async move {
@@ -326,7 +326,7 @@ impl VideoService {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
             }
-            interactive_wait.get_or_insert_with(|| self.processes.occupy(WorkClass::Interactive));
+            interactive_wait.get_or_insert_with(|| self.videos.occupy(WorkClass::Interactive));
             {
                 let mut process = session.process.lock().await;
                 if session.cancel.is_cancelled() {

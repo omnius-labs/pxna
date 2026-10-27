@@ -1,3 +1,4 @@
+pub mod image_channel;
 pub mod library;
 pub mod listing;
 pub mod mutation;

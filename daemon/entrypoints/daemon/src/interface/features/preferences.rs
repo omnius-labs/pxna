@@ -125,6 +125,7 @@ impl PreferencesModel {
                 OriginalImageMode::Auto => models::OriginalImageMode::Auto,
                 OriginalImageMode::OnZoom => models::OriginalImageMode::OnZoom,
             },
+            u32::from(set.filmstrip_size),
         )
     }
 
@@ -144,6 +145,7 @@ impl PreferencesModel {
                 models::OriginalImageMode::Auto => OriginalImageMode::Auto,
                 models::OriginalImageMode::OnZoom => OriginalImageMode::OnZoom,
             },
+            filmstrip_size: u8::try_from(model.filmstrip_size).unwrap_or(u8::MAX),
         }
     }
 }
@@ -160,8 +162,8 @@ mod tests {
 
     fn preferences(tile_size: u32) -> serde_json::Value {
         json!({
-            "wide": {"tileSize": tile_size, "thumbnailShape": "fit", "view": "list", "originalImage": "auto"},
-            "narrow": {"tileSize": 2, "thumbnailShape": "crop", "view": "grid", "originalImage": "onZoom"},
+            "wide": {"tileSize": tile_size, "thumbnailShape": "fit", "view": "list", "originalImage": "auto", "filmstripSize": 3},
+            "narrow": {"tileSize": 2, "thumbnailShape": "crop", "view": "grid", "originalImage": "onZoom", "filmstripSize": 3},
             "sort": {"key": "modified_at", "order": "desc"},
         })
     }
@@ -179,7 +181,7 @@ mod tests {
         assert_eq!(defaults.status, StatusCode::OK);
         assert_eq!(
             defaults.body["wide"],
-            json!({"tileSize": 3, "thumbnailShape": "crop", "view": "grid", "originalImage": "auto"})
+            json!({"tileSize": 3, "thumbnailShape": "crop", "view": "grid", "originalImage": "auto", "filmstripSize": 3})
         );
         assert_eq!(defaults.body["narrow"]["originalImage"], "onZoom");
         assert_eq!(defaults.body["sort"], json!({"key": "name", "order": "asc"}));
@@ -194,6 +196,16 @@ mod tests {
             // 範囲は契約に書いてあり、生成されたルータが本文を読んだ時点で拒否する。この 400 の本文は `ErrorResponse` ではない。
             assert_eq!(rejected.status, StatusCode::BAD_REQUEST, "{tile_size}");
         }
+        for filmstrip_size in [0, 6] {
+            let mut body = preferences(5);
+            body["narrow"]["filmstripSize"] = json!(filmstrip_size);
+            let rejected = send(&router, Method::PUT, "/api/v1/preferences", headers, Some(body)).await?;
+            assert_eq!(rejected.status, StatusCode::BAD_REQUEST, "{filmstrip_size}");
+        }
+        let mut missing = preferences(5);
+        missing["wide"].as_object_mut().unwrap().remove("filmstripSize");
+        let rejected = send(&router, Method::PUT, "/api/v1/preferences", headers, Some(missing)).await?;
+        assert!(rejected.status.is_client_error(), "filmstripSize is required: {}", rejected.status);
         assert_eq!(
             send(&router, Method::GET, "/api/v1/preferences", headers, None).await?.body,
             preferences(5),

@@ -25,6 +25,13 @@ function setup(put: (preferences: Preferences) => Promise<Preferences>) {
     return { client, writer, notify, cached };
 }
 
+it("has a filmstrip size of 3 in both default sets and replaces it for one set only", () => {
+    expect([DEFAULT_PREFERENCES.wide.filmstripSize, DEFAULT_PREFERENCES.narrow.filmstripSize]).toEqual([3, 3]);
+    const changed = replaceSet(DEFAULT_PREFERENCES, false, { filmstripSize: 5 });
+    expect([changed.wide.filmstripSize, changed.narrow.filmstripSize]).toEqual([5, 3]);
+    expect(changed.wide.tileSize).toBe(DEFAULT_PREFERENCES.wide.tileSize);
+});
+
 it("selects and replaces the set for the screen width without touching the other set or the sort", () => {
     expect(selectSet(DEFAULT_PREFERENCES, false)).toBe(DEFAULT_PREFERENCES.wide);
     expect(selectSet(DEFAULT_PREFERENCES, true)).toBe(DEFAULT_PREFERENCES.narrow);

@@ -1,115 +1,92 @@
-/// 表示用画像の要求の優先度。サーバは `interactive` の生成を、先読みとサムネイルより先に始める。
-export type DisplayPriority = "interactive" | "prefetch";
+import type { ImageSource } from "../images/source";
+import { type ImageSpec, specKey, type Want } from "../images/spec";
 
-/// 表示用画像を取得し、`<img>` に渡せる blob の URL を返す。
-export async function loadDisplayImage(url: string, priority: DisplayPriority, signal: AbortSignal): Promise<string> {
-    const response = await fetch(url, { headers: { "Pxna-Priority": priority }, signal });
-    if (!response.ok) {
-        throw new Error(`display image request failed with status ${response.status}`);
-    }
-    return URL.createObjectURL(await response.blob());
-}
-
-export function revokeDisplayImage(url: string): void {
-    URL.revokeObjectURL(url);
-}
-
-interface Request {
-    priority: DisplayPriority;
-    controller: AbortController;
-    promise: Promise<string>;
-    /// 読み終えた画像の blob の URL。
-    objectUrl?: string;
-}
-
-/// ビューアの表示用画像の要求（表示中の画像と、前後の先読み）。
+/// ビューアの表示用画像の「欲しい」（表示中の画像と、前後の先読み）。
 ///
-/// 表示中の画像は `interactive`、先読みは `prefetch` で要求する。先読み中の画像を表示するときは、先読みを中止して
-/// `interactive` で取り直すので、サーバで生成を待っている要求が前に出る。読み終えた先読みは、そのまま使う。
-/// 残す画像から外れた要求は、読み込み中なら中止する。サーバは、生成の枠を待っている間に中止された要求の生成を始めない。
-/// 読み終えた画像は、戻ったときに使えるよう、新しいものから `KEPT_LOADED` 枚まで残す。
+/// 表示中の画像は `interactive`、先読みは `prefetch` で欲しいと言う。先読み中の画像を表示するときは、同じ画像の急ぎ度を
+/// `interactive` へ上げるだけで、daemon は作り始めた生成をやり直さずに前へ出す。読み終えた先読みは、そのまま使う。
+/// 残す画像から外れた画像は欲しい一覧から外し、daemon が、まだ作り始めていなければ作らない。
+/// 読み終えた画像は、戻ったときにすぐ出せるよう、新しいものから `KEPT_LOADED` 枚まで残す。
 export class DisplayImages {
     static readonly KEPT_LOADED = 6;
 
-    readonly #load: typeof loadDisplayImage;
-    readonly #revoke: (url: string) => void;
-    readonly #requests = new Map<string, Request>();
+    readonly #source: ImageSource;
+    readonly #wants = new Map<string, Want>();
+    /// 読み終えた画像の鍵。古いものが先。残す枚数の上限を超えたら、古いものから手放す。
+    #loaded: string[] = [];
+    readonly #pending = new Set<() => void>();
 
-    constructor(load: typeof loadDisplayImage, revoke: (url: string) => void) {
-        this.#load = load;
-        this.#revoke = revoke;
+    constructor(source: ImageSource) {
+        this.#source = source;
     }
 
-    prefetch(url: string): void {
-        if (!this.#requests.has(url)) {
-            this.#start(url, "prefetch");
+    prefetch(spec: ImageSpec): void {
+        const key = specKey(spec);
+        if (this.#wants.get(key)?.class !== "interactive") {
+            this.#wants.set(key, { spec, class: "prefetch", order: 1 });
+            this.#apply();
         }
     }
 
-    /// 表示する画像の blob の URL を返す。
-    show(url: string): Promise<string> {
-        const request = this.#requests.get(url);
-        if (request && (request.priority === "interactive" || request.objectUrl !== undefined)) {
-            return request.promise;
-        }
-        request?.controller.abort();
-        return this.#start(url, "interactive").promise;
+    /// 表示する画像の blob の URL を返す。読めなければ拒否する。
+    show(spec: ImageSpec): Promise<string> {
+        this.#wants.set(specKey(spec), { spec, class: "interactive", order: 0 });
+        this.#apply();
+        return new Promise((resolve, reject) => {
+            let unsubscribe = () => {};
+            const settle = () => {
+                const state = this.#source.getState(spec);
+                if (state.status === "ready") {
+                    this.#pending.delete(cancel);
+                    unsubscribe();
+                    resolve(state.url);
+                } else if (state.status === "failed") {
+                    this.#pending.delete(cancel);
+                    unsubscribe();
+                    reject(new Error("the display image could not be made"));
+                }
+            };
+            const cancel = () => {
+                unsubscribe();
+                reject(new Error("the display images were disposed"));
+            };
+            this.#pending.add(cancel);
+            unsubscribe = this.#source.subscribe(settle);
+            settle();
+        });
     }
 
-    /// `urls` に含まれない読み込み中の要求を中止し、古い読み終えた画像を解放する。
-    retain(urls: Iterable<string>): void {
-        const kept = new Set(urls);
-        const loaded: string[] = [];
-        for (const [url, request] of [...this.#requests]) {
-            if (kept.has(url)) {
-                // 残す画像を、新しいものとして末尾へ並べ直す。
-                this.#requests.delete(url);
-                this.#requests.set(url, request);
-            } else if (request.objectUrl === undefined) {
-                this.#drop(url, request);
-            } else {
-                loaded.push(url);
-            }
+    /// `specs` に含まれない画像を欲しい一覧から外す。読み終えた画像は、新しいものから `KEPT_LOADED` 枚だけ残す。
+    retain(specs: Iterable<ImageSpec>): void {
+        const kept = new Set<string>();
+        for (const spec of specs) kept.add(specKey(spec));
+        for (const [key, want] of this.#wants) {
+            if (this.#source.getState(want.spec).status === "ready" && !this.#loaded.includes(key))
+                this.#loaded.push(key);
         }
-        for (const url of loaded.slice(0, Math.max(0, loaded.length - DisplayImages.KEPT_LOADED))) {
-            const request = this.#requests.get(url);
-            if (request) this.#drop(url, request);
+        const extras = this.#loaded
+            .filter((key) => !kept.has(key) && this.#wants.has(key))
+            .slice(-DisplayImages.KEPT_LOADED);
+        for (const key of [...this.#wants.keys()]) {
+            if (!kept.has(key) && !extras.includes(key)) this.#wants.delete(key);
         }
+        extras.forEach((key, index) => {
+            const want = this.#wants.get(key);
+            if (want !== undefined) this.#wants.set(key, { ...want, class: "prefetch", order: 100 + index });
+        });
+        this.#loaded = this.#loaded.filter((key) => kept.has(key) || extras.includes(key));
+        this.#apply();
     }
 
     dispose(): void {
-        for (const [url, request] of [...this.#requests]) {
-            this.#drop(url, request);
-        }
+        this.#wants.clear();
+        this.#loaded = [];
+        for (const cancel of [...this.#pending]) cancel();
+        this.#pending.clear();
+        this.#source.release(this);
     }
 
-    #start(url: string, priority: DisplayPriority): Request {
-        const controller = new AbortController();
-        const request: Request = { priority, controller, promise: Promise.resolve("") };
-        request.promise = this.#load(url, priority, controller.signal).then((objectUrl) => {
-            if (this.#requests.get(url) === request) {
-                request.objectUrl = objectUrl;
-            } else {
-                // 読み終える前に外れた要求の画像は、使わずに解放する。
-                this.#revoke(objectUrl);
-            }
-            return objectUrl;
-        });
-        // 先読みの失敗は表示しない。表示するときに取り直す。
-        request.promise.catch(() => {
-            if (this.#requests.get(url) === request && request.priority === "prefetch") {
-                this.#requests.delete(url);
-            }
-        });
-        this.#requests.set(url, request);
-        return request;
-    }
-
-    #drop(url: string, request: Request): void {
-        request.controller.abort();
-        if (request.objectUrl !== undefined) {
-            this.#revoke(request.objectUrl);
-        }
-        this.#requests.delete(url);
+    #apply(): void {
+        this.#source.setWants(this, new Map(this.#wants));
     }
 }

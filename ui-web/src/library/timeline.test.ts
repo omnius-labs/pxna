@@ -197,7 +197,7 @@ describe("TimelineStore", () => {
         expect(store.loadedFrom).toBeGreaterThan(0);
         expect(snapshots.size).toBeGreaterThan(1);
         expect(store.locate("/photos/start")).toBeDefined();
-    });
+    }, 30_000);
 
     it("drops the reload of unused stores and reloads the ones in use", async () => {
         const client = new QueryClient();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Entry } from "../library/entries";
-import { FILMSTRIP_LOOKAHEAD, filmstripWanted } from "./filmstrip";
+import { FILMSTRIP_ITEM_SIDES, FILMSTRIP_LOOKAHEAD, filmstripItemSide, filmstripWanted } from "./filmstrip";
 
 function entry(index: number, contentType = "image/png"): Entry {
     return {
@@ -63,5 +63,17 @@ describe("filmstripWanted", () => {
         expect(thumbnails.has("/6")).toBe(false);
         expect(thumbnails.has("/7")).toBe(false);
         expect(thumbnails.has("/4")).toBe(true);
+    });
+});
+
+describe("filmstripItemSide", () => {
+    it("maps levels 1 to 5 to 40, 48, 56, 72, and 96 CSS px, with level 3 at 56", () => {
+        expect([1, 2, 3, 4, 5].map(filmstripItemSide)).toEqual([40, 48, 56, 72, 96]);
+        expect([...FILMSTRIP_ITEM_SIDES]).toEqual([40, 48, 56, 72, 96]);
+    });
+
+    it("clamps a level outside the range and rounds a fractional level", () => {
+        expect([0, -3, 6, 99, Number.NaN].map((level) => filmstripItemSide(level))).toEqual([40, 40, 96, 96, 56]);
+        expect(filmstripItemSide(2.6)).toBe(56);
     });
 });

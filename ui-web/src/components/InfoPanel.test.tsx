@@ -9,6 +9,7 @@ import type { Entry } from "../library/entries";
 import { formatBytes, formatModifiedAt } from "../library/format";
 import { emptySelection, type Selection, selectionItem, selectionValue } from "../library/selection";
 import { testEntry } from "../testing/entries";
+import { FakeImageSource } from "../testing/images";
 import { InfoPanel, InfoPanelToggle } from "./InfoPanel";
 
 const mocks = vi.hoisted(() => ({ get: vi.fn() }));
@@ -149,8 +150,10 @@ it("複数を選ぶと、件数と、ステータスバーと同じ合計のサ�
 });
 
 describe("大きめのサムネイル", () => {
-    const thumbnailRequests = () =>
-        mocks.get.mock.calls.filter(([path]) => path === "/libraries/{libraryId}/thumbnails");
+    let source: FakeImageSource;
+    let uninstall: () => void;
+    /// 欲しいと言われているサムネイルのパス。
+    const wantedPaths = () => source.wanted().map((want) => want.spec.path);
     const elapse = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms));
     const entryAt = (index: number) =>
         testEntry(`/trip/${index}.png`, { metadata: { contentType: "image/png", size: 1 } });
@@ -159,13 +162,11 @@ describe("大きめのサムネイル", () => {
         Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
         vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
         mocks.get.mockReset();
-        mocks.get.mockImplementation(async () => ({ data: new Blob(["x"]), response: new Response() }));
-        vi.stubGlobal(
-            "URL",
-            Object.assign(URL, { createObjectURL: vi.fn(() => "blob:thumb"), revokeObjectURL: vi.fn() }),
-        );
+        source = new FakeImageSource();
+        uninstall = source.install();
     });
     afterEach(() => {
+        uninstall();
         vi.useRealTimers();
         vi.unstubAllGlobals();
     });
@@ -188,74 +189,75 @@ describe("大きめのサムネイル", () => {
         };
     }
 
-    it("選んで 199 ms の間は要求を出さず、200 ms たつと 1 回出し、形は全体表示で一辺は 256 である", async () => {
+    it("選んで 199 ms の間は欲しいと言わず、200 ms たつと言い、形は全体表示で一辺は 256 である", async () => {
         const view = await mount(selectionOf(entryAt(1)));
         await elapse(199);
-        expect(thumbnailRequests()).toHaveLength(0);
+        expect(wantedPaths()).toEqual([]);
         await elapse(1);
-        expect(thumbnailRequests()).toHaveLength(1);
-        const [, options] = thumbnailRequests()[0] ?? [];
-        expect(options.params.query).toEqual({
+        expect(source.wanted()).toHaveLength(1);
+        const [want] = source.wanted();
+        expect(want?.spec).toEqual({
+            libraryId: "photos",
             path: "/trip/1.png",
-            variant: "thumbnail",
+            kind: "thumbnail",
             width: 256,
             height: 256,
-            resize: "fit",
+            shape: "fit",
         });
+        expect(want?.class).toBe("visible");
+        await act(async () => source.ready(want?.spec ?? ({} as never), "blob:thumb"));
         expect(view.host.querySelector("img")?.getAttribute("src")).toBe("blob:thumb");
         await view.unmount();
     });
 
-    it("200 ms より短い間隔で選択を変え続けても、要求を出さず、止まってから最後の 1 件だけを要求する", async () => {
+    it("200 ms より短い間隔で選択を変え続けても、欲しいと言わず、止まってから最後の 1 件だけを欲しいと言う", async () => {
         const view = await mount(selectionOf(entryAt(0)));
         for (const index of [1, 2, 3, 4]) {
             await elapse(150);
             await view.show(selectionOf(entryAt(index)));
         }
-        expect(thumbnailRequests()).toHaveLength(0);
+        expect(wantedPaths()).toEqual([]);
         await elapse(200);
-        expect(thumbnailRequests().map(([, options]) => options.params.query.path)).toEqual(["/trip/4.png"]);
+        expect(wantedPaths()).toEqual(["/trip/4.png"]);
         await view.unmount();
     });
 
-    it("要求を出した後に選択を変えると、その要求を取り消す", async () => {
-        mocks.get.mockImplementation(() => new Promise(() => {}));
+    it("欲しいと言った後に選択を変えると、前のものを欲しい一覧から外す", async () => {
         const view = await mount(selectionOf(entryAt(1)));
         await elapse(200);
-        expect(thumbnailRequests()).toHaveLength(1);
-        const signal = thumbnailRequests()[0]?.[1].signal as AbortSignal;
-        expect(signal.aborted).toBe(false);
+        expect(wantedPaths()).toEqual(["/trip/1.png"]);
         await view.show(selectionOf(entryAt(2)));
-        expect(signal.aborted).toBe(true);
+        expect(wantedPaths()).toEqual([]);
+        await elapse(200);
+        expect(wantedPaths()).toEqual(["/trip/2.png"]);
         await view.unmount();
     });
 
-    it("フォルダは代表サムネイルを要求し、サムネイルを出せないファイルと、複数の選択では要求しない", async () => {
+    it("フォルダは代表サムネイルを欲しいと言い、サムネイルを出せないファイルと、複数の選択では言わない", async () => {
         const folder = testEntry("/trip/day1", { folder: true });
         const view = await mount(selectionOf(folder));
         await elapse(200);
-        expect(thumbnailRequests()).toHaveLength(1);
+        expect(wantedPaths()).toEqual(["/trip/day1"]);
         await view.show(selectionOf(testEntry("/trip/note.txt")));
         await elapse(1000);
         await view.show(selectionOf(entryAt(1), entryAt(2)));
         await elapse(1000);
-        expect(thumbnailRequests()).toHaveLength(1);
+        expect(wantedPaths()).toEqual([]);
         await view.unmount();
     });
 
-    it("閉じる（描かれなくなる）と、200 ms の前なら要求を出さず、後なら取り消す", async () => {
+    it("閉じる（描かれなくなる）と、200 ms の前なら欲しいと言わず、後なら欲しい一覧から外す", async () => {
         const early = await mount(selectionOf(entryAt(1)));
         await elapse(100);
         await early.unmount();
         await elapse(1000);
-        expect(thumbnailRequests()).toHaveLength(0);
+        expect(source.calls.filter((call) => call.wants.size > 0)).toHaveLength(0);
 
-        mocks.get.mockImplementation(() => new Promise(() => {}));
         const late = await mount(selectionOf(entryAt(2)));
         await elapse(200);
-        const signal = thumbnailRequests()[0]?.[1].signal as AbortSignal;
+        expect(wantedPaths()).toEqual(["/trip/2.png"]);
         await late.unmount();
-        expect(signal.aborted).toBe(true);
+        expect(wantedPaths()).toEqual([]);
     });
 });
 

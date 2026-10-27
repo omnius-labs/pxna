@@ -1,0 +1,117 @@
+{
+    "date": "2026-10-27",
+    "subject": "thumbnail fan-out and companion cache hits",
+    "environment": {
+        "os": "Debian GNU/Linux 13 (trixie) x86_64",
+        "cpu_cores": 10,
+        "memory_bytes": 8589934592,
+        "rust": "1.96.0",
+        "daemon_profile": "development",
+        "ffmpeg": "n9.0.2-17-g2a571b6068",
+        "heif_dec": "1.23.6",
+        "browser": "Headless Chrome 156",
+        "viewport": "1280x720",
+        "pixel_ratio": 1
+    },
+    "fixture": {
+        "sources": 5,
+        "source_type": "iPhone 15 Plus HEIC",
+        "source_bytes": 3552847,
+        "note": "The same HEIC copied under five names; each copy is a distinct SourceKey.",
+        "source_dimensions": "5712x4284"
+    },
+    "procedure": "Fresh daemon state. One image channel sends, in order, a 512x512 crop thumbnail (listing request), a 512x512 fit thumbnail (shape switch), and a 128x128 crop thumbnail (filmstrip request). Each source is a cache miss on the first request.",
+    "runs": [
+        {
+            "source": "/fanout_1.heic",
+            "primary_request_ms": 34486.7,
+            "production_ms": 34481.6,
+            "companion_conversion_ms": 29543.6,
+            "derived_primary_only_production_ms": 4938.0,
+            "primary_bytes": 39428,
+            "added_companion_bytes": 62030,
+            "companion_count": 5,
+            "shape_hit_request_ms": 5.706,
+            "filmstrip_hit_request_ms": 3.48,
+            "shape_hit": true,
+            "filmstrip_hit": true
+        },
+        {
+            "source": "/fanout_2.heic",
+            "primary_request_ms": 28457.4,
+            "production_ms": 28451.4,
+            "companion_conversion_ms": 19961.2,
+            "derived_primary_only_production_ms": 8490.2,
+            "primary_bytes": 39428,
+            "added_companion_bytes": 62030,
+            "companion_count": 5,
+            "shape_hit_request_ms": 2.483,
+            "filmstrip_hit_request_ms": 2.342,
+            "shape_hit": true,
+            "filmstrip_hit": true
+        },
+        {
+            "source": "/fanout_3.heic",
+            "primary_request_ms": 18863.0,
+            "production_ms": 18859.8,
+            "companion_conversion_ms": 14944.4,
+            "derived_primary_only_production_ms": 3915.4,
+            "primary_bytes": 39428,
+            "added_companion_bytes": 62030,
+            "companion_count": 5,
+            "shape_hit_request_ms": 2.042,
+            "filmstrip_hit_request_ms": 1.838,
+            "shape_hit": true,
+            "filmstrip_hit": true
+        },
+        {
+            "source": "/fanout_4.heic",
+            "primary_request_ms": 36780.6,
+            "production_ms": 36776.4,
+            "companion_conversion_ms": 30803.9,
+            "derived_primary_only_production_ms": 5972.5,
+            "primary_bytes": 39428,
+            "added_companion_bytes": 62030,
+            "companion_count": 5,
+            "shape_hit_request_ms": 4.224,
+            "filmstrip_hit_request_ms": 4.067,
+            "shape_hit": true,
+            "filmstrip_hit": true
+        },
+        {
+            "source": "/fanout_5.heic",
+            "primary_request_ms": 22777.5,
+            "production_ms": 22772.1,
+            "companion_conversion_ms": 15002.6,
+            "derived_primary_only_production_ms": 7769.5,
+            "primary_bytes": 39428,
+            "added_companion_bytes": 62030,
+            "companion_count": 5,
+            "shape_hit_request_ms": 2.46,
+            "filmstrip_hit_request_ms": 2.009,
+            "shape_hit": true,
+            "filmstrip_hit": true
+        }
+    ],
+    "medians": {
+        "primary_request_ms": 28457.4,
+        "production_with_companions_ms": 28451.4,
+        "companion_conversion_ms": 19961.2,
+        "derived_primary_only_production_ms": 5972.5,
+        "shape_hit_request_ms": 2.483,
+        "filmstrip_hit_request_ms": 2.342,
+        "primary_bytes": 39428,
+        "added_companion_bytes": 62030,
+        "stored_bytes_per_source": 101458,
+        "companions_per_generation": 5,
+        "external_decodes": 5,
+        "conversions": 5
+    },
+    "hit_rate": {
+        "requests": 15,
+        "hits": 10,
+        "misses": 5,
+        "with_companions": 0.6666666666666666,
+        "without_companions": 0.0
+    }
+}

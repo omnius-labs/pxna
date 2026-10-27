@@ -616,66 +616,6 @@ lazy_static::lazy_static! {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetThumbnailHeaderParams {
-    pub pxna_priority: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetThumbnailPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_GETTHUMBNAILPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_GETTHUMBNAILPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetThumbnailQueryParams {
-    /// Path relative to the selected Library.
-    #[serde(rename = "path")]
-    #[validate(length(min = 1, max = 4096))]
-    pub path: String,
-    /// What to generate. See the operation description.
-    #[serde(rename = "variant")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub variant: Option<models::ThumbnailVariant>,
-    /// Requested thumbnail width in pixels.
-    #[serde(rename = "width")]
-    #[validate(range(min = 1u32, max = 4096u32))]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub width: Option<u32>,
-    /// Requested thumbnail height in pixels.
-    #[serde(rename = "height")]
-    #[validate(range(min = 1u32, max = 4096u32))]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub height: Option<u32>,
-    /// Thumbnail image format. When omitted, the server uses the format set by `[thumbnail] format` (`webp` by default).
-    #[serde(rename = "format")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub format: Option<models::ImageFormat>,
-    /// Resize behavior. `fit` keeps the aspect ratio, fits the image inside the box, and never enlarges it. `pad` fills the box with transparent margins, so it cannot be combined with `format=jpeg`.
-    #[serde(rename = "resize")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resize: Option<models::ImageResize>,
-    /// Image resampler.
-    #[serde(rename = "resampler")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resampler: Option<models::ImageResampler>,
-    /// Anchor position used when resizing and cropping.
-    #[serde(rename = "anchor")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub anchor: Option<models::ImageAnchor>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct GetTimelineStatusQueryParams {
     /// Libraries to list, repeated as `libraryIds=a&libraryIds=b`. Every id must name a Library; an unknown id is 404.
     #[serde(rename = "libraryIds")]
@@ -2354,16 +2294,22 @@ pub struct DisplaySet {
     #[serde(rename = "originalImage")]
     #[validate(nested)]
     pub original_image: models::OriginalImageMode,
+
+    /// Filmstrip size step of the viewer from 1 (smallest) to 5 (largest). Only the wide set uses it; the narrow set keeps the value without showing a filmstrip.
+    #[serde(rename = "filmstripSize")]
+    #[validate(range(min = 1u32, max = 5u32))]
+    pub filmstrip_size: u32,
 }
 
 impl DisplaySet {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(tile_size: u32, thumbnail_shape: models::ThumbnailShape, view: models::ListView, original_image: models::OriginalImageMode) -> DisplaySet {
+    pub fn new(tile_size: u32, thumbnail_shape: models::ThumbnailShape, view: models::ListView, original_image: models::OriginalImageMode, filmstrip_size: u32) -> DisplaySet {
         DisplaySet {
             tile_size,
             thumbnail_shape,
             view,
             original_image,
+            filmstrip_size,
         }
     }
 }
@@ -2381,6 +2327,8 @@ impl std::fmt::Display for DisplaySet {
             // Skipping view in query parameter serialization
 
             // Skipping originalImage in query parameter serialization
+            Some("filmstripSize".to_string()),
+            Some(self.filmstrip_size.to_string()),
         ];
 
         write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
@@ -2402,6 +2350,7 @@ impl std::str::FromStr for DisplaySet {
             pub thumbnail_shape: Vec<models::ThumbnailShape>,
             pub view: Vec<models::ListView>,
             pub original_image: Vec<models::OriginalImageMode>,
+            pub filmstrip_size: Vec<u32>,
         }
 
         let mut intermediate_rep = IntermediateRep::default();
@@ -2433,6 +2382,8 @@ impl std::str::FromStr for DisplaySet {
                     "originalImage" => intermediate_rep
                         .original_image
                         .push(<models::OriginalImageMode as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "filmstripSize" => intermediate_rep.filmstrip_size.push(<u32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     _ => return std::result::Result::Err("Unexpected key while parsing DisplaySet".to_string()),
                 }
             }
@@ -2455,6 +2406,11 @@ impl std::str::FromStr for DisplaySet {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "originalImage missing in DisplaySet".to_string())?,
+            filmstrip_size: intermediate_rep
+                .filmstrip_size
+                .into_iter()
+                .next()
+                .ok_or_else(|| "filmstripSize missing in DisplaySet".to_string())?,
         })
     }
 }
@@ -5088,120 +5044,6 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<HealthRespon
     }
 }
 
-/// Enumeration of values.
-/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
-/// which helps with FFI.
-#[allow(non_camel_case_types, clippy::large_enum_variant)]
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
-pub enum ImageAnchor {
-    #[serde(rename = "bottom")]
-    Bottom,
-    #[serde(rename = "bottom_left")]
-    BottomLeft,
-    #[serde(rename = "bottom_right")]
-    BottomRight,
-    #[serde(rename = "center")]
-    Center,
-    #[serde(rename = "left")]
-    Left,
-    #[serde(rename = "right")]
-    Right,
-    #[serde(rename = "top")]
-    Top,
-    #[serde(rename = "top_left")]
-    TopLeft,
-    #[serde(rename = "top_right")]
-    TopRight,
-}
-
-impl validator::Validate for ImageAnchor {
-    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
-        std::result::Result::Ok(())
-    }
-}
-
-impl std::fmt::Display for ImageAnchor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            ImageAnchor::Bottom => write!(f, "bottom"),
-            ImageAnchor::BottomLeft => write!(f, "bottom_left"),
-            ImageAnchor::BottomRight => write!(f, "bottom_right"),
-            ImageAnchor::Center => write!(f, "center"),
-            ImageAnchor::Left => write!(f, "left"),
-            ImageAnchor::Right => write!(f, "right"),
-            ImageAnchor::Top => write!(f, "top"),
-            ImageAnchor::TopLeft => write!(f, "top_left"),
-            ImageAnchor::TopRight => write!(f, "top_right"),
-        }
-    }
-}
-
-impl std::str::FromStr for ImageAnchor {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "bottom" => std::result::Result::Ok(ImageAnchor::Bottom),
-            "bottom_left" => std::result::Result::Ok(ImageAnchor::BottomLeft),
-            "bottom_right" => std::result::Result::Ok(ImageAnchor::BottomRight),
-            "center" => std::result::Result::Ok(ImageAnchor::Center),
-            "left" => std::result::Result::Ok(ImageAnchor::Left),
-            "right" => std::result::Result::Ok(ImageAnchor::Right),
-            "top" => std::result::Result::Ok(ImageAnchor::Top),
-            "top_left" => std::result::Result::Ok(ImageAnchor::TopLeft),
-            "top_right" => std::result::Result::Ok(ImageAnchor::TopRight),
-            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
-        }
-    }
-}
-
-/// Enumeration of values.
-/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
-/// which helps with FFI.
-#[allow(non_camel_case_types, clippy::large_enum_variant)]
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
-pub enum ImageFormat {
-    #[serde(rename = "webp")]
-    Webp,
-    #[serde(rename = "jpeg")]
-    Jpeg,
-    #[serde(rename = "png")]
-    Png,
-}
-
-impl validator::Validate for ImageFormat {
-    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
-        std::result::Result::Ok(())
-    }
-}
-
-impl std::fmt::Display for ImageFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            ImageFormat::Webp => write!(f, "webp"),
-            ImageFormat::Jpeg => write!(f, "jpeg"),
-            ImageFormat::Png => write!(f, "png"),
-        }
-    }
-}
-
-impl std::str::FromStr for ImageFormat {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "webp" => std::result::Result::Ok(ImageFormat::Webp),
-            "jpeg" => std::result::Result::Ok(ImageFormat::Jpeg),
-            "png" => std::result::Result::Ok(ImageFormat::Png),
-            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
-        }
-    }
-}
-
 /// Format, size and shooting information of an image.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
@@ -5363,92 +5205,6 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<ImageMediaIn
                 std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into ImageMediaInfo - {err}"#)),
             },
             std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
-        }
-    }
-}
-
-/// Enumeration of values.
-/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
-/// which helps with FFI.
-#[allow(non_camel_case_types, clippy::large_enum_variant)]
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
-pub enum ImageResampler {
-    #[serde(rename = "lanczos3")]
-    Lanczos3,
-}
-
-impl validator::Validate for ImageResampler {
-    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
-        std::result::Result::Ok(())
-    }
-}
-
-impl std::fmt::Display for ImageResampler {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            ImageResampler::Lanczos3 => write!(f, "lanczos3"),
-        }
-    }
-}
-
-impl std::str::FromStr for ImageResampler {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "lanczos3" => std::result::Result::Ok(ImageResampler::Lanczos3),
-            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
-        }
-    }
-}
-
-/// Enumeration of values.
-/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
-/// which helps with FFI.
-#[allow(non_camel_case_types, clippy::large_enum_variant)]
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
-pub enum ImageResize {
-    #[serde(rename = "crop")]
-    Crop,
-    #[serde(rename = "pad")]
-    Pad,
-    #[serde(rename = "manual")]
-    Manual,
-    #[serde(rename = "fit")]
-    Fit,
-}
-
-impl validator::Validate for ImageResize {
-    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
-        std::result::Result::Ok(())
-    }
-}
-
-impl std::fmt::Display for ImageResize {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            ImageResize::Crop => write!(f, "crop"),
-            ImageResize::Pad => write!(f, "pad"),
-            ImageResize::Manual => write!(f, "manual"),
-            ImageResize::Fit => write!(f, "fit"),
-        }
-    }
-}
-
-impl std::str::FromStr for ImageResize {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "crop" => std::result::Result::Ok(ImageResize::Crop),
-            "pad" => std::result::Result::Ok(ImageResize::Pad),
-            "manual" => std::result::Result::Ok(ImageResize::Manual),
-            "fit" => std::result::Result::Ok(ImageResize::Fit),
-            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
         }
     }
 }
@@ -9042,51 +8798,6 @@ impl std::str::FromStr for ThumbnailShape {
         match s {
             "crop" => std::result::Result::Ok(ThumbnailShape::Crop),
             "fit" => std::result::Result::Ok(ThumbnailShape::Fit),
-            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
-        }
-    }
-}
-
-/// Enumeration of values.
-/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
-/// which helps with FFI.
-#[allow(non_camel_case_types, clippy::large_enum_variant)]
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
-pub enum ThumbnailVariant {
-    #[serde(rename = "thumbnail")]
-    Thumbnail,
-    #[serde(rename = "display")]
-    Display,
-    #[serde(rename = "sprite")]
-    Sprite,
-}
-
-impl validator::Validate for ThumbnailVariant {
-    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
-        std::result::Result::Ok(())
-    }
-}
-
-impl std::fmt::Display for ThumbnailVariant {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            ThumbnailVariant::Thumbnail => write!(f, "thumbnail"),
-            ThumbnailVariant::Display => write!(f, "display"),
-            ThumbnailVariant::Sprite => write!(f, "sprite"),
-        }
-    }
-}
-
-impl std::str::FromStr for ThumbnailVariant {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "thumbnail" => std::result::Result::Ok(ThumbnailVariant::Thumbnail),
-            "display" => std::result::Result::Ok(ThumbnailVariant::Display),
-            "sprite" => std::result::Result::Ok(ThumbnailVariant::Sprite),
             _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
         }
     }

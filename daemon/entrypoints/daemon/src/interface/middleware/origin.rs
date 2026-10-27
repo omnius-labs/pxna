@@ -33,8 +33,17 @@ impl OriginCheck {
         if matches!(*method, Method::GET | Method::HEAD) || !Self::has_session_cookie(headers) {
             return true;
         }
+        Self::matches_host(headers)
+    }
 
-        // `Origin` がない要求を通すと、`Origin` を付けずに送らせる手段が見つかった時点で検証全体を迂回される。
+    /// image channel の WebSocket の upgrade は `GET` なので `middleware` を素通りするが、ブラウザは cookie を付けて送る。
+    /// そのため channel 自身が、cookie を持つ upgrade に同じ検証をする（design.md §8.5）。
+    pub fn allows_upgrade(headers: &HeaderMap) -> bool {
+        !Self::has_session_cookie(headers) || Self::matches_host(headers)
+    }
+
+    /// `Origin` がない要求を通すと、`Origin` を付けずに送らせる手段が見つかった時点で検証全体を迂回される。
+    fn matches_host(headers: &HeaderMap) -> bool {
         let host = headers.get(HOST).and_then(|value| value.to_str().ok());
         let origin = headers.get(ORIGIN).and_then(|value| value.to_str().ok()).and_then(Self::authority);
         matches!((host, origin), (Some(host), Some(origin)) if host.eq_ignore_ascii_case(origin))

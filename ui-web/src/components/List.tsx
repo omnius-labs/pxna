@@ -1,4 +1,6 @@
 import { Fragment, type KeyboardEvent, type MouseEvent, useEffect, useState, useSyncExternalStore } from "react";
+import type { ImageWants } from "../images/wants";
+import { useImageWants } from "../images/wants";
 import { useEntryActions } from "../library/actionContext";
 import { isCut, useClipboard } from "../library/clipboard";
 import { useDragScroll } from "../library/dnd";
@@ -11,9 +13,7 @@ import { SORT_KEYS, SORT_LABELS, sortFromHeader } from "../library/sort";
 import { type SelectionProgress, useEntryInteraction } from "../library/useEntryInteraction";
 import { useListingRows } from "../library/useListingRows";
 import { useRevealEntry } from "../library/useRevealEntry";
-import type { ThumbnailQueue } from "../thumbnails/queue";
 import { type ScrollDirection, tilePriority, wantedPagesForRows, wantedRows } from "../thumbnails/range";
-import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { EntryIcon } from "./EntryIcon";
 import { EntryMenu } from "./EntryMenu";
 import { LoadFailure } from "./LoadFailure";
@@ -83,7 +83,7 @@ export function List({
             }),
         onDone: () => onRevealed?.(),
     });
-    const { queue } = useThumbnailQueue(libraryId, 1, false, shape, THUMBNAIL_SIDE);
+    const { wants } = useImageWants(libraryId, 1, false, shape, THUMBNAIL_SIDE);
     const [direction, setDirection] = useState<ScrollDirection>("forward");
     if (virtualizer.scrollDirection !== null && virtualizer.scrollDirection !== direction)
         setDirection(virtualizer.scrollDirection);
@@ -103,6 +103,7 @@ export function List({
         const { first, last, center } = wantedRows({ firstRow, lastRow, rowCount, direction });
         const wanted = new Map<string, number>();
         const delayed = new Set<string>();
+        const prefetch = new Set<string>();
         for (let index = first; index <= last; index += 1) {
             const entry = listing.entryAt(index);
             if (entry && isThumbnailable(entry)) {
@@ -111,10 +112,12 @@ export function List({
                     delayed.add(entry.path);
                 }
                 wanted.set(entry.path, tilePriority(index, 0, center));
+                // 画面に出ていない行は先読みで、出ている行より後にする。
+                if (index < firstRow || index > lastRow) prefetch.add(entry.path);
             }
         }
-        queue.setWanted(wanted, delayed);
-    }, [firstRow, lastRow, rowCount, direction, totalCount, version, listing, queue]);
+        wants.setWanted(wanted, delayed, prefetch);
+    }, [firstRow, lastRow, rowCount, direction, totalCount, version, listing, wants]);
     useEffect(() => {
         onTotal(totalCount);
     }, [totalCount, onTotal]);
@@ -222,7 +225,7 @@ export function List({
                                                     index={row.index}
                                                     narrow={narrow}
                                                     shape={shape}
-                                                    queue={queue}
+                                                    wants={wants}
                                                     selected={selection.items.has(entry.path)}
                                                     focusable={row.index === tabbable}
                                                     onClick={interaction.click}
@@ -261,7 +264,7 @@ interface RowProps {
     index: number;
     narrow: boolean;
     shape: DisplaySet["thumbnailShape"];
-    queue: ThumbnailQueue;
+    wants: ImageWants;
     selected: boolean;
     focusable: boolean;
     onClick: (event: MouseEvent, index: number) => void;
@@ -274,7 +277,7 @@ function ListRow({
     index,
     narrow,
     shape,
-    queue,
+    wants,
     selected,
     focusable,
     onClick,
@@ -284,7 +287,7 @@ function ListRow({
     const actions = useEntryActions();
     const clipboard = useClipboard();
     const cut = isCut(clipboard.contents, actions?.libraryId ?? "", entry.path);
-    const thumbnail = useSyncExternalStore(queue.subscribe, () => queue.getState(entry.path));
+    const thumbnail = useSyncExternalStore(wants.subscribe, () => wants.getState(entry.path));
     const kind = entryKind(entry);
     const modified = formatModifiedAt(entry.metadata?.modifiedAt);
     const size = formatBytes(entry.metadata?.size);

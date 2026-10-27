@@ -43,6 +43,6 @@ Representative thumbnails are used only for folder and archive tiles in folder v
 ## Handling Policy
 
 Fix both layers as decided in [Thumbnail Design §10.1](../design/thumbnail.md#representative-revalidation).
-The server returns folder and archive responses with `Cache-Control: private, no-cache` and the existing `ETag`, and the web client discards the states of folder and archive tiles and requests them again when it rereads the listing after the daemon's own change.
-First reproduce in a browser that the old image is served from the HTTP cache, so that the server-side fix can be shown to be needed.
-A test that a folder response does not carry `max-age`, and a test that the queue requests folder tiles again after its states are discarded, prevent a recurrence.
+The server-side layer goes away with the image channel: every want of a folder or archive is revalidated against the representative chosen now, so no HTTP cache answers it ([Image Channel Design §7](../design/image-channel.md#7-revalidation)).
+The web client discards the states of folder and archive tiles and wants them again with the `ETag` of the image it holds when it rereads the listing after the daemon's own change (C11 of [Client Design §6.2](../design/client.md#62-roadmap), after C13).
+A test that a want with the old `ETag` receives the new representative, and a test that the client wants folder tiles again after its states are discarded, prevent a recurrence.

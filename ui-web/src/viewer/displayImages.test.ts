@@ -1,80 +1,90 @@
 import { expect, it } from "vitest";
 
-import { DisplayImages, type DisplayPriority } from "./displayImages";
+import type { ImageSpec } from "../images/spec";
+import { FakeImageSource } from "../testing/images";
+import { DisplayImages } from "./displayImages";
 
-/// 要求ごとに、解決と中止を外から観察できる読み込み。
-function loader() {
-    const calls: Array<{
-        url: string;
-        priority: DisplayPriority;
-        signal: AbortSignal;
-        resolve: (url: string) => void;
-    }> = [];
-    const revoked: string[] = [];
-    const load = (url: string, priority: DisplayPriority, signal: AbortSignal) =>
-        new Promise<string>((resolve, reject) => {
-            signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
-            calls.push({ url, priority, signal, resolve });
-        });
-    return { calls, revoked, images: new DisplayImages(load, (url) => revoked.push(url)) };
+const spec = (path: string): ImageSpec => ({ libraryId: "photos", path, kind: "display", width: 2048, height: 1536 });
+
+function setup() {
+    const source = new FakeImageSource();
+    return { source, images: new DisplayImages(source) };
 }
 
-const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+/// 欲しいと言われた画像の、パスと急ぎ度。
+const classes = (source: FakeImageSource) =>
+    Object.fromEntries(source.wanted().map((want) => [want.spec.path, want.class]));
 
-it("showing an image that is still prefetching aborts the prefetch and requests it as interactive", async () => {
-    const { calls, images } = loader();
-    images.prefetch("/a");
-    const shown = images.show("/a");
+it("wants the shown image as interactive and the neighbors as prefetch", async () => {
+    const { source, images } = setup();
+    images.prefetch(spec("/next"));
+    const shown = images.show(spec("/a"));
+    expect(classes(source)).toEqual({ "/next": "prefetch", "/a": "interactive" });
 
-    expect(calls.map(({ url, priority }) => [url, priority])).toEqual([
-        ["/a", "prefetch"],
-        ["/a", "interactive"],
-    ]);
-    expect(calls[0]?.signal.aborted).toBe(true);
-    calls[1]?.resolve("blob:a");
+    source.ready(spec("/a"), "blob:a");
     await expect(shown).resolves.toBe("blob:a");
 });
 
-it("showing a loaded prefetch reuses it without another request", async () => {
-    const { calls, images } = loader();
-    images.prefetch("/a");
-    calls[0]?.resolve("blob:a");
-    await settled();
+it("raises an image that is still being prefetched to interactive, in the same item", async () => {
+    const { source, images } = setup();
+    images.prefetch(spec("/a"));
+    expect(classes(source)).toEqual({ "/a": "prefetch" });
+    const shown = images.show(spec("/a"));
 
-    await expect(images.show("/a")).resolves.toBe("blob:a");
-    expect(calls).toHaveLength(1);
+    // The image is wanted once, with a higher class. Nothing is requested again.
+    expect(source.wanted()).toHaveLength(1);
+    expect(classes(source)).toEqual({ "/a": "interactive" });
+    source.ready(spec("/a"), "blob:a");
+    await expect(shown).resolves.toBe("blob:a");
 });
 
-it("retaining other images aborts the requests in progress and keeps recent loaded ones", async () => {
-    const { calls, revoked, images } = loader();
-    for (let index = 0; index < 8; index++) {
-        images.prefetch(`/${index}`);
-        calls[index]?.resolve(`blob:${index}`);
+it("does not lower a shown image to prefetch when it is prefetched again", () => {
+    const { source, images } = setup();
+    void images.show(spec("/a")).catch(() => undefined);
+    images.prefetch(spec("/a"));
+    expect(classes(source)).toEqual({ "/a": "interactive" });
+});
+
+it("shows a loaded prefetch at once", async () => {
+    const { source, images } = setup();
+    images.prefetch(spec("/a"));
+    source.ready(spec("/a"), "blob:a");
+    await expect(images.show(spec("/a"))).resolves.toBe("blob:a");
+});
+
+it("rejects a shown image that could not be made, and stays quiet about a prefetch that could not", async () => {
+    const { source, images } = setup();
+    images.prefetch(spec("/next"));
+    source.setState(spec("/next"), { status: "failed", kind: "NotFound" });
+    const shown = images.show(spec("/a"));
+    source.setState(spec("/a"), { status: "failed", kind: "Timeout" });
+    await expect(shown).rejects.toThrow();
+});
+
+it("stops wanting the images it no longer keeps, and keeps the most recent loaded ones up to six", () => {
+    const { source, images } = setup();
+    for (let index = 0; index < 9; index++) {
+        images.prefetch(spec(`/${index}`));
+        source.ready(spec(`/${index}`), `blob:${index}`);
+        // The viewer retains what it shows and the neighbors after each move.
+        images.retain([spec(`/${index}`)]);
     }
-    await settled();
-    images.prefetch("/loading");
-    images.retain(["/7"]);
+    images.prefetch(spec("/loading"));
+    images.retain([spec("/8")]);
 
-    expect(calls.at(-1)?.signal.aborted).toBe(true);
-    expect(revoked).toEqual(["blob:0"]);
-    images.dispose();
-    expect(revoked).toHaveLength(8);
+    const wanted = source.wanted().map((want) => want.spec.path);
+    // The shown one, and the six loaded images before it. The image still loading and the oldest loaded ones are let go.
+    expect(wanted.sort()).toEqual(["/2", "/3", "/4", "/5", "/6", "/7", "/8"]);
+    expect(source.wanted().find((want) => want.spec.path === "/8")?.order).toBeLessThan(
+        source.wanted().find((want) => want.spec.path === "/7")?.order ?? 0,
+    );
 });
 
-it("an image that finishes after it was dropped is revoked at once", async () => {
-    const revoked: string[] = [];
-    let resolve: (url: string) => void = () => {};
-    // 中止に気づかずに読み終える読み込み。
-    const images = new DisplayImages(
-        () =>
-            new Promise<string>((done) => {
-                resolve = done;
-            }),
-        (url) => revoked.push(url),
-    );
-    images.show("/a");
+it("gives everything back on dispose and rejects a show that is still waiting", async () => {
+    const { source, images } = setup();
+    const shown = images.show(spec("/a"));
+    const rejected = expect(shown).rejects.toThrow();
     images.dispose();
-    resolve("blob:late");
-    await settled();
-    expect(revoked).toEqual(["blob:late"]);
+    await rejected;
+    expect(source.wanted()).toEqual([]);
 });

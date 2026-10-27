@@ -1,17 +1,16 @@
 import { type KeyboardEvent, type MouseEvent, useState, useSyncExternalStore } from "react";
-
+import type { ImageWants } from "../images/wants";
 import { isCut, useClipboard } from "../library/clipboard";
 import { type Entry, entryKind } from "../library/entries";
 import { PLACE_HEIGHT } from "../library/grid";
 import type { DisplaySet } from "../library/preferences";
-import type { ThumbnailQueue } from "../thumbnails/queue";
 import { useFlipbook } from "../thumbnails/useFlipbook";
 import { EntryIcon } from "./EntryIcon";
 
 interface TileProps {
     entry: Entry;
     place?: string;
-    queue: ThumbnailQueue;
+    wants: ImageWants;
     libraryId: string;
     thumbnailSize: number;
     /// タイルの表示の一辺（CSS ピクセル）。
@@ -28,7 +27,7 @@ interface TileProps {
 export function Tile({
     entry,
     place,
-    queue,
+    wants,
     libraryId,
     thumbnailSize: size,
     tileSide,
@@ -43,7 +42,7 @@ export function Tile({
     const clipboard = useClipboard();
     const cut = isCut(clipboard.contents, libraryId, entry.path);
     const kind = entryKind(entry);
-    const thumbnail = useSyncExternalStore(queue.subscribe, () => queue.getState(entry.path));
+    const thumbnail = useSyncExternalStore(wants.subscribe, () => wants.getState(entry.path));
     // 動画のタイルにマウスを重ねている間は、スプライトシートのフレームを順に切り替える。
     const [hovering, setHovering] = useState(false);
     const flipbook = useFlipbook(hovering && kind === "video", libraryId, entry.path, size, shape, tileSide);

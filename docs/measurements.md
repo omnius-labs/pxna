@@ -27,6 +27,9 @@ Each record has the measurement method, the numbers, and the limits, and values 
 | [2026-10-16-webp-method](./measurements/2026-10-16-webp-method.md) | 2026-10-16 | A sweep of WebP compression effort (method), and first generation and consecutive flipping before and after lowering it from 4 to 2 |
 | [2026-10-24-heif-display](./measurements/2026-10-24-heif-display.md) | 2026-10-24 | HEIC decoding, display image and thumbnail generation, and cache hits compared with the same-size JPEG |
 | [2026-10-24-heif-ppm](./measurements/2026-10-24-heif-ppm.md) | 2026-10-24 | Display and thumbnail generation after switching ffmpeg-read images to PPM output |
+| [2026-10-27-image-channel](./measurements/2026-10-27-image-channel.md) | 2026-10-27 | External decodes of iPhone HEIC while browsing and viewing, and the `unchanged` answers after a reload, after the web client switched to the image channel |
+| [2026-10-27-thumbnail-fanout](./measurements/2026-10-27-thumbnail-fanout.md) | 2026-10-27 | Thumbnail generation with and without companions, a shape switch and a filmstrip request that hit companions, the bytes added per image, and the hit-rate change |
+| [2026-10-27-thumbnail-fanout-release-ab](./measurements/2026-10-27-thumbnail-fanout-release-ab.md) | 2026-10-27 | Release-build A/B of the fan-out on and off: primary latency, later-request latency, external decodes, stored bytes, and hit rate |
 
 ## 3. Comparison Procedures
 

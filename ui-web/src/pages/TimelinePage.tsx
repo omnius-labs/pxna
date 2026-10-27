@@ -92,7 +92,7 @@ function TimelineScreen({
         (libraries.data ?? []).filter((library) => library.readonly).map((library) => library.id),
     );
     const isReadonlyLibrary = (libraryId: string) => !libraries.data || readonlyLibraries.has(libraryId);
-    const { set, narrow, updateTimelineLibraries } = usePreferences();
+    const { set, narrow, updateTimelineLibraries, updateSet } = usePreferences();
     const infoPanel = useInfoPanel();
     const clipboard = useClipboard();
 
@@ -365,6 +365,8 @@ function TimelineScreen({
                     libraryIds={libraryIds}
                     view={view}
                     originalImage={set.originalImage}
+                    filmstripSize={set.filmstripSize}
+                    onDisplaySetChange={updateSet}
                     narrow={narrow}
                     libraryReadonly={isReadonlyLibrary(entryAddress(CROSS_LIBRARY_SCOPE, viewKey(view)).libraryId)}
                     onChange={changeView}

@@ -120,6 +120,24 @@ describe("Modal", () => {
         expect(event.defaultPrevented).toBe(false);
     });
 
+    it("leaves Tab inside a nested popover (role=dialog) to its own focus scope", async () => {
+        await act(async () =>
+            root.render(
+                <Modal label="photo" onClose={vi.fn()}>
+                    <button type="button">close</button>
+                    <div role="dialog">
+                        <button type="button">inside</button>
+                    </div>
+                </Modal>,
+            ),
+        );
+        const inside = host.querySelector("[role=dialog] button");
+        if (!inside) throw new Error("the popover button is missing");
+        const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+        await act(async () => inside.dispatchEvent(event));
+        expect(event.defaultPrevented).toBe(false);
+    });
+
     it("hands the outer element that wraps the children to the owner", async () => {
         const outerRef = vi.fn();
         await act(async () =>

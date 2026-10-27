@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useImageWants } from "../images/wants";
 import { useDragScroll } from "../library/dnd";
 import { type Entry, isFolderLike, isThumbnailable } from "../library/entries";
 import { gridLayout, PLACE_HEIGHT, rowHeight, TILE_GAP } from "../library/grid";
@@ -9,7 +10,6 @@ import { type SelectionProgress, useEntryInteraction } from "../library/useEntry
 import { useListingRows } from "../library/useListingRows";
 import { useRevealEntry } from "../library/useRevealEntry";
 import { type ScrollDirection, tilePriority, wantedPagesForRows, wantedRows } from "../thumbnails/range";
-import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { EntryMenu } from "./EntryMenu";
 import { LoadFailure } from "./LoadFailure";
 import { Tile } from "./Tile";
@@ -99,7 +99,7 @@ export function Grid({
     // サムネイルの要求のキュー。見えているタイルと、スクロールの方向へ画面 1 枚分の先読みのタイルだけを、画面の中央に近い順に要求する。
     // 大きさと形は、タイルサイズか形を変えたときに決め直し、サムネイルとスプライトシートに同じ値を使う。
     // 一覧の幅が変わっただけでは決め直さない。幅を変えている間に、要求が続けて出ないようにするためである。
-    const { queue, size } = useThumbnailQueue(libraryId, tileSize, narrow, shape);
+    const { wants, size } = useImageWants(libraryId, tileSize, narrow, shape);
 
     // スクロールが止まると方向は null に戻るので、最後にスクロールした方向を覚える。
     const [direction, setDirection] = useState<ScrollDirection>("forward");
@@ -126,6 +126,7 @@ export function Grid({
         const { first, last, center } = wantedRows({ firstRow, lastRow: lastVisibleRow, rowCount, direction });
         const wanted = new Map<string, number>();
         const delayed = new Set<string>();
+        const prefetch = new Set<string>();
         for (let row = first; row <= last; row += 1) {
             for (let column = 0; column < columns; column += 1) {
                 const entry = listing.entryAt(row * columns + column);
@@ -135,11 +136,13 @@ export function Grid({
                         delayed.add(entry.path);
                     }
                     wanted.set(entry.path, tilePriority(row, column, center));
+                    // 画面に出ていない行は先読みで、出ている行より後にする。
+                    if (row < firstRow || row > lastVisibleRow) prefetch.add(entry.path);
                 }
             }
         }
-        queue.setWanted(wanted, delayed);
-    }, [firstRow, lastVisibleRow, direction, columns, rowCount, totalCount, version, queue]);
+        wants.setWanted(wanted, delayed, prefetch);
+    }, [firstRow, lastVisibleRow, direction, columns, rowCount, totalCount, version, wants]);
 
     useEffect(() => {
         onTotal(totalCount);
@@ -240,7 +243,7 @@ export function Grid({
                                                     place={place?.(entry)}
                                                     index={index}
                                                     selected={selection.items.has(entry.path)}
-                                                    queue={queue}
+                                                    wants={wants}
                                                     libraryId={libraryId}
                                                     thumbnailSize={size}
                                                     tileSide={tileSide}
