@@ -7,7 +7,7 @@ The intended readers are developers and AI agents who implement or review the cl
 It assumes the vocabulary of [terms.md](../terms.md).
 The definitions of words are not in this document.
 
-Note that the web client's interface is in Japanese. Where this document quotes the text of buttons, menus, and messages, it quotes the Japanese text as displayed, with an English gloss.
+Note that the web client's interface is shown in English or Japanese (§3.11). Where this document quotes the text of buttons, menus, and messages, it quotes the Japanese text, with an English gloss.
 
 ### 1.1 Division of Responsibility Between Documents
 
@@ -317,7 +317,7 @@ While one Library is searched, it is a path relative to the start, and an Entry 
 Opening a folder or archive result moves to that position in folder view, and the search ends. Moving by the switch also ends the search.
 Opening an image or video result opens a viewer that moves back and forth among the search results.
 
-On a wide screen, delete, download, cut, copy, rename, and "フォルダで表示" (Show in folder) can be done, by the same rules as in the timeline (§3.10). A selection spanning Libraries is deleted with one request per Library, and cut and copy keep the Entries grouped by Library. There is no current folder, so new folder, paste, upload, and move by drag are not shown.
+On a wide screen, delete, download, cut, copy, rename, and "Show in folder" can be done, by the same rules as in the timeline (§3.10). A selection spanning Libraries is deleted with one request per Library, and cut and copy keep the Entries grouped by Library. There is no current folder, so new folder, paste, upload, and move by drag are not shown.
 The info panel shows the Library name in addition to the Library-relative path.
 
 On narrow screens, the field for search terms is always shown in a row below the search mode header, and the other conditions are in the left drawer. The drawer's button shows the number of conditions other than the terms that narrow the search.
@@ -526,7 +526,7 @@ Cut and copy keep the Entries grouped by Library, and pasting in folder view sen
 The info panel shows the Library name in addition to the Library-relative path.
 Range selection is limited to the loaded range, and Ctrl or ⌘ plus A is not provided.
 When it finishes changing Entries, the timelines that list a changed Library and their per-month counts are reread.
-"フォルダで表示" (Show in folder) opens the selected Entry's parent folder in folder view, selects that Entry, and scrolls to the display position.
+"Show in folder" opens the selected Entry's parent folder in folder view, selects that Entry, and scrolls to the display position.
 For an Entry inside an archive, it opens the folder inside that archive.
 
 The viewer moves to the previous and next images and videos in timeline order. The range the viewer holds also discards Entries farther than 1000 items from the open Entry and the filmstrip's range. The filmstrip does not read beyond 3000 items from the open Entry. This is to avoid holding everything between the open Entry and distant positions, since the range read is one contiguous range.
@@ -535,6 +535,18 @@ When opened directly from the URL's `view`, the range containing that Entry in t
 
 The Entry of a file that vanished externally remains listed until the server's next aggregation.
 That tile becomes an icon showing the kind, the same as files whose thumbnail cannot be made.
+
+### 3.11 Languages
+
+The web client is shown in English or Japanese. English is the default and the base of the translations.
+When the user has not chosen a language, it follows the browser's language list in order and uses the first language it supports, or English if none matches.
+The settings menu offers Auto, English, and 日本語. The choice is saved per device in the browser's `localStorage` under `pxna.language`, and Auto removes it.
+The choice is read before the first render, so the screen does not flash in another language, and it also applies to the login and setup screens, which are shown before the server's display preferences are available.
+Strings live in [en.ts](../../ui-web/src/i18n/locales/en.ts) and [ja.ts](../../ui-web/src/i18n/locales/ja.ts). The type checker requires `ja.ts` to have the same keys as `en.ts`, and a test requires the same placeholders.
+Counts use plural keys: English has `_one` and `_other`, and Japanese has only `_other`. Dates and the names of months follow the language.
+Strings are read with `t` at render time, so changing the language rebuilds the whole screen. Open menus and other transient state are lost, and server state stays in the `QueryClient`.
+The `message` of an API error is English text for logs. The client shows a translation chosen by the error's `kind` and falls back to `message` only when the response has no `kind`.
+The daemon and the API are not translated.
 
 ## 4. Thumbnail Requests
 
@@ -950,6 +962,24 @@ Like the open/closed state, it is a per-device way of viewing, so it is saved in
 A method that saves the width in the server's display preferences.
 It would be consistent across devices, but the same width does not suit devices with different screen sizes, so we rejected it.
 
+#### Choose the Language by the Browser and Save the Choice in the Browser
+
+**Decision**
+The language follows the browser's language list unless the user chooses one, and the choice is saved per device in `localStorage` (§3.11). The daemon and the API are not translated; the client translates API errors by `kind`.
+
+**Reason**
+The language is a per-device way of viewing, and the browser's language already differs per device.
+`localStorage` can be read synchronously before the first render and works on screens shown before sign-in, which the server's display preferences cannot.
+Translating in the client keeps the daemon and the API contract unchanged.
+
+**Rejected alternative 1**
+A method that saves the language in the server's display preferences.
+It would follow the user across devices, but it needs an API change, cannot be read before sign-in, and delays the first render.
+
+**Rejected alternative 2**
+A method where the daemon translates error messages by `Accept-Language`.
+It would need internationalization on the Rust side for messages that are mostly shown as short notices, so we rejected it.
+
 #### Activity Becomes Read When Opened, and Finished Items Can Be Removed
 
 **Decision**
@@ -1348,7 +1378,7 @@ It would be easy to tell apart by location, but the timeline's parts would becom
 #### The Timeline Also Allows Operations Up to Renaming
 
 **Decision**
-In the timeline, delete, download, cut, copy, rename, and "フォルダで表示" (Show in folder) can be done.
+In the timeline, delete, download, cut, copy, rename, and "Show in folder" can be done.
 New folder, paste, upload, and move by drag are not provided (§3.10).
 
 **Reason**
@@ -1457,7 +1487,7 @@ It would be predictable, but returning to a search would mean entering the condi
 #### Search Results Allow the Same Operations as the Timeline
 
 **Decision**
-In search mode, delete, download, cut, copy, rename, and "フォルダで表示" (Show in folder) can be done, also on a selection that spans Libraries. New folder, paste, upload, and move by drag are not provided (§3.6).
+In search mode, delete, download, cut, copy, rename, and "Show in folder" can be done, also on a selection that spans Libraries. New folder, paste, upload, and move by drag are not provided (§3.6).
 
 **Reason**
 Search results, like the timeline, have no current folder and span Libraries, so the operations of the timeline fit them without change, including splitting a selection into one request per Library.
@@ -1640,7 +1670,7 @@ For images, it shows the dimensions with the rotation applied and the items of s
 The timeline (§3.10) places at `/timeline` a grid with daily headings ([TimelineGrid.tsx](../../ui-web/src/components/TimelineGrid.tsx)) and a list of years and months ([TimelineSidebar.tsx](../../ui-web/src/components/TimelineSidebar.tsx)).
 Loading is held by `TimelineStore` in [library/timeline.ts](../../ui-web/src/library/timeline.ts), which points to Entries by absolute positions based on the start of the range first read, so even when reading is added toward the front, the positions of the selection and the viewer do not move.
 The viewer and filmstrip run on a `TimelineStore` that has the same `Listing` shape, and use the same parts as the folder view listing.
-The switch between folder view and the timeline is [ModeSwitch.tsx](../../ui-web/src/components/ModeSwitch.tsx), which goes back to the folder saved by [folderReturn.ts](../../ui-web/src/library/folderReturn.ts) in `localStorage`, and "フォルダで表示" (Show in folder) is received by `reveal` in the folder view URL.
+The switch between folder view and the timeline is [ModeSwitch.tsx](../../ui-web/src/components/ModeSwitch.tsx), which goes back to the folder saved by [folderReturn.ts](../../ui-web/src/library/folderReturn.ts) in `localStorage`, and "Show in folder" is received by `reveal` in the folder view URL.
 Timeline Entries carry `/{libraryId}{Library-relative path}` as their path, so the selection, the viewer, and the positions in the range tell Entries of different Libraries apart without change; the API helpers turn that path back into the Library and the Library-relative path with `entryAddress` in [location.ts](../../ui-web/src/location.ts).
 Ratings and tags are read and written by the queries and saving in [ratingTags.ts](../../ui-web/src/library/ratingTags.ts). In the info panel, [EntryTags.tsx](../../ui-web/src/components/EntryTags.tsx) handles displaying the rating and attaching and detaching tags. The viewer's rate mode is handled by [Viewer.tsx](../../ui-web/src/components/Viewer.tsx), shared by the viewers of folder view, search mode, and the timeline.
 The tree subscribes with [useTreeListing.ts](../../ui-web/src/library/useTreeListing.ts) to levels that are expanded and whose ancestors are not closed, and shares the page and generation management of [listing.ts](../../ui-web/src/library/listing.ts).

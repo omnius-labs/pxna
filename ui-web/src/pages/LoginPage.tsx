@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { t } from "i18next";
 import { useEffect } from "react";
 
 import { ApiError } from "../api/client";
@@ -30,8 +31,8 @@ export function LoginPage() {
 
     return (
         <CredentialsForm
-            title="ログイン"
-            submitLabel="ログイン"
+            title={t("pages.login")}
+            submitLabel={t("pages.login")}
             passwordAutoComplete="current-password"
             error={signIn.error ? loginErrorMessage(signIn.error) : undefined}
             pending={signIn.isPending}
@@ -42,7 +43,7 @@ export function LoginPage() {
 
 function loginErrorMessage(error: Error): string {
     if (error instanceof ApiError && error.unauthorized) {
-        return "ユーザ名かパスワードが違います。";
+        return t("pages.loginInvalid");
     }
-    return "ログインできませんでした。";
+    return t("pages.loginFailed");
 }

@@ -1,8 +1,12 @@
+import { t } from "i18next";
+
+import { currentLanguage } from "../i18n";
+
 const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
 /// バイト数を、1024 を単位に小数 1 桁で表す。
 export function formatBytes(bytes: number | undefined): string {
-    if (bytes === undefined) return "不明";
+    if (bytes === undefined) return t("format.unknown");
     let value = bytes;
     let unit = 0;
     while (value >= 1024 && unit < UNITS.length - 1) {
@@ -17,7 +21,7 @@ export function formatModifiedAt(value: string | null | undefined): string {
     if (value == null) return "—";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "—";
-    return new Intl.DateTimeFormat("ja-JP", {
+    return new Intl.DateTimeFormat(currentLanguage(), {
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
@@ -40,9 +44,11 @@ export function formatDuration(secs: number): string {
     return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
 }
 
-/// 露出時間を表す。1 秒未満は「1/250 秒」の分数にし、1 秒以上は秒数にする。
+/// 露出時間を表す。1 秒未満は「1/250 s」の分数にし、1 秒以上は秒数にする。
 export function formatExposureTime(secs: number): string {
-    return secs > 0 && secs < 1 ? `1/${Math.round(1 / secs)} 秒` : `${Number(secs.toFixed(1))} 秒`;
+    return secs > 0 && secs < 1
+        ? t("format.exposureFraction", { denominator: Math.round(1 / secs) })
+        : t("format.exposureSeconds", { seconds: Number(secs.toFixed(1)) });
 }
 
 /// 絞り値を「f/2.8」で表す。

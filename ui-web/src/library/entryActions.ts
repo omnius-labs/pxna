@@ -1,7 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
-
+import { t } from "i18next";
 import { ApiError, api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
+import { describeError } from "../i18n/errors";
 import { entryAddress, groupByLibrary } from "../location";
 import type { Entry } from "./entries";
 import { refreshLibrary } from "./listing";
@@ -45,7 +46,7 @@ export async function renameEntry(
     const data = unwrap(
         await api.POST(route, { params: { path: { libraryId } }, body: { srcPaths: [path], dstPath } }),
     );
-    if (!("entries" in data)) throw new Error("名前の変更が同期で完了しませんでした。");
+    if (!("entries" in data)) throw new Error(t("errors.renameNotSync"));
     await refreshLibrary(client, libraryId);
     return data.entries[0]!;
 }
@@ -60,7 +61,7 @@ export class DeleteEntriesError extends ApiError {
         super(
             first instanceof ApiError ? first.status : 0,
             first instanceof ApiError ? first.kind : undefined,
-            first instanceof Error ? first.message : "削除できませんでした。",
+            describeError(first, t("errors.deleteFailed")),
         );
     }
 }

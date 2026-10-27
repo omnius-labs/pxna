@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { t } from "i18next";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -48,20 +49,20 @@ function NameForm({ target, onClose, onDone }: NameDialogProps & { target: NameT
         try {
             if (target.type === "create") {
                 await createFolder(client, target.libraryId, childPath(target.parent, name));
-                toast.success("フォルダを作成しました。");
+                toast.success(t("nameDialog.created"));
             } else {
                 await renameEntry(client, target.libraryId, { path: target.path, folder: target.folder }, name);
-                toast.success("名前を変更しました。");
+                toast.success(t("nameDialog.renamed"));
             }
             onDone();
             onClose();
         } catch (error) {
             toast.error(
                 error instanceof ApiError && error.status === 409
-                    ? "同じ名前の項目があります。"
+                    ? t("nameDialog.exists")
                     : error instanceof ApiError && error.status === 403
-                      ? "この場所は変更できません。"
-                      : "変更できませんでした。",
+                      ? t("nameDialog.locked")
+                      : t("nameDialog.failed"),
             );
             input.current?.focus();
         } finally {
@@ -69,7 +70,7 @@ function NameForm({ target, onClose, onDone }: NameDialogProps & { target: NameT
         }
     };
 
-    const title = target.type === "create" ? "フォルダを作成" : "名前を変更";
+    const title = target.type === "create" ? t("nameDialog.createTitle") : t("nameDialog.renameTitle");
     const place = target.type === "create" ? target.parent : target.path;
     return (
         <Dialog
@@ -98,22 +99,23 @@ function NameForm({ target, onClose, onDone }: NameDialogProps & { target: NameT
                     <DialogHeader>
                         <DialogTitle>{title}</DialogTitle>
                         <DialogDescription>
-                            {target.type === "create" ? "作成先" : "対象"}: <span className="break-all">{place}</span>
+                            {target.type === "create" ? t("nameDialog.createIn") : t("nameDialog.target")}:{" "}
+                            <span className="break-all">{place}</span>
                         </DialogDescription>
                     </DialogHeader>
                     <Input
                         ref={input}
-                        aria-label="名前"
+                        aria-label={t("common.name")}
                         value={name}
                         readOnly={busy}
                         onChange={(event) => setName(event.target.value)}
                     />
                     <DialogFooter>
                         <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
-                            取り消す
+                            {t("common.cancel")}
                         </Button>
                         <Button type="submit" disabled={busy || invalid}>
-                            {target.type === "create" ? "作成する" : "変更する"}
+                            {target.type === "create" ? t("nameDialog.create") : t("nameDialog.change")}
                         </Button>
                     </DialogFooter>
                 </form>

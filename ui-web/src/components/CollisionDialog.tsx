@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import type { CollisionChoice } from "../library/collision";
 import {
     AlertDialog,
@@ -28,11 +29,9 @@ export function CollisionDialog({
         >
             <AlertDialogContent>
                 <AlertDialogHeader>
-                    <AlertDialogTitle>{names.length} 件の名前が衝突しています</AlertDialogTitle>
+                    <AlertDialogTitle>{t("collision.title", { count: names.length })}</AlertDialogTitle>
                     <AlertDialogDescription>
-                        {duplicateOnly
-                            ? "元の項目を残し、別名で複製します。"
-                            : "選んだ方法を今回のすべての項目に適用します。フォルダの置き換えでは中身を統合し、同名ファイルを上書きします。"}
+                        {duplicateOnly ? t("collision.duplicateOnly") : t("collision.applyAll")}
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <ul className="max-h-40 overflow-auto text-sm">
@@ -41,7 +40,7 @@ export function CollisionDialog({
                             {name}
                         </li>
                     ))}
-                    {names.length > 10 && <li>ほか {names.length - 10} 件</li>}
+                    {names.length > 10 && <li>{t("collision.more", { count: names.length - 10 })}</li>}
                 </ul>
                 <AlertDialogFooter>
                     <AlertDialogCancel
@@ -50,7 +49,7 @@ export function CollisionDialog({
                             onChoice("cancel");
                         }}
                     >
-                        中止
+                        {t("collision.abort")}
                     </AlertDialogCancel>
                     {!duplicateOnly && (
                         <AlertDialogAction
@@ -59,7 +58,7 @@ export function CollisionDialog({
                                 onChoice("skip");
                             }}
                         >
-                            スキップ
+                            {t("collision.skip")}
                         </AlertDialogAction>
                     )}
                     <AlertDialogAction
@@ -68,7 +67,7 @@ export function CollisionDialog({
                             onChoice("rename");
                         }}
                     >
-                        両方残す
+                        {t("collision.keepBoth")}
                     </AlertDialogAction>
                     {!duplicateOnly && (
                         <AlertDialogAction
@@ -77,7 +76,7 @@ export function CollisionDialog({
                                 onChoice("overwrite");
                             }}
                         >
-                            置き換える
+                            {t("collision.replace")}
                         </AlertDialogAction>
                     )}
                 </AlertDialogFooter>

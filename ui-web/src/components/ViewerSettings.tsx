@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { Image as ImageIcon, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -39,8 +40,8 @@ export function ViewerSettings({
             <PopoverTrigger asChild>
                 <button
                     type="button"
-                    aria-label="ビューアの設定"
-                    title="ビューアの設定"
+                    aria-label={t("viewerSettings.label")}
+                    title={t("viewerSettings.label")}
                     className="rounded p-1.5 hover:bg-white/10"
                 >
                     <Settings className="size-4" />
@@ -48,7 +49,7 @@ export function ViewerSettings({
             </PopoverTrigger>
             <PopoverContent align="end" container={container} className="w-72 gap-4">
                 {filmstrip && (
-                    <Field label="フィルムストリップの大きさ">
+                    <Field label={t("viewerSettings.filmstripSize")}>
                         <div className="flex items-center gap-2">
                             <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
                             <Slider
@@ -56,7 +57,7 @@ export function ViewerSettings({
                                 min={MIN_FILMSTRIP_SIZE}
                                 max={MAX_FILMSTRIP_SIZE}
                                 step={1}
-                                aria-label="フィルムストリップの大きさ"
+                                aria-label={t("viewerSettings.filmstripSize")}
                                 onValueChange={([filmstripSize]) =>
                                     filmstripSize !== undefined && onChange({ filmstripSize })
                                 }
@@ -66,20 +67,20 @@ export function ViewerSettings({
                     </Field>
                 )}
                 {originalImage && (
-                    <Field label="元の画像への差し替え">
+                    <Field label={t("viewerSettings.originalImage")}>
                         <ToggleGroup
                             type="single"
                             variant="outline"
                             size="sm"
                             value={set.originalImage}
-                            aria-label="元の画像への差し替え"
+                            aria-label={t("viewerSettings.originalImage")}
                             // Pressing the selected item again empties the value, so ignore it.
                             onValueChange={(value) =>
                                 (value === "auto" || value === "onZoom") && onChange({ originalImage: value })
                             }
                         >
-                            <ToggleGroupItem value="auto">自動</ToggleGroupItem>
-                            <ToggleGroupItem value="onZoom">拡大したときだけ</ToggleGroupItem>
+                            <ToggleGroupItem value="auto">{t("viewerSettings.auto")}</ToggleGroupItem>
+                            <ToggleGroupItem value="onZoom">{t("viewerSettings.onZoom")}</ToggleGroupItem>
                         </ToggleGroup>
                     </Field>
                 )}

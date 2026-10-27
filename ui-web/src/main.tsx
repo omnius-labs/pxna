@@ -1,11 +1,12 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
-import { StrictMode } from "react";
+import { Fragment, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { clientTimings } from "./api/clientTimings";
 import { createAppQueryClient, leaveForLogin } from "./auth/unauthorized";
 import { Toaster } from "./components/ui/sonner";
+import { useLanguage } from "./i18n";
 import "./index.css";
 import { createBrowserImageChannel } from "./images/channel";
 import { notifyImageSessionEnded, onImageSessionEnded, setImageSource } from "./images/source";
@@ -31,11 +32,21 @@ if (!root) {
     throw new Error("missing #root element");
 }
 
+/// 文字列は描画のたびに引くので、言語が変わったら画面全体を作り直す。表示中の画面の状態（開いたメニューなど）は失うが、サーバの状態は `QueryClient` に残る。
+function App() {
+    const language = useLanguage();
+    return (
+        <Fragment key={language}>
+            <QueryClientProvider client={queryClient}>
+                <RouterProvider router={router} />
+            </QueryClientProvider>
+            <Toaster />
+        </Fragment>
+    );
+}
+
 createRoot(root).render(
     <StrictMode>
-        <QueryClientProvider client={queryClient}>
-            <RouterProvider router={router} />
-        </QueryClientProvider>
-        <Toaster />
+        <App />
     </StrictMode>,
 );

@@ -1,6 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { t } from "i18next";
 import { useState } from "react";
 import { toast } from "sonner";
+import { describeError } from "../i18n/errors";
 import { useActivity } from "../library/activity";
 import { DeleteEntriesError, deleteEntries } from "../library/entryActions";
 import {
@@ -45,7 +47,7 @@ export function DeleteDialog({
             if (operations.length) activity?.show(operations);
             else
                 toast.success(
-                    "削除しました。",
+                    t("deleteDialog.done"),
                     ...(toasters?.success === undefined ? [] : [{ toasterId: toasters.success }]),
                 );
             onDeleted();
@@ -55,8 +57,8 @@ export function DeleteDialog({
                 if (error.operations.length) activity?.show(error.operations);
                 if (error.acceptedCount > 0) onDeleted();
             }
-            toast.error("削除できない項目があります。", {
-                description: error instanceof Error ? error.message : undefined,
+            toast.error(t("deleteDialog.failed"), {
+                description: error instanceof Error ? describeError(error, "") : undefined,
                 toasterId: toasters?.failure,
             });
             onClose();
@@ -74,13 +76,14 @@ export function DeleteDialog({
         >
             <AlertDialogContent container={container}>
                 <AlertDialogHeader>
-                    <AlertDialogTitle>{target.items.size} 件を削除しますか？</AlertDialogTitle>
+                    <AlertDialogTitle>{t("deleteDialog.title", { count: target.items.size })}</AlertDialogTitle>
                     <AlertDialogDescription>
-                        この操作は取り消せません。{folders && "フォルダは中身ごと削除されます。"}
+                        {t("deleteDialog.description")}
+                        {folders && t("deleteDialog.folders")}
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                    <AlertDialogCancel disabled={busy}>取り消す</AlertDialogCancel>
+                    <AlertDialogCancel disabled={busy}>{t("common.cancel")}</AlertDialogCancel>
                     <AlertDialogAction
                         disabled={busy}
                         onClick={(event) => {
@@ -88,7 +91,7 @@ export function DeleteDialog({
                             void confirm();
                         }}
                     >
-                        削除する
+                        {t("deleteDialog.confirm")}
                     </AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>

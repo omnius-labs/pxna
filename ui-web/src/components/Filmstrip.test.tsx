@@ -122,7 +122,7 @@ it("1000 件の一覧に、1 件 56 px の横の仮想スクロールで、全�
     try {
         expect(mock.options?.horizontal).toBe(true);
         expect(mock.options?.count).toBe(1000);
-        const inner = byName(h.host, "フィルムストリップ")?.firstElementChild as HTMLElement;
+        const inner = byName(h.host, "Filmstrip")?.firstElementChild as HTMLElement;
         expect(inner.style.width).toBe("56000px");
         // 描くのは、仮想スクロールが返した見えている範囲だけである。
         expect(h.host.querySelectorAll("[aria-label$='.png'], [aria-label$='.mp4'], [aria-label=sub]")).toHaveLength(3);
@@ -139,7 +139,7 @@ it.each([
     mock.last = 2;
     const h = await render({ side });
     try {
-        const section = byName(h.host, "フィルムストリップ") as HTMLElement;
+        const section = byName(h.host, "Filmstrip") as HTMLElement;
         expect(section.style.height).toBe(`${side + 8}px`);
         const inner = section.firstElementChild as HTMLElement;
         expect(inner.style.width).toBe(`${1000 * side}px`);
@@ -180,7 +180,7 @@ it("位置の大きさが変わると、測り直して、開いている位置�
             mock.scrollToIndex.mock.invocationCallOrder.at(-1) as number,
         );
         expect(mock.options?.count).toBe(1000);
-        const section = byName(h.host, "フィルムストリップ") as HTMLElement;
+        const section = byName(h.host, "Filmstrip") as HTMLElement;
         expect(section.style.height).toBe("104px");
     } finally {
         await h.dispose();

@@ -56,7 +56,7 @@ async function render(operations: Operation[]) {
         articles: () => [...host.querySelectorAll("article")],
         button: (label: string) => host.querySelector(`button[aria-label="${label}"]`),
         footerButton: () =>
-            [...host.querySelectorAll("footer button")].find((b) => b.textContent?.startsWith("アクティビティ")),
+            [...host.querySelectorAll("footer button")].find((b) => b.textContent?.startsWith("Activity")),
         click,
         dispose: async () => {
             await act(async () => root.unmount());
@@ -70,13 +70,13 @@ it("畳んだ後に開き直すと、見せた項目が既読になって薄く�
     const h = await render([operation("a", "succeeded"), operation("b", "failed")]);
     try {
         expect(h.articles().every((article) => !article.className.includes("opacity-60"))).toBe(true);
-        await h.click(h.button("アクティビティを畳む"));
-        expect(h.footerButton()?.textContent).toBe("アクティビティ（2）");
+        await h.click(h.button("Collapse activity"));
+        expect(h.footerButton()?.textContent).toBe("Activity (2)");
         await h.click(h.footerButton());
         expect(h.articles()).toHaveLength(2);
         expect(h.articles().every((article) => article.className.includes("opacity-60"))).toBe(true);
-        await h.click(h.button("アクティビティを畳む"));
-        expect(h.footerButton()?.textContent).toBe("アクティビティ");
+        await h.click(h.button("Collapse activity"));
+        expect(h.footerButton()?.textContent).toBe("Activity");
     } finally {
         await h.dispose();
     }
@@ -85,12 +85,12 @@ it("畳んだ後に開き直すと、見せた項目が既読になって薄く�
 it("終わった項目は × で消せ、進行中の項目には × を出さない", async () => {
     const h = await render([operation("done", "succeeded"), operation("busy", "running")]);
     try {
-        const dismiss = h.host.querySelectorAll('button[aria-label="この項目を消す"]');
+        const dismiss = h.host.querySelectorAll('button[aria-label="Dismiss this item"]');
         expect(dismiss).toHaveLength(1);
         await h.click(dismiss[0]);
         expect(h.articles()).toHaveLength(1);
-        expect(h.articles()[0]?.textContent).toContain("実行中");
-        expect(h.host.querySelector('button[aria-label="この項目を消す"]')).toBeNull();
+        expect(h.articles()[0]?.textContent).toContain("Running");
+        expect(h.host.querySelector('button[aria-label="Dismiss this item"]')).toBeNull();
     } finally {
         await h.dispose();
     }
@@ -99,7 +99,7 @@ it("終わった項目は × で消せ、進行中の項目には × を出さ�
 it("進行中の項目は、既読になっても薄くならない", async () => {
     const h = await render([operation("busy", "running")]);
     try {
-        await h.click(h.button("アクティビティを畳む"));
+        await h.click(h.button("Collapse activity"));
         await h.click(h.footerButton());
         expect(h.articles()[0]?.className).not.toContain("opacity-60");
     } finally {

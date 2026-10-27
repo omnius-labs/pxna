@@ -13,7 +13,7 @@ vi.mock("../api/client", async (original) => ({
     api: { GET: vi.fn() },
 }));
 vi.mock("../library/preferences", () => ({ useNarrowScreen: () => false }));
-it.each(["両方残す", "スキップ", "置き換える", "中止"])(
+it.each(["Keep both", "Skip", "Replace", "Abort"])(
     "アップロードは衝突を確認し %s を一度だけ enqueue へ反映する",
     async (choice) => {
         Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -66,12 +66,12 @@ it.each(["両方残す", "スキップ", "置き換える", "中止"])(
                     .find((button) => button.textContent === choice)!
                     .click(),
             );
-            if (choice === "中止") expect(enqueue).not.toHaveBeenCalled();
+            if (choice === "Abort") expect(enqueue).not.toHaveBeenCalled();
             else
                 expect(enqueue).toHaveBeenCalledExactlyOnceWith(
                     input,
                     { libraryId: "dest", path: "/" },
-                    { 両方残す: "rename", スキップ: "skip", 置き換える: "overwrite" }[choice],
+                    { "Keep both": "rename", Skip: "skip", Replace: "overwrite" }[choice],
                 );
         } finally {
             await act(async () => root.unmount());

@@ -1,4 +1,5 @@
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
+import { t } from "i18next";
 
 import { api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
@@ -13,7 +14,17 @@ export const MAX_TAGS_PER_ENTRY = 32;
 /// タグの語の長さの上限（文字数）。daemon の上限と同じ値である。
 export const MAX_TAG_CHARS = 64;
 
-export const RATING_LABELS: Record<Rating, string> = { good: "良い", bad: "悪い", none: "未評価" };
+export const RATING_LABELS: Record<Rating, string> = {
+    get good() {
+        return t("rating.good");
+    },
+    get bad() {
+        return t("rating.bad");
+    },
+    get none() {
+        return t("rating.none");
+    },
+};
 
 /// `scope` は Library の id か、タイムラインの範囲である。キーは Entry の所在で作り、フォルダ表示とタイムラインで共有する。
 export function ratingQuery(scope: string, scopedPath: string) {

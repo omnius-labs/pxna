@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { t } from "i18next";
 import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -65,10 +66,10 @@ export function TimelinePage() {
             <AppShell timeline>
                 <p className="p-4 text-muted-foreground">
                     {libraries.isError
-                        ? "Library を読めませんでした。"
+                        ? t("common.librariesNotFound")
                         : libraries.data === undefined
-                          ? "Library を読み込み中…"
-                          : "Library がありません。"}
+                          ? t("common.librariesLoading")
+                          : t("pages.noLibraries")}
                 </p>
             </AppShell>
         );
@@ -261,7 +262,7 @@ function TimelineScreen({
             await startTimelineScan(libraryIds);
             await refreshTimeline(client, libraryIds);
         } catch {
-            toast.error("更新できませんでした。");
+            toast.error(t("pages.refreshFailed"));
         }
     };
 
@@ -305,8 +306,8 @@ function TimelineScreen({
                         <Button
                             variant="ghost"
                             size="icon"
-                            aria-label="今すぐ更新"
-                            title="今すぐ更新"
+                            aria-label={t("pages.refreshNow")}
+                            title={t("pages.refreshNow")}
                             onClick={() => void refresh()}
                         >
                             <RefreshCw />
@@ -319,7 +320,7 @@ function TimelineScreen({
                 footer={
                     <StatusBar
                         totalCount={store.loadedItems.length}
-                        countLabel="件読み込み済み"
+                        countLabel={t("pages.loadedCount")}
                         selectedCount={selection.items.size}
                         selectedBytes={selectedBytes}
                         progress={progress}
@@ -329,7 +330,7 @@ function TimelineScreen({
                 <div className="flex h-full flex-col">
                     {running && (
                         <p role="status" className="shrink-0 border-b p-2 text-sm text-muted-foreground">
-                            集計中… {processedFiles} 件を処理しました。
+                            {t("pages.aggregating", { count: processedFiles })}
                         </p>
                     )}
                     <div className="min-h-0 flex-1">
@@ -345,11 +346,7 @@ function TimelineScreen({
                             onProgress={setProgress}
                             onVisibleMonth={setVisibleMonth}
                             onOpen={open}
-                            emptyMessage={
-                                running
-                                    ? "集計中です。画像と動画が見つかると、ここに並びます。"
-                                    : "画像と動画がありません。"
-                            }
+                            emptyMessage={running ? t("pages.aggregatingEmpty") : t("pages.empty")}
                         />
                     </div>
                 </div>

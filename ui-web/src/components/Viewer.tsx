@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { t } from "i18next";
 import {
     CircleSlash,
     Download,
@@ -224,8 +225,7 @@ function ViewerView({
                     if (!controller.signal.aborted) setFound({ identity, index: entry?.index, done: true });
                 })
                 .catch(() => {
-                    if (!controller.signal.aborted)
-                        setFound({ identity, done: true, error: "一覧を読めませんでした。" });
+                    if (!controller.signal.aborted) setFound({ identity, done: true, error: t("viewer.listFailed") });
                 });
         }
         return () => {
@@ -298,7 +298,7 @@ function ViewerView({
             return "moved";
         } catch {
             if (controller.signal.aborted) return "busy";
-            setFound((value) => ({ ...value, error: "次の範囲を読めませんでした。" }));
+            setFound((value) => ({ ...value, error: t("viewer.nextFailed") }));
             return "end";
         } finally {
             if (movement.current === controller) setMoving(false);
@@ -393,7 +393,7 @@ function ViewerView({
                 destination: target === undefined ? undefined : relativePath(location.path, target.entry.path),
             });
         } catch {
-            if (!controller.signal.aborted) setFound((value) => ({ ...value, error: "次の範囲を読めませんでした。" }));
+            if (!controller.signal.aborted) setFound((value) => ({ ...value, error: t("viewer.nextFailed") }));
         } finally {
             if (movement.current === controller) setPreparingDeletion(false);
         }
@@ -430,7 +430,7 @@ function ViewerView({
                 await previous.catch(() => {});
                 await putRating(client, location.libraryId, path, value);
             },
-            "評価を保存できませんでした。",
+            t("viewer.saveRatingFailed"),
         );
         void step(1);
     };
@@ -445,7 +445,7 @@ function ViewerView({
             async () => {
                 await putRating(client, location.libraryId, path, await last.previous);
             },
-            "評価を元に戻せませんでした。",
+            t("viewer.undoRatingFailed"),
         );
         movement.current?.abort();
         if (last.target.entry.path !== current?.path) moveTo(last.target);
@@ -533,7 +533,7 @@ function ViewerView({
             <div className="relative min-h-0 flex-1">
                 {current === undefined ? (
                     <p className="p-6 text-neutral-300">
-                        {found.error ?? (found.done && !deletion ? "見つかりませんでした。" : "読み込み中…")}
+                        {found.error ?? (found.done && !deletion ? t("viewer.notFound") : t("common.loading"))}
                     </p>
                 ) : entryKind(current) === "video" ? (
                     <VideoPlayer
@@ -543,7 +543,7 @@ function ViewerView({
                         onDone={videoDone}
                     />
                 ) : entryKind(current) !== "image" ? (
-                    <p className="p-6 text-neutral-300">この種類のファイルは、まだ表示できません。</p>
+                    <p className="p-6 text-neutral-300">{t("viewer.unsupported")}</p>
                 ) : (
                     <ViewerImage
                         key={current.path}
@@ -562,14 +562,14 @@ function ViewerView({
                 )}
                 {moving && (
                     <p role="status" className="absolute bottom-2 right-2 text-sm text-neutral-300">
-                        読み込み中…
+                        {t("common.loading")}
                     </p>
                 )}
                 {current && isViewable(current) ? (
                     <>
                         <button
                             type="button"
-                            aria-label="前へ"
+                            aria-label={t("viewer.previous")}
                             disabled={previous === undefined || moving}
                             className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-3 py-2 text-2xl hover:bg-white/20 disabled:opacity-20"
                             onClick={stepBackward}
@@ -578,7 +578,7 @@ function ViewerView({
                         </button>
                         <button
                             type="button"
-                            aria-label="次へ"
+                            aria-label={t("viewer.next")}
                             disabled={next === undefined || moving}
                             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-3 py-2 text-2xl hover:bg-white/20 disabled:opacity-20"
                             onClick={stepForward}
@@ -646,13 +646,13 @@ function RatingPad({ canUndo, onRate, onUndo, video }: RatingPadProps) {
         "flex size-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 disabled:opacity-30";
     return (
         <fieldset
-            aria-label="評価"
+            aria-label={t("common.rating")}
             className={`absolute right-4 grid grid-cols-3 grid-rows-3 gap-1 ${video ? "bottom-20" : "bottom-4"}`}
         >
             <button
                 type="button"
-                aria-label="元に戻す"
-                title="元に戻す（↑）"
+                aria-label={t("viewer.undo")}
+                title={t("viewer.undoTitle")}
                 disabled={!canUndo}
                 className={`${buttonClass} col-start-2 row-start-1`}
                 onClick={onUndo}
@@ -661,8 +661,8 @@ function RatingPad({ canUndo, onRate, onUndo, video }: RatingPadProps) {
             </button>
             <button
                 type="button"
-                aria-label="悪い"
-                title="悪い（←）"
+                aria-label={t("rating.bad")}
+                title={t("viewer.badTitle")}
                 className={`${buttonClass} col-start-1 row-start-2`}
                 onClick={() => onRate("bad")}
             >
@@ -670,8 +670,8 @@ function RatingPad({ canUndo, onRate, onUndo, video }: RatingPadProps) {
             </button>
             <button
                 type="button"
-                aria-label="良い"
-                title="良い（→）"
+                aria-label={t("rating.good")}
+                title={t("viewer.goodTitle")}
                 className={`${buttonClass} col-start-3 row-start-2`}
                 onClick={() => onRate("good")}
             >
@@ -679,8 +679,8 @@ function RatingPad({ canUndo, onRate, onUndo, video }: RatingPadProps) {
             </button>
             <button
                 type="button"
-                aria-label="未評価"
-                title="未評価（↓）"
+                aria-label={t("rating.none")}
+                title={t("viewer.noneTitle")}
                 className={`${buttonClass} col-start-2 row-start-3`}
                 onClick={() => onRate("none")}
             >
@@ -706,7 +706,7 @@ function RatingBadge({ rating }: { rating: Rating | undefined }) {
     }
     return (
         <span data-rating="none" className="shrink-0 text-xs text-neutral-300">
-            ← 悪い　→ 良い　↓ 未評価　↑ 元に戻す
+            {t("viewer.rateHint")}
         </span>
     );
 }
@@ -749,8 +749,8 @@ function HeaderActions({
     container,
     onClose,
 }: HeaderActionsProps) {
-    const slideshowLabel = slideshow.running ? "スライドショーを止める" : "スライドショー";
-    const fullscreenLabel = fullscreen.active ? "全画面表示を終える" : "全画面表示";
+    const slideshowLabel = slideshow.running ? t("viewer.stopSlideshow") : t("viewer.slideshow");
+    const fullscreenLabel = fullscreen.active ? t("viewer.exitFullscreen") : t("viewer.fullscreen");
     const toggleSlideshow = slideshow.running ? slideshow.stop : slideshow.start;
     const buttonClass = "rounded p-1.5 hover:bg-white/10";
     return (
@@ -758,13 +758,9 @@ function HeaderActions({
             {rate && (
                 <button
                     type="button"
-                    aria-label="レートモード"
+                    aria-label={t("viewer.rateMode")}
                     aria-pressed={rate.active}
-                    title={
-                        rate.active
-                            ? "レートモードを終える（R）"
-                            : "レートモード（R）: → 良い、← 悪い、↓ 未評価、↑ 元に戻す"
-                    }
+                    title={rate.active ? t("viewer.exitRateMode") : t("viewer.enterRateMode")}
                     className={`${buttonClass} ${rate.active ? "bg-white/20" : ""}`}
                     onClick={rate.toggle}
                 >
@@ -775,7 +771,12 @@ function HeaderActions({
             {image && narrow && (
                 <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange}>
                     <DropdownMenuTrigger asChild>
-                        <button type="button" aria-label="その他" title="その他" className={buttonClass}>
+                        <button
+                            type="button"
+                            aria-label={t("viewer.more")}
+                            title={t("viewer.more")}
+                            className={buttonClass}
+                        >
                             <Ellipsis className="size-4" />
                         </button>
                     </DropdownMenuTrigger>
@@ -813,8 +814,8 @@ function HeaderActions({
                     )}
                     {download && (
                         <a
-                            aria-label="ダウンロード"
-                            title="ダウンロード"
+                            aria-label={t("common.download")}
+                            title={t("common.download")}
                             href={download.href}
                             download={download.name}
                             className={buttonClass}
@@ -824,8 +825,8 @@ function HeaderActions({
                     )}
                     <button
                         type="button"
-                        aria-label="削除"
-                        title="削除"
+                        aria-label={t("common.delete")}
+                        title={t("common.delete")}
                         disabled={!deletable}
                         className={`${buttonClass} disabled:opacity-40`}
                         onClick={onDelete}
@@ -837,7 +838,7 @@ function HeaderActions({
             {!narrow && <ViewerSettings {...settings} container={container} />}
             <button
                 type="button"
-                aria-label="閉じる"
+                aria-label={t("common.close")}
                 className="rounded px-2 py-1 text-lg hover:bg-white/10"
                 onClick={onClose}
             >
@@ -959,7 +960,7 @@ function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: View
     };
 
     if (displayFailed) {
-        return <p className="p-6 text-neutral-300">画像を読めませんでした。</p>;
+        return <p className="p-6 text-neutral-300">{t("viewer.imageFailed")}</p>;
     }
 
     return (

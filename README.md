@@ -17,6 +17,7 @@ Pxna is a self-hosted remote file manager. A Rust daemon serves files from direc
 - Ratings and tags, with filtering in search
 - Upload, rename, move, copy, and delete files
 - Single-owner authentication with server-side sessions
+- English and Japanese UI, chosen from the browser's language or the settings menu
 - Docker image with ffmpeg 9 and libheif included
 
 The design documents are in [docs/design.md](docs/design.md).

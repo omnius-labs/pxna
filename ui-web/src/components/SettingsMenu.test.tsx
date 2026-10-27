@@ -53,7 +53,7 @@ async function open(narrow: boolean, timeline = false) {
             </QueryClientProvider>,
         ),
     );
-    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="設定"]')!.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Settings"]')!.click());
 }
 
 const cached = () => client.getQueryData(preferencesQuery.queryKey)!;
@@ -75,13 +75,13 @@ const settle = async (check: () => void) =>
 it.each([false, true])("changes only the active set and hides grid size controls (narrow=%s)", async (narrow) => {
     await open(narrow);
     // 一覧の表示、タイルサイズ、サムネイルの形、並べ替えを 1 つのポップオーバーに出す。元の画像への差し替えは、ビューアの設定にある。
-    expect(document.querySelector('[aria-label="一覧の表示"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="List view"]')).not.toBeNull();
     expect(document.querySelector('[role="slider"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="サムネイルの形"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="元の画像への差し替え"]')).toBeNull();
-    expect(document.querySelector('[aria-label="並べ替えのキー"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="並べ替えの向き"]')).not.toBeNull();
-    await act(async () => item("一覧の表示", "リスト").click());
+    expect(document.querySelector('[aria-label="Thumbnail shape"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Switch to the original image"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Sort key"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Sort order"]')).not.toBeNull();
+    await act(async () => item("List view", "List").click());
     const preferences = cached();
     expect(narrow ? preferences.narrow.view : preferences.wide.view).toBe("list");
     expect(narrow ? preferences.wide : preferences.narrow).toEqual(
@@ -99,15 +99,15 @@ it.each([false, true])(
     "一覧の設定に、ビューアだけの設定（元の画像への差し替えとフィルムストリップ）を出さない (narrow=%s)",
     async (narrow) => {
         await open(narrow);
-        expect(document.querySelector('[aria-label="元の画像への差し替え"]')).toBeNull();
-        expect(document.querySelector('[aria-label="フィルムストリップの大きさ"]')).toBeNull();
-        expect(document.body.textContent).not.toContain("元の画像への差し替え");
+        expect(document.querySelector('[aria-label="Switch to the original image"]')).toBeNull();
+        expect(document.querySelector('[aria-label="Filmstrip size"]')).toBeNull();
+        expect(document.body.textContent).not.toContain("Switch to the original image");
     },
 );
 
 it("並べ替えの向きを変えると、組によらない sort だけが変わる", async () => {
     await open(false);
-    await act(async () => item("並べ替えの向き", "降順").click());
+    await act(async () => item("Sort order", "Descending").click());
     expect(cached().sort).toEqual({ ...DEFAULT_PREFERENCES.sort, order: "desc" });
     expect(cached().wide).toEqual(DEFAULT_PREFERENCES.wide);
     expect(cached().narrow).toEqual(DEFAULT_PREFERENCES.narrow);
@@ -115,8 +115,8 @@ it("並べ替えの向きを変えると、組によらない sort だけが変�
 
 it("writes the whole preferences once after the edits stop", async () => {
     await open(false);
-    await act(async () => item("サムネイルの形", "全体表示").click());
-    await act(async () => item("一覧の表示", "リスト").click());
+    await act(async () => item("Thumbnail shape", "Fit").click());
+    await act(async () => item("List view", "List").click());
     expect(mocks.put).not.toHaveBeenCalled();
 
     await vi.waitFor(
@@ -136,8 +136,41 @@ it("writes the whole preferences once after the edits stop", async () => {
 
 it("タイムラインでは一覧の表示と並べ替えを出さず、タイルサイズはいつも出す", async () => {
     await open(false, true);
-    expect(document.querySelector('[aria-label="一覧の表示"]')).toBeNull();
-    expect(document.querySelector('[aria-label="並べ替えのキー"]')).toBeNull();
-    expect(document.querySelector('[aria-label="並べ替えの向き"]')).toBeNull();
+    expect(document.querySelector('[aria-label="List view"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Sort key"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Sort order"]')).toBeNull();
     expect(document.querySelector('[role="slider"]')).not.toBeNull();
+});
+
+it("言語を選ぶとブラウザに保存し、画面の言語を切り替える", async () => {
+    Element.prototype.scrollIntoView = () => {};
+    await open(false);
+    expect(document.querySelector('button[aria-label="Language"]')?.textContent).toBe("Auto");
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Language"]')!.click());
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (o) => o.textContent === "日本語",
+    );
+    await act(async () => option!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(window.localStorage.getItem("pxna.language")).toBe("ja");
+    expect(document.documentElement.lang).toBe("ja");
+});
+
+it("今の表示と同じ言語に解決される選択でも、選んだ項目を表示し、保存する", async () => {
+    Element.prototype.scrollIntoView = () => {};
+    await open(false);
+    const trigger = () => document.querySelector('button[aria-label="Language"]');
+    const choose = async (name: string) => {
+        await act(async () => (trigger() as HTMLButtonElement).click());
+        const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+            (o) => o.textContent === name,
+        );
+        await act(async () => option!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    };
+    // ブラウザの言語が英語なので、English を選んでも画面の言語は変わらない。
+    await choose("English");
+    expect(trigger()?.textContent).toBe("English");
+    expect(window.localStorage.getItem("pxna.language")).toBe("en");
+    await choose("Auto");
+    expect(trigger()?.textContent).toBe("Auto");
+    expect(window.localStorage.getItem("pxna.language")).toBeNull();
 });

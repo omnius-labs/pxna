@@ -43,12 +43,12 @@ const links = () => [...host.querySelectorAll("a")];
 
 it("フォルダ、タイムライン、検索を横に並べ、今の表示だけを強調する", async () => {
     for (const [mode, label] of [
-        ["folder", "フォルダ"],
-        ["timeline", "タイムライン"],
-        ["search", "検索"],
+        ["folder", "Folder"],
+        ["timeline", "Timeline"],
+        ["search", "Search"],
     ] as const) {
         await render(mode);
-        expect(links().map((link) => link.textContent)).toEqual(["フォルダ", "タイムライン", "検索"]);
+        expect(links().map((link) => link.textContent)).toEqual(["Folder", "Timeline", "Search"]);
         expect(
             links()
                 .filter((link) => link.getAttribute("aria-current") === "page")
@@ -60,15 +60,15 @@ it("フォルダ、タイムライン、検索を横に並べ、今の表示だ�
 it("狭い画面ではアイコンだけにし、名前を aria-label に持つ", async () => {
     await render("search", true);
     expect(links().map((link) => [link.textContent, link.getAttribute("aria-label")])).toEqual([
-        ["", "フォルダ"],
-        ["", "タイムライン"],
-        ["", "検索"],
+        ["", "Folder"],
+        ["", "Timeline"],
+        ["", "Search"],
     ]);
 });
 
 it("検索は、最初は条件のない検索へ、使った後は最後の条件へ移る", async () => {
     await render("folder");
-    const search = () => links().find((link) => link.title === "検索")!;
+    const search = () => links().find((link) => link.title === "Search")!;
     rememberSearch({ path: "/", tags: [] });
     await render("timeline");
     expect(search().getAttribute("href")).toBe("/search");
@@ -85,7 +85,7 @@ it("検索は、最初は条件のない検索へ、使った後は最後の条�
 
 it("フォルダは最後に開いたフォルダへ、なければ先頭の Library のルートへ移る", async () => {
     await render("search");
-    const folder = () => links().find((link) => link.title === "フォルダ")!;
+    const folder = () => links().find((link) => link.title === "Folder")!;
     expect(folder().getAttribute("href")).toMatch(/^\/browse\/(photos|photos\/.+)$/);
     window.localStorage.setItem(LAST_FOLDER_KEY, JSON.stringify({ libraryId: "photos", path: "/a/b" }));
     await render("search");

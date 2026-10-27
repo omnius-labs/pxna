@@ -100,11 +100,11 @@ it("最後の 1 つの Library は外せない", async () => {
 
 it("場所は Library が 1 つのときだけ選べ、複数になると全体に戻る", async () => {
     await render();
-    expect(host.querySelector("section[aria-label=場所]")?.textContent).toContain("各 Library の全体");
-    expect(host.querySelector('button[aria-label="場所を選ぶ"]')).toBeNull();
+    expect(host.querySelector("section[aria-label=Place]")?.textContent).toContain("Whole of each Library");
+    expect(host.querySelector('button[aria-label="Choose a place"]')).toBeNull();
 
     await render({ libraryIds: ["photos"], path: "/a" });
-    const start = host.querySelector('button[aria-label="場所を選ぶ"]');
+    const start = host.querySelector('button[aria-label="Choose a place"]');
     expect(start?.textContent).toBe("/a");
     await click("#search-library-videos");
     expect(lastHref()).toBe("/search");
@@ -112,16 +112,16 @@ it("場所は Library が 1 つのときだけ選べ、複数になると全体�
 
 it("場所のポップオーバーでそのフォルダを選ぶと起点にし、Library 全体へ戻せる", async () => {
     await render({ libraryIds: ["photos"], path: "/a" });
-    expect(host.querySelector('button[aria-label="場所を選ぶ"]')?.textContent).toBe("/a");
-    await click('button[aria-label="場所を選ぶ"]');
+    expect(host.querySelector('button[aria-label="Choose a place"]')?.textContent).toBe("/a");
+    await click('button[aria-label="Choose a place"]');
     const tree = document.querySelector("[data-tree]");
     expect(tree?.textContent).toBe("photos:/a");
     await act(async () => (tree as HTMLElement).click());
     expect(lastHref()).toBe("/search?lib=photos&path=%2Fa%2Fb");
 
     await render({ libraryIds: ["photos"], path: "/a" });
-    await click('button[aria-label="場所を選ぶ"]');
-    const whole = [...document.querySelectorAll("button")].find((button) => button.textContent === "Library 全体");
+    await click('button[aria-label="Choose a place"]');
+    const whole = [...document.querySelectorAll("button")].find((button) => button.textContent === "Whole Library");
     await act(async () => whole!.click());
     expect(lastHref()).toBe("/search?lib=photos");
 });

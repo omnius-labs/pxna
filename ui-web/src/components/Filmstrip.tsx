@@ -1,4 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { t } from "i18next";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ImageWants } from "../images/wants";
 import { type Entry, entryKind } from "../library/entries";
@@ -97,7 +98,7 @@ export function Filmstrip({ listing, index, side, wants, onSelect, onPages }: Fi
     return (
         <section
             ref={setScrollElement}
-            aria-label="フィルムストリップ"
+            aria-label={t("filmstrip.label")}
             className="shrink-0 overflow-x-auto overflow-y-hidden border-t border-white/10"
             style={{ height: side + 8 }}
         >

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { t } from "i18next";
 import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "../components/AppShell";
 import { DeleteDialog, type DeleteTarget } from "../components/DeleteDialog";
@@ -251,13 +252,13 @@ function BrowseScreen({ location }: { location: BrowseLocation }) {
                     libraries.isError ? (
                         <LoadFailure
                             error={libraries.error}
-                            label="Library を読めませんでした。"
+                            label={t("common.librariesNotFound")}
                             onRetry={() => {
                                 void libraries.refetch();
                             }}
                         />
                     ) : (
-                        <p className="p-4 text-muted-foreground">Library を読み込み中…</p>
+                        <p className="p-4 text-muted-foreground">{t("common.librariesLoading")}</p>
                     )
                 ) : set.view === "list" ? (
                     <List

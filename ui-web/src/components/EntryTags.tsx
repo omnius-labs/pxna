@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { t } from "i18next";
 import { X } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
@@ -35,7 +36,7 @@ export function EntryTags({ libraryId, path }: { libraryId: string; path: string
             await putEntryTags(client, libraryId, path, next);
             return true;
         } catch {
-            toast.error("タグを保存できませんでした。");
+            toast.error(t("entryTags.saveFailed"));
             return false;
         } finally {
             setBusy(false);
@@ -44,7 +45,7 @@ export function EntryTags({ libraryId, path }: { libraryId: string; path: string
     const add = async () => {
         const tag = normalizeTag(draft);
         if (tag === undefined) {
-            if (draft.trim() !== "") toast.error(`タグは ${MAX_TAG_CHARS} 文字以下で、制御文字を含められません。`);
+            if (draft.trim() !== "") toast.error(t("entryTags.tooLong", { count: MAX_TAG_CHARS }));
             return;
         }
         if (current.includes(tag)) {
@@ -52,22 +53,22 @@ export function EntryTags({ libraryId, path }: { libraryId: string; path: string
             return;
         }
         if (current.length >= MAX_TAGS_PER_ENTRY) {
-            toast.error(`タグは ${MAX_TAGS_PER_ENTRY} 個まで付けられます。`);
+            toast.error(t("entryTags.tooMany", { count: MAX_TAGS_PER_ENTRY }));
             return;
         }
         if (await save([...current, tag])) setDraft("");
     };
 
     return (
-        <section aria-label="評価とタグ" className="px-4 py-3">
+        <section aria-label={t("entryTags.section")} className="px-4 py-3">
             <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">評価</span>
+                <span className="text-muted-foreground">{t("common.rating")}</span>
                 <span data-rating={rating.data ?? "none"}>{RATING_LABELS[rating.data ?? "none"]}</span>
             </div>
-            <h3 className="mt-3 text-xs text-muted-foreground">タグ</h3>
+            <h3 className="mt-3 text-xs text-muted-foreground">{t("common.tags")}</h3>
             {tags.isError ? (
                 <p role="alert" className="mt-1 text-xs text-destructive">
-                    タグを読めませんでした。
+                    {t("entryTags.loadFailed")}
                 </p>
             ) : (
                 <ul className="mt-1 flex flex-wrap gap-1">
@@ -76,7 +77,7 @@ export function EntryTags({ libraryId, path }: { libraryId: string; path: string
                             <span className="break-all">{tag}</span>
                             <button
                                 type="button"
-                                aria-label={`タグ「${tag}」を外す`}
+                                aria-label={t("entryTags.remove", { tag })}
                                 disabled={busy || !loaded}
                                 className="text-muted-foreground hover:text-foreground"
                                 onClick={() => void save(current.filter((existing) => existing !== tag))}
@@ -88,8 +89,8 @@ export function EntryTags({ libraryId, path }: { libraryId: string; path: string
                 </ul>
             )}
             <Input
-                aria-label="タグを追加"
-                placeholder="タグを追加"
+                aria-label={t("entryTags.add")}
+                placeholder={t("entryTags.add")}
                 list={listId}
                 className="mt-2 h-8"
                 value={draft}

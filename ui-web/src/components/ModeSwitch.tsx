@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { t } from "i18next";
 import { Clock, FolderTree, Search } from "lucide-react";
 import type { MouseEvent } from "react";
 
@@ -30,19 +31,19 @@ export function ModeSwitch({ libraryId, mode, compact = false }: ModeSwitchProps
     const items = [
         {
             mode: "folder",
-            label: "フォルダ",
+            label: t("common.folder"),
             href: folder === undefined ? "/" : browseHref(folder),
             icon: <FolderTree className="size-4" />,
         },
         {
             mode: "timeline",
-            label: "タイムライン",
+            label: t("common.timeline"),
             href: timelineHref({}),
             icon: <Clock className="size-4" />,
         },
         {
             mode: "search",
-            label: "検索",
+            label: t("common.search"),
             href: searchHref(lastSearchLocation() ?? EMPTY_SEARCH),
             icon: <Search className="size-4" />,
         },
@@ -53,7 +54,7 @@ export function ModeSwitch({ libraryId, mode, compact = false }: ModeSwitchProps
         void navigate({ href });
     };
     return (
-        <nav aria-label="表示の切り替え" className="flex shrink-0 items-center rounded-md border p-0.5">
+        <nav aria-label={t("modeSwitch.label")} className="flex shrink-0 items-center rounded-md border p-0.5">
             {items.map((item) => (
                 <a
                     key={item.mode}

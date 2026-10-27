@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { t } from "i18next";
 import { ChevronLeft, LogOut, Menu, User } from "lucide-react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
@@ -82,7 +83,7 @@ export function NarrowHeader({ location, search, timeline = false, actions, onOp
     const libraryId = location?.libraryId;
     const libraryName = useLibraryName(libraryId);
     const segments = location === undefined ? [] : pathSegments(location.path);
-    const title = search ? "検索" : timeline ? "タイムライン" : (segments.at(-1) ?? libraryName);
+    const title = search ? t("common.search") : timeline ? t("common.timeline") : (segments.at(-1) ?? libraryName);
     const trail =
         search || timeline ? "" : segments.length > 0 ? [libraryName, ...segments.slice(0, -1)].join(" / ") : "";
 
@@ -93,7 +94,11 @@ export function NarrowHeader({ location, search, timeline = false, actions, onOp
                     variant="ghost"
                     size="icon"
                     aria-label={
-                        search ? `検索の条件${search.conditions > 0 ? `（${search.conditions} 件）` : ""}` : "フォルダ"
+                        search
+                            ? search.conditions > 0
+                                ? t("toolbar.searchConditionsCount", { count: search.conditions })
+                                : t("toolbar.searchConditions")
+                            : t("common.folder")
                     }
                     className="relative"
                     onClick={onOpenTree}
@@ -112,7 +117,7 @@ export function NarrowHeader({ location, search, timeline = false, actions, onOp
                     <Button
                         variant="ghost"
                         size="icon"
-                        aria-label="上のフォルダ"
+                        aria-label={t("toolbar.up")}
                         disabled={parent === undefined}
                         onClick={() => parent !== undefined && void navigate({ href: browseHref(parent) })}
                     >
@@ -188,14 +193,14 @@ function UserMenu() {
                 await toLogin();
                 return;
             }
-            toast.error("ログアウトできませんでした。");
+            toast.error(t("toolbar.logoutFailed"));
         },
     });
 
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="ユーザ">
+                <Button variant="ghost" size="icon" aria-label={t("toolbar.user")}>
                     <User />
                 </Button>
             </DropdownMenuTrigger>
@@ -204,7 +209,7 @@ function UserMenu() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem disabled={signOut.isPending} onSelect={() => signOut.mutate()}>
                     <LogOut />
-                    ログアウト
+                    {t("toolbar.logout")}
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>

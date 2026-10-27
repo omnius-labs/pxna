@@ -1,5 +1,7 @@
+import { t } from "i18next";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import { ApiError, api, unwrap } from "../api/client";
+import { describeError } from "../i18n/errors";
 import type { ConflictPolicy, TransferDestination } from "./collision";
 import { fetchFolderPage } from "./entries";
 import { childPath, validateName } from "./entryActions";
@@ -69,7 +71,7 @@ export async function uploadFile(
     try {
         signal.throwIfAborted();
         let offset = upload.committedSize;
-        if (offset !== 0) throw new Error("新しいアップロードの開始位置が不正です。");
+        if (offset !== 0) throw new Error(t("errors.uploadStartInvalid"));
         while (offset < file.size) {
             const chunk = file.slice(offset, Math.min(offset + UPLOAD_CHUNK_SIZE, file.size));
             await writeBytes(
@@ -79,7 +81,7 @@ export async function uploadFile(
             );
             const state = unwrap(await api.GET("/libraries/{libraryId}/uploads/{uploadId}", { params, signal })).upload;
             if (state.status !== "active" || state.committedSize !== offset + chunk.size)
-                throw new Error("アップロードの送信位置を確認できませんでした。");
+                throw new Error(t("errors.uploadOffsetUnknown"));
             offset = state.committedSize;
             progress(offset);
         }
@@ -99,7 +101,7 @@ async function existingEntry(libraryId: string, parent: string, name: string) {
         if (found) return found;
         offset += page.entries.length;
         if (offset >= page.totalCount) return;
-        if (!page.entries.length) throw new Error("宛先の種類を確認できませんでした。");
+        if (!page.entries.length) throw new Error(t("errors.destinationKindUnknown"));
     }
 }
 async function makeUploadFolder(
@@ -126,8 +128,7 @@ async function makeUploadFolder(
             if (policy === "rename") continue;
             const existing = await existingEntry(libraryId, parent, name);
             if (!existing) throw error;
-            if (existing.metadata?.readonly !== false)
-                throw new Error("このフォルダへは送れません。", { cause: error });
+            if (existing.metadata?.readonly !== false) throw new Error(t("errors.cannotSendHere"), { cause: error });
             if (existing.kind === "folder") return path;
             signal.throwIfAborted();
             unwrap(
@@ -146,7 +147,7 @@ async function makeUploadFolder(
             return path;
         }
     }
-    throw new Error("空いているフォルダ名を見つけられませんでした。");
+    throw new Error(t("errors.noFreeFolderName"));
 }
 interface UploadJob {
     item: UploadItem;
@@ -193,7 +194,7 @@ export class UploadStore {
         };
         for (const input of inputs) {
             if (!input.path || input.path.split("/").some((part) => validateName(part)))
-                throw new Error("持ち込む名前が不正です。");
+                throw new Error(t("errors.invalidImportName"));
         }
         for (const input of inputs) {
             const id = `web-upload-${++this.sequence}`;
@@ -270,7 +271,7 @@ export class UploadStore {
                     (error === signal.reason || (error instanceof Error && error.name === "AbortError"))
                         ? "cancelled"
                         : "failed",
-                error: error instanceof Error ? error.message : String(error),
+                error: describeError(error, String(error)),
             });
         } finally {
             this.jobs.delete(job.item.id);

@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { formatBytes } from "../library/format";
 import type { SelectionProgress } from "../library/useEntryInteraction";
 import { ActivityButton } from "./ActivityPanel";
@@ -13,7 +14,13 @@ interface StatusBarProps {
 }
 
 /// 件数と、選択中の件数と合計サイズを示す。
-export function StatusBar({ totalCount, progress, selectedCount, selectedBytes, countLabel = "件" }: StatusBarProps) {
+export function StatusBar({
+    totalCount,
+    progress,
+    selectedCount,
+    selectedBytes,
+    countLabel = t("status.countLabel"),
+}: StatusBarProps) {
     return (
         <footer className="flex h-7 shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
             <span>
@@ -21,12 +28,12 @@ export function StatusBar({ totalCount, progress, selectedCount, selectedBytes, 
             </span>
             {progress && (
                 <span role="status">
-                    選択する範囲を読み込み中… {progress.loaded} / {progress.total} ページ
+                    {t("status.loadingRange", { loaded: progress.loaded, total: progress.total })}
                 </span>
             )}
             {selectedCount > 0 && (
                 <span className="text-foreground">
-                    {selectedCount} 件を選択（{formatBytes(selectedBytes)}）
+                    {t("status.selected", { count: selectedCount, bytes: formatBytes(selectedBytes) })}
                 </span>
             )}
             <ActivityButton />

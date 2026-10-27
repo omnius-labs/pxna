@@ -47,7 +47,7 @@ async function render(node: ReactNode) {
 it("何も選んでいないとき、Entry を選ぶと詳細が出ることを案内する", async () => {
     const view = await render(<InfoPanel libraryId="photos" selection={emptySelection} />);
     try {
-        expect(view.host.textContent).toBe("Entry を選ぶと、詳細が出ます。");
+        expect(view.host.textContent).toBe("Choose an item to see its details.");
     } finally {
         await view.dispose();
     }
@@ -57,7 +57,7 @@ it("ボタンは今の開閉を aria-pressed で示し、押すと切り替え�
     const onToggle = vi.fn();
     const view = await render(<InfoPanelToggle open onToggle={onToggle} />);
     try {
-        const button = view.host.querySelector<HTMLButtonElement>("button[aria-label=情報パネル]");
+        const button = view.host.querySelector<HTMLButtonElement>("button[aria-label='Info panel']");
         expect(button?.getAttribute("aria-pressed")).toBe("true");
         await act(async () => button?.click());
         expect(onToggle).toHaveBeenCalledOnce();
@@ -83,10 +83,10 @@ it("ファイルを 1 件選ぶと、名前、種類、サイズ、更新日時�
     const view = await render(<InfoPanel libraryId="photos" selection={selectionOf(photo)} />);
     try {
         expect(view.host.querySelector("h2")?.textContent).toBe("photo.png");
-        expect(rowOf(view.host, "種類")).toBe("画像");
-        expect(rowOf(view.host, "サイズ")).toBe(formatBytes(2048));
-        expect(rowOf(view.host, "更新日時")).toBe(formatModifiedAt("2026-10-05T01:02:03Z"));
-        expect(rowOf(view.host, "場所")).toBe("/trip/photo.png");
+        expect(rowOf(view.host, "Type")).toBe("Image");
+        expect(rowOf(view.host, "Size")).toBe(formatBytes(2048));
+        expect(rowOf(view.host, "Modified")).toBe(formatModifiedAt("2026-10-05T01:02:03Z"));
+        expect(rowOf(view.host, "Place")).toBe("/trip/photo.png");
         expect(mocks.get).not.toHaveBeenCalled();
     } finally {
         await view.dispose();
@@ -97,15 +97,15 @@ it("フォルダと archive には、サイズの項目を出さない", async (
     const folder = testEntry("/trip/day1", { folder: true });
     const archive: Entry = { ...testEntry("/trip/album.zip"), file: { archive: true } };
     for (const [entry, kind] of [
-        [folder, "フォルダ"],
-        [archive, "アーカイブ"],
+        [folder, "Folder"],
+        [archive, "Archive"],
     ] as const) {
         const view = await render(<InfoPanel libraryId="photos" selection={selectionOf(entry)} />);
         try {
             expect(view.host.querySelector("h2")?.textContent).toBe(entry.name);
-            expect(rowOf(view.host, "種類")).toBe(kind);
-            expect(rowOf(view.host, "サイズ")).toBeUndefined();
-            expect(rowOf(view.host, "場所")).toBe(entry.path);
+            expect(rowOf(view.host, "Type")).toBe(kind);
+            expect(rowOf(view.host, "Size")).toBeUndefined();
+            expect(rowOf(view.host, "Place")).toBe(entry.path);
         } finally {
             await view.dispose();
         }
@@ -126,9 +126,9 @@ it("選択が変わると、出す項目も変わる", async () => {
         const next = testEntry("/trip/clip.mp4", { metadata: { size: 5, contentType: "video/mp4" } });
         await show(selectionOf(next));
         expect(host.querySelector("h2")?.textContent).toBe("clip.mp4");
-        expect(rowOf(host, "種類")).toBe("動画");
+        expect(rowOf(host, "Type")).toBe("Video");
         await show(emptySelection);
-        expect(host.textContent).toBe("Entry を選ぶと、詳細が出ます。");
+        expect(host.textContent).toBe("Choose an item to see its details.");
     } finally {
         await act(async () => root.unmount());
         host.remove();
@@ -140,8 +140,8 @@ it("複数を選ぶと、件数と、ステータスバーと同じ合計のサ�
     const entries = [1000, 2000, 3000].map((size, index) => testEntry(`/trip/${index}.png`, { metadata: { size } }));
     const view = await render(<InfoPanel libraryId="photos" selection={selectionOf(...entries)} />);
     try {
-        expect(view.host.querySelector("h2")?.textContent).toBe("3 件を選択中");
-        expect(view.host.textContent).toContain(`合計 ${formatBytes(6000)}`);
+        expect(view.host.querySelector("h2")?.textContent).toBe("3 selected");
+        expect(view.host.textContent).toContain(`Total ${formatBytes(6000)}`);
         expect(view.host.querySelector("dl")).toBeNull();
         expect(mocks.get).not.toHaveBeenCalled();
     } finally {
@@ -352,14 +352,14 @@ describe("メディア情報", () => {
             path: { libraryId: "photos" },
             query: { path: "/trip/a.png" },
         });
-        expect(rowOf(view.host, "寸法")).toBe("32 × 64");
-        expect(rowOf(view.host, "撮影日時")).toBe("2026-04-05 14:32");
-        expect(rowOf(view.host, "カメラ")).toBe("Apple iPhone 17 Pro");
-        expect(rowOf(view.host, "レンズ")).toBe("iPhone 17 Pro back camera 6.86mm f/1.78");
-        expect(rowOf(view.host, "焦点距離")).toBe("6.9 mm");
-        expect(rowOf(view.host, "絞り値")).toBe("f/1.8");
-        expect(rowOf(view.host, "露出時間")).toBe("1/250 秒");
-        expect(rowOf(view.host, "ISO 感度")).toBe("64");
+        expect(rowOf(view.host, "Dimensions")).toBe("32 × 64");
+        expect(rowOf(view.host, "Date taken")).toBe("2026-04-05 14:32");
+        expect(rowOf(view.host, "Camera")).toBe("Apple iPhone 17 Pro");
+        expect(rowOf(view.host, "Lens")).toBe("iPhone 17 Pro back camera 6.86mm f/1.78");
+        expect(rowOf(view.host, "Focal length")).toBe("6.9 mm");
+        expect(rowOf(view.host, "Aperture")).toBe("f/1.8");
+        expect(rowOf(view.host, "Exposure time")).toBe("1/250 s");
+        expect(rowOf(view.host, "ISO")).toBe("64");
         await view.unmount();
     });
 
@@ -367,16 +367,16 @@ describe("メディア情報", () => {
         answer(async () => ({ data: { mediaInfo: imageInfo({ iso: 100 }) }, response: new Response() }));
         const some = await open(selectionOf(image("a.png")));
         await load();
-        expect(rowOf(some.host, "ISO 感度")).toBe("100");
-        expect(rowOf(some.host, "撮影日時")).toBeUndefined();
-        expect(rowOf(some.host, "寸法")).toBe("64 × 32");
+        expect(rowOf(some.host, "ISO")).toBe("100");
+        expect(rowOf(some.host, "Date taken")).toBeUndefined();
+        expect(rowOf(some.host, "Dimensions")).toBe("64 × 32");
         await some.unmount();
 
         answer(async () => ({ data: { mediaInfo: imageInfo({}) }, response: new Response() }));
         const none = await open(selectionOf(image("b.png")));
         await load();
-        expect(rowOf(none.host, "寸法")).toBe("64 × 32");
-        expect(none.host.textContent).not.toContain("撮影情報");
+        expect(rowOf(none.host, "Dimensions")).toBe("64 × 32");
+        expect(none.host.textContent).not.toContain("Shooting info");
         await none.unmount();
     });
 
@@ -402,9 +402,9 @@ describe("メディア情報", () => {
         const clip = testEntry("/trip/clip.mp4", { metadata: { contentType: "video/mp4", size: 1 } });
         const view = await open(selectionOf(clip));
         await load();
-        expect(rowOf(view.host, "長さ")).toBe("0:02");
-        expect(rowOf(view.host, "解像度")).toBe("320 × 240");
-        expect(rowOf(view.host, "コーデック")).toBe("h264 / aac");
+        expect(rowOf(view.host, "Duration")).toBe("0:02");
+        expect(rowOf(view.host, "Resolution")).toBe("320 × 240");
+        expect(rowOf(view.host, "Codec")).toBe("h264 / aac");
         await view.unmount();
     });
 
@@ -412,7 +412,7 @@ describe("メディア情報", () => {
         answer(() => new Promise(() => {}));
         const loading = await open(selectionOf(image("a.png")));
         await load();
-        expect(loading.host.textContent).toContain("読み込み中…");
+        expect(loading.host.textContent).toContain("Loading…");
         await loading.unmount();
 
         answer(async () => {
@@ -420,9 +420,9 @@ describe("メディア情報", () => {
         });
         const failed = await open(selectionOf(image("b.png")));
         await load();
-        expect(failed.host.querySelector("[role=alert]")?.textContent).toBe("メディア情報を読めませんでした。");
+        expect(failed.host.querySelector("[role=alert]")?.textContent).toBe("Could not load the media information.");
         expect(failed.host.querySelector("h2")?.textContent).toBe("b.png");
-        expect(rowOf(failed.host, "場所")).toBe("/trip/b.png");
+        expect(rowOf(failed.host, "Place")).toBe("/trip/b.png");
         await failed.unmount();
     });
 

@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { type KeyboardEvent, type MouseEvent, useState, useSyncExternalStore } from "react";
 import type { ImageWants } from "../images/wants";
 import { isCut, useClipboard } from "../library/clipboard";
@@ -82,7 +83,7 @@ export function Tile({
                 {kind === "video" && (
                     <span
                         role="img"
-                        aria-label="動画"
+                        aria-label={t("tile.video")}
                         className="absolute bottom-1 right-1 rounded bg-black/60 px-1 text-[10px] leading-4 text-white"
                     >
                         ▶

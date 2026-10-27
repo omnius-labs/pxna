@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { Fragment, type KeyboardEvent, type MouseEvent, useEffect, useState, useSyncExternalStore } from "react";
 import type { ImageWants } from "../images/wants";
 import { useImageWants } from "../images/wants";
@@ -142,18 +143,18 @@ export function List({
         return (
             <LoadFailure
                 error={listing.pageError(0)}
-                label="中身を読めませんでした。"
+                label={t("common.contentsNotFound")}
                 onRetry={() => listing.retry(0)}
             />
         );
     if (totalCount === undefined)
-        return <p className="p-4 text-muted-foreground">{recursive ? "検索中…" : "読み込み中…"}</p>;
+        return <p className="p-4 text-muted-foreground">{recursive ? t("common.searching") : t("common.loading")}</p>;
     return (
         <EntryMenu>
             <div className="flex h-full flex-col" data-view="list">
                 {listing.truncated && (
                     <p role="status" className="shrink-0 border-b p-3 text-sm text-muted-foreground">
-                        結果の一部を表示しています。Library を絞るか、場所を下げて探し直してください。
+                        {t("common.partialResults")}
                     </p>
                 )}
                 {!narrow && (
@@ -163,11 +164,11 @@ export function List({
                         className="grid shrink-0 items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground"
                         style={{ gridTemplateColumns: recursive ? SEARCH_COLUMNS : WIDE_COLUMNS }}
                         role="row"
-                        aria-label="列の見出し"
+                        aria-label={t("list.columns")}
                     >
                         {/* biome-ignore lint/a11y/useFocusableInteractive: CSS グリッドによる疑似テーブルのヘッダセル。ネイティブ table への置換は別課題 */}
                         {/* biome-ignore lint/a11y/useSemanticElements: CSS グリッドによる疑似テーブルのヘッダセル。ネイティブ table への置換は別課題 */}
-                        <span role="columnheader" aria-label="サムネイル" />
+                        <span role="columnheader" aria-label={t("list.thumbnail")} />
                         {SORT_KEYS.map((key) => (
                             <Fragment key={key}>
                                 {/* biome-ignore lint/a11y/useFocusableInteractive: CSS グリッドによる疑似テーブルのヘッダセル。ネイティブ table への置換は別課題 */}
@@ -190,7 +191,7 @@ export function List({
                                 {recursive && key === "name" && (
                                     // biome-ignore lint/a11y/useFocusableInteractive: CSS グリッドによる疑似テーブルのヘッダセル。ネイティブ table への置換は別課題
                                     // biome-ignore lint/a11y/useSemanticElements: CSS グリッドによる疑似テーブルのヘッダセル。ネイティブ table への置換は別課題
-                                    <span role="columnheader">場所</span>
+                                    <span role="columnheader">{t("list.place")}</span>
                                 )}
                             </Fragment>
                         ))}
@@ -198,7 +199,7 @@ export function List({
                 )}
                 {totalCount === 0 ? (
                     <p className="p-4 text-muted-foreground">
-                        {searching ? "一致する項目がありません。" : "このフォルダは空です。"}
+                        {searching ? t("common.nothingMatches") : t("common.folderEmpty")}
                     </p>
                 ) : (
                     <div
@@ -248,7 +249,7 @@ export function List({
                         <LoadFailure
                             key={page}
                             error={listing.pageError(page)}
-                            label="この範囲を読めませんでした。"
+                            label={t("common.rangeNotFound")}
                             onRetry={() => listing.retry(page)}
                             compact
                         />

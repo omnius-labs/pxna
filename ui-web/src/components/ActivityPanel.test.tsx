@@ -55,16 +55,16 @@ it("進捗、スキップ、失敗理由、取り消し、畳んだボタンを�
     try {
         await render(true);
         expect(host.textContent).toContain("40 / 400");
-        expect(host.textContent).toContain("スキップ 2 件");
-        expect(host.textContent).toContain("/x: denied");
-        await act(async () => [...host.querySelectorAll("button")].find((b) => b.textContent === "取り消す")!.click());
+        expect(host.textContent).toContain("Skipped 2");
+        expect(host.textContent).toContain("/x: This is not allowed.");
+        await act(async () => [...host.querySelectorAll("button")].find((b) => b.textContent === "Cancel")!.click());
         expect(cancel).toHaveBeenCalledWith("op");
         await render(true, { ...op, status: "cancelled" });
-        expect(host.textContent).toContain("取り消した");
-        expect(host.textContent).not.toContain("取り消す");
+        expect(host.textContent).toContain("Cancelled");
+        expect([...host.querySelectorAll("button")].some((b) => b.textContent === "Cancel")).toBe(false);
         await render(false);
         expect(host.querySelector("section")).toBeNull();
-        expect(host.textContent).toContain("アクティビティ（1）");
+        expect(host.textContent).toContain("Activity (1)");
     } finally {
         await act(async () => root.unmount());
     }
@@ -121,16 +121,16 @@ it("Operationとアップロードの状態・バイト進捗・失敗理由・�
                 </ActivityContext.Provider>,
             ),
         );
-        expect(host.textContent).toContain("ファイルのコピー");
-        expect(host.textContent).toContain("16,777,216 / 34,603,008 バイト");
+        expect(host.textContent).toContain("Copy files");
+        expect(host.textContent).toContain("16,777,216 / 34,603,008 bytes");
         expect(host.textContent).toContain("/f3: denied");
-        for (const label of ["待機中", "送信中", "完了", "失敗", "取り消した", "スキップ"])
+        for (const label of ["Waiting", "Sending", "Done", "Failed", "Cancelled", "Skip"])
             expect(host.textContent).toContain(label);
-        const buttons = host.querySelectorAll('button[aria-label*="アップロードを取り消す"]');
+        const buttons = host.querySelectorAll('button[aria-label*="Cancel the upload"]');
         expect(buttons).toHaveLength(2);
         await act(async () => (buttons[1] as HTMLButtonElement).click());
         expect(cancel).toHaveBeenCalledWith("1");
-        expect(host.querySelectorAll("article p")[0]?.textContent).not.toContain("バイト");
+        expect(host.querySelectorAll("article p")[0]?.textContent).not.toContain("bytes");
         screen.narrow = true;
         await act(async () =>
             root.render(

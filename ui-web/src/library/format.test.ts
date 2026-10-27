@@ -42,10 +42,10 @@ describe("メディア情報の整形", () => {
     });
 
     it("露出時間は、1 秒未満を分数、1 秒以上を秒数にする", () => {
-        expect(formatExposureTime(0.004)).toBe("1/250 秒");
-        expect(formatExposureTime(0.5)).toBe("1/2 秒");
-        expect(formatExposureTime(1)).toBe("1 秒");
-        expect(formatExposureTime(2.5)).toBe("2.5 秒");
+        expect(formatExposureTime(0.004)).toBe("1/250 s");
+        expect(formatExposureTime(0.5)).toBe("1/2 s");
+        expect(formatExposureTime(1)).toBe("1 s");
+        expect(formatExposureTime(2.5)).toBe("2.5 s");
     });
 
     it("絞り値と焦点距離は、不要な小数を付けない", () => {
@@ -57,7 +57,7 @@ describe("メディア情報の整形", () => {
 
     it("撮影日時は、秒を除いて、日付と時刻を空白で区切る", () => {
         expect(formatTakenAt("2026-04-05T14:32:10")).toBe("2026-04-05 14:32");
-        expect(formatTakenAt("不明")).toBe("不明");
+        expect(formatTakenAt("Unknown")).toBe("Unknown");
     });
 
     it("カメラは、モデルがメーカー名の最初の語で始まるときは重ねず、片方だけならそれを返す", () => {

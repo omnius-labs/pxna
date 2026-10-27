@@ -1,5 +1,7 @@
 import { type QueryClient, QueryObserver, type QueryObserverResult, useQueryClient } from "@tanstack/react-query";
+import { t } from "i18next";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { describeError } from "../i18n/errors";
 import { CROSS_LIBRARY_SCOPE } from "../location";
 import { type Entry, type FolderListing, fetchEntryDetails, fetchListingPage, fetchSearchPage } from "./entries";
 import type { SortPreference } from "./preferences";
@@ -103,7 +105,7 @@ export function searchPageKey(criteria: SearchCriteria, sort: SortPreference, pa
 
 export class ListingSnapshotChanged extends Error {
     constructor() {
-        super("一覧が変わったため、読み込みを取り消しました。");
+        super(t("errors.listingCancelled"));
     }
 }
 
@@ -352,7 +354,7 @@ class FolderListingStore implements Listing {
                     } else
                         this.details.set(summary.path, {
                             ...summary,
-                            detailError: result?.error ?? "詳細を取得できませんでした。",
+                            detailError: result?.error ?? t("errors.detailFailed"),
                         });
                 }
                 this.detailPages.add(index);
@@ -370,7 +372,7 @@ class FolderListingStore implements Listing {
                 for (const entry of page.entries)
                     this.details.set(entry.path, {
                         ...entry,
-                        detailError: error instanceof Error ? error.message : "詳細を取得できませんでした。",
+                        detailError: describeError(error, t("errors.detailFailed")),
                     });
                 this.detailPages.add(index);
                 this.emit();

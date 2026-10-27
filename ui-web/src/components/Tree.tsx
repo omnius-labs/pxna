@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
+import { t } from "i18next";
 import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useEntryActions } from "../library/actionContext";
 import { useEntryDrop } from "../library/dnd";
@@ -268,7 +269,7 @@ export function Tree({ location, libraryIds, onSelect }: TreeProps) {
             <div ref={setScrollElement} className="h-full overflow-auto">
                 <div
                     role="tree"
-                    aria-label="フォルダ"
+                    aria-label={t("tree.label")}
                     className="relative"
                     style={{ height: virtualizer.getTotalSize() }}
                     onKeyDown={keyDown}
@@ -290,7 +291,9 @@ export function Tree({ location, libraryIds, onSelect }: TreeProps) {
                                         role="treeitem"
                                         aria-level={node.level}
                                         aria-label={
-                                            parent?.pageStatus(page) === "error" ? "読み込めませんでした" : "読み込み中"
+                                            parent?.pageStatus(page) === "error"
+                                                ? t("tree.loadFailed")
+                                                : t("common.loading")
                                         }
                                         aria-busy={parent?.pageStatus(page) !== "error" || undefined}
                                         tabIndex={-1}
@@ -298,7 +301,7 @@ export function Tree({ location, libraryIds, onSelect }: TreeProps) {
                                     >
                                         {parent?.pageStatus(page) === "error" ? (
                                             <button type="button" onClick={() => parent.retry(page)}>
-                                                読み直す
+                                                {t("common.reload")}
                                             </button>
                                         ) : (
                                             <span className="h-3 w-20 animate-pulse rounded bg-muted" />
@@ -371,7 +374,7 @@ export function Tree({ location, libraryIds, onSelect }: TreeProps) {
                                                     <span
                                                         role="alert"
                                                         className="ml-1 shrink-0 text-destructive"
-                                                        title="中身を読めませんでした"
+                                                        title={t("tree.contentsFailed")}
                                                     >
                                                         !
                                                     </span>

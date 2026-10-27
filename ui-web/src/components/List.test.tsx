@@ -121,7 +121,7 @@ it("renders five wide columns and sorts through their headings", async () => {
         expect(h.host.querySelector("[role=option]")!.children).toHaveLength(5);
         expect((h.host.querySelector("[role=listbox] > div") as HTMLElement).style.height).toBe("140000px");
         const modified = [...h.host.querySelectorAll("button")].find((button) =>
-            button.textContent?.startsWith("更新日時"),
+            button.textContent?.startsWith("Modified"),
         )!;
         await act(async () => modified.click());
         expect(h.onSort).toHaveBeenLastCalledWith({ key: "modified_at", order: "asc" });
@@ -131,11 +131,11 @@ it("renders five wide columns and sorts through their headings", async () => {
                 await Promise.resolve();
             });
             expect(h.host.querySelector('[role="columnheader"][aria-sort="ascending"]')?.textContent).toContain(
-                "更新日時",
+                "Modified",
             );
         });
         const currentModified = [...h.host.querySelectorAll("button")].find((button) =>
-            button.textContent?.startsWith("更新日時"),
+            button.textContent?.startsWith("Modified"),
         )!;
         await act(async () => currentModified.click());
         expect(h.onSort).toHaveBeenLastCalledWith({ key: "modified_at", order: "desc" });
@@ -160,7 +160,7 @@ it("広いリストは名前の次に、並べ替えない場所の列を足す"
     const h = await harness(false, searchSource(true), searchPage(listPage()), placeUnder);
     try {
         expect(h.host.querySelectorAll("[role=columnheader]")).toHaveLength(6);
-        const heading = [...h.host.querySelectorAll("[role=columnheader]")].find((el) => el.textContent === "場所")!;
+        const heading = [...h.host.querySelectorAll("[role=columnheader]")].find((el) => el.textContent === "Place")!;
         expect(heading.querySelector("button")).toBeNull();
         const rows = [...h.host.querySelectorAll("[role=option]")];
         expect(rows[0]!.children[2]!.textContent).toBe(".");
@@ -192,7 +192,7 @@ it("直下の絞り込みでは場所を出さない", async () => {
 it.each([true, false])("リストは配下の最初のページだけ検索中と示す %s", async (recursive) => {
     const h = await harness(false, searchSource(recursive), null, recursive ? placeUnder : undefined);
     try {
-        expect(h.host.textContent).toBe(recursive ? "検索中…" : "読み込み中…");
+        expect(h.host.textContent).toBe(recursive ? "Searching…" : "Loading…");
     } finally {
         await h.dispose();
     }
@@ -205,9 +205,11 @@ it.each([false, true])("リストは検索の 0 件と打ち切りを示す %s",
         placeUnder,
     );
     try {
-        expect(h.host.textContent).toContain("一致する項目がありません。");
+        expect(h.host.textContent).toContain("No matching items.");
         expect(h.host.querySelector('[role="status"]')?.textContent).toBe(
-            truncated ? "結果の一部を表示しています。Library を絞るか、場所を下げて探し直してください。" : undefined,
+            truncated
+                ? "Showing part of the results. Narrow the Libraries or go deeper into a location and search again."
+                : undefined,
         );
     } finally {
         await h.dispose();
@@ -216,7 +218,7 @@ it.each([false, true])("リストは検索の 0 件と打ち切りを示す %s",
 it("リストは結果があるときも打ち切りを示す", async () => {
     const h = await harness(false, searchSource(true), searchPage({ ...listPage(), truncated: true }), placeUnder);
     try {
-        expect(h.host.querySelector('[role="status"]')?.textContent).toContain("Library を絞るか");
+        expect(h.host.querySelector('[role="status"]')?.textContent).toContain("Narrow the Libraries");
     } finally {
         await h.dispose();
     }
@@ -228,7 +230,7 @@ it("リストは 0 件の通常の一覧を空のフォルダと示す", async (
         { entries: [], totalCount: 0, snapshot: "empty", truncated: false },
     );
     try {
-        expect(h.host.textContent).toContain("このフォルダは空です。");
+        expect(h.host.textContent).toContain("This folder is empty.");
     } finally {
         await h.dispose();
     }

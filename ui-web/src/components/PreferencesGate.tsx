@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Outlet } from "@tanstack/react-router";
+import { t } from "i18next";
 import { type ReactNode, useEffect } from "react";
 import { toast } from "sonner";
 
@@ -19,7 +20,7 @@ export function PreferencesGate({ children }: { children: ReactNode }) {
     useEffect(() => {
         if (query.isError && !unauthorized) {
             client.setQueryData(preferencesQuery.queryKey, DEFAULT_PREFERENCES);
-            toast.error("表示設定を読めなかったため、既定値で表示します。");
+            toast.error(t("preferences.loadFailed"));
         }
     }, [query.isError, unauthorized, client]);
 
@@ -47,7 +48,7 @@ function ShellSkeleton() {
     return (
         <div
             role="status"
-            aria-label="読み込み中"
+            aria-label={t("preferences.loading")}
             className="grid h-screen grid-cols-[16rem_1fr] grid-rows-[3rem_1fr_2rem] bg-background"
         >
             <Skeleton className="col-span-2 rounded-none" />

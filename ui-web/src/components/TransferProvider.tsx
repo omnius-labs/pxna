@@ -1,6 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { t } from "i18next";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { describeError } from "../i18n/errors";
 import { useActivity } from "../library/activity";
 import { type TransferSource, useClipboard } from "../library/clipboard";
 import { type CollisionChoice, findCollisions, resolveConflict, type TransferDestination } from "../library/collision";
@@ -71,13 +73,13 @@ export function TransferProvider({ children }: { children: ReactNode }) {
                 staleTime: 0,
             });
             signal.throwIfAborted();
-            if (!library || !canMutate(library, folder)) throw new Error("このフォルダへは送れません。");
+            if (!library || !canMutate(library, folder)) throw new Error(t("errors.cannotSendHere"));
             if (
                 source.mode === "cut" &&
                 (libraries.find((item) => item.id === source.libraryId)?.readonly ||
                     source.entries.some((entry) => entry.readonly))
             )
-                throw new Error("読み取り専用の項目は切り取りできません。");
+                throw new Error(t("transfer.readOnly"));
             if (source.libraryId === destination.libraryId) {
                 for (const entry of source.entries) {
                     const target = childPath(destination.path, entry.path.split("/").at(-1)!);
@@ -86,7 +88,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
                         (entry.folder &&
                             (destination.path === entry.path || destination.path.startsWith(`${entry.path}/`)))
                     )
-                        throw new Error("元と同じ場所への移動や、フォルダ自身の中への貼り付けはできません。");
+                        throw new Error(t("transfer.invalidTarget"));
                 }
             }
             const incoming = source.entries.map((entry) => entry.path.split("/").at(-1)!);
@@ -110,21 +112,19 @@ export function TransferProvider({ children }: { children: ReactNode }) {
             if (result.entries.length || result.skippedCount || (!result.operations.length && !result.failures.length))
                 toast.success(
                     result.skippedCount
-                        ? `${result.skippedCount} 件をスキップしました。`
+                        ? t("transfer.skipped", { count: result.skippedCount })
                         : source.mode === "cut"
-                          ? "移動しました。"
-                          : "コピーしました。",
+                          ? t("transfer.moved")
+                          : t("transfer.copied"),
                 );
             if (result.failures.length)
-                toast.error("送れない項目があります。", {
-                    description: result.failures
-                        .map((error) => (error instanceof Error ? error.message : String(error)))
-                        .join("\n"),
+                toast.error(t("transfer.someRejected"), {
+                    description: result.failures.map((error) => describeError(error, String(error))).join("\n"),
                 });
         } catch (error) {
             if (!signal.aborted)
-                toast.error("項目を送れませんでした。", {
-                    description: error instanceof Error ? error.message : undefined,
+                toast.error(t("transfer.failed"), {
+                    description: error instanceof Error ? describeError(error, "") : undefined,
                 });
         } finally {
             controller.abort();
@@ -148,7 +148,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
                 staleTime: 0,
             });
             signal.throwIfAborted();
-            if (!library || !canMutate(library, folder)) throw new Error("このフォルダへは送れません。");
+            if (!library || !canMutate(library, folder)) throw new Error(t("errors.cannotSendHere"));
             const roots = [...new Set(inputs.map((input) => input.path.split("/")[0]!))];
             const policy = await resolveConflict(roots, destination, confirm, signal);
             if (policy === "cancel" || signal.aborted || !active.current) return;
@@ -156,8 +156,8 @@ export function TransferProvider({ children }: { children: ReactNode }) {
             activity?.show();
         } catch (error) {
             if (!signal.aborted)
-                toast.error("アップロードを始められませんでした。", {
-                    description: error instanceof Error ? error.message : undefined,
+                toast.error(t("transfer.uploadFailed"), {
+                    description: error instanceof Error ? describeError(error, "") : undefined,
                 });
         } finally {
             controller.abort();

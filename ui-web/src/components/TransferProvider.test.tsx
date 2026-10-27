@@ -175,30 +175,25 @@ it("重複した貼り付けを受け付けず、古い応答で新しい切り�
         await h.dispose();
     }
 });
-it.each(["置き換える", "両方残す", "スキップ", "中止"])(
-    "衝突の %s を1回選び、コピーの内容を保持する",
-    async (choice) => {
-        const h = await harness();
-        try {
-            fetchPage.mockResolvedValue({ entries: [{ name: "a.txt" }], totalCount: 1, snapshot: "one" });
-            await h.capture("copy");
-            const { promise } = await h.begin();
-            await flush(() => expect(document.querySelector("[role=alertdialog]")).not.toBeNull());
-            await h.choose(choice);
-            await act(async () => promise);
-            if (choice === "中止") expect(post).not.toHaveBeenCalled();
-            else
-                expect(post.mock.calls[0]![1].body.conflict).toBe(
-                    ({ 置き換える: "overwrite", 両方残す: "rename", スキップ: "skip" } as Record<string, string>)[
-                        choice
-                    ],
-                );
-            expect(h.state.value?.sources.flatMap((source) => source.entries).length).toBe(2);
-        } finally {
-            await h.dispose();
-        }
-    },
-);
+it.each(["Replace", "Keep both", "Skip", "Abort"])("衝突の %s を1回選び、コピーの内容を保持する", async (choice) => {
+    const h = await harness();
+    try {
+        fetchPage.mockResolvedValue({ entries: [{ name: "a.txt" }], totalCount: 1, snapshot: "one" });
+        await h.capture("copy");
+        const { promise } = await h.begin();
+        await flush(() => expect(document.querySelector("[role=alertdialog]")).not.toBeNull());
+        await h.choose(choice);
+        await act(async () => promise);
+        if (choice === "Abort") expect(post).not.toHaveBeenCalled();
+        else
+            expect(post.mock.calls[0]![1].body.conflict).toBe(
+                ({ Replace: "overwrite", "Keep both": "rename", Skip: "skip" } as Record<string, string>)[choice],
+            );
+        expect(h.state.value?.sources.flatMap((source) => source.entries).length).toBe(2);
+    } finally {
+        await h.dispose();
+    }
+});
 it("同じ場所へのコピーは別名と中止だけを出し、move と自己配下は送らない", async () => {
     const h = await harness();
     try {
@@ -206,9 +201,9 @@ it("同じ場所へのコピーは別名と中止だけを出し、move と自�
         const { promise } = await h.begin({ libraryId: "dest", path: "/" });
         await flush(() => expect(document.querySelector("[role=alertdialog]")).not.toBeNull());
         expect([...document.querySelectorAll("[role=alertdialog] button")].map((button) => button.textContent)).toEqual(
-            ["中止", "両方残す"],
+            ["Abort", "Keep both"],
         );
-        await h.choose("両方残す");
+        await h.choose("Keep both");
         await act(async () => promise);
         expect(post.mock.calls[0]![1].body.conflict).toBe("rename");
         post.mockClear();

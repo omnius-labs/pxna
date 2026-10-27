@@ -1,3 +1,4 @@
+import { t } from "i18next";
 import { rowHeight } from "./grid";
 
 /// 日付の見出しの行の高さ（CSS ピクセル）。
@@ -39,20 +40,25 @@ export function monthOf(date: string): string {
     return date.slice(0, 7);
 }
 
-const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
-
 /// `2025-05-03` を「2025年5月3日（土）」の形にする。曜日は暦から求め、タイムゾーンに左右されない。
 export function formatDay(day: string): string {
     const [year, month, date] = day.split("-").map(Number);
     if (year === undefined || month === undefined || date === undefined) return day;
-    const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, date)).getUTCDay()];
-    return `${year}年${month}月${date}日（${weekday}）`;
+    const weekday = (t("format.weekdays", { returnObjects: true }) as string[])[
+        new Date(Date.UTC(year, month - 1, date)).getUTCDay()
+    ];
+    return t("format.day", { year, month: monthName(month), date, weekday });
+}
+
+/// 月の名前。日本語は数字、英語は短い英語名である。
+export function monthName(month: number): string {
+    return (t("format.months", { returnObjects: true }) as string[])[month - 1] ?? String(month);
 }
 
 /// `2025-05` を「2025年5月」の形にする。
 export function formatMonth(month: string): string {
     const [year, number] = month.split("-").map(Number);
-    return year === undefined || number === undefined ? month : `${year}年${number}月`;
+    return year === undefined || number === undefined ? month : t("format.month", { year, month: monthName(number) });
 }
 
 /// 新しい順に並んだ Entry を、日ごとの見出しの行と、`columns` 個ずつのタイルの行にする。

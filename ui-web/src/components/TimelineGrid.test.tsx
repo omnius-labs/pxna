@@ -79,7 +79,7 @@ async function harness(store: TimelineStore, onSelectionChange = vi.fn<(selectio
                     onProgress={() => {}}
                     onVisibleMonth={() => {}}
                     onOpen={() => {}}
-                    emptyMessage="画像と動画がありません。"
+                    emptyMessage="There are no images or videos."
                 />
             </QueryClientProvider>,
         ),
@@ -110,15 +110,15 @@ it("puts a heading before each day and lists the tiles of a day from newest to o
     const h = await harness(store);
     try {
         expect([...h.host.querySelectorAll("h2")].map((heading) => heading.textContent)).toEqual([
-            "2025年5月3日（土）",
-            "2025年4月30日（水）",
+            "May 3, 2025 (Sat)",
+            "Apr 30, 2025 (Wed)",
         ]);
         expect([...h.host.querySelectorAll("[role=option]")].map((tile) => tile.getAttribute("title"))).toEqual([
             "a.png",
             "b.png",
             "c.png",
         ]);
-        expect(h.host.querySelector("[role=listbox]")?.getAttribute("aria-label")).toBe("タイムライン");
+        expect(h.host.querySelector("[role=listbox]")?.getAttribute("aria-label")).toBe("Timeline");
     } finally {
         await h.dispose();
     }
@@ -169,7 +169,7 @@ it("shows the empty message when nothing is loaded", async () => {
     await store.ensureInitial();
     const h = await harness(store);
     try {
-        expect(h.host.textContent).toContain("画像と動画がありません。");
+        expect(h.host.textContent).toContain("There are no images or videos.");
         expect(h.host.querySelector("[role=listbox]")).toBeNull();
     } finally {
         await h.dispose();
