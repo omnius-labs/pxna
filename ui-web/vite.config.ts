@@ -19,11 +19,14 @@ export default defineConfig({
         proxy: {
             // Host を書き換えない。daemon の Origin の検証は Origin を Host と比べるため、
             // Host を daemon のアドレスへ書き換えると、cookie を持つ変更系の要求が 403 になる。
-            "/api": { target: daemonOrigin, changeOrigin: false },
+            // `ws` は image channel の WebSocket の upgrade も同じ先へ渡す。
+            "/api": { target: daemonOrigin, changeOrigin: false, ws: true },
         },
     },
     test: {
         environment: "node",
         include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+        // どのテストも、実際の WebSocket と IndexedDB を使わないよう、画像の窓口を偽物にしておく。
+        setupFiles: ["./src/testing/setup.ts"],
     },
 });

@@ -15,17 +15,19 @@ import {
 import { type PointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { clientTimings } from "../api/clientTimings";
+import { imageSource } from "../images/source";
+import type { ImageSpec } from "../images/spec";
+import { useImageWants } from "../images/wants";
 import { type Entry, entryKind } from "../library/entries";
 import { canMutate } from "../library/entryActions";
 import { type Listing, type ListingSource, useListing } from "../library/listing";
-import type { SortPreference } from "../library/preferences";
+import type { DisplaySet, SortPreference } from "../library/preferences";
 import { putRating, RATING_LABELS, type Rating, ratingQuery } from "../library/ratingTags";
 import { keepRange, reachablePages, useTimelineStore } from "../library/timeline";
 import { type BrowseLocation, CROSS_LIBRARY_SCOPE, entryAddress, relativePath, viewKey } from "../location";
-import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
-import { DisplayImages, loadDisplayImage, revokeDisplayImage } from "../viewer/displayImages";
-import { FILMSTRIP_ITEM_WIDTH } from "../viewer/filmstrip";
-import { displayImageUrl, fileContentUrl, originalImageUrl } from "../viewer/urls";
+import { DisplayImages } from "../viewer/displayImages";
+import { filmstripItemSide } from "../viewer/filmstrip";
+import { displayImageSpec, fileContentUrl, originalImageUrl } from "../viewer/urls";
 import { useFullscreen } from "../viewer/useFullscreen";
 import { type SlideshowStep, useSlideshow } from "../viewer/useSlideshow";
 import {
@@ -51,6 +53,7 @@ import { Modal } from "./Modal";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Toaster } from "./ui/sonner";
 import { VideoPlayer } from "./VideoPlayer";
+import { ViewerSettings, type ViewerSettingsProps } from "./ViewerSettings";
 
 interface ViewerProps {
     /// ビューアの範囲と、前後へ移る基準のフォルダと、開いている Entry。検索では範囲が `CROSS_LIBRARY_SCOPE` で、基準は `/` である。
@@ -61,6 +64,10 @@ interface ViewerProps {
     sort: SortPreference;
     /// 元の画像へ差し替える時機の表示設定。今の画面の幅の区分の組の値を渡す。
     originalImage: OriginalImageMode;
+    /// The size level (1 to 5) of the filmstrip in the display set for the current screen width.
+    filmstripSize: number;
+    /// Writes a change of the display set for the current screen width. The viewer settings panel uses it.
+    onDisplaySetChange: (patch: Partial<DisplaySet>) => void;
     /// 狭い画面か。狭い画面にはフィルムストリップとダウンロードと削除のボタンを出さない。
     narrow: boolean;
     /// 開いている Library が読み取り専用か。読み取り専用なら削除できない。
@@ -159,6 +166,8 @@ function ViewerView({
     scope,
     onPages: changeWantedPages,
     originalImage,
+    filmstripSize,
+    onDisplaySetChange,
     narrow,
     libraryReadonly,
     onChange,
@@ -225,8 +234,10 @@ function ViewerView({
         };
     }, [identity, listing, name, location.path]);
 
-    // フィルムストリップのサムネイルのキュー。一覧のタイルサイズによらず、1 つの位置の幅で切り抜く。
-    const { queue: filmstripQueue } = useThumbnailQueue(location.libraryId, 1, false, "crop", FILMSTRIP_ITEM_WIDTH);
+    // フィルムストリップのサムネイルの「欲しい」。一覧のタイルサイズによらず、1 つの位置の幅で切り抜く。
+    // The side follows the size level, so changing the level wants the new size with new wants.
+    const filmstripSide = filmstripItemSide(filmstripSize);
+    const { wants: filmstripWants } = useImageWants(location.libraryId, 1, false, "crop", filmstripSide);
 
     // 画面の大きさは、開いたときの値で決める。
     const [screen] = useState(() => ({
@@ -245,14 +256,14 @@ function ViewerView({
         [screen, originalImage],
     );
 
-    /// 表示中の画像と、読み込み済みの隣の画像の要求。隣は先に要求し、移ったときの待ちを減らす。隣が動画なら要求しない。
-    /// どちらでもなくなった画像の要求は中止し、サーバで待っている生成を始めさせない。
-    const [displayImages] = useState(() => new DisplayImages(loadDisplayImage, revokeDisplayImage));
+    /// 表示中の画像と、読み込み済みの隣の画像の「欲しい」。隣は先に欲しいと言い、移ったときの待ちを減らす。隣が動画なら言わない。
+    /// どちらでもなくなった画像は欲しい一覧から外し、daemon がまだ作り始めていなければ作らせない。
+    const [displayImages] = useState(() => new DisplayImages(imageSource()));
     useEffect(() => () => displayImages.dispose(), [displayImages]);
     useEffect(() => {
-        const kept: string[] = [];
+        const kept: ImageSpec[] = [];
         if (current !== undefined && entryKind(current) === "image") {
-            kept.push(displayImageUrl(location.libraryId, current.path, sizeOf(current)));
+            kept.push(displayImageSpec(location.libraryId, current.path, sizeOf(current)));
         }
         for (const neighborEntry of [previous, next]) {
             if (
@@ -262,9 +273,9 @@ function ViewerView({
             ) {
                 continue;
             }
-            const url = displayImageUrl(location.libraryId, neighborEntry.entry.path, sizeOf(neighborEntry.entry));
-            displayImages.prefetch(url);
-            kept.push(url);
+            const spec = displayImageSpec(location.libraryId, neighborEntry.entry.path, sizeOf(neighborEntry.entry));
+            displayImages.prefetch(spec);
+            kept.push(spec);
         }
         displayImages.retain(kept);
     }, [current, previous, next, location.libraryId, sizeOf, displayImages]);
@@ -349,7 +360,13 @@ function ViewerView({
     const [menuOpen, setMenuOpen] = useState(false);
     const menuVisible = menuOpen && narrow && showsSlideshow;
     // 外枠の中の確認のダイアログやメニューが開いている間は、ビューアのキー操作を行わない。それぞれの Esc と矢印キーに任せる。
-    const nestedOpen = menuVisible || deletion !== undefined;
+    // The viewer settings panel is a popover drawn inside the outer frame. It is closed whenever the gear is not shown.
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const isVideo = current !== undefined && entryKind(current) === "video";
+    const settingsShowsFilmstrip = !narrow && (isImage || isVideo);
+    const settingsShowsOriginalImage = isImage;
+    const settingsVisible = settingsOpen && (settingsShowsFilmstrip || settingsShowsOriginalImage);
+    const nestedOpen = menuVisible || settingsVisible || deletion !== undefined;
     /// 閉じる操作。全画面の間は全画面だけを終え、ビューアを開いたままにする。
     const requestClose = () => {
         if (nestedOpen) return;
@@ -501,6 +518,14 @@ function ViewerView({
                     onDelete={() => void requestDeletion()}
                     menuOpen={menuVisible}
                     onMenuOpenChange={setMenuOpen}
+                    settings={{
+                        filmstrip: settingsShowsFilmstrip,
+                        originalImage: settingsShowsOriginalImage,
+                        set: { filmstripSize, originalImage },
+                        onChange: onDisplaySetChange,
+                        open: settingsVisible,
+                        onOpenChange: setSettingsOpen,
+                    }}
                     container={outer}
                     onClose={() => onChange(undefined)}
                 />
@@ -591,7 +616,8 @@ function ViewerView({
                 <Filmstrip
                     listing={listing}
                     index={stripIndex}
-                    queue={filmstripQueue}
+                    side={filmstripSide}
+                    wants={filmstripWants}
                     onSelect={moveTo}
                     onPages={changeWantedPages}
                 />
@@ -700,6 +726,8 @@ interface HeaderActionsProps {
     onDelete: () => void;
     menuOpen: boolean;
     onMenuOpenChange: (open: boolean) => void;
+    /// The viewer settings panel, without the container. The gear is hidden when neither setting applies.
+    settings: Omit<ViewerSettingsProps, "container">;
     /// メニューを描く先。モーダルの外枠の要素。
     container: HTMLElement | null;
     onClose: () => void;
@@ -717,6 +745,7 @@ function HeaderActions({
     onDelete,
     menuOpen,
     onMenuOpenChange,
+    settings,
     container,
     onClose,
 }: HeaderActionsProps) {
@@ -742,6 +771,7 @@ function HeaderActions({
                     <ThumbsUp className="size-4" />
                 </button>
             )}
+            {narrow && <ViewerSettings {...settings} container={container} />}
             {image && narrow && (
                 <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange}>
                     <DropdownMenuTrigger asChild>
@@ -804,6 +834,7 @@ function HeaderActions({
                     </button>
                 </>
             )}
+            {!narrow && <ViewerSettings {...settings} container={container} />}
             <button
                 type="button"
                 aria-label="閉じる"
@@ -844,12 +875,12 @@ function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: View
     const settle = useRef(onSettled);
     settle.current = onSettled;
 
-    // 表示用画像を interactive で取得する。先読みを読み終えていれば、それを使う。
-    const displayUrl = displayImageUrl(libraryId, entry.path, size);
+    // 表示用画像を interactive で欲しいと言う。先読みを読み終えていれば、それを使う。
+    const { width, height } = size;
     const [displaySource, setDisplaySource] = useState<string | undefined>(undefined);
     useEffect(() => {
         let active = true;
-        images.show(displayUrl).then(
+        images.show(displayImageSpec(libraryId, entry.path, { width, height })).then(
             (source) => {
                 if (active) setDisplaySource(source);
             },
@@ -863,7 +894,7 @@ function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: View
         return () => {
             active = false;
         };
-    }, [images, displayUrl]);
+    }, [images, libraryId, entry.path, width, height]);
 
     useEffect(() => {
         if (!stage) {
@@ -951,11 +982,17 @@ function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: View
                         draggable={false}
                         className="absolute inset-0 h-full w-full object-contain"
                         onLoad={(event) => {
-                            clientTimings.recordResource("display_image", displayUrl, libraryId, entry.path, shownFrom);
+                            // 画像は WebSocket で届くので、Resource Timing の内訳はない。欲しいと言ってから出るまでを測る。
+                            const durationMs = Math.round((performance.now() - shownFrom) * 10) / 10;
+                            clientTimings.record({
+                                ...entryAddress(libraryId, entry.path),
+                                operation: "display_image",
+                                durationMs,
+                            });
                             clientTimings.record({
                                 ...entryAddress(libraryId, entry.path),
                                 operation: "viewer_display",
-                                durationMs: Math.round((performance.now() - shownFrom) * 10) / 10,
+                                durationMs,
                             });
                             setNatural({
                                 width: event.currentTarget.naturalWidth,

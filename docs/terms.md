@@ -21,6 +21,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | --- | --- | --- | --- | --- | --- |
 | ConflictPolicy | all | `ConflictPolicy` | `conflict` | How to handle an existing entry at the destination (fail, skip, overwrite, rename) | - |
 | [Entry](#t-entry) | all | `FsEntry` | `FileSystemEntry` | Collective name for a file, folder, or symbolic link in a Library | file |
+| Image channel | all | `ImageChannel` | `/api/v1/image-channel` | The WebSocket, one per browser tab, through which a client wants thumbnails, sprite sheets, and display images and receives them | thumbnail socket |
 | [Library](#t-library) | all | `LibraryConfig` | `libraryId` | One directory the daemon exposes | root |
 | [Library-relative path](#t-library-relative-path) | all | `LibraryRelativePath` | `RelativePath` | A path with which a client points at a location, treating the Library root as `/` | - |
 | Operation | all | `Operation` | `operation` | The progress state of a mutating operation whose duration is proportional to the content size | job |
@@ -72,14 +73,20 @@ Design rationale, implementation status, defects, and external behavior are each
 | Slideshow | client | - | - | A display, inside the viewer, that automatically advances the open Entry at a fixed interval | autoplay |
 | Rate mode | client | - | the viewer's "Rate mode" button, `r` | A state inside the viewer where ← records bad and moves to the next Entry, → records good and moves to the next Entry, ↓ records unrated and moves to the next Entry, and ↑ undoes the last of these | triage mode |
 | [Viewer](./terms/client.md#t-viewer) | client | `Viewer` | `view` | The web screen that displays and plays images and videos in full screen. It has a filmstrip, a slideshow, and full-screen display | image display mode, slideshow mode |
-| Filmstrip | client | - | - | A display, placed at the bottom edge of the image viewer on a wide screen, that lays out the Entries of the current listing horizontally in the same order as the listing | - |
+| Filmstrip | client | - | `filmstripSize` | A display, placed at the bottom edge of the image viewer on a wide screen, that lays out the Entries of the current listing horizontally in the same order as the listing. Its item side is chosen from 5 levels | - |
 | Folder view | client | - | `/browse/{libraryId}/…`, "Folder" | The web screen that lists the direct children of the folder selected in the tree | dir mode |
 | Display preferences | client | `Preferences` | `/preferences` | The set of values for the web client's appearance and behavior that the owner chooses and saves on the server | settings |
+| Image channel client | client | `ImageChannelClient` | - | The web client's one holder per tab of the image wants of every part, which merges them into items, keeps received images in IndexedDB, and talks to the image channel | thumbnail queue |
 | Size steps | thumbnail | - | `[thumbnail] sizes`, `display_sizes` | The fixed set of values to which the server rounds up the width and height of thumbnails and display images | - |
-| Sprite sheet | thumbnail | `ThumbnailVariant::Sprite` | `variant=sprite`, `Pxna-Frame-Count` | A single image that lays out a video's frame sequence in one row | - |
+| Companion | thumbnail | - | - | A thumbnail that one generation makes from the same decode as the requested image and stores as an ordinary cache entry: the smallest three size steps in both shapes, and, for a thumbnail or a sprite sheet request, the other shape at the requested size | - |
+| Sprite sheet | thumbnail | `ThumbnailVariant::Sprite` | `variant=sprite`, `frameCount` | A single image that lays out a video's frame sequence in one row | - |
 | Representative thumbnail | thumbnail | - | - | The thumbnail of the first image or video found by looking at the direct children of a folder or archive in natural order | - |
 | Display image | thumbnail | `ThumbnailVariant::Display` | `variant=display` | The image the viewer shows first, which the server shrinks for the screen while preserving the aspect ratio | preview image |
 | Frame sequence | thumbnail | - | - | Multiple frames taken from positions decided as ratios of a video's duration | - |
+| Source job | thumbnail | `SourceJob` | - | The one generation of a source that decodes it once and answers every item for it, from every connection, that joined before it started | flight |
+| Request class | image-channel | `RequestClass` | `class`: `interactive`, `visible`, `prefetch` | How urgently an item is wanted: shown now in the viewer, on screen, or expected soon | priority |
+| Item | image-channel | `WantedItem` | `want`, `id` | One image a connection wants: a Library, a Library-relative path, the kind, the width and height, and the shape, with a request class, an order within it, and the `ETag` of a held image if any | request |
+| Wanted set | image-channel | `WantedSet` | - | The items one connection of the image channel wants now, held by the server until each is answered or dropped | queue |
 | Direct playback | video | - | - | Playing a video by fetching the original video file from the content API | - |
 | Transcoded playback | video | - | - | Playing a video that the server serves while converting it to HLS | transcode playback |
 | Transcode session | video | - | - | The server-side state that holds the ffmpeg process and segments for the transcoded playback of one video | - |
@@ -157,7 +164,7 @@ If a folder listing is answered from the name index, external changes to that fo
 **Boundary**
 A thumbnail is the image shown on a tile in a listing. It is made from the thumbnail size steps and fits in the thumbnail capacity budget.
 A display image is the image shown in the viewer. It is shrunk to the display size steps while preserving the aspect ratio and fits in the display capacity budget.
-Both come from the same thumbnail API and conversion path, and the request specifies the kind.
+Both come through the image channel and the same conversion path, and the item specifies the kind.
 
 **What goes wrong if they are confused**
 If a display image is used for a tile, the transfer volume of a listing grows by an order of magnitude.
@@ -167,13 +174,25 @@ If a thumbnail is requested with the display budget, flipping through photos in 
 #### Display image and Original image
 
 **Boundary**
-A display image is an image the server shrinks and compresses for the screen, and the thumbnail API returns it.
+A display image is an image the server shrinks and compresses for the screen, and the image channel carries it.
 An original image is the image file itself in a Library, and the content API returns it.
 The viewer shows the display image first and swaps in the original image when conditions allow.
 
 **What goes wrong if they are confused**
 If a display image is treated as the original image, detail lost to shrinking and compression does not come back when zoomed in, and downloads are also the shrunk image.
 If original images are prefetched in place of display images, every flip of a photo adds a transfer of several MB for each neighboring image.
+
+<a id="t-item-vs-source-job"></a>
+#### Item and Source job
+
+**Boundary**
+An item is what one connection wants, and it ends when it is answered or dropped.
+A source job is one generation of a source, which may answer items of several connections and companions nobody wanted yet.
+Dropping an item removes only the item; the job stops only if it has not started and no item is left.
+
+**What goes wrong if they are confused**
+If dropping an item stopped its job, scrolling one tab would stop a generation that another tab or the viewer is waiting for.
+If an item were kept until its job ends, a connection would hold every item of a long video job and could not tell the server that it no longer needs them.
 
 <a id="t-tile-size-vs-size-step"></a>
 #### Tile size and Size steps

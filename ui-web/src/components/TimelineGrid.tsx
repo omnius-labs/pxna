@@ -1,6 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-
+import { useImageWants } from "../images/wants";
 import { type Entry, isThumbnailable } from "../library/entries";
 import { gridLayout, TILE_GAP } from "../library/grid";
 import type { DisplaySet } from "../library/preferences";
@@ -21,7 +21,6 @@ import {
 } from "../library/timelineLayout";
 import { type SelectionProgress, useEntryInteraction } from "../library/useEntryInteraction";
 import { tilePriority } from "../thumbnails/range";
-import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { EntryMenu } from "./EntryMenu";
 import { LoadFailure } from "./LoadFailure";
 import { Tile } from "./Tile";
@@ -163,7 +162,7 @@ export function TimelineGrid({
     }, [firstRow, lastRow, rows, version, store]);
 
     // サムネイルの要求のキュー。見えている行と、その前後の行のタイルを、画面の中央に近い順に要求する。
-    const { queue, size } = useThumbnailQueue(libraryId, tileSize, narrow, shape);
+    const { wants, size } = useImageWants(libraryId, tileSize, narrow, shape);
     // biome-ignore lint/correctness/useExhaustiveDependencies: version は読み込み済みの Entry が増えたときに要求を決め直させる gate である
     useEffect(() => {
         if (firstRow === undefined || lastRow === undefined) return;
@@ -171,16 +170,21 @@ export function TimelineGrid({
         const last = Math.min(rows.length - 1, lastRow + THUMBNAIL_MARGIN_ROWS);
         const center = (firstRow + lastRow) / 2;
         const wanted = new Map<string, number>();
+        const prefetch = new Set<string>();
         for (let rowIndex = first; rowIndex <= last; rowIndex += 1) {
             const row = rows[rowIndex];
             if (row?.type !== "tiles") continue;
             for (let column = 0; column < row.count; column += 1) {
                 const entry = items[row.first + column]?.entry;
-                if (entry && isThumbnailable(entry)) wanted.set(entry.path, tilePriority(rowIndex, column, center));
+                if (entry && isThumbnailable(entry)) {
+                    wanted.set(entry.path, tilePriority(rowIndex, column, center));
+                    // 画面に出ていない行は先読みで、出ている行より後にする。
+                    if (rowIndex < firstRow || rowIndex > lastRow) prefetch.add(entry.path);
+                }
             }
         }
-        queue.setWanted(wanted);
-    }, [firstRow, lastRow, rows, items, version, queue]);
+        wants.setWanted(wanted, new Set(), prefetch);
+    }, [firstRow, lastRow, rows, items, version, wants]);
 
     const focusTile = (index: number) => {
         const position = index - store.loadedFrom;
@@ -285,7 +289,7 @@ export function TimelineGrid({
                                                     entry={entry}
                                                     index={index}
                                                     selected={selection.items.has(entry.path)}
-                                                    queue={queue}
+                                                    wants={wants}
                                                     libraryId={libraryId}
                                                     thumbnailSize={size}
                                                     tileSide={tileSide}

@@ -14,7 +14,18 @@ function isAuthQuery(queryKey: readonly unknown[]): boolean {
     return queryKey[0] === "auth";
 }
 
-/// 表示中にセッションが失効して 401 を受けたら、手元のキャッシュを捨ててログインへ移し、ログインの後に今の画面へ戻す。
+/// 表示中にセッションが終わったら、手元のキャッシュを捨ててログインへ移し、ログインの後に今の画面へ戻す。
+/// API の 401 と、image channel が閉じられたとき（close code 4401）の両方で使う。ログインとセットアップの画面では何もしない。
+export function leaveForLogin(queryClient: QueryClient, nav: UnauthorizedNavigator): void {
+    if (nav.currentPathname() === "/login" || nav.currentPathname() === "/setup") {
+        return;
+    }
+    const redirect = nav.currentHref();
+    queryClient.clear();
+    nav.toLogin(redirect);
+}
+
+/// 表示中にセッションが失効して 401 を受けたら、ログインへ移す（`leaveForLogin`）。
 /// 401 と期限切れ（504）は繰り返しても結果が変わらないので、自動では再試行しない。
 export function createAppQueryClient(navigator: () => UnauthorizedNavigator): QueryClient {
     const queryClient: QueryClient = new QueryClient({
@@ -23,13 +34,7 @@ export function createAppQueryClient(navigator: () => UnauthorizedNavigator): Qu
                 if (!(error instanceof ApiError && error.unauthorized) || isAuthQuery(query.queryKey)) {
                     return;
                 }
-                const nav = navigator();
-                if (nav.currentPathname() === "/login" || nav.currentPathname() === "/setup") {
-                    return;
-                }
-                const redirect = nav.currentHref();
-                queryClient.clear();
-                nav.toLogin(redirect);
+                leaveForLogin(queryClient, navigator());
             },
         }),
         defaultOptions: {

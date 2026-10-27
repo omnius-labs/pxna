@@ -136,40 +136,110 @@ impl ThumbnailCache {
         }))
     }
 
+    /// Whether the index has the key. It does not read the file or update the recency, so a caller can skip work that is already cached.
+    pub async fn contains(&self, key: &ThumbnailKey) -> Result<bool> {
+        let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM entries WHERE key = ?1")
+            .bind(key.hex())
+            .fetch_optional(&self.db)
+            .instrument(perf_span!("thumbnail_cache_contains"))
+            .await?;
+        Ok(row.is_some())
+    }
+
+    /// Removes the index row of a key, so that a test can make a cached entry missing.
+    #[cfg(test)]
+    pub(super) async fn forget(&self, key: &ThumbnailKey) -> Result<()> {
+        sqlx::query("DELETE FROM entries WHERE key = ?1").bind(key.hex()).execute(&self.db).await?;
+        Ok(())
+    }
+
     /// 枠の容量を 1 件で超える画像は、キャッシュせずに `false` を返す。
+    /// The generator stores in batches with `put_many`, so only tests use this single-entry form.
+    #[cfg(test)]
     pub async fn put(&self, key: &ThumbnailKey, bucket: CacheBucket, image: &CachedImage) -> Result<bool> {
-        let size = image.bytes.len() as u64;
-        if size > self.options.capacity(bucket) {
-            return Ok(false);
-        }
+        Ok(self.put_many(&[(key, bucket, image)]).await?[0])
+    }
+
+    /// Stores several entries with one lock, one recency flush, one transaction, and one eviction per bucket.
+    ///
+    /// `last_accessed` follows the input order, so the last entries are the newest and a small bucket evicts the first ones.
+    /// The result has one flag per input entry: `false` for an entry that alone exceeds its bucket, which is skipped.
+    /// An I/O or SQL error fails the call; files already staged are removed, and files already published are reconciled on the next open.
+    pub async fn put_many(&self, entries: &[(&ThumbnailKey, CacheBucket, &CachedImage)]) -> Result<Vec<bool>> {
+        let storable: Vec<bool> = entries
+            .iter()
+            .map(|(_, bucket, image)| image.bytes.len() as u64 <= self.options.capacity(*bucket))
+            .collect();
 
         // 実ファイルは lock の外で staging に書き、公開と索引の更新だけを lock の中で行う。
-        let staged = self.root.join(STAGING_DIR_NAME).join(uuid::Uuid::new_v4().to_string());
-        tokio::fs::write(&staged, &image.bytes).await?;
+        let mut staged = Vec::new();
+        for ((_, _, image), storable) in entries.iter().zip(&storable) {
+            if !storable {
+                continue;
+            }
+            let path = self.root.join(STAGING_DIR_NAME).join(uuid::Uuid::new_v4().to_string());
+            staged.push(path.clone());
+            if let Err(error) = tokio::fs::write(&path, &image.bytes).await {
+                Self::remove_staged(&staged).await;
+                return Err(error.into());
+            }
+        }
+        if staged.is_empty() {
+            return Ok(storable);
+        }
 
+        let published = self.publish_staged(entries, &storable, &staged).await;
+        if published.is_err() {
+            Self::remove_staged(&staged).await;
+        }
+        published?;
+        Ok(storable)
+    }
+
+    async fn remove_staged(staged: &[PathBuf]) {
+        for path in staged {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+    }
+
+    async fn publish_staged(&self, entries: &[(&ThumbnailKey, CacheBucket, &CachedImage)], storable: &[bool], staged: &[PathBuf]) -> Result<()> {
         let _guard = self.lock.lock().await;
         // eviction が最新の利用順で選ぶよう、溜めた更新を先に反映する。
         Self::flush_touches(&self.db, &self.pending_touches).await?;
-        let published = self.file_path(key);
-        if let Some(parent) = published.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+
+        let stored = entries.iter().zip(storable).filter(|(_, storable)| **storable).map(|(entry, _)| entry);
+        for ((key, _, _), staged) in stored.clone().zip(staged) {
+            let published = self.file_path(key);
+            if let Some(parent) = published.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            tokio::fs::rename(staged, &published).await?;
         }
-        tokio::fs::rename(&staged, &published).await?;
 
-        sqlx::query(
-            "INSERT INTO entries (key, bucket, size, frame_count, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5) \
-             ON CONFLICT(key) DO UPDATE SET bucket = ?2, size = ?3, frame_count = ?4, last_accessed = ?5",
-        )
-        .bind(key.hex())
-        .bind(bucket.as_str())
-        .bind(size as i64)
-        .bind(image.frame_count.map(i64::from))
-        .bind(self.next_access())
-        .execute(&self.db)
-        .await?;
+        let mut transaction = self.db.begin().await?;
+        let mut buckets = Vec::new();
+        for (key, bucket, image) in stored {
+            sqlx::query(
+                "INSERT INTO entries (key, bucket, size, frame_count, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5) \
+                 ON CONFLICT(key) DO UPDATE SET bucket = ?2, size = ?3, frame_count = ?4, last_accessed = ?5",
+            )
+            .bind(key.hex())
+            .bind(bucket.as_str())
+            .bind(image.bytes.len() as i64)
+            .bind(image.frame_count.map(i64::from))
+            .bind(self.next_access())
+            .execute(&mut *transaction)
+            .await?;
+            if !buckets.contains(bucket) {
+                buckets.push(*bucket);
+            }
+        }
+        transaction.commit().await?;
 
-        self.evict(bucket).await?;
-        Ok(true)
+        for bucket in buckets {
+            self.evict(bucket).await?;
+        }
+        Ok(())
     }
 }
 
@@ -181,6 +251,8 @@ impl ThumbnailCache {
             .filename(root.join(DATABASE_FILE_NAME))
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            // The cache is regenerable, so a power loss may lose the latest entries; reconcile drops the rows whose files are gone.
+            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
             .busy_timeout(std::time::Duration::from_secs(10));
         let db = SqlitePool::connect_with(connect_options).await?;
         Self::migrate(&db).await?;
@@ -265,24 +337,22 @@ CREATE INDEX IF NOT EXISTS index_entries_bucket_last_accessed ON entries(bucket,
     /// 枠の合計が容量に収まるまで、その枠の古いものから削除する。呼び出し元が `lock` を持つ。
     async fn evict(&self, bucket: CacheBucket) -> Result<()> {
         let capacity = self.options.capacity(bucket) as i64;
-        loop {
-            let total: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(size), 0) FROM entries WHERE bucket = ?1")
-                .bind(bucket.as_str())
-                .fetch_one(&self.db)
-                .await?;
-            if total <= capacity {
-                return Ok(());
-            }
-
-            let oldest: Option<String> = sqlx::query_scalar("SELECT key FROM entries WHERE bucket = ?1 ORDER BY last_accessed ASC LIMIT 1")
+        // The total is read once, and the size of each deleted entry is subtracted from it.
+        let mut total: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(size), 0) FROM entries WHERE bucket = ?1")
+            .bind(bucket.as_str())
+            .fetch_one(&self.db)
+            .await?;
+        while total > capacity {
+            let oldest: Option<(String, i64)> = sqlx::query_as("SELECT key, size FROM entries WHERE bucket = ?1 ORDER BY last_accessed ASC LIMIT 1")
                 .bind(bucket.as_str())
                 .fetch_optional(&self.db)
                 .await?;
-            let Some(hex) = oldest else {
+            let Some((hex, size)) = oldest else {
                 return Ok(());
             };
 
             sqlx::query("DELETE FROM entries WHERE key = ?1").bind(&hex).execute(&self.db).await?;
+            total -= size;
             if let Some(key) = ThumbnailKey::from_hex(&hex)
                 && let Err(error) = tokio::fs::remove_file(self.file_path(&key)).await
                 && error.kind() != io::ErrorKind::NotFound
@@ -290,6 +360,7 @@ CREATE INDEX IF NOT EXISTS index_entries_bucket_last_accessed ON entries(bucket,
                 return Err(error.into());
             }
         }
+        Ok(())
     }
 
     fn file_path(&self, key: &ThumbnailKey) -> PathBuf {
@@ -388,6 +459,81 @@ mod tests {
         drop(cache);
         let reopened = open(dir.path()).await?;
         assert_eq!(reopened.get(&key(1)).await?, Some(image(4, Some(8))), "再起動後も残る");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn contains_answers_from_the_index_only_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let cache = open(dir.path()).await?;
+        assert!(!cache.contains(&key(1)).await?);
+
+        assert!(cache.put(&key(1), CacheBucket::Thumbnail, &image(4, None)).await?);
+        assert!(cache.contains(&key(1)).await?);
+
+        tokio::fs::remove_file(cache.file_path(&key(1))).await?;
+        assert!(cache.contains(&key(1)).await?, "the index still has the key, and the file is not read");
+        assert_eq!(cache.get(&key(1)).await?, None, "a read finds the missing file");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_cache_database_uses_synchronous_normal_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let cache = open(dir.path()).await?;
+        let mode: i64 = sqlx::query_scalar("PRAGMA synchronous").fetch_one(&cache.db).await?;
+        assert_eq!(mode, 1, "NORMAL");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn put_many_stores_several_and_skips_the_oversized_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let cache = open(dir.path()).await?;
+        let (a, b, c) = (image(3, None), image(11, None), image(4, Some(8)));
+        let stored = cache
+            .put_many(&[
+                (&key(1), CacheBucket::Thumbnail, &a),
+                (&key(2), CacheBucket::Thumbnail, &b),
+                (&key(3), CacheBucket::Display, &c),
+            ])
+            .await?;
+        assert_eq!(stored, [true, false, true], "an entry larger than its bucket is skipped");
+        assert_eq!(cache.get(&key(1)).await?, Some(a));
+        assert_eq!(cache.get(&key(2)).await?, None);
+        assert_eq!(cache.get(&key(3)).await?, Some(c));
+        assert_eq!(cache.put_many(&[]).await?, Vec::<bool>::new());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn put_many_evicts_the_first_entries_and_keeps_the_last_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let cache = open(dir.path()).await?;
+        // The thumbnail bucket holds 10 bytes: the three companions (4 each) cannot stay with the primary (6).
+        let (c1, c2, c3, primary) = (image(4, None), image(4, None), image(4, None), image(6, None));
+        cache
+            .put_many(&[
+                (&key(1), CacheBucket::Thumbnail, &c1),
+                (&key(2), CacheBucket::Thumbnail, &c2),
+                (&key(3), CacheBucket::Thumbnail, &c3),
+                (&key(4), CacheBucket::Thumbnail, &primary),
+            ])
+            .await?;
+        assert_eq!(cache.get(&key(4)).await?, Some(primary), "the last entry is the newest and stays");
+        assert_eq!(cache.get(&key(1)).await?, None);
+        assert_eq!(cache.get(&key(2)).await?, None);
+        assert_eq!(cache.get(&key(3)).await?, Some(c3), "10 bytes: the primary and the newest companion fit");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn put_many_fails_without_staging_and_leaves_nothing_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let cache = open(dir.path()).await?;
+        tokio::fs::remove_dir_all(dir.path().join("thumbnail").join(STAGING_DIR_NAME)).await?;
+        assert!(cache.put_many(&[(&key(1), CacheBucket::Thumbnail, &image(3, None))]).await.is_err());
+        assert!(!cache.contains(&key(1)).await?);
         Ok(())
     }
 

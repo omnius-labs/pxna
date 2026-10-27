@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PanelRight } from "lucide-react";
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
-
+import { IDLE } from "../images/spec";
+import { useImageWants } from "../images/wants";
 import { ENTRY_KIND_LABELS, type Entry, entryKind, isThumbnailable } from "../library/entries";
 import {
     formatBytes,
@@ -20,8 +21,6 @@ import { librariesQuery, type MediaInfo, mediaInfoQuery } from "../library/queri
 import { type Selection, selectionBytes } from "../library/selection";
 import { useSettled } from "../library/useSettled";
 import { CROSS_LIBRARY_SCOPE, entryAddress } from "../location";
-import type { ThumbnailState } from "../thumbnails/queue";
-import { useThumbnailQueue } from "../thumbnails/useThumbnailQueue";
 import { EntryIcon } from "./EntryIcon";
 import { EntryTags } from "./EntryTags";
 import { Button } from "./ui/button";
@@ -48,8 +47,6 @@ interface InfoPanelProps {
     selection: Selection;
 }
 
-const IDLE: ThumbnailState = { status: "idle" };
-
 /// 一覧の右に置く、選んだ Entry の詳細の表示。
 export function InfoPanel({ libraryId, selection }: InfoPanelProps) {
     const client = useQueryClient();
@@ -57,12 +54,12 @@ export function InfoPanel({ libraryId, selection }: InfoPanelProps) {
     const [only] = items;
     // 大きめのサムネイルは、1 件を選んでいて、選択が 200 ms 変わらなかったときにだけ要求する。
     const settled = useSettled(items.length === 1 ? only?.entry : undefined);
-    const { queue } = useThumbnailQueue(libraryId, 1, false, "fit", INFO_PANEL_THUMBNAIL_SIDE);
+    const { wants } = useImageWants(libraryId, 1, false, "fit", INFO_PANEL_THUMBNAIL_SIDE);
     useEffect(() => {
-        queue.setWanted(settled !== undefined && isThumbnailable(settled) ? new Map([[settled.path, 0]]) : new Map());
-    }, [queue, settled]);
-    const thumbnail = useSyncExternalStore(queue.subscribe, () =>
-        settled === undefined ? IDLE : queue.getState(settled.path),
+        wants.setWanted(settled !== undefined && isThumbnailable(settled) ? new Map([[settled.path, 0]]) : new Map());
+    }, [wants, settled]);
+    const thumbnail = useSyncExternalStore(wants.subscribe, () =>
+        settled === undefined ? IDLE : wants.getState(settled.path),
     );
     // メディア情報も同じ規則で、画像と動画だけを要求する。
     const mediaTarget = settled !== undefined && hasMediaInfo(settled) ? settled : undefined;

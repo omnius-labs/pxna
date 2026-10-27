@@ -17,11 +17,13 @@ Note that the web client's interface is in Japanese. Where this document quotes 
 | [design.md](../design.md) | Pxna's overall scope, how the web client is served, carrying sessions, conventions for mutating APIs, constraints common to clients |
 | [Listing and Search Design](./listing.md) | How the server sorts, filters, and cuts listings from snapshots |
 | [Thumbnail Design](./thumbnail.md) | How the server generates and caches thumbnails, sprite sheets, and display images |
+| [Image Channel Design](./image-channel.md) | The connection that carries thumbnails, sprite sheets, and display images, request classes, delivery, revalidation |
 | [Video Playback Design](./video.md) | The server-side mechanisms for media info of images and videos, direct playback, and transcoded playback |
 | [Timeline Design](./timeline.md) | What is listed in the timeline, timeline dates, the server's aggregation and reading |
 | [terms.md](../terms.md) | Definitions of terms |
 | [issues.md](../issues.md) | Clear defects confirmed in code and handling policies |
 | [daemon/openapi.yaml](../../daemon/openapi.yaml) | The authoritative paths, schemas, and status codes of the APIs the client calls |
+| [daemon/image-channel.schema.json](../../daemon/image-channel.schema.json) | The authoritative messages of the image channel |
 
 The entry point of the design document family is [design.md](../design.md).
 
@@ -130,6 +132,7 @@ The size of tiles is chosen from 5 levels by the display preferences' tile size.
 On a wide screen, the minimum length of a tile's side is 96, 128, 176, 240, and 320 CSS px for each level, the number of columns that fit in the listing's width is found with that minimum, and then the columns are widened to fill the listing's width.
 On a narrow screen, the levels are treated as numbers of columns (6, 5, 4, 3, 2 columns), and the tile's side is decided from the screen width.
 Phone screen widths differ by model, so with a fixed size the number of columns and the right-edge margin would vary by model.
+The thumbnails of a tile are requested at the smallest size step that covers the tile, and one generation also warms the smaller steps in both shapes ([Thumbnail Design §3](./thumbnail.md#3-determining-the-target)), so switching the shape or opening the viewer finds them in the cache.
 The tile size is switched with the slider in the settings menu (§3.9), and on a wide screen also with Ctrl or ⌘ plus the wheel, and with the `+` and `-` keys.
 
 The listing can be switched between grid and list.
@@ -149,7 +152,7 @@ This is because an extraction that passed its deadline can give the same result 
 
 ### 3.3 Flipbook Playback
 
-When starting flipbook playback, the client requests that video's sprite sheet.
+When starting flipbook playback, the client wants that video's sprite sheet.
 It passes the same values as the tile's thumbnail for width, height, and shape (`resize`). This is because the server puts both into the cache with one generation only when the thumbnail and sprite sheet are requested under the same conditions ([Thumbnail Design §6.2](./thumbnail.md#62-generate-together)).
 It divides the sprite sheet equally by the number of frames in the response, and switches the display position at a fixed interval.
 When the thumbnail shape is whole display, each frame fits in a square preserving the aspect ratio.
@@ -191,9 +194,9 @@ A flick is a horizontal movement of more than 50 CSS px within 300 ms, a downwar
 The order of previous and next follows the same sort as the listing.
 When moving to an Entry on a page not yet read, that page is read.
 The display images of one before and one after are requested in advance, so they are shown without waiting when moved to.
-The shown image is requested with `Pxna-Priority: interactive` and the ones before and after with `prefetch`, so the server starts the shown image first ([Thumbnail Design §7](./thumbnail.md#7-order-and-concurrency-of-generation)).
-The requests of images that are neither shown nor next to the shown image are canceled while loading. Besides the shown image and its neighbors, up to 6 more loaded display images are kept, the most recent first.
-Moving to an image whose prefetch is still loading cancels the prefetch and requests it again as `interactive`.
+The shown image is wanted with the `interactive` request class and the ones before and after with `prefetch`, so the server starts the shown image first ([Image Channel Design §5](./image-channel.md#5-request-classes-and-order)).
+The wants of images that are neither shown nor next to the shown image are dropped while loading. Besides the shown image and its neighbors, up to 6 more loaded display images are kept, the most recent first.
+Moving to an image whose prefetch is still loading raises its want to `interactive`, so the server moves it ahead without starting it over.
 The original images before and after are not requested in advance.
 The targets of moving back and forth are the images and videos in the current listing, and Entries that are neither are skipped. Arrow keys pressed while focus is on the video player are left to the player.
 When the destination is already known from back and forth movement, the filmstrip, or undo in rate mode, the viewer opens it at that position without waiting for the listing to be searched again, so neither "読み込み中…" (Loading…) nor a rebuilt filmstrip appears between Entries.
@@ -202,13 +205,21 @@ The browser's back operation also closes the viewer, and even when a URL is open
 
 The wide-screen image and video viewer has a filmstrip at the bottom edge.
 The filmstrip assigns the same width to every Entry of the current listing (including search results), and lays them out horizontally in the same order as the listing.
+The side of one position is chosen from 5 levels by the display preferences' filmstrip size: 40, 48, 56, 72, and 96 CSS px, and the section is 8 CSS px taller than the side. The default is level 3 (56 CSS px).
+Changing the level measures the positions again and scrolls until the open Entry is at the center again.
 At image and video positions it shows thumbnails, highlights the open Entry, and moves to the clicked Entry.
 At the positions of other Entries it shows a faint icon indicating the kind and does not accept clicks.
 While the open Entry is being searched for, the filmstrip stays at the previous position instead of being rebuilt.
 The overall width is decided from `totalCount`, and only the pages of the range that became visible by scrolling horizontally are read (§3.5).
 When the open image changes, it scrolls until that position comes to the center.
-Thumbnails use the crop shape and are requested under the same queue rules as the listing (§4).
+Thumbnails use the crop shape and are wanted under the same rules as the listing (§4), at the side times the pixel density, so changing the level changes the requested size.
 Tab stops only at the open position, and distant positions are moved to by clicking.
+
+The viewer has its own settings panel, a popover opened from a gear button in the header and drawn inside the outer frame element of `Modal`.
+It holds the settings that only the viewer uses: the filmstrip size, on a wide screen only, and the swapping to the original image, for images only.
+The gear is shown only when the panel would have a control: on a wide screen for an image or a video, and on a narrow screen for an image. A narrow video has neither setting, so it has no gear.
+On a narrow screen the gear is next to the "その他" (More) menu, and on a wide screen it is with the other header buttons.
+While the panel is open, the viewer's moving back and forth and closing with Esc are not accepted, so Esc closes only the panel and the slider's arrow keys change only the slider. The panel's Tab is left to the popover's own focus scope, and `Modal` does not move the focus ([Radix's nested layers](../knowledge/radix-nested-layer-events.md)).
 
 The image viewer has a slideshow and full-screen display through the Fullscreen API.
 The slideshow advances to the next image 5 seconds after the display image appears, and stops at the last image.
@@ -233,7 +244,7 @@ Delete goes through the same confirmation dialog as the listing before being sen
 The result of deletion is notified by a toast over the viewer. The result of a deletion that closes the viewer is shown in a toast outside the viewer so that it remains visible after closing.
 If the screen switches to narrow while a dialog is shown, the confirmation is canceled.
 The viewer is modal, so the key operations of §3.7 do not work inside the viewer.
-While a confirmation dialog and the "その他" (More) menu are open, moving back and forth and the key operation of closing the viewer with Esc are also not accepted.
+While a confirmation dialog, the "その他" (More) menu, and the viewer settings panel are open, moving back and forth and the key operation of closing the viewer with Esc are also not accepted.
 After deletion completes, it moves to the next image, or the previous image if there is no next, or closes the viewer if neither exists.
 While the next range is being loaded, delete cannot be chosen. While preparing and during the delete confirmation, the slideshow cannot be started. When the slideshow is stopped, automatic movement in the middle of loading is also canceled.
 The destination is decided from the current listing before the confirmation dialog is shown. After deletion the listing is reread and positions shift, so it is held by relative path, not by position.
@@ -413,7 +424,7 @@ When media info could not be read, a sentence says it could not be read.
 When multiple Entries are selected, it shows the count and the total size.
 
 The larger thumbnail and media info are requested only when the info panel is open and the selection has not changed for 200 ms.
-When the selection changes, the request already sent is canceled.
+When the selection changes, the want already sent is dropped.
 This is so that, when moving the selection by clicking in succession, the server is not made to read ffprobe or Exif and generate large thumbnails for each Entry passed by.
 The name, kind, size, and modification date are shown from the Entry the selection holds, without waiting for requests (§5.1).
 
@@ -435,6 +446,7 @@ When they could not be read, it runs with the defaults and notifies by a toast.
 Even if the display preferences cannot be read, browsing is not stopped.
 The shape and ranges of the set of values are defined by `openapi.yaml` and validated by the server.
 A `PUT` that contains an out-of-range value is rejected with 400, and the saved values do not change.
+`filmstripSize` is required. A set saved before it existed cannot be read, so `GET /preferences` fails with `SerdeError`, the web client runs with the defaults, and the next `PUT` saves the new shape. Deleting only the saved preferences row also resets it; the state directory holds users and ratings and is not deleted.
 The ranges are written in the contract, so the generated router rejects when it reads the body. The body of this 400 is not an `ErrorResponse`, and the web client judges the rejection from the status code alone.
 
 The display preferences have two sets: for wide screens and for narrow screens.
@@ -447,11 +459,14 @@ Only sorting does not depend on the screen width, so it is held once outside the
 | Thumbnail shape (crop, whole display) | Yes | Crop / Crop |
 | Listing display (grid, list) | Yes | Grid / Grid |
 | Swapping to the original image (automatic, only on zoom) | Yes | Automatic / Only on zoom |
+| Filmstrip size (5 levels) | Yes | 3 (56 CSS px) / 3 (saved, not used) |
 | Sorting (key and direction) | No | Name ascending |
 
 The key and direction of sorting are the same as the values the listing API's `sort` and `order` take.
-The values are changed in the settings menu, a popover opened from the gear button at the right end of the toolbar.
-The menu shows the listing display, tile size, thumbnail shape, and swapping to the original image of the set currently in use, and sorting, each under a heading, and directly changes those values.
+The values are changed in two places: the listing's values in the settings menu, a popover opened from the gear button at the right end of the toolbar, and the viewer's values in the viewer's settings panel (§3.4).
+The menu shows the listing display, tile size, thumbnail shape of the set currently in use, and sorting, each under a heading, and directly changes those values.
+The viewer's panel shows the filmstrip size and the swapping to the original image of the set currently in use.
+The narrow set has a filmstrip size because the shape of a set is one, but the narrow screen has no filmstrip, so the value is saved and neither used nor edited.
 The other set is changed from a screen of that width. The menu does not show which set it changes.
 The menu shows only the choices of values that are in effect at that point.
 When the listing display is the list, the tile size choice is not shown.
@@ -497,7 +512,7 @@ If the visible rows and the rows in the margin of one screen above and below hav
 The range read is held as one contiguous range, and Entries farther than 1000 items from the viewed position are discarded. When returning to the discarded side, it rereads from the cursor of the Entry at the discarded boundary.
 When the continuation above is added and when distant Entries are discarded, the position of the Entry being viewed is kept. Even if row breaks change through reassembling rows, the row containing the Entry that was being viewed is found and the position is restored.
 When a month is chosen and when opened from the URL's `month`, the range already read is discarded and reread from that month.
-Thumbnails are requested under the same queue rules as folder view (§4).
+Thumbnails are wanted under the same rules as folder view (§4).
 
 While the server is aggregating any of the chosen Libraries, "集計中" (Aggregating) and the number of files processed, summed over them, are shown, and the per-month counts are reread every 10 seconds.
 Entries added by aggregation are not automatically inserted into the already loaded grid. Added Entries appear when "今すぐ更新" (Update now) is pressed and on the reread when a month is chosen again.
@@ -523,38 +538,43 @@ That tile becomes an icon showing the kind, the same as files whose thumbnail ca
 
 ## 4. Thumbnail Requests
 
-The client requests the thumbnails of only the visible tiles and the tiles in the prefetch margin around them.
-The prefetch margin is one screen in the direction of scrolling.
-Requests are managed with the client's own queue, and the number sent at the same time is limited to 4.
-Requests for tiles that left the screen and also left the prefetch margin are removed from the queue if not yet sent, and canceled if already sent (in the web client, with `AbortController`).
-Tiles nearer the center of the screen are placed at the front of the queue.
+The client receives thumbnails, sprite sheets, and display images only through the image channel ([Image Channel Design](./image-channel.md)).
+One image channel client per tab gathers the wants of every part: the grid, the list, the timeline, the filmstrip, flipbook playback, the info panel, and the viewer's display images.
+Each part tells it which images it needs now, with a request class and an order within the class.
+The channel client merges an image that several parts want, the same Library, path, kind, width, height, and shape, into one item with the highest class and the smallest order, and sends the changes of the merged set to the server.
+The server decides from this set what to generate and send next ([Image Channel Design §5](./image-channel.md#5-request-classes-and-order)), so the client neither limits how many images it asks for at once nor cancels requests.
 
-The number sent at the same time is limited so that requests remaining in the queue can be reordered and canceled later.
-Until a canceled request is closed by the browser, it overlaps with the new request sent to that slot.
-If everything were sent at once, since the server's generation is in arrival order, the generation of tiles that left the screen would remain lined up first ([Thumbnail Design §7](./thumbnail.md#7-order-and-concurrency-of-generation)).
+A listing wants the thumbnails of only the visible tiles and the tiles in the prefetch margin around them.
+The prefetch margin is one screen in the direction of scrolling.
+Visible tiles are `visible` and tiles in the margin are `prefetch`, and within each class tiles nearer the center of the screen get a smaller order.
+When a tile leaves the screen and the prefetch margin, the listing stops wanting it, and the channel client drops the item unless another part still wants it.
 
 The width and height requested are the tile's display size multiplied by the pixel density.
 The server rounds up to size steps, so the client need not know the step values.
-When the tile size or the thumbnail shape is changed, the visible tiles are requested again with the new values.
+When the tile size or the thumbnail shape is changed, the visible tiles are wanted again with the new values.
 On a wide screen, the tile's display size that is the basis of the requested size uses the minimum length of a side of the tile size level.
 On a narrow screen, it uses the screen width divided by the number of columns.
 The actual size after widening columns to fill the listing's width can be larger than the minimum.
 For that difference, the obtained thumbnail is shown enlarged.
-It does not re-request merely because the listing's width changed and columns widened, and requests with the size at the time the folder was opened or the tile size was changed.
-This is so that requests do not go out in succession while the width is being changed.
+It does not want again merely because the listing's width changed and columns widened, and wants with the size at the time the folder was opened or the tile size was changed.
+This is so that wants do not change in succession while the width is being changed.
 The output format is not specified and is left to the server's configuration ([Thumbnail Design §4.2](./thumbnail.md#42-shape-and-output-format)).
 
-The web client fetches thumbnails with `fetch`, turns the response into a blob URL, and shows it on the tile.
-When a tile leaves the request targets, the URL of the image already read is released.
-If the API's URL were put directly in an `img` element's `src`, the browser would decide the order of sending and cancellation, and it could not be controlled by the queue.
+The channel client keeps the images it receives in IndexedDB, by the same Library, path, kind, width, height, and shape, with the image's `ETag`.
+When a part wants an image the cache holds, the channel client shows it at once and wants the item with that `ETag`. On `unchanged` it keeps the image, and on a new image it replaces the image in the cache and on screen ([Image Channel Design §7](./image-channel.md#7-revalidation)).
+Thumbnails and sprite sheets have a budget of 256 MiB and display images one of 512 MiB, and each drops its least recently used images beyond the budget, so opening many display images does not push out the listing's thumbnails.
+Logging out deletes the cache, because its images show the Library to whoever uses the browser next.
+The channel client turns an image into a blob URL for the parts, and releases the URL when no part wants the image any more.
 
-A tile for which the server returned a deadline expiry (`Timeout`) becomes an icon showing the kind, like files whose thumbnail cannot be made, and is not requested again while that folder is displayed.
+A tile whose item failed with the server's deadline expiry (`Timeout`) becomes an icon showing the kind, like files whose thumbnail cannot be made, and is not wanted again while that folder is displayed.
 As with the failure of a listing, this is because repeating can hit the same deadline expiry.
+When the channel closes, the channel client reconnects and sends its whole set again; items that were not answered are wanted again with new ids ([Image Channel Design §3](./image-channel.md#3-connection)).
+When the server closes the channel because the session ended, the web client returns to login, and when it closes it for a contract error, the tiles that were not answered become icons.
 
 The exception is right after the daemon's own change.
-When the listing is reread after a change made through Pxna, the read and failed states of folder and archive tiles are discarded, and the tiles in the request targets are requested again.
-A representative can change with the contents, and the server revalidates its response on every request, so a request made again receives the new representative ([Thumbnail Design §10.1](./thumbnail.md#representative-revalidation)).
-Image and video tiles are not requested again, because their thumbnails change only when the file itself is replaced.
+When the listing is reread after a change made through Pxna, the shown and failed states of folder and archive tiles are discarded, and the tiles in the request targets are wanted again with the `ETag` of the image the cache holds.
+A representative can change with the contents, and the server compares the want with the representative chosen now, so it receives the new representative ([Thumbnail Design §10.1](./thumbnail.md#representative-revalidation)).
+Image and video tiles are not wanted again, because their thumbnails change only when the file itself is replaced, and the next want revalidates them.
 
 ## 5. Design Decisions
 
@@ -896,15 +916,18 @@ The implementation is small, but in folders containing videos, only the videos w
 A method that advances videos to the next in 5 seconds too.
 They could not be seen to the end, which does not suit the slideshow's purpose, so we rejected it.
 
-#### Gather Display Preferences into One Settings Menu
+#### Gather Display Preferences into a Settings Menu and a Viewer Panel
 
 **Decision**
-The listing display (grid and list), tile size, thumbnail shape, swapping to the original image, and sorting are placed in a single settings menu opened from the toolbar's gear button, on both wide and narrow screens. The menu changes only the set currently in use (§3.9).
+The listing display (grid and list), tile size, thumbnail shape, and sorting are placed in a single settings menu opened from the toolbar's gear button, on both wide and narrow screens. The menu changes only the set currently in use (§3.9).
+The settings that only the viewer uses, the filmstrip size and the swapping to the original image, are placed in the viewer's settings panel (§3.4), not in the settings menu.
 
 **Reason**
 When operations line up on the toolbar, they compete for width with the mode switch, the breadcrumb, and the operations. Display settings are not changed often, so folding them into a menu is not a problem.
 Wide and narrow screens use the same part, so implementations per screen width need not be separated.
 A separate view menu and settings screen showed the same values in two places, and the user had to know which entrance held which value.
+The swapping to the original image and the filmstrip size only matter while the viewer is open, and the viewer is modal, so the listing's menu cannot be reached from it. Placing them in the viewer lets the user see the effect of a change while changing it.
+Each value still has one entrance.
 
 **Rejected alternative 1**
 A method that lines them up on the bar on wide screens and makes a menu only on narrow screens.
@@ -1017,10 +1040,37 @@ Behavior would be the same regardless of format, but the display image never bec
 A method that switches to the original image with a viewer button.
 The user could decide the transfer volume, but an operation would be needed every time a photo is flipped, so we rejected it.
 
+#### Gather Every Image Want of a Tab in One Image Channel Client
+
+**Decision**
+One image channel client per tab merges the image wants of every part and sends them on one image channel (§4).
+
+**Reason**
+The listing, the filmstrip, the list, the info panel, the timeline, and the viewer each had their own queue, limited to 4 requests, and none saw what the others asked for. The same image was asked for in two sizes by the listing and the filmstrip, and the server decoded it twice, and the queues and the display images shared the browser's six connections to the daemon ([Image Channel Design §9.1](./image-channel.md#91-decided)).
+With one client, the same image wanted by two parts is one item, and the server receives every want of the tab and merges them by source.
+
+**Rejected alternative**
+Letting each part open its own channel. The parts would keep their own state, but the server would see several connections and the tab would hold several sockets.
+
+#### Keep Received Images in IndexedDB and Revalidate Them
+
+**Decision**
+The channel client keeps received images in IndexedDB with their `ETag`, with separate budgets for thumbnails and sprite sheets (256 MiB) and display images (512 MiB), drops the least recently used beyond the budget, revalidates each kept image when it is wanted, and deletes the cache on logout (§4).
+
+**Reason**
+The browser's HTTP cache does not keep what a WebSocket carries. Without a cache of its own, every reload and every new tab would transfer every image again. IndexedDB holds blobs with the fields needed to find and evict them, which the Cache API, keyed by request, does not.
+Separate budgets keep the larger display images from pushing out the listing's thumbnails.
+
+**Rejected alternative 1**
+One budget for every kind. It is simpler, but opening many display images in the viewer would evict the listing's thumbnails.
+
+**Rejected alternative 2**
+Leaving eviction to the browser's storage quota. It needs no code, but the cache could take much of the device's storage, and what is evicted could not be controlled.
+
 #### Line Up All the Listing's Entries in the Filmstrip
 
 **Decision**
-The filmstrip assigns the same width to every Entry of the current listing, lays them out in the same order as the listing, and reads only the pages of the range that became visible (§3.4).
+The filmstrip assigns the same width to every Entry of the current listing, lays them out in the same order as the listing, and reads only the pages of the range that became visible (§3.4). The width is the same for every Entry and is chosen from 5 levels by the filmstrip size.
 Images and videos show thumbnails and can be moved to by clicking, and at the positions of other Entries, an icon showing the kind is shown.
 
 **Reason**
@@ -1067,11 +1117,11 @@ The generated types are placed in the repository, and CI checks that there is no
 **Reason**
 As with the daemon, `openapi.yaml` is kept as the authoritative contract, and discrepancies between the contract and the web client can be detected by type checking and CI.
 Only types are generated, and the runtime processing remains a thin wrapper around `fetch`.
-Passing the `AbortSignal` that the thumbnail queue (§4) needs and receiving responses as blobs can also be done as they are.
+Passing an `AbortSignal` to cancel a request and receiving responses as blobs can also be done as they are.
 
 **Rejected alternative 1**
 A method that generates a TypeScript API client with the same openapi-generator as the daemon.
-The generator version could be aligned, but the output is large and class-centered, and the hand-written routes (file content and thumbnails) would end up being called directly with `fetch` anyway, so we rejected it.
+The generator version could be aligned, but the output is large and class-centered, and the hand-written routes (file content) would end up being called directly with `fetch` anyway, so we rejected it.
 
 **Rejected alternative 2**
 A method that generates even TanStack Query hooks (orval).
@@ -1091,7 +1141,7 @@ Non-virtualized parts use shadcn/ui ("Use shadcn/ui for Parts Such as Menus and 
 **Reason**
 TanStack Query handles per-folder listing caches, loading pages, sharing the same listing between the tree and the listing, and discarding everything at once on a 401, with ready-made mechanisms.
 TanStack Router can check URL paths and queries with types.
-TanStack Virtual returns the displayed range and scroll direction as they are, so the values passed to the thumbnail queue (§4) and page requests (§3.5) are easy to assemble.
+TanStack Virtual returns the displayed range and scroll direction as they are, so the values passed to the image wants (§4) and page requests (§3.5) are easy to assemble.
 We build the tree, grid, and list in-house so that, combined with virtual scrolling, they do not collide with the virtualization that a part library holds internally.
 
 **Rejected alternative 1**
@@ -1104,7 +1154,7 @@ It has more users and information, but we would have to write the typing of quer
 
 **Rejected alternative 3**
 A method that virtualizes the grid with react-virtuoso.
-It even provides additional page loading, but internal state such as scroll direction is hard to extract, and the values to pass to the queue are hard to assemble, so we rejected it.
+It even provides additional page loading, but internal state such as scroll direction is hard to extract, and the values to pass to the image wants are hard to assemble, so we rejected it.
 
 **Rejected alternative 4**
 A method that builds the tree and dialogs with React Aria Components.
@@ -1556,11 +1606,11 @@ When the info panel has been used on real screens and one can judge whether over
 Summary listings and detail completion are implemented in [entries.ts](../../ui-web/src/library/entries.ts) and [listing.ts](../../ui-web/src/library/listing.ts). Support is confirmed with capabilities, and names and kinds are displayed first. The existence of children for visible rows is checked one request at a time by [ChildProbeQueue](../../ui-web/src/library/childProbes.ts). It cancels on leaving the screen and on snapshot change, and returns to unconfirmed after the remaining TTL. Waiting for a probe does not stop normal expansion.
 
 The web client is a Vite SPA that the daemon serves from `[web] dir`.
-It has initial setup and login, the toolbar (mode switch, breadcrumb, user menu), the tree, the grid and list, the status bar, selection, the thumbnail request queue, flipbook playback of videos, and the image viewer.
+It has initial setup and login, the toolbar (mode switch, breadcrumb, user menu), the tree, the grid and list, the status bar, selection, the image channel client, flipbook playback of videos, and the image viewer.
 The video viewer chooses direct playback or HLS from media info, and on closing ends playback and the transcode session.
 The screen skeleton lines up the toolbar, tree, listing, and status bar on a wide screen (the tree and info panel change width with [ResizeHandle.tsx](../../ui-web/src/components/ResizeHandle.tsx)), and folds the tree into a drawer on a narrow screen. The color scheme follows the OS's light and dark setting.
 Display preferences wait for loading at the entrance of authenticated screens, and run with defaults if they cannot be read. Changes are written back as a whole when they have stopped for 500 ms, and on failure return to the saved values.
-From the toolbar's settings menu ([SettingsMenu.tsx](../../ui-web/src/components/SettingsMenu.tsx)), the listing display, the grid's tile size, the thumbnail shape, swapping to the original image, and sorting can be chosen for the set currently in use. Wide and narrow screens are separate sets, and they switch when the screen width crosses 768 CSS px. The list's set does not show the tile size choice.
+From the toolbar's settings menu ([SettingsMenu.tsx](../../ui-web/src/components/SettingsMenu.tsx)), the listing display, the grid's tile size, the thumbnail shape, and sorting can be chosen for the set currently in use. Wide and narrow screens are separate sets, and they switch when the screen width crosses 768 CSS px. The list's set does not show the tile size choice.
 The listing's data is held per page by [library/listing.ts](../../ui-web/src/library/listing.ts). It reserves the overall height from the first page's `totalCount`, and reads the pages containing the visible rows and one screen of prefetch rows in the scrolling direction, 200 items at a time by `offset`. It shows frames at unread positions and cancels requests for pages that left the targets.
 The grid lines up square tiles following the tile size level. The list, on a wide screen, has the 5 columns of small thumbnail, name, modification date, size, and kind with sort headings, and on a narrow screen shows no headings and lines up two-line rows of the name and "更新日時 · サイズ" (modification date · size). On a narrow screen, a single tap on a tile or list row opens it ([useEntryInteraction.ts](../../ui-web/src/library/useEntryInteraction.ts)).
 When the folder, sorting, listing display, or search conditions change, the display returns to starting from the top. When a page with a different snapshot id arrives, the other pages are discarded and the needed range is reread, keeping the scroll position.
@@ -1569,7 +1619,7 @@ Search is handled by search mode in [SearchPage.tsx](../../ui-web/src/pages/Sear
 The paged listing store in [listing.ts](../../ui-web/src/library/listing.ts) reads either a folder or a search (`ListingSource`), and a search is requested with `listSearchEntries` through `fetchSearchPage` in [entries.ts](../../ui-web/src/library/entries.ts), which turns each Entry's path into the keyed path. Grid, List, and the viewer take the source; the viewer moves among the search results. For subtree results, the parent folder is shown below the name in the grid, in the "場所" (Location) column in a wide screen's list, and at the start of the second line in a narrow screen's list; direct children of the start are shown as ".". During a subtree search, "検索中…" (Searching…) is displayed, and if the search results are 0, "一致する項目がありません。" (No matching items.) is displayed, and on truncation of any Library it guides narrowing the Libraries or moving the start down and searching again. Opening a folder or archive result moves to that position in folder view and ends the search.
 The tree reads folder-like Entries in order by `offset` and shows children after fetching all pages. When the snapshot's id changes, it rereads from the start.
 The image and video viewer also uses the same listing data, and reads pages in order until the Entry of the relative path that `view` of a directly opened URL points to is found. Moving to the previous and next Entries stops at images and videos and skips the rest, and moves in one operation after finishing reading unread pages too. When the destination is known, it is opened at that position without waiting for the search. The display images of the image before and after in the loaded range are prefetched. The original image is fetched at a timing decided from the format, size, and the display preferences' value for swapping to the original image, and the size of the display image request is also decided by the same result ([viewer.ts](../../ui-web/src/viewer/viewer.ts)). Zoom is done only with the wheel.
-The wide-screen image and video viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), and the image viewer has the header's slideshow, full-screen, download, and delete buttons. Rate mode's buttons and undo history are in [Viewer.tsx](../../ui-web/src/components/Viewer.tsx). On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1).
+The wide-screen image and video viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), whose item side follows the filmstrip size, and the image viewer has the header's slideshow, full-screen, download, and delete buttons. The header's gear opens the viewer settings panel ([ViewerSettings.tsx](../../ui-web/src/components/ViewerSettings.tsx)) with the filmstrip size and the swapping to the original image. Rate mode's buttons and undo history are in [Viewer.tsx](../../ui-web/src/components/Viewer.tsx). On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, the gear of an image has only the swapping to the original image, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1).
 Parts are built with Tailwind, the shadcn/ui parts in `ui-web/src/components/ui`, and in-house code.
 On a wide screen, from the listing's context menu and the toolbar, one can create folders, rename, delete, and download a single file. Creating, renaming, and deleting can also use key operations. In the tree too, one can create inside, rename, and delete the right-clicked folder. Creating and renaming are done in the modal dialog of [NameDialog.tsx](../../ui-web/src/components/NameDialog.tsx), which shows the target's path. Whether something can be changed is decided by the logical OR of the Library's `readonly` and the Entry's or the current folder's `metadata.readonly`. After success, that Library's listing and tree are reread.
 [clipboard.ts](../../ui-web/src/library/clipboard.ts) holds the targets of cut and copy across authenticated screens. They can be operated with the menu and Ctrl or ⌘ X, C, and V, and during cut the targets in the grid and list are shown faintly. Paste targets the current folder, or a tile or tree folder, and transfer to another Library is also possible.
@@ -1578,7 +1628,8 @@ Internal drag moves to the same Library's tree and folder tiles, and copies when
 [upload.ts](../../ui-web/src/library/upload.ts) sends the toolbar's file and folder selection and OS drops in a queue of at most 2. Files of 32 MiB or less are written directly, and larger files send 16 MiB chunks. Folders are created first, and the conflict policy is also applied to what is underneath. For OS folders, it reads from the same reader until an empty batch, and does not drop the tail of what is underneath ([Measurements of Chromium](../knowledge/chromium-directory-reader.md)). A session is discarded when canceled, and the listing and tree are reread once per published file.
 The activity panel is shown overlaid at the bottom right and shows the progress, state, and failures and skips of Operations and uploads. Operations are updated every second only while running, and return even after a reload. Uploads show the number of bytes sent and can be canceled while waiting and sending. When collapsed it becomes a status bar button and shows the unread count. The items lined up when it is opened become read and are shown faintly, and finished items can be removed with ×. During an upload a leave confirmation is registered, and it is released when a terminal state is reached. On narrow screens, the entrances to operations and the panel are not shown.
 The viewer does not have back-and-forth movement by left and right flicks, zoom by pinch or double tap, or closing by a downward swipe.
-The thumbnail queue does not discard the states of folder and archive tiles after the daemon's own changes, and search mode does not display the notice for results the name index did not answer.
+Thumbnails, sprite sheets, and display images are received only over the image channel (IC2): one client per tab ([channel.ts](../../ui-web/src/images/channel.ts)) merges the wants of the grid, list, timeline, info panel, filmstrip, and viewer into items with a class and an order, and keeps received images in IndexedDB with the budgets of §4 ([cache.ts](../../ui-web/src/images/cache.ts)). A part subscribes with [useImageWants](../../ui-web/src/images/wants.ts) or [DisplayImages](../../ui-web/src/viewer/displayImages.ts) and gets a blob URL. A cache hit is shown at once and wanted again with its `ETag`, so an unchanged file costs no image transfer. The per-part `ThumbnailQueue`, `fetchThumbnail`, and `loadDisplayImage`, and the browser's HTTP cache of thumbnails, are gone. Logging out clears the cache.
+The image channel client does not yet discard the states of folder and archive tiles after the daemon's own changes, and search mode does not display the notice for results the name index did not answer.
 To the right of the listing on a wide screen, the info panel ([InfoPanel.tsx](../../ui-web/src/components/InfoPanel.tsx)), which can be opened and closed with a toolbar button, is placed.
 The open/closed state is saved in the browser's `localStorage`, and is open when first opened.
 When one item is selected, the name, kind, size, modification date, and Library-relative path are shown from the Entry the selection holds, without a request.
@@ -1604,7 +1655,7 @@ Only the dependencies must be respected.
 | No. | Content | Dependencies assumed |
 | --- | --- | --- |
 | C10 | Implement back-and-forth movement by left and right flicks in the viewer, zoom by pinch and double tap, and closing by a downward swipe | None |
-| C11 | Discard the states of folder and archive tiles and request them again when the listing is reread after the daemon's own change (§4) | None |
+| C11 | Discard the states of folder and archive tiles and want them again when the listing is reread after the daemon's own change (§4) | None |
 | C12 | Display the notice of §3.6 when a subtree search from a folder outside archives is not answered from the name index | L1 of [Listing and Search Design §9.2](./listing.md#92-roadmap) |
 
 C10 corresponds to M15, C11 to part of M20, and C12 to part of M19 of [design.md §12.2](../design.md#122-roadmap).

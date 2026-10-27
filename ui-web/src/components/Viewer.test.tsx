@@ -4,7 +4,9 @@ import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Want } from "../images/spec";
 import type { Entry, FolderListing } from "../library/entries";
+import { FakeImageSource } from "../testing/images";
 import { stubMatchMedia, stubResizeObserver } from "../testing/preferences";
 import { Viewer } from "./Viewer";
 
@@ -28,6 +30,7 @@ vi.mock("@tanstack/react-virtual", () => ({
     useVirtualizer: (options: { count: number; estimateSize: () => number }) => ({
         range: { startIndex: range.first, endIndex: range.last },
         scrollToIndex: () => {},
+        measure: () => {},
         getTotalSize: () => options.count * options.estimateSize(),
         getVirtualItems: () =>
             Array.from({ length: range.last - range.first + 1 }, (_, offset) => ({
@@ -37,19 +40,6 @@ vi.mock("@tanstack/react-virtual", () => ({
                 size: options.estimateSize(),
             })),
     }),
-}));
-// jsdom は画像を読まないので、表示用画像は要求の URL をそのまま `<img>` に渡す。
-vi.mock("../viewer/displayImages", async (original) => ({
-    ...(await original<typeof import("../viewer/displayImages")>()),
-    loadDisplayImage: (url: string, priority: string) => {
-        displayLoads.push({ url, priority });
-        return Promise.resolve(url);
-    },
-    revokeDisplayImage: () => {},
-}));
-vi.mock("../thumbnails/api", async (original) => ({
-    ...(await original<typeof import("../thumbnails/api")>()),
-    fetchThumbnail: () => new Promise(() => {}),
 }));
 vi.mock("../api/client", async (original) => ({
     ...(await original<typeof import("../api/client")>()),
@@ -91,7 +81,28 @@ vi.mock("./Modal", () => ({
         </dialog>
     ),
 }));
+/// jsdom は画像を読まないので、表示用画像は欲しいと言われた時点で出し、要求の内容を表す URL をそのまま `<img>` に渡す。
+/// サムネイルは何も返さない。
+class DisplaySource extends FakeImageSource {
+    readonly #seen = new Set<string>();
+
+    override setWants(owner: object, wants: ReadonlyMap<string, Want>): void {
+        super.setWants(owner, wants);
+        for (const [key, want] of wants) {
+            if (want.spec.kind !== "display" || this.#seen.has(key)) continue;
+            this.#seen.add(key);
+            const url = `display:?path=${encodeURIComponent(want.spec.path)}&width=${want.spec.width}&height=${want.spec.height}`;
+            displayLoads.push({ url, priority: want.class });
+            this.ready(want.spec, url);
+        }
+    }
+}
+let uninstallImages: () => void;
+beforeEach(() => {
+    uninstallImages = new DisplaySource().install();
+});
 afterEach(() => {
+    uninstallImages();
     get.mockReset();
     remove.mockReset();
     rate.mockReset();
@@ -117,6 +128,7 @@ async function harness(
     container?: { width: number; height: number },
     narrow = true,
     libraryReadonly = false,
+    filmstripSize = 3,
 ) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     const restoreObserver = stubResizeObserver();
@@ -137,6 +149,7 @@ async function harness(
     document.body.append(host);
     const root = createRoot(host);
     const onChange = vi.fn();
+    const onDisplaySetChange = vi.fn();
     const render = async (view: string, nextNarrow = narrow) => {
         await act(async () =>
             root.render(
@@ -146,6 +159,8 @@ async function harness(
                         source={{ kind: "folder", libraryId: "big", path }}
                         sort={{ key: "name", order: "asc" }}
                         originalImage={originalImage}
+                        filmstripSize={filmstripSize}
+                        onDisplaySetChange={onDisplaySetChange}
                         narrow={nextNarrow}
                         libraryReadonly={libraryReadonly}
                         onChange={onChange}
@@ -158,6 +173,7 @@ async function harness(
     return {
         host,
         onChange,
+        onDisplaySetChange,
         render,
         dispose: async () => {
             await act(async () => root.unmount());
@@ -1393,6 +1409,125 @@ describe("レートモード", () => {
             await wait(() => expect(document.querySelector("[role=alertdialog]")).not.toBeNull());
             await press("ArrowRight");
             expect(rate).not.toHaveBeenCalled();
+        } finally {
+            await h.dispose();
+        }
+    });
+});
+
+describe("ビューアの設定", () => {
+    const gear = (h: { host: HTMLElement }) =>
+        h.host.querySelector<HTMLButtonElement>('button[aria-label="ビューアの設定"]');
+    const panel = (h: { host: HTMLElement }) => h.host.querySelector<HTMLElement>("[data-slot=popover-content]");
+    const open = async (view: string, contentType: string, narrow: boolean, filmstripSize = 3) => {
+        listed([image(view, contentType, 1), image("other.png", "image/png", 1)]);
+        const h = await harness(view, "/", "onZoom", undefined, narrow, false, filmstripSize);
+        await wait(() =>
+            expect(h.host.querySelector(contentType.startsWith("video") ? "video" : "img")).not.toBeNull(),
+        );
+        return h;
+    };
+    const press = (target: EventTarget, name: string) =>
+        act(async () =>
+            target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true })),
+        );
+
+    it("広い画面の画像には歯車があり、フィルムストリップの大きさと元の画像への差し替えを出す", async () => {
+        const h = await open("1.png", "image/png", false);
+        try {
+            expect(panel(h)).toBeNull();
+            await act(async () => gear(h)?.click());
+            expect(panel(h)?.querySelector("[role=slider]")?.getAttribute("aria-valuenow")).toBe("3");
+            expect(panel(h)?.querySelector('[aria-label="元の画像への差し替え"]')).not.toBeNull();
+            // ポップオーバーは、全画面にする外枠の要素の中に描く。
+            expect(h.host.querySelector("dialog > div")?.contains(panel(h))).toBe(true);
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("スライダーと切り替えの操作を、今の組へ書く変更として渡す", async () => {
+        const h = await open("1.png", "image/png", false, 3);
+        try {
+            await act(async () => gear(h)?.click());
+            const slider = panel(h)?.querySelector<HTMLElement>("[role=slider]");
+            if (!slider) throw new Error("スライダーがない");
+            await press(slider, "ArrowRight");
+            expect(h.onDisplaySetChange).toHaveBeenLastCalledWith({ filmstripSize: 4 });
+            await act(async () =>
+                [...(panel(h)?.querySelectorAll<HTMLButtonElement>('[aria-label="元の画像への差し替え"] button') ?? [])]
+                    .find((button) => button.textContent === "自動")
+                    ?.click(),
+            );
+            expect(h.onDisplaySetChange).toHaveBeenLastCalledWith({ originalImage: "auto" });
+            expect(h.onDisplaySetChange).toHaveBeenCalledTimes(2);
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("狭い画面の動画には歯車を出さず、狭い画面の画像は元の画像への差し替えだけを出す", async () => {
+        const video = await open("clip.mp4", "video/mp4", true);
+        try {
+            expect(gear(video)).toBeNull();
+        } finally {
+            await video.dispose();
+        }
+        const narrow = await open("1.png", "image/png", true);
+        try {
+            expect(gear(narrow)).not.toBeNull();
+            // 狭い画面の歯車は「その他」のメニューの隣に置く。
+            const more = narrow.host.querySelector('button[aria-label="その他"]');
+            expect(gear(narrow)?.nextElementSibling).toBe(more);
+            await act(async () => gear(narrow)?.click());
+            expect(panel(narrow)?.querySelector("[role=slider]")).toBeNull();
+            expect(panel(narrow)?.querySelector('[aria-label="元の画像への差し替え"]')).not.toBeNull();
+        } finally {
+            await narrow.dispose();
+        }
+    });
+
+    it("広い画面の動画には、フィルムストリップの大きさだけを出す", async () => {
+        const h = await open("clip.mp4", "video/mp4", false);
+        try {
+            await act(async () => gear(h)?.click());
+            expect(panel(h)?.querySelector("[role=slider]")).not.toBeNull();
+            expect(panel(h)?.querySelector('[aria-label="元の画像への差し替え"]')).toBeNull();
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("画像でも動画でもない Entry には、歯車を出さない", async () => {
+        listed([image("note.txt", "text/plain", 1)]);
+        const h = await harness("note.txt", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(h.host.querySelector("dialog")).not.toBeNull());
+            await wait(() => expect(h.host.textContent).toContain("この種類のファイルは、まだ表示できません。"));
+            expect(gear(h)).toBeNull();
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("パネルが開いている間は、スライダーの矢印キーで移らず、Esc はパネルだけを閉じる", async () => {
+        const h = await open("1.png", "image/png", false);
+        try {
+            await act(async () => gear(h)?.click());
+            const slider = panel(h)?.querySelector<HTMLElement>("[role=slider]");
+            if (!slider) throw new Error("スライダーがない");
+            await press(slider, "ArrowRight");
+            await press(slider, "ArrowLeft");
+            await press(window, "ArrowRight");
+            expect(h.onChange).not.toHaveBeenCalled();
+            const content = panel(h);
+            if (!content) throw new Error("パネルがない");
+            await press(content, "Escape");
+            expect(panel(h)).toBeNull();
+            expect(h.onChange).not.toHaveBeenCalled();
+            // 閉じた後は、矢印キーで移る。
+            await press(window, "ArrowRight");
+            await wait(() => expect(h.onChange).toHaveBeenCalledExactlyOnceWith("other.png"));
         } finally {
             await h.dispose();
         }

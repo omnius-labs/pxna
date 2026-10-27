@@ -17,8 +17,8 @@ export const WRITE_DELAY_MS = 500;
 
 /// 保存したことがないときにサーバが返す値と同じ既定値。取得に失敗したときも、この値で動かす。
 export const DEFAULT_PREFERENCES: Preferences = {
-    wide: { tileSize: 3, thumbnailShape: "crop", view: "grid", originalImage: "auto" },
-    narrow: { tileSize: 3, thumbnailShape: "crop", view: "grid", originalImage: "onZoom" },
+    wide: { tileSize: 3, thumbnailShape: "crop", view: "grid", originalImage: "auto", filmstripSize: 3 },
+    narrow: { tileSize: 3, thumbnailShape: "crop", view: "grid", originalImage: "onZoom", filmstripSize: 3 },
     sort: { key: "name", order: "asc" },
 };
 

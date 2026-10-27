@@ -13,6 +13,14 @@ In Chromium 154.0.8037.98, for Radix's `DropdownMenu` and `AlertDialog` drawn by
 
 We did not check the `defaultPrevented` of the `AlertDialog` Esc `keydown`, or other versions of radix-ui.
 
+### Popover (the viewer settings panel)
+
+Checked with jsdom tests and by reading radix-ui 1.6.7 (@radix-ui/react-popover 1.1.23, @radix-ui/react-focus-scope 1.1.16, @radix-ui/react-slider). **We did not check this in Chromium.**
+
+- Esc: `DismissableLayer` listens to `keydown` on the document in the capture phase and calls `preventDefault()` when it handles Esc, as for the menu. The viewer's `window` listener skips it because of `defaultPrevented`, and also because the open panel is part of `nestedOpen`. The jsdom test closes only the panel and does not move or close the viewer.
+- Slider arrow keys: the slider's thumb calls `preventDefault()` on the arrow keys it handles, and `nestedOpen` also stops the viewer's own arrow handling. The jsdom test changes the value by one step and does not move the viewer.
+- Tab: the non-modal `PopoverContent` is `role="dialog"` and has a `FocusScope` with `loop` and without `trapped`. It handles only a Tab at the first or last tabbable element, and wraps. React still bubbles a Tab from the Portal child to the `dialog` of `Modal`, so `NESTED_LAYER` includes `[role='dialog']` to keep `Modal` from moving the focus. The `Modal` test checks that a Tab inside `role="dialog"` is not prevented. Real focus movement through the popover was not run.
+
 ## Basis
 
 For Esc, we opened the viewer on a narrow screen (width 390) and ran the following with `playwright-cli run-code`.

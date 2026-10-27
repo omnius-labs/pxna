@@ -43,7 +43,7 @@ function BrowseScreen({ location }: { location: BrowseLocation }) {
     const navigate = useNavigate();
     const libraries = useQuery(librariesQuery);
     const libraryReadonly = libraries.data?.find((library) => library.id === libraryId)?.readonly ?? true;
-    const { set, narrow, sort, updateSort } = usePreferences();
+    const { set, narrow, sort, updateSort, updateSet } = usePreferences();
     const infoPanel = useInfoPanel();
 
     const folder = useQuery(folderQuery(libraryId, location.path));
@@ -307,6 +307,8 @@ function BrowseScreen({ location }: { location: BrowseLocation }) {
                     source={{ kind: "folder", libraryId, path: location.path }}
                     sort={sort}
                     originalImage={set.originalImage}
+                    filmstripSize={set.filmstripSize}
+                    onDisplaySetChange={updateSet}
                     narrow={narrow}
                     libraryReadonly={libraryReadonly}
                     onChange={changeView}

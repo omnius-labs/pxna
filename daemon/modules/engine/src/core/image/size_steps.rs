@@ -22,6 +22,11 @@ impl SizeSteps {
         self.0.iter().copied().find(|step| *step >= value).unwrap_or_else(|| self.max())
     }
 
+    /// The first `count` steps in ascending order, or all of them when there are fewer.
+    pub fn smallest(&self, count: usize) -> &[u32] {
+        &self.0[..count.min(self.0.len())]
+    }
+
     pub fn max(&self) -> u32 {
         self.0.last().copied().unwrap_or_default()
     }
@@ -42,6 +47,16 @@ mod tests {
         assert_eq!(steps.round_up(300), 512);
         assert_eq!(steps.round_up(1024), 1024);
         assert_eq!(steps.round_up(2000), 1024, "最大の段階を超える要求は最大の段階に丸める");
+        Ok(())
+    }
+
+    #[test]
+    fn smallest_returns_the_first_steps_in_order_test() -> TestResult {
+        let steps = SizeSteps::new(vec![512, 128, 1024, 256])?;
+        assert_eq!(steps.smallest(3), [128, 256, 512]);
+        assert_eq!(steps.smallest(0), [] as [u32; 0]);
+        assert_eq!(steps.smallest(9), [128, 256, 512, 1024]);
+        assert_eq!(SizeSteps::new(vec![256, 64])?.smallest(3), [64, 256], "a set with fewer steps returns all of them");
         Ok(())
     }
 

@@ -301,13 +301,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_selection_cancelled_waiter_and_old_flight_publication_test() -> TestResult {
+    async fn an_invalidated_flight_does_not_publish_test() -> TestResult {
         let dir = tempfile::tempdir()?;
         std::fs::write(dir.path().join("a.png"), b"x")?;
         old(dir.path(), 100)?;
         let fs = service();
         let cache = Arc::new(RepresentativeSelection::new(fs.clone()));
         let folder = folder(&fs, dir.path()).await?;
+        // Hold every stream permit so that the scan stops after it starts and the flight stays in flight.
         let mut permits = Vec::new();
         for _ in 0..12 {
             permits.push(fs.work_budget().enter(WorkClass::Foreground).await?);
@@ -319,27 +320,20 @@ mod tests {
         while cache.scans.load(Ordering::SeqCst) == 0 {
             tokio::task::yield_now().await;
         }
-        let mut waiters = Vec::new();
-        for _ in 0..4 {
-            let (cache, folder) = (cache.clone(), folder.clone());
-            waiters.push(tokio::spawn(async move { cache.select(&folder).await }));
-        }
-        first.abort();
-        let _ = first.await;
         fs.invalidate_browse_caches();
-        // 新世代の要求もあれば別 flight を開始できる。古いものの公開は許さない。
-        for waiter in waiters {
-            waiter.abort();
-            let _ = waiter.await;
-        }
         permits.clear();
-        while cache.flights.in_flight() != 0 {
-            tokio::task::yield_now().await;
-        }
-        assert!(cache.state.lock().entries.is_empty());
+
+        let selected = first.await??;
+        assert!(selected.path().to_string().ends_with("/a.png"));
+        assert!(
+            cache.state.lock().entries.is_empty(),
+            "a flight started before the invalidation must not publish its result"
+        );
+
         cache.select(&folder).await?;
-        cache.select(&folder).await?;
-        assert!(cache.scans.load(Ordering::SeqCst) >= 2);
+        assert_eq!(cache.scans.load(Ordering::SeqCst), 2, "the invalidated result was not cached");
+        assert_eq!(cache.state.lock().entries.len(), 1);
+
         let after = cache.scans.load(Ordering::SeqCst);
         let tasks = (0..8).map(|_| {
             let (cache, folder) = (cache.clone(), folder.clone());
@@ -348,7 +342,7 @@ mod tests {
         for result in futures::future::join_all(tasks).await {
             result??;
         }
-        assert_eq!(cache.scans.load(Ordering::SeqCst), after);
+        assert_eq!(cache.scans.load(Ordering::SeqCst), after, "the published selection is shared without another scan");
         Ok(())
     }
 

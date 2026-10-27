@@ -39,7 +39,7 @@ RUN case "${TARGETARCH}" in \
     rm -rf /tmp/ffmpeg.tar.xz /opt/ffmpeg
 
 FROM debian:trixie-slim
-# ffmpeg 9 reads HEIC and AVIF, including tile grids and rotation. libheif is kept for the alpha channel of HEIC/AVIF.
+# ffmpeg 9 reads HEIC and AVIF, including tile grids and rotation. libheif is kept for the alpha channel of HEIC/AVIF and writes TIFF.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libheif-examples libheif-plugin-libde265 libheif-plugin-dav1d && rm -rf /var/lib/apt/lists/* && \
     groupadd --gid 10001 pxna && useradd --uid 10001 --gid pxna --no-create-home --shell /usr/sbin/nologin pxna && \
     mkdir -p /config /state /libraries && chown pxna:pxna /config /state /libraries

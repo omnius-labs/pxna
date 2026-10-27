@@ -701,7 +701,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/libraries/{libraryId}/thumbnails": {
+    "/image-channel": {
         parameters: {
             query?: never;
             header?: never;
@@ -709,35 +709,25 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a thumbnail
-         * @description Returns a generated image for an image, a video, a folder, or
-         *     an archive.
+         * Open the image channel
+         * @description Upgrades the connection to a WebSocket, through which the
+         *     client wants thumbnails, sprite sheets, and display images and
+         *     receives them. Every message and binary frame is defined by
+         *     `image-channel.schema.json` next to this file; this entry
+         *     names only the upgrade.
          *
-         *     `variant` selects what is generated. `thumbnail` is the small
-         *     image shown in a grid tile; for a video it is the first frame.
-         *     `display` is an aspect-preserving image whose long edge fits
-         *     the display size, shown first by a viewer; without `width`
-         *     and `height` it uses the largest display size, not the
-         *     default 256. `sprite` is a
-         *     video's frames placed side by side in one image, and the
-         *     `Pxna-Frame-Count` header tells how many frames it holds.
+         *     The upgrade carries the session cookie or a Bearer token like
+         *     any other request. When it carries the session cookie, its
+         *     `Origin` must match its `Host`, as for a mutation, and `403`
+         *     is returned otherwise, also when `Origin` is missing. A session
+         *     may keep a limited number of channels open, and `429` is
+         *     returned beyond it.
          *
-         *     The server rounds `width` and `height` up to its fixed size
-         *     steps, so the returned image can be larger than requested.
-         *
-         *     For a folder or an archive, the server picks the first image
-         *     or video among its direct children in natural name order and
-         *     returns that entry's thumbnail; `NotFound` means there is none.
-         *
-         *     The response `Content-Type` follows `format`.
-         *
-         *     `Pxna-Priority` orders the generation of `display` images. The
-         *     image a viewer shows now is `interactive` and starts before
-         *     prefetched images and grid thumbnails; a prefetched image is
-         *     `prefetch`. A request the client abandons while it waits for
-         *     a generation slot starts nothing.
+         *     The daemon closes the channel with code `4401` when the
+         *     session ends, `4400` when the client breaks the contract or a
+         *     limit, and `1001` when it shuts down.
          */
-        get: operations["getThumbnail"];
+        get: operations["getImageChannel"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1115,6 +1105,13 @@ export interface components {
             thumbnailShape: components["schemas"]["ThumbnailShape"];
             view: components["schemas"]["ListView"];
             originalImage: components["schemas"]["OriginalImageMode"];
+            /**
+             * Format: int32
+             * @description Filmstrip size step of the viewer from 1 (smallest) to
+             *     5 (largest). Only the wide set uses it; the narrow set
+             *     keeps the value without showing a filmstrip.
+             */
+            filmstripSize: number;
         };
         /** @enum {string} */
         ThumbnailShape: "crop" | "fit";
@@ -1721,28 +1718,6 @@ export interface components {
             kind: components["schemas"]["ErrorKind"];
             message?: string;
         };
-        /**
-         * @default thumbnail
-         * @enum {string}
-         */
-        ThumbnailVariant: "thumbnail" | "display" | "sprite";
-        /** @enum {string} */
-        ImageFormat: "webp" | "jpeg" | "png";
-        /**
-         * @default crop
-         * @enum {string}
-         */
-        ImageResize: "crop" | "pad" | "manual" | "fit";
-        /**
-         * @default lanczos3
-         * @enum {string}
-         */
-        ImageResampler: "lanczos3";
-        /**
-         * @default center
-         * @enum {string}
-         */
-        ImageAnchor: "bottom" | "bottom_left" | "bottom_right" | "center" | "left" | "right" | "top" | "top_left" | "top_right";
         ErrorResponse: {
             kind: components["schemas"]["ErrorKind"];
             message?: string;
@@ -2021,34 +1996,6 @@ export interface components {
         OffsetQuery: number;
         /** @description Maximum bytes in an explicit read window. Defaults to 1 MiB only when offset is supplied. */
         ReadLimitQuery: number;
-        /** @description What to generate. See the operation description. */
-        ThumbnailVariantQuery: components["schemas"]["ThumbnailVariant"];
-        /** @description Requested thumbnail width in pixels. */
-        ThumbnailWidthQuery: number;
-        /** @description Requested thumbnail height in pixels. */
-        ThumbnailHeightQuery: number;
-        /**
-         * @description Thumbnail image format. When omitted, the server uses the
-         *     format set by `[thumbnail] format` (`webp` by default).
-         */
-        ThumbnailFormatQuery: components["schemas"]["ImageFormat"];
-        /**
-         * @description Resize behavior. `fit` keeps the aspect ratio, fits the image
-         *     inside the box, and never enlarges it. `pad` fills the box with
-         *     transparent margins, so it cannot be combined with
-         *     `format=jpeg`.
-         */
-        ResizeQuery: components["schemas"]["ImageResize"];
-        /** @description Image resampler. */
-        ResamplerQuery: components["schemas"]["ImageResampler"];
-        /** @description Anchor position used when resizing and cropping. */
-        AnchorQuery: components["schemas"]["ImageAnchor"];
-        /**
-         * @description Priority of a `display` image: `interactive` for the image
-         *     shown now, the default, and `prefetch` for an image prepared
-         *     ahead. Other variants ignore it.
-         */
-        PriorityHeader: "interactive" | "prefetch";
         /** @description How to resolve an existing entry at the target path. */
         ConflictQuery: components["schemas"]["ConflictPolicy"];
         /** @description Opaque identifier of an upload session. */
@@ -2076,11 +2023,6 @@ export interface components {
         ClearedSessionCookie: string;
         /** @description Indicates byte range support. */
         AcceptRanges: "bytes";
-        /**
-         * @description Cache policy for thumbnail responses.
-         * @example private, max-age=86400
-         */
-        CacheControl: string;
         /** @description Response body length in bytes. */
         ContentLength: number;
         /**
@@ -2090,11 +2032,6 @@ export interface components {
         ContentRange: string;
         /** @description Entity tag for cache validation. */
         ETag: string;
-        /**
-         * @description Number of frames placed side by side in a `sprite` image. Present
-         *     only for `variant=sprite`.
-         */
-        PxnaFrameCount: number;
     };
     pathItems: never;
 }
@@ -3236,74 +3173,35 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    getThumbnail: {
+    getImageChannel: {
         parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-                /** @description What to generate. See the operation description. */
-                variant?: components["parameters"]["ThumbnailVariantQuery"];
-                /** @description Requested thumbnail width in pixels. */
-                width?: components["parameters"]["ThumbnailWidthQuery"];
-                /** @description Requested thumbnail height in pixels. */
-                height?: components["parameters"]["ThumbnailHeightQuery"];
-                /**
-                 * @description Thumbnail image format. When omitted, the server uses the
-                 *     format set by `[thumbnail] format` (`webp` by default).
-                 */
-                format?: components["parameters"]["ThumbnailFormatQuery"];
-                /**
-                 * @description Resize behavior. `fit` keeps the aspect ratio, fits the image
-                 *     inside the box, and never enlarges it. `pad` fills the box with
-                 *     transparent margins, so it cannot be combined with
-                 *     `format=jpeg`.
-                 */
-                resize?: components["parameters"]["ResizeQuery"];
-                /** @description Image resampler. */
-                resampler?: components["parameters"]["ResamplerQuery"];
-                /** @description Anchor position used when resizing and cropping. */
-                anchor?: components["parameters"]["AnchorQuery"];
-            };
-            header?: {
-                /**
-                 * @description Priority of a `display` image: `interactive` for the image
-                 *     shown now, the default, and `prefetch` for an image prepared
-                 *     ahead. Other variants ignore it.
-                 */
-                "Pxna-Priority"?: components["parameters"]["PriorityHeader"];
-            };
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
+            query?: never;
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Thumbnail image. */
-            200: {
+            /** @description The connection is upgraded to a WebSocket. */
+            101: {
                 headers: {
-                    "Cache-Control": components["headers"]["CacheControl"];
-                    ETag: components["headers"]["ETag"];
-                    "Pxna-Frame-Count": components["headers"]["PxnaFrameCount"];
                     [name: string]: unknown;
                 };
-                content: {
-                    "image/webp": string;
-                    "image/jpeg": string;
-                    "image/png": string;
-                };
+                content?: never;
             };
             400: components["responses"]["InvalidRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            /** @description The session already has the most image channels it may keep open. `kind` is `LimitExceeded`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
         };
     };
     createUpload: {

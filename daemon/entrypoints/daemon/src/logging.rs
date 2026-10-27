@@ -18,8 +18,6 @@ use omnius_pxna_engine::telemetry::PERFORMANCE_TARGET;
 use crate::{config::LoggingConfig, prelude::*};
 
 pub use performance::PerformanceLayer;
-#[cfg(test)]
-pub(crate) use performance::tests::SpanCapture;
 
 /// file のログを書く thread の guard。落とすと書き切って thread が止まる。
 static FILE_GUARD: Mutex<Option<WorkerGuard>> = Mutex::new(None);

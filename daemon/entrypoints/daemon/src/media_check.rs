@@ -35,16 +35,31 @@ impl MediaEnvironment {
         }
     }
 
+    /// heif-dec must take `--png-compression-level`, which libheif 1.17 added; the PNG fallback passes it on every run.
+    /// The help is read instead of `--version`, because the `heif-convert` of older libheif may not take `--version`.
+    /// TIFF output needs 1.19 and a build with libtiff, but the decode falls back to PNG when either is missing.
     #[cfg(not(target_os = "windows"))]
     async fn require_heif_dec(path: &Path) -> Result<()> {
-        // 古い libheif の heif-convert は --version を受け付けないことがあるため、起動できることだけを確かめる。
         let mut command = Command::new(path);
-        command.arg("--version").kill_on_drop(true);
-        tokio::time::timeout(Duration::from_secs(5), command.output())
+        command.arg("--help").kill_on_drop(true);
+        let output = tokio::time::timeout(Duration::from_secs(5), command.output())
             .await
             .map_err(|_| Error::new(ErrorKind::Timeout).with_message(format!("heif-dec did not answer within 5 seconds: {}", path.display())))?
             .map_err(|error| Error::from_error(error, ErrorKind::UnexpectedError).with_message(format!("failed to start heif-dec at {}", path.display())))?;
+        // libheif prints the help to stderr.
+        let help = [output.stdout, output.stderr].concat();
+        if !Self::heif_dec_takes_png_compression_level(&String::from_utf8_lossy(&help)) {
+            return Err(Error::new(ErrorKind::UnexpectedError).with_message(format!(
+                "heif-dec of libheif 1.17 or newer is required, but {} does not take --png-compression-level",
+                path.display()
+            )));
+        }
         Ok(())
+    }
+
+    #[cfg(any(not(target_os = "windows"), test))]
+    fn heif_dec_takes_png_compression_level(help: &str) -> bool {
+        help.contains("--png-compression-level")
     }
 
     async fn run(name: &str, path: &Path, args: &[&str]) -> Result<Vec<u8>> {
@@ -80,5 +95,16 @@ mod tests {
         assert_eq!(MediaEnvironment::major_version("ffmpeg", "ffmpeg version 6.1.1-3ubuntu5"), Some(6));
         assert_eq!(MediaEnvironment::major_version("ffmpeg", "ffmpeg version N-117000-gabc"), None);
         assert_eq!(MediaEnvironment::major_version("ffmpeg", ""), None);
+    }
+
+    #[test]
+    fn requires_the_png_compression_level_of_libheif_1_17_test() {
+        // Lines of `--help` from libheif 1.17.6 and 1.15.1.
+        assert!(MediaEnvironment::heif_dec_takes_png_compression_level(
+            "  -q, --quality                  quality (for JPEG output)\n      --png-compression-level #  Set to integer between 0 (fastest) and 9 (best). Use -1 for default."
+        ));
+        assert!(!MediaEnvironment::heif_dec_takes_png_compression_level(
+            "  -q, --quality           quality (for JPEG output)"
+        ));
     }
 }

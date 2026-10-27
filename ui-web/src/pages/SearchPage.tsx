@@ -44,7 +44,7 @@ export function SearchPage() {
     const search = useMemo(() => searchLocation(query), [query]);
     const navigate = useNavigate();
     const libraries = useQuery(librariesQuery);
-    const { set, narrow, sort, updateSort } = usePreferences();
+    const { set, narrow, sort, updateSort, updateSet } = usePreferences();
     const infoPanel = useInfoPanel();
     const clipboard = useClipboard();
 
@@ -289,6 +289,8 @@ export function SearchPage() {
                     source={source}
                     sort={sort}
                     originalImage={set.originalImage}
+                    filmstripSize={set.filmstripSize}
+                    onDisplaySetChange={updateSet}
                     narrow={narrow}
                     libraryReadonly={isReadonlyLibrary(entryAddress(CROSS_LIBRARY_SCOPE, viewKey(viewing)).libraryId)}
                     onChange={changeView}

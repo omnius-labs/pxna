@@ -54,7 +54,7 @@ interface DisplaySettingsProps {
     onSort: (patch: Partial<SortPreference>) => void;
 }
 
-/// 効いている値の選択だけを出す。元の画像への差し替えは、一覧の表示によらずビューアを開けるので、いつも出す。
+/// 効いている値の選択だけを出す。ビューアだけの設定（フィルムストリップの大きさと元の画像への差し替え）はビューアの設定にある。
 function DisplaySettings({ set, sort, timeline, onSet, onSort }: DisplaySettingsProps) {
     return (
         <div className="flex flex-col gap-4">
@@ -113,21 +113,6 @@ function DisplaySettings({ set, sort, timeline, onSet, onSort }: DisplaySettings
                         <Expand />
                         全体表示
                     </ToggleGroupItem>
-                </ToggleGroup>
-            </Field>
-            <Field label="元の画像への差し替え">
-                <ToggleGroup
-                    type="single"
-                    variant="outline"
-                    size="sm"
-                    value={set.originalImage}
-                    aria-label="元の画像への差し替え"
-                    onValueChange={(value) =>
-                        (value === "auto" || value === "onZoom") && onSet({ originalImage: value })
-                    }
-                >
-                    <ToggleGroupItem value="auto">自動</ToggleGroupItem>
-                    <ToggleGroupItem value="onZoom">拡大したときだけ</ToggleGroupItem>
                 </ToggleGroup>
             </Field>
             {!timeline && (

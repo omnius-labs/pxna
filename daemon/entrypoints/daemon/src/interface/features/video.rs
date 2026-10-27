@@ -3,7 +3,7 @@ use axum_extra::extract::CookieJar;
 use headers::Host;
 use http::Method;
 
-use omnius_pxna_engine::service::WorkClass;
+use omnius_pxna_engine::service::{MediaKind, MediaPools, PriorityPool, WorkClass};
 use omnius_pxna_interface::{apis, models, types::ByteArray};
 
 use crate::{
@@ -65,7 +65,7 @@ impl apis::video::Video for ApiServer {
         query_params: &models::GetMediaInfoQueryParams,
     ) -> std::result::Result<apis::video::GetMediaInfoResponse, ()> {
         // 再生と情報パネルが開いた 1 件の情報なので、ユーザーが待っているものとして数える。
-        let _waiting = self.state.pools.processes.occupy(WorkClass::Interactive);
+        let _waiting = media_info_pool(&self.state.pools, &query_params.path).occupy(WorkClass::Interactive);
         let result = async {
             let source = self.state.mutation.source(&path_params.library_id, &query_params.path, false, false).await?;
             Ok::<_, Error>(MediaInfoModel::from(self.state.media_info.probe(&source).await?))
@@ -182,6 +182,17 @@ impl From<ApiError> for apis::video::GetVideoSegmentResponse {
     }
 }
 
+/// A video, and a file with an unknown extension that ffprobe reads as a video, count in the video pool; an image counts in the image process pool.
+// omnius-lint:allow(free-fn) Pure pool choice for the media info handler, with no owning type
+fn media_info_pool<'a>(pools: &'a MediaPools, path: &str) -> &'a PriorityPool {
+    if uses_video_pool(MediaKind::of_name(path)) { &pools.videos } else { &pools.processes }
+}
+
+// omnius-lint:allow(free-fn) Pure kind check for media_info_pool, with no owning type
+fn uses_video_pool(kind: Option<MediaKind>) -> bool {
+    matches!(kind, Some(MediaKind::Video) | None)
+}
+
 #[cfg(test)]
 mod tests {
     use http::StatusCode;
@@ -191,6 +202,14 @@ mod tests {
 
     use super::*;
     use crate::interface::server::tests::*;
+
+    #[test]
+    fn media_info_counts_videos_and_unknown_files_in_the_video_pool_test() {
+        assert!(uses_video_pool(MediaKind::of_name("a/clip.MP4")));
+        assert!(uses_video_pool(MediaKind::of_name("a/clip.unknown")));
+        assert!(!uses_video_pool(MediaKind::of_name("a/photo.heic")));
+        assert!(!uses_video_pool(MediaKind::of_name("a/photo.png")));
+    }
 
     #[tokio::test]
     async fn media_info_of_an_image_has_the_image_kind_and_no_video_test() -> TestResult {

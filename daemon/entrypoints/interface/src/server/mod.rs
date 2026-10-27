@@ -25,6 +25,7 @@ where
         + apis::files::Files<E, Claims = C>
         + apis::folders::Folders<E, Claims = C>
         + apis::health::Health<E>
+        + apis::image_channel::ImageChannel<E, Claims = C>
         + apis::libraries::Libraries<E, Claims = C>
         + apis::operations::Operations<E, Claims = C>
         + apis::performance::Performance<E, Claims = C>
@@ -33,7 +34,6 @@ where
         + apis::search::Search<E, Claims = C>
         + apis::setup::Setup<E>
         + apis::tags::Tags<E, Claims = C>
-        + apis::thumbnails::Thumbnails<E, Claims = C>
         + apis::timeline::Timeline<E, Claims = C>
         + apis::uploads::Uploads<E, Claims = C>
         + apis::video::Video<E, Claims = C>
@@ -52,6 +52,7 @@ where
         .route("/api/v1/auth/session", delete(delete_current_session::<I, A, E, C>))
         .route("/api/v1/capabilities", get(get_capabilities::<I, A, E, C>))
         .route("/api/v1/health", get(get_health::<I, A, E>))
+        .route("/api/v1/image-channel", get(get_image_channel::<I, A, E, C>))
         .route("/api/v1/libraries", get(list_libraries::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}", get(get_library::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/entries/details", post(get_entry_details::<I, A, E, C>))
@@ -73,7 +74,6 @@ where
         .route("/api/v1/libraries/{library_id}/media-info", get(get_media_info::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/rating", get(get_rating::<I, A, E, C>).put(put_rating::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/tags", get(get_entry_tags::<I, A, E, C>).put(put_entry_tags::<I, A, E, C>))
-        .route("/api/v1/libraries/{library_id}/thumbnails", get(get_thumbnail::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/uploads", post(create_upload::<I, A, E, C>))
         .route(
             "/api/v1/libraries/{library_id}/uploads/{upload_id}",
@@ -3725,6 +3725,154 @@ where
 }
 
 #[tracing::instrument(skip_all)]
+fn get_image_channel_validation() -> std::result::Result<(), ValidationErrors> {
+    Ok(())
+}
+/// GetImageChannel - GET /api/v1/image-channel
+#[tracing::instrument(skip_all)]
+async fn get_image_channel<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::image_channel::ImageChannel<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || get_image_channel_validation()).await.unwrap();
+
+    let Ok(()) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().get_image_channel(&method, &host, &cookies, &claims).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::image_channel::GetImageChannelResponse::Status101_TheConnectionIsUpgradedToAWebSocket => {
+                let mut response = response.status(101);
+                response.body(Body::empty())
+            }
+            apis::image_channel::GetImageChannelResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::image_channel::GetImageChannelResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::image_channel::GetImageChannelResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::image_channel::GetImageChannelResponse::Status429_TheSessionAlreadyHasTheMostImageChannelsItMayKeepOpen(body) => {
+                let mut response = response.status(429);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::image_channel::GetImageChannelResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
 fn get_capabilities_validation() -> std::result::Result<(), ValidationErrors> {
     Ok(())
 }
@@ -6008,296 +6156,6 @@ where
                 response.body(Body::from(body_content))
             }
             apis::tags::PutEntryTagsResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
-                let mut response = response.status(504);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[tracing::instrument(skip_all)]
-fn get_thumbnail_validation(
-    header_params: models::GetThumbnailHeaderParams,
-    path_params: models::GetThumbnailPathParams,
-    query_params: models::GetThumbnailQueryParams,
-) -> std::result::Result<(models::GetThumbnailHeaderParams, models::GetThumbnailPathParams, models::GetThumbnailQueryParams), ValidationErrors> {
-    header_params.validate()?;
-    path_params.validate()?;
-    query_params.validate()?;
-
-    Ok((header_params, path_params, query_params))
-}
-/// GetThumbnail - GET /api/v1/libraries/{libraryId}/thumbnails
-#[tracing::instrument(skip_all)]
-async fn get_thumbnail<I, A, E, C>(
-    method: Method,
-    TypedHeader(host): TypedHeader<Host>,
-    cookies: CookieJar,
-    headers: HeaderMap,
-    Path(path_params): Path<models::GetThumbnailPathParams>,
-    QueryExtra(query_params): QueryExtra<models::GetThumbnailQueryParams>,
-    State(api_impl): State<I>,
-) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::thumbnails::Thumbnails<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    // Authentication
-    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
-    let claims_in_auth_header = api_impl
-        .as_ref()
-        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
-        .await;
-    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
-    let Some(claims) = claims else {
-        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
-    };
-
-    // Header parameters
-    let header_params = {
-        let header_pxna_priority = headers.get(HeaderName::from_static("pxna-priority"));
-
-        let header_pxna_priority = match header_pxna_priority {
-            Some(v) => match header::IntoHeaderValue::<String>::try_from((*v).clone()) {
-                Ok(result) => Some(result.0),
-                Err(err) => {
-                    return Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Body::from(format!("Invalid header Pxna-Priority - {err}")))
-                        .map_err(|e| {
-                            error!(error = ?e);
-                            StatusCode::INTERNAL_SERVER_ERROR
-                        });
-                }
-            },
-            None => None,
-        };
-
-        models::GetThumbnailHeaderParams {
-            pxna_priority: header_pxna_priority,
-        }
-    };
-
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_thumbnail_validation(header_params, path_params, query_params))
-        .await
-        .unwrap();
-
-    let Ok((header_params, path_params, query_params)) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl
-        .as_ref()
-        .get_thumbnail(&method, &host, &cookies, &claims, &header_params, &path_params, &query_params)
-        .await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::thumbnails::GetThumbnailResponse::Status200_ThumbnailImage {
-                body,
-                cache_control,
-                e_tag,
-                pxna_frame_count,
-            } => {
-                if let Some(cache_control) = cache_control {
-                    let cache_control = match header::IntoHeaderValue(cache_control).try_into() {
-                        Ok(val) => val,
-                        Err(e) => {
-                            return Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(Body::from(format!("An internal server error occurred handling cache_control header - {e}")))
-                                .map_err(|e| {
-                                    error!(error = ?e);
-                                    StatusCode::INTERNAL_SERVER_ERROR
-                                });
-                        }
-                    };
-
-                    {
-                        let mut response_headers = response.headers_mut().unwrap();
-                        response_headers.insert(HeaderName::from_static("cache-control"), cache_control);
-                    }
-                }
-                if let Some(e_tag) = e_tag {
-                    let e_tag = match header::IntoHeaderValue(e_tag).try_into() {
-                        Ok(val) => val,
-                        Err(e) => {
-                            return Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(Body::from(format!("An internal server error occurred handling e_tag header - {e}")))
-                                .map_err(|e| {
-                                    error!(error = ?e);
-                                    StatusCode::INTERNAL_SERVER_ERROR
-                                });
-                        }
-                    };
-
-                    {
-                        let mut response_headers = response.headers_mut().unwrap();
-                        response_headers.insert(HeaderName::from_static("etag"), e_tag);
-                    }
-                }
-                if let Some(pxna_frame_count) = pxna_frame_count {
-                    let pxna_frame_count = match header::IntoHeaderValue(pxna_frame_count).try_into() {
-                        Ok(val) => val,
-                        Err(e) => {
-                            return Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(Body::from(format!("An internal server error occurred handling pxna_frame_count header - {e}")))
-                                .map_err(|e| {
-                                    error!(error = ?e);
-                                    StatusCode::INTERNAL_SERVER_ERROR
-                                });
-                        }
-                    };
-
-                    {
-                        let mut response_headers = response.headers_mut().unwrap();
-                        response_headers.insert(HeaderName::from_static("pxna-frame-count"), pxna_frame_count);
-                    }
-                }
-                let mut response = response.status(200);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("image/webp"));
-                }
-
-                let body_content = body.0;
-                response.body(Body::from(body_content))
-            }
-            apis::thumbnails::GetThumbnailResponse::Status400_InvalidRequest(body) => {
-                let mut response = response.status(400);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::thumbnails::GetThumbnailResponse::Status401_MissingOrInvalidAuthentication(body) => {
-                let mut response = response.status(401);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::thumbnails::GetThumbnailResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
-                let mut response = response.status(403);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::thumbnails::GetThumbnailResponse::Status404_ResourceNotFound(body) => {
-                let mut response = response.status(404);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::thumbnails::GetThumbnailResponse::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => {
-                let mut response = response.status(409);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::thumbnails::GetThumbnailResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::thumbnails::GetThumbnailResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();

@@ -110,4 +110,22 @@ mod tests {
         assert_eq!(service.get().await?, saved);
         Ok(())
     }
+
+    #[tokio::test]
+    async fn a_value_saved_without_a_filmstrip_size_fails_to_read_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let db = pool(&dir).await?;
+        let service = PreferencesService::new(db.clone()).await?;
+
+        let mut json = serde_json::to_value(Preferences::default())?;
+        for set in ["wide", "narrow"] {
+            json[set].as_object_mut().unwrap().remove("filmstripSize");
+        }
+        sqlx::query("INSERT INTO preferences (id, value) VALUES (1, ?)").bind(json.to_string()).execute(&db).await?;
+
+        assert_eq!(*service.get().await.unwrap_err().kind(), ErrorKind::SerdeError);
+        service.put(&Preferences::default()).await?;
+        assert_eq!(service.get().await?, Preferences::default(), "the next put saves the new shape");
+        Ok(())
+    }
 }

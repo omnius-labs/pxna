@@ -73,6 +73,11 @@ pub struct SessionAuth;
 
 impl SessionAuth {
     pub async fn authenticate(state: &DaemonState, cookies: &CookieJar, headers: &HeaderMap) -> Option<Claims> {
+        Self::authenticate_with_token(state, cookies, headers).await.map(|(_, claims)| claims)
+    }
+
+    /// `authenticate` と同じ照合をして、通った token も返す。接続が続く間、同じセッションがまだ有効かを確かめ直すために使う。
+    pub async fn authenticate_with_token(state: &DaemonState, cookies: &CookieJar, headers: &HeaderMap) -> Option<(String, Claims)> {
         let tokens = cookies
             .get(SessionCookie::from_config(&state.conf.web).name())
             .map(|cookie| cookie.value())
@@ -80,7 +85,7 @@ impl SessionAuth {
             .chain(BearerToken::parse(headers));
         for token in tokens {
             if let Some(claims) = Self::authenticate_token(state, token).await {
-                return Some(claims);
+                return Some((token.to_string(), claims));
             }
         }
         None

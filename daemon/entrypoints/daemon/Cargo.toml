@@ -66,6 +66,8 @@ rustix = { workspace = true }
 windows-sys = { workspace = true }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
+tokio-tungstenite = { workspace = true }
 testcontainers = { workspace = true }
 testresult = { workspace = true }
 sevenz-rust2 = { workspace = true }

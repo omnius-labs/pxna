@@ -2,17 +2,17 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-
+import type { ImageWants } from "../images/wants";
 import type { Entry } from "../library/entries";
 import type { Listing } from "../library/listing";
 import { stubResizeObserver } from "../testing/preferences";
-import type { ThumbnailQueue } from "../thumbnails/queue";
 import { Filmstrip } from "./Filmstrip";
 
 const mock = vi.hoisted(() => ({
     first: 0,
     last: 2,
     scrollToIndex: vi.fn(),
+    measure: vi.fn(),
     options: undefined as { horizontal?: boolean; count: number } | undefined,
 }));
 vi.mock("@tanstack/react-virtual", () => ({
@@ -21,6 +21,7 @@ vi.mock("@tanstack/react-virtual", () => ({
         return {
             range: { startIndex: mock.first, endIndex: mock.last },
             scrollToIndex: mock.scrollToIndex,
+            measure: mock.measure,
             getTotalSize: () => options.count * options.estimateSize(),
             getVirtualItems: () =>
                 Array.from({ length: mock.last - mock.first + 1 }, (_, offset) => ({
@@ -34,6 +35,7 @@ vi.mock("@tanstack/react-virtual", () => ({
 }));
 afterEach(() => {
     mock.scrollToIndex.mockReset();
+    mock.measure.mockReset();
     mock.first = 0;
     mock.last = 2;
 });
@@ -70,14 +72,14 @@ function listingOf(totalCount: number, loaded: number): Listing {
 }
 
 const IDLE = { status: "idle" };
-function fakeQueue() {
+function fakeWants() {
     const setWanted = vi.fn();
-    const queue = {
+    const wants = {
         subscribe: () => () => {},
         getState: () => IDLE,
         setWanted,
-    } as unknown as ThumbnailQueue;
-    return { queue, setWanted };
+    } as unknown as ImageWants;
+    return { wants, setWanted };
 }
 
 async function render(props: Partial<React.ComponentProps<typeof Filmstrip>> = {}) {
@@ -86,13 +88,14 @@ async function render(props: Partial<React.ComponentProps<typeof Filmstrip>> = {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
-    const { queue, setWanted } = fakeQueue();
+    const { wants, setWanted } = fakeWants();
     const onSelect = vi.fn();
     const onPages = vi.fn();
     const all = {
         listing: listingOf(1000, 200),
         index: 3,
-        queue,
+        side: 56,
+        wants,
         onSelect,
         onPages,
         ...props,
@@ -123,6 +126,62 @@ it("1000 件の一覧に、1 件 56 px の横の仮想スクロールで、全�
         expect(inner.style.width).toBe("56000px");
         // 描くのは、仮想スクロールが返した見えている範囲だけである。
         expect(h.host.querySelectorAll("[aria-label$='.png'], [aria-label$='.mp4'], [aria-label=sub]")).toHaveLength(3);
+    } finally {
+        await h.dispose();
+    }
+});
+
+it.each([
+    { level: 1, side: 40 },
+    { level: 5, side: 96 },
+])("大きさの段階 $level では、枠と位置と中の画像と全体の幅が $side px から決まる", async ({ side }) => {
+    mock.first = 0;
+    mock.last = 2;
+    const h = await render({ side });
+    try {
+        const section = byName(h.host, "フィルムストリップ") as HTMLElement;
+        expect(section.style.height).toBe(`${side + 8}px`);
+        const inner = section.firstElementChild as HTMLElement;
+        expect(inner.style.width).toBe(`${1000 * side}px`);
+        expect(inner.style.height).toBe(`${side}px`);
+        expect((inner.firstElementChild as HTMLElement).style.width).toBe(`${side}px`);
+        expect((inner.firstElementChild as HTMLElement).style.height).toBe(`${side}px`);
+        for (const name of ["clip.mp4", "sub", "img-2.png"]) {
+            const element = byName(h.host, name) as HTMLElement;
+            expect([element.style.width, element.style.height], name).toEqual([`${side - 4}px`, `${side - 4}px`]);
+        }
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("未読の位置の枠も、大きさの段階の位置より 4 px 小さい", async () => {
+    mock.first = 199;
+    mock.last = 200;
+    const h = await render({ side: 96, index: 199 });
+    try {
+        const placeholder = h.host.querySelector<HTMLElement>("[data-placeholder]");
+        expect([placeholder?.style.width, placeholder?.style.height]).toEqual(["92px", "92px"]);
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("位置の大きさが変わると、測り直して、開いている位置を中央に置き直す", async () => {
+    const h = await render({ index: 3, side: 56 });
+    try {
+        const centered = mock.scrollToIndex.mock.calls.length;
+        const measured = mock.measure.mock.calls.length;
+        await h.rerender({ side: 96 });
+        expect(mock.measure.mock.calls.length).toBeGreaterThan(measured);
+        expect(mock.scrollToIndex.mock.calls.length).toBeGreaterThan(centered);
+        expect(mock.scrollToIndex).toHaveBeenLastCalledWith(3, { align: "center" });
+        expect(mock.measure.mock.invocationCallOrder.at(-1)).toBeLessThan(
+            mock.scrollToIndex.mock.invocationCallOrder.at(-1) as number,
+        );
+        expect(mock.options?.count).toBe(1000);
+        const section = byName(h.host, "フィルムストリップ") as HTMLElement;
+        expect(section.style.height).toBe("104px");
     } finally {
         await h.dispose();
     }

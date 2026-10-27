@@ -54,8 +54,8 @@ tags:
       description: Folder metadata and folder listing.
     - name: Files
       description: File metadata and byte content.
-    - name: Thumbnails
-      description: Generated preview images for supported files.
+    - name: ImageChannel
+      description: The WebSocket through which clients receive thumbnails, sprite sheets, and display images.
     - name: Uploads
       description: Resumable chunked upload sessions.
     - name: Video
@@ -1239,87 +1239,46 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
-    /libraries/{libraryId}/thumbnails:
+    /image-channel:
         get:
             tags:
-                - Thumbnails
-            summary: Get a thumbnail
+                - ImageChannel
+            summary: Open the image channel
             description: |
-                Returns a generated image for an image, a video, a folder, or
-                an archive.
+                Upgrades the connection to a WebSocket, through which the
+                client wants thumbnails, sprite sheets, and display images and
+                receives them. Every message and binary frame is defined by
+                `image-channel.schema.json` next to this file; this entry
+                names only the upgrade.
 
-                `variant` selects what is generated. `thumbnail` is the small
-                image shown in a grid tile; for a video it is the first frame.
-                `display` is an aspect-preserving image whose long edge fits
-                the display size, shown first by a viewer; without `width`
-                and `height` it uses the largest display size, not the
-                default 256. `sprite` is a
-                video's frames placed side by side in one image, and the
-                `Pxna-Frame-Count` header tells how many frames it holds.
+                The upgrade carries the session cookie or a Bearer token like
+                any other request. When it carries the session cookie, its
+                `Origin` must match its `Host`, as for a mutation, and `403`
+                is returned otherwise, also when `Origin` is missing. A session
+                may keep a limited number of channels open, and `429` is
+                returned beyond it.
 
-                The server rounds `width` and `height` up to its fixed size
-                steps, so the returned image can be larger than requested.
-
-                For a folder or an archive, the server picks the first image
-                or video among its direct children in natural name order and
-                returns that entry's thumbnail; `NotFound` means there is none.
-
-                The response `Content-Type` follows `format`.
-
-                `Pxna-Priority` orders the generation of `display` images. The
-                image a viewer shows now is `interactive` and starts before
-                prefetched images and grid thumbnails; a prefetched image is
-                `prefetch`. A request the client abandons while it waits for
-                a generation slot starts nothing.
-            operationId: getThumbnail
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-                - $ref: "#/components/parameters/ThumbnailVariantQuery"
-                - $ref: "#/components/parameters/ThumbnailWidthQuery"
-                - $ref: "#/components/parameters/ThumbnailHeightQuery"
-                - $ref: "#/components/parameters/ThumbnailFormatQuery"
-                - $ref: "#/components/parameters/ResizeQuery"
-                - $ref: "#/components/parameters/ResamplerQuery"
-                - $ref: "#/components/parameters/AnchorQuery"
-                - $ref: "#/components/parameters/PriorityHeader"
+                The daemon closes the channel with code `4401` when the
+                session ends, `4400` when the client breaks the contract or a
+                limit, and `1001` when it shuts down.
+            operationId: getImageChannel
             responses:
-                "200":
-                    description: Thumbnail image.
-                    headers:
-                        Cache-Control:
-                            $ref: "#/components/headers/CacheControl"
-                        ETag:
-                            $ref: "#/components/headers/ETag"
-                        Pxna-Frame-Count:
-                            $ref: "#/components/headers/PxnaFrameCount"
-                    content:
-                        image/webp:
-                            schema:
-                                type: string
-                                format: binary
-                        image/jpeg:
-                            schema:
-                                type: string
-                                format: binary
-                        image/png:
-                            schema:
-                                type: string
-                                format: binary
+                "101":
+                    description: The connection is upgraded to a WebSocket.
                 "400":
                     $ref: "#/components/responses/InvalidRequest"
                 "401":
                     $ref: "#/components/responses/Unauthorized"
                 "403":
                     $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
+                "429":
+                    description: The session already has the most image channels it may keep open. `kind` is `LimitExceeded`.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/ErrorResponse"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
 
     /libraries/{libraryId}/uploads:
         post:
@@ -2127,90 +2086,6 @@ components:
                 minimum: 1
                 maximum: 134217728
 
-        ThumbnailVariantQuery:
-            name: variant
-            in: query
-            required: false
-            description: What to generate. See the operation description.
-            schema:
-                $ref: "#/components/schemas/ThumbnailVariant"
-
-        ThumbnailWidthQuery:
-            name: width
-            in: query
-            required: false
-            description: Requested thumbnail width in pixels.
-            schema:
-                type: integer
-                format: int32
-                minimum: 1
-                maximum: 4096
-                default: 256
-
-        ThumbnailHeightQuery:
-            name: height
-            in: query
-            required: false
-            description: Requested thumbnail height in pixels.
-            schema:
-                type: integer
-                format: int32
-                minimum: 1
-                maximum: 4096
-                default: 256
-
-        ThumbnailFormatQuery:
-            name: format
-            in: query
-            required: false
-            description: |
-                Thumbnail image format. When omitted, the server uses the
-                format set by `[thumbnail] format` (`webp` by default).
-            schema:
-                $ref: "#/components/schemas/ImageFormat"
-
-        ResizeQuery:
-            name: resize
-            in: query
-            required: false
-            description: |
-                Resize behavior. `fit` keeps the aspect ratio, fits the image
-                inside the box, and never enlarges it. `pad` fills the box with
-                transparent margins, so it cannot be combined with
-                `format=jpeg`.
-            schema:
-                $ref: "#/components/schemas/ImageResize"
-
-        ResamplerQuery:
-            name: resampler
-            in: query
-            required: false
-            description: Image resampler.
-            schema:
-                $ref: "#/components/schemas/ImageResampler"
-
-        AnchorQuery:
-            name: anchor
-            in: query
-            required: false
-            description: Anchor position used when resizing and cropping.
-            schema:
-                $ref: "#/components/schemas/ImageAnchor"
-
-        PriorityHeader:
-            name: Pxna-Priority
-            in: header
-            required: false
-            description: |
-                Priority of a `display` image: `interactive` for the image
-                shown now, the default, and `prefetch` for an image prepared
-                ahead. Other variants ignore it.
-            schema:
-                type: string
-                enum:
-                    - interactive
-                    - prefetch
-
         ConflictQuery:
             name: conflict
             in: query
@@ -2269,12 +2144,6 @@ components:
                 enum:
                     - bytes
 
-        CacheControl:
-            description: Cache policy for thumbnail responses.
-            schema:
-                type: string
-            example: private, max-age=86400
-
         ContentLength:
             description: Response body length in bytes.
             schema:
@@ -2292,15 +2161,6 @@ components:
             description: Entity tag for cache validation.
             schema:
                 type: string
-
-        PxnaFrameCount:
-            description: |
-                Number of frames placed side by side in a `sprite` image. Present
-                only for `variant=sprite`.
-            schema:
-                type: integer
-                format: int32
-                minimum: 1
 
     responses:
         InvalidRequest:
@@ -2467,7 +2327,7 @@ components:
         DisplaySet:
             type: object
             additionalProperties: false
-            required: [tileSize, thumbnailShape, view, originalImage]
+            required: [tileSize, thumbnailShape, view, originalImage, filmstripSize]
             properties:
                 tileSize:
                     type: integer
@@ -2481,6 +2341,15 @@ components:
                     $ref: "#/components/schemas/ListView"
                 originalImage:
                     $ref: "#/components/schemas/OriginalImageMode"
+                filmstripSize:
+                    type: integer
+                    format: int32
+                    minimum: 1
+                    maximum: 5
+                    description: |
+                        Filmstrip size step of the viewer from 1 (smallest) to
+                        5 (largest). Only the wide set uses it; the narrow set
+                        keeps the value without showing a filmstrip.
         ThumbnailShape:
             type: string
             enum:
@@ -3706,50 +3575,6 @@ components:
                     $ref: "#/components/schemas/ErrorKind"
                 message:
                     type: string
-
-        ThumbnailVariant:
-            type: string
-            enum:
-                - thumbnail
-                - display
-                - sprite
-            default: thumbnail
-
-        ImageFormat:
-            type: string
-            enum:
-                - webp
-                - jpeg
-                - png
-
-        ImageResize:
-            type: string
-            enum:
-                - crop
-                - pad
-                - manual
-                - fit
-            default: crop
-
-        ImageResampler:
-            type: string
-            enum:
-                - lanczos3
-            default: lanczos3
-
-        ImageAnchor:
-            type: string
-            enum:
-                - bottom
-                - bottom_left
-                - bottom_right
-                - center
-                - left
-                - right
-                - top
-                - top_left
-                - top_right
-            default: center
 
         ErrorResponse:
             type: object

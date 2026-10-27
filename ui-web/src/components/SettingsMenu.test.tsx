@@ -74,11 +74,11 @@ const settle = async (check: () => void) =>
 
 it.each([false, true])("changes only the active set and hides grid size controls (narrow=%s)", async (narrow) => {
     await open(narrow);
-    // 一覧の表示、タイルサイズ、サムネイルの形、元の画像への差し替え、並べ替えを 1 つのポップオーバーに出す。
+    // 一覧の表示、タイルサイズ、サムネイルの形、並べ替えを 1 つのポップオーバーに出す。元の画像への差し替えは、ビューアの設定にある。
     expect(document.querySelector('[aria-label="一覧の表示"]')).not.toBeNull();
     expect(document.querySelector('[role="slider"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="サムネイルの形"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="元の画像への差し替え"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="元の画像への差し替え"]')).toBeNull();
     expect(document.querySelector('[aria-label="並べ替えのキー"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="並べ替えの向き"]')).not.toBeNull();
     await act(async () => item("一覧の表示", "リスト").click());
@@ -88,8 +88,6 @@ it.each([false, true])("changes only the active set and hides grid size controls
         narrow ? DEFAULT_PREFERENCES.wide : DEFAULT_PREFERENCES.narrow,
     );
     await settle(() => expect(document.querySelector('[role="slider"]')).toBeNull());
-    // リストでも、ビューアは開けるので元の画像への差し替えは出す。
-    expect(item("元の画像への差し替え", "自動")).not.toBeNull();
     await act(async () => {
         window.dispatchEvent(new KeyboardEvent("keydown", { key: "+" }));
         window.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100 }));
@@ -97,14 +95,15 @@ it.each([false, true])("changes only the active set and hides grid size controls
     expect(cached().wide.tileSize).toBe(DEFAULT_PREFERENCES.wide.tileSize);
 });
 
-it("元の画像への差し替えを今の組の値で選び、変えるとその組だけが変わる", async () => {
-    await open(true);
-    expect(item("元の画像への差し替え", "拡大したときだけ").getAttribute("aria-checked")).toBe("true");
-    expect(item("元の画像への差し替え", "自動").getAttribute("aria-checked")).toBe("false");
-    await act(async () => item("元の画像への差し替え", "自動").click());
-    expect(cached().narrow.originalImage).toBe("auto");
-    expect(cached().wide).toEqual(DEFAULT_PREFERENCES.wide);
-});
+it.each([false, true])(
+    "一覧の設定に、ビューアだけの設定（元の画像への差し替えとフィルムストリップ）を出さない (narrow=%s)",
+    async (narrow) => {
+        await open(narrow);
+        expect(document.querySelector('[aria-label="元の画像への差し替え"]')).toBeNull();
+        expect(document.querySelector('[aria-label="フィルムストリップの大きさ"]')).toBeNull();
+        expect(document.body.textContent).not.toContain("元の画像への差し替え");
+    },
+);
 
 it("並べ替えの向きを変えると、組によらない sort だけが変わる", async () => {
     await open(false);
@@ -117,7 +116,7 @@ it("並べ替えの向きを変えると、組によらない sort だけが変�
 it("writes the whole preferences once after the edits stop", async () => {
     await open(false);
     await act(async () => item("サムネイルの形", "全体表示").click());
-    await act(async () => item("元の画像への差し替え", "拡大したときだけ").click());
+    await act(async () => item("一覧の表示", "リスト").click());
     expect(mocks.put).not.toHaveBeenCalled();
 
     await vi.waitFor(
@@ -131,7 +130,7 @@ it("writes the whole preferences once after the edits stop", async () => {
     );
     expect(mocks.put.mock.calls[0]?.[1]?.body).toEqual({
         ...DEFAULT_PREFERENCES,
-        wide: { ...DEFAULT_PREFERENCES.wide, thumbnailShape: "fit", originalImage: "onZoom" },
+        wide: { ...DEFAULT_PREFERENCES.wide, thumbnailShape: "fit", view: "list" },
     });
 });
 
@@ -141,5 +140,4 @@ it("タイムラインでは一覧の表示と並べ替えを出さず、タイ�
     expect(document.querySelector('[aria-label="並べ替えのキー"]')).toBeNull();
     expect(document.querySelector('[aria-label="並べ替えの向き"]')).toBeNull();
     expect(document.querySelector('[role="slider"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="元の画像への差し替え"]')).not.toBeNull();
 });

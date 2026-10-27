@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::{borrow::Cow, io::Cursor};
 
 use tracing::field::Empty;
 
@@ -12,7 +12,7 @@ use crate::{
     prelude::*,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageConvertOptions {
     pub format_type: ImageFormatType,
     /// 非可逆の形式（WebP、JPEG）の圧縮の品質（1 から 100）。PNG では使わない。
@@ -30,6 +30,8 @@ pub struct ImageConvertOptions {
 pub struct ImageConverter;
 
 impl ImageConverter {
+    /// Decodes, resizes, and encodes in one call. The generator decodes once and fans out with `resize_ref`, so only tests use this.
+    #[cfg(test)]
     pub fn convert(input: &[u8], opts: &ImageConvertOptions) -> Result<Vec<u8>> {
         Self::validate(opts)?;
         let span = perf_span!("image_convert", input_bytes = input.len(), format = ?opts.format_type, output_bytes = Empty).entered();
@@ -51,6 +53,20 @@ impl ImageConverter {
     }
 
     pub fn resize(image: DynamicImage, opts: &ImageConvertOptions) -> Result<DynamicImage> {
+        Ok(Self::resize_inner(&image, opts)?.unwrap_or(image))
+    }
+
+    /// Resizes without consuming the source, so that one decoded image can produce several outputs.
+    /// A `Fit` source that already fits is borrowed as it is; every other case is a new image.
+    pub fn resize_ref<'a>(image: &'a DynamicImage, opts: &ImageConvertOptions) -> Result<Cow<'a, DynamicImage>> {
+        Ok(match Self::resize_inner(image, opts)? {
+            Some(resized) => Cow::Owned(resized),
+            None => Cow::Borrowed(image),
+        })
+    }
+
+    /// Returns `None` when the source is already the result, which only happens to a `Fit` source that fits the box.
+    fn resize_inner(image: &DynamicImage, opts: &ImageConvertOptions) -> Result<Option<DynamicImage>> {
         Self::validate(opts)?;
         let span = perf_span!("image_resize", source_width = image.width(), source_height = image.height(), width = Empty, height = Empty).entered();
 
@@ -68,18 +84,18 @@ impl ImageConverter {
 
         let resized = match opts.resize_type {
             // 縦横比を無視して、枠の大きさにする。
-            ImageResizeType::Manual => Self::scale(&image, target_w, target_h, filter)?,
+            ImageResizeType::Manual => Self::scale(image, target_w, target_h, filter)?,
             // 枠を覆うまで拡大縮小し、anchor の位置で枠の大きさに切り抜く。
             ImageResizeType::Crop => {
                 let scale = f32::max(target_w as f32 / src_w, target_h as f32 / src_h);
-                let scaled = Self::scale(&image, (src_w * scale).ceil().max(1.0) as u32, (src_h * scale).ceil().max(1.0) as u32, filter)?;
+                let scaled = Self::scale(image, (src_w * scale).ceil().max(1.0) as u32, (src_h * scale).ceil().max(1.0) as u32, filter)?;
                 let (x, y) = Self::anchor_offset(opts.anchor_position_type, scaled.width(), scaled.height(), target_w, target_h);
                 scaled.crop_imm(x, y, target_w, target_h)
             }
             // 枠に収まるまで拡大縮小し、透明な余白で枠を埋める。
             ImageResizeType::Pad => {
                 let scale = f32::min(target_w as f32 / src_w, target_h as f32 / src_h);
-                let scaled = Self::scale(&image, (src_w * scale).floor().max(1.0) as u32, (src_h * scale).floor().max(1.0) as u32, filter)?;
+                let scaled = Self::scale(image, (src_w * scale).floor().max(1.0) as u32, (src_h * scale).floor().max(1.0) as u32, filter)?;
                 let (x, y) = Self::anchor_offset(opts.anchor_position_type, target_w, target_h, scaled.width(), scaled.height());
                 let mut canvas = RgbaImage::from_pixel(target_w, target_h, Rgba([0; 4]));
                 imageops::replace(&mut canvas, &scaled.to_rgba8(), x.into(), y.into());
@@ -88,18 +104,18 @@ impl ImageConverter {
             // 縦横比を保って枠に収める。元の画像より大きくはせず、余白も付けない。
             ImageResizeType::Fit => {
                 if image.width() <= target_w && image.height() <= target_h {
-                    image
-                } else {
-                    let ratio = f64::min(target_w as f64 / image.width() as f64, target_h as f64 / image.height() as f64);
-                    let width = ((image.width() as f64 * ratio).round() as u32).clamp(1, target_w);
-                    let height = ((image.height() as f64 * ratio).round() as u32).clamp(1, target_h);
-                    Self::scale(&image, width, height, filter)?
+                    span.record("width", image.width()).record("height", image.height());
+                    return Ok(None);
                 }
+                let ratio = f64::min(target_w as f64 / image.width() as f64, target_h as f64 / image.height() as f64);
+                let width = ((image.width() as f64 * ratio).round() as u32).clamp(1, target_w);
+                let height = ((image.height() as f64 * ratio).round() as u32).clamp(1, target_h);
+                Self::scale(image, width, height, filter)?
             }
             ImageResizeType::Unknown => unreachable!("validate rejects an unknown resize type"),
         };
         span.record("width", resized.width()).record("height", resized.height());
-        Ok(resized)
+        Ok(Some(resized))
     }
 
     /// SIMD で width × height へ縮小する。`image` crate の `resize_exact` は、同じ Lanczos3 でも数倍遅い。
@@ -239,6 +255,29 @@ mod tests {
         let small = png(40, 20, Rgba([10, 20, 30, 255]))?;
         let kept = ImageConverter::convert(&small, &options(ImageResizeType::Fit, ImageFormatType::Png, Some(1024), Some(1024)))?;
         assert_eq!(size(&kept)?, (40, 20), "元の画像より大きくしない");
+        Ok(())
+    }
+
+    #[test]
+    fn resize_ref_matches_resize_and_keeps_the_source_test() -> TestResult {
+        let source = ImageConverter::decode(&png(400, 200, Rgba([10, 20, 30, 255]))?)?;
+        for resize_type in [ImageResizeType::Crop, ImageResizeType::Fit, ImageResizeType::Pad, ImageResizeType::Manual] {
+            let opts = options(resize_type, ImageFormatType::Png, Some(100), Some(100));
+            let expected = ImageConverter::resize(source.clone(), &opts)?;
+            // The same decoded image can be resized again and again.
+            for _ in 0..2 {
+                let resized = ImageConverter::resize_ref(&source, &opts)?;
+                assert!(matches!(resized, Cow::Owned(_)), "{resize_type} makes a new image");
+                assert_eq!(resized.as_bytes(), expected.as_bytes(), "{resize_type}");
+                assert_eq!((resized.width(), resized.height()), (expected.width(), expected.height()), "{resize_type}");
+            }
+        }
+        assert_eq!((source.width(), source.height()), (400, 200));
+
+        let fits = options(ImageResizeType::Fit, ImageFormatType::Png, Some(1024), Some(1024));
+        let kept = ImageConverter::resize_ref(&source, &fits)?;
+        assert!(matches!(kept, Cow::Borrowed(_)), "a Fit source that already fits is not copied");
+        assert_eq!(ImageConverter::resize(source.clone(), &fits)?.as_bytes(), source.as_bytes());
         Ok(())
     }
 

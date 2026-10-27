@@ -1,6 +1,7 @@
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
 
 import { api, unwrap } from "../api/client";
+import { imageSource } from "../images/source";
 
 export const currentUserQuery = queryOptions({
     queryKey: ["auth", "me"],
@@ -26,8 +27,10 @@ export async function createOwner(credentials: Credentials): Promise<void> {
     unwrap(await api.POST("/setup", { body: { ...credentials, sessionTransport: "cookie" } }));
 }
 
-/// サーバ側のセッションを失効させてから、手元のキャッシュを捨てる。
+/// サーバ側のセッションを失効させてから、手元のキャッシュを捨てる。受け取った画像は、ログアウトの後に同じブラウザを使う人に
+/// Library の中身を見せてしまうので、IndexedDB に残した分も消す。
 export async function logout(queryClient: QueryClient): Promise<void> {
     unwrap(await api.DELETE("/auth/session"));
     queryClient.clear();
+    await imageSource().clear();
 }

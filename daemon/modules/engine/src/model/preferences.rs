@@ -55,6 +55,8 @@ pub struct DisplaySet {
     pub thumbnail_shape: ThumbnailShape,
     pub view: ListView,
     pub original_image: OriginalImageMode,
+    /// The size level of the viewer's filmstrip (1 to 5). The narrow set keeps it but does not use it.
+    pub filmstrip_size: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,10 +83,19 @@ pub struct Preferences {
 impl DisplaySet {
     pub const MIN_TILE_SIZE: u8 = 1;
     pub const MAX_TILE_SIZE: u8 = 5;
+    pub const MIN_FILMSTRIP_SIZE: u8 = 1;
+    pub const MAX_FILMSTRIP_SIZE: u8 = 5;
 
     fn validate(&self, name: &str) -> Result<()> {
         if !(Self::MIN_TILE_SIZE..=Self::MAX_TILE_SIZE).contains(&self.tile_size) {
             return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("{name}.tileSize must be between {} and {}", Self::MIN_TILE_SIZE, Self::MAX_TILE_SIZE)));
+        }
+        if !(Self::MIN_FILMSTRIP_SIZE..=Self::MAX_FILMSTRIP_SIZE).contains(&self.filmstrip_size) {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message(format!(
+                "{name}.filmstripSize must be between {} and {}",
+                Self::MIN_FILMSTRIP_SIZE,
+                Self::MAX_FILMSTRIP_SIZE
+            )));
         }
         Ok(())
     }
@@ -121,6 +132,7 @@ impl Default for Preferences {
             thumbnail_shape: ThumbnailShape::Crop,
             view: ListView::Grid,
             original_image: OriginalImageMode::Auto,
+            filmstrip_size: 3,
         };
         Self {
             wide,
@@ -145,6 +157,7 @@ mod tests {
     fn defaults_follow_the_design_test() {
         let preferences = Preferences::default();
         assert_eq!(preferences.wide.tile_size, 3);
+        assert_eq!((preferences.wide.filmstrip_size, preferences.narrow.filmstrip_size), (3, 3));
         assert_eq!(preferences.wide.original_image, OriginalImageMode::Auto);
         assert_eq!(preferences.narrow.original_image, OriginalImageMode::OnZoom);
         assert_eq!((preferences.sort.key, preferences.sort.order), (SortKey::Name, SortOrder::Asc));
@@ -159,6 +172,25 @@ mod tests {
                 let set = if narrow { &mut preferences.narrow } else { &mut preferences.wide };
                 set.tile_size = tile_size;
                 assert_eq!(*preferences.validate().unwrap_err().kind(), ErrorKind::InvalidInput, "{tile_size} {narrow}");
+            }
+        }
+    }
+
+    #[test]
+    fn filmstrip_size_accepts_the_range_and_rejects_outside_it_test() {
+        for filmstrip_size in [1, 5] {
+            let mut preferences = Preferences::default();
+            preferences.wide.filmstrip_size = filmstrip_size;
+            preferences.narrow.filmstrip_size = filmstrip_size;
+            assert!(preferences.validate().is_ok(), "{filmstrip_size}");
+        }
+        for filmstrip_size in [0, 6, 255] {
+            for narrow in [false, true] {
+                let mut preferences = Preferences::default();
+                let set = if narrow { &mut preferences.narrow } else { &mut preferences.wide };
+                set.filmstrip_size = filmstrip_size;
+                let error = preferences.validate().unwrap_err();
+                assert_eq!(*error.kind(), ErrorKind::InvalidInput, "{filmstrip_size} {narrow}");
             }
         }
     }

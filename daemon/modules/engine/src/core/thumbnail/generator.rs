@@ -1,10 +1,15 @@
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
 
+use image::DynamicImage;
 use tokio_util::bytes::Bytes;
 use tracing::{Instrument as _, Span, field::Empty};
 
 use crate::{
-    base::util::SingleFlight,
     core::{
         image::{ImageConvertOptions, ImageConverter, SizeSteps},
         media::{FrameSpec, MediaKind, MediaOptions, MediaTools},
@@ -13,7 +18,9 @@ use crate::{
             cache::{CacheBucket, CachedImage, ThumbnailCache, ThumbnailCacheOptions},
             key::{ThumbnailKey, ThumbnailKeyHasher},
             request::{Thumbnail, ThumbnailRequest, ThumbnailVariant},
+            source_job::{Created, Outcome, SourceJobs},
         },
+        work::WorkClass,
     },
     perf_span,
     prelude::*,
@@ -21,6 +28,12 @@ use crate::{
 };
 
 const GIB: u64 = 1024 * 1024 * 1024;
+
+/// How many of the smallest size steps one generation also produces, in both shapes, for the viewer's filmstrip.
+const COMPANION_STEPS: usize = 3;
+
+/// How many times a request places itself in source jobs before it gives up. It places again only when the job it waited for did not leave its image.
+const MAX_PLACEMENTS: usize = 3;
 
 /// 動画から取り出すフレームの数と位置。設定ファイルからは指定できず、ここから渡す。
 const FRAME_SPEC: FrameSpec = FrameSpec::DEFAULT;
@@ -82,7 +95,8 @@ impl ThumbnailOptions {
 
 /// 画像、動画、フォルダ、archive から、サムネイルと表示用画像を生成してキャッシュする。
 ///
-/// 生成は要求を受けたときにだけ行う。どの要求を先に生成するかはクライアントが決め、ここでは到着順に処理する。
+/// 生成は要求を受けたときにだけ行う。同じ画像への要求は、どの接続からのものでも 1 つの source job にまとめ、
+/// 1 つの画像を同時に 2 回デコードしない（docs/design/thumbnail.md §7）。
 #[derive(Clone)]
 pub struct ThumbnailGenerator {
     inner: Arc<Inner>,
@@ -96,10 +110,14 @@ struct Inner {
     media_info: Arc<MediaInfoService>,
     sizes: SizeSteps,
     display_sizes: SizeSteps,
+    /// The configured default format. Companions use it whatever format the request names.
+    format: ImageFormatType,
     quality: u8,
     display_quality: u8,
     pools: MediaPools,
-    flights: SingleFlight<ThumbnailKey, Produced>,
+    jobs: Jobs,
+    #[cfg(test)]
+    probe: ConversionProbe,
     #[cfg(test)]
     conversions: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
@@ -116,28 +134,184 @@ struct Plan {
     convert: ImageConvertOptions,
 }
 
-/// 1 回の生成で得た画像。動画は、サムネイルとスプライトシートを一緒に作る。
-#[derive(Debug, Clone)]
-struct Produced {
-    /// サムネイルか、表示用画像。
-    image: CachedImage,
-    sprite: Option<CachedImage>,
+/// How an output of a source job is made from the decoded source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputShape {
+    /// One resized image: the decoded image, or a video's first frame.
+    Single,
+    /// A video's frames resized and laid out in one row.
+    Sprite,
 }
 
-/// 生成の 1 件分の仕事。独立した task へ渡すため、借用を持たない。
-struct Job {
-    source: ResolvedStoragePath,
-    plan: Plan,
+/// One image that a source job makes.
+#[derive(Debug, Clone)]
+struct OutputSpec {
+    /// `None` when the source has no cache key: the image is made for its request and not stored.
+    key: Option<ThumbnailKey>,
+    convert: ImageConvertOptions,
+    shape: OutputShape,
+    bucket: CacheBucket,
+    /// A requested image fails its request when it cannot be made. A companion is dropped with a log.
+    requested: bool,
+}
+
+/// What a source job made, by key.
+#[derive(Debug, Default)]
+struct JobOutput {
+    images: HashMap<ThumbnailKey, CachedImage>,
+    /// The requested images that could not be made.
+    errors: HashMap<ThumbnailKey, Error>,
+}
+
+impl JobOutput {
+    /// `results` is aligned with `specs`.
+    fn collect(specs: &[OutputSpec], results: Vec<Result<CachedImage>>) -> Self {
+        let mut output = Self::default();
+        for (spec, result) in specs.iter().zip(results) {
+            let Some(key) = &spec.key else {
+                continue;
+            };
+            match result {
+                Ok(image) => {
+                    output.images.insert(key.clone(), image);
+                }
+                Err(error) if spec.requested => {
+                    output.errors.insert(key.clone(), error);
+                }
+                Err(error) => warn!(error = ?error, "failed to make a companion thumbnail, so it is dropped"),
+            }
+        }
+        output
+    }
+
+    /// `Error` cannot be cloned, so each item gets a copy with the same kind and message.
+    fn error_for(&self, key: &ThumbnailKey) -> Option<Error> {
+        self.errors.get(key).map(|error| {
+            let message = error.message().map(str::to_string).unwrap_or_else(|| error.kind().to_string());
+            Error::new(error.kind().clone()).with_message(message)
+        })
+    }
+}
+
+/// Where a request points: the file whose image it asks for, and the plan and key of that image.
+struct Located {
+    target: ResolvedStoragePath,
     kind: MediaKind,
-    /// `image` のキャッシュのキー。元の file の更新を取れない場合は、キャッシュしないので `None` になる。
-    primary_key: Option<ThumbnailKey>,
-    sprite_key: Option<ThumbnailKey>,
+    plan: Plan,
+    /// `None` for a file that cannot be cached.
+    source: Option<SourceId>,
+    requested_key: Option<ThumbnailKey>,
+}
+
+/// What the items of one source job share: the file, its kind, and which source it is.
+struct SourceContext {
+    target: ResolvedStoragePath,
+    kind: MediaKind,
+    source: SourceId,
+}
+
+/// Source jobs by the source's key. An item carries its plan, and a job's output is read by key.
+type Jobs = SourceJobs<ThumbnailKey, ThumbnailKey, Plan, JobOutput>;
+
+/// What the tests watch of the conversions, and the gate that holds them. A job that has started and reached the gate is decoding its source.
+#[cfg(test)]
+struct ConversionProbe {
+    /// How many requests were placed in source jobs.
+    placements: std::sync::atomic::AtomicUsize,
+    /// How many conversions reached the gate.
+    reached: std::sync::atomic::AtomicUsize,
+    /// How many conversions run at this moment, and the most that ran at the same time.
+    active: std::sync::atomic::AtomicUsize,
+    peak: std::sync::atomic::AtomicUsize,
+    /// Conversions pass while it has permits. A test takes them all to hold the conversions that start, and gives them back to let them go.
+    gate: tokio::sync::Semaphore,
+}
+
+#[cfg(test)]
+impl ConversionProbe {
+    fn new() -> Self {
+        Self {
+            placements: std::sync::atomic::AtomicUsize::new(0),
+            reached: std::sync::atomic::AtomicUsize::new(0),
+            active: std::sync::atomic::AtomicUsize::new(0),
+            peak: std::sync::atomic::AtomicUsize::new(0),
+            gate: tokio::sync::Semaphore::new(tokio::sync::Semaphore::MAX_PERMITS),
+        }
+    }
+
+    /// Passes the gate and counts the conversion until the returned guard is dropped.
+    async fn enter(&self) -> ConversionGuard<'_> {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.reached.fetch_add(1, SeqCst);
+        // The permit is not kept: the gate only holds conversions while a test has taken every permit.
+        drop(self.gate.acquire().await);
+        let active = self.active.fetch_add(1, SeqCst) + 1;
+        self.peak.fetch_max(active, SeqCst);
+        ConversionGuard(&self.active)
+    }
+}
+
+#[cfg(test)]
+struct ConversionGuard<'a>(&'a std::sync::atomic::AtomicUsize);
+
+#[cfg(test)]
+impl Drop for ConversionGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Ends the job in the table when its task ends, also when the task panics, so that nothing waits for it forever.
+struct JobGuard {
+    jobs: Jobs,
+    source: ThumbnailKey,
+    id: u64,
+    finished: bool,
+}
+
+impl JobGuard {
+    fn finish(&mut self, outcome: Outcome<JobOutput>) {
+        self.jobs.finish(&self.source, self.id, outcome);
+        self.finished = true;
+    }
+}
+
+impl Drop for JobGuard {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.finish(Err(Arc::new(Error::new(ErrorKind::TaskError).with_message("the source job ended unexpectedly"))));
+        }
+    }
 }
 
 /// キャッシュの key に含める、元の file を指す値。
+#[derive(Clone)]
 enum SourceId {
     Local { path: String, len: u64, modified_secs: i64, modified_nanos: u32 },
     Archive(EntryCacheKey),
+}
+
+impl SourceId {
+    /// The key of the source itself, apart from any conversion. Source jobs are placed by it.
+    fn key(&self) -> ThumbnailKey {
+        let mut hasher = ThumbnailKeyHasher::new();
+        hasher.field(b"source");
+        match self {
+            Self::Local {
+                path,
+                len,
+                modified_secs,
+                modified_nanos,
+            } => {
+                hasher.field(b"local").field(path.as_bytes()).field(&len.to_be_bytes());
+                hasher.field(&modified_secs.to_be_bytes()).field(&modified_nanos.to_be_bytes());
+            }
+            Self::Archive(key) => {
+                hasher.field(b"archive").field(key.to_hex().as_bytes());
+            }
+        }
+        hasher.finish()
+    }
 }
 
 impl ThumbnailGenerator {
@@ -174,10 +348,13 @@ impl ThumbnailGenerator {
                 media_info,
                 sizes,
                 display_sizes,
+                format: options.format,
                 quality: options.quality,
                 display_quality: options.display_quality,
                 pools,
-                flights: SingleFlight::new(),
+                jobs: SourceJobs::new(),
+                #[cfg(test)]
+                probe: ConversionProbe::new(),
                 #[cfg(test)]
                 conversions: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
@@ -199,9 +376,70 @@ impl ThumbnailGenerator {
         self.generate_traced(resolved, request).instrument(span).await
     }
 
+    /// The key `generate_resolved` would give the image of this request, without reading the cache or generating anything.
+    /// `None` for a file that cannot be cached. The key changes when the file is replaced or the representative of a folder changes,
+    /// so a client that holds an image with this key knows whether it is still the current one.
+    pub async fn current_key(&self, resolved: ResolvedStoragePath, request: &ThumbnailRequest) -> Result<Option<String>> {
+        let located = self.inner.locate(resolved, request).await?;
+        Ok(located.requested_key.map(|key| key.hex().to_string()))
+    }
+
     /// `generate_resolved` の本体。結果の分かった field を、外側の `thumbnail_generate` の span に記録する。
     async fn generate_traced(&self, resolved: ResolvedStoragePath, request: &ThumbnailRequest) -> Result<Thumbnail> {
         let inner = &self.inner;
+        let Located {
+            target,
+            kind,
+            plan,
+            source,
+            requested_key,
+        } = inner.locate(resolved, request).await?;
+
+        if let Some(key) = &requested_key
+            && let Some(hit) = inner.cache.get(key).await?
+        {
+            Span::current().record("cache_hit", true);
+            return Ok(plan.thumbnail(hit, Some(key)));
+        }
+        Span::current().record("cache_hit", false);
+
+        // 生成枠と同じ画像の生成を待つ時間も含む。生成そのものは `thumbnail_production` が測る。
+        let class = request.class;
+        let image = async {
+            match (source, requested_key.clone()) {
+                (Some(source), Some(wanted)) => inner.generate_in_job(Arc::new(SourceContext { target, kind, source }), &plan, wanted, class).await,
+                _ => inner.generate_alone(&target, kind, &plan, class).await,
+            }
+        }
+        .instrument(perf_span!("thumbnail_generation"))
+        .await?;
+        Ok(plan.thumbnail(image, requested_key.as_ref()))
+    }
+
+    /// 実際に変換した回数。キャッシュと source job が効いているかを、テストが確かめるために使う。
+    #[cfg(test)]
+    fn conversions(&self) -> usize {
+        self.inner.conversions.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// ffmpeg を起動した回数。
+    #[cfg(test)]
+    fn ffmpeg_runs(&self) -> usize {
+        self.inner.ffmpeg_runs.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// heif-dec を起動した回数。
+    #[cfg(test)]
+    fn heif_dec_runs(&self) -> usize {
+        self.inner.heif_dec_runs.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Inner {
+    /// Finds the file a request points to, which is the representative for a folder or an archive, and the plan and key of its image.
+    /// Records the file name and its kind in the current span.
+    async fn locate(&self, resolved: ResolvedStoragePath, request: &ThumbnailRequest) -> Result<Located> {
+        let inner = self;
         let path = resolved.path().to_nested_path_buf();
         let entry = resolved.get_entry().await?;
         let (target, entry) = match entry.detail.clone() {
@@ -248,80 +486,16 @@ impl ThumbnailGenerator {
 
         let plan = inner.plan(request)?;
         let source = inner.source_id(&target, &entry);
-        let key_of = |variant| source.as_ref().map(|source| plan.key(source, variant, kind));
-        let requested_key = key_of(request.variant);
-
-        if let Some(key) = &requested_key
-            && let Some(hit) = inner.cache.get(key).await?
-        {
-            Span::current().record("cache_hit", true);
-            return Ok(plan.thumbnail(hit, Some(key)));
-        }
-        Span::current().record("cache_hit", false);
-
-        // 動画のサムネイルとスプライトシートは 1 回の ffmpeg の実行で両方を作るため、同じ flight にまとめる。
-        let shares_a_run = kind == MediaKind::Video && request.variant != ThumbnailVariant::Display;
-        let job = Job {
-            source: target,
-            plan: plan.clone(),
+        let requested_key = source.as_ref().map(|source| plan.key(source, request.variant, kind));
+        Ok(Located {
+            target,
             kind,
-            primary_key: if shares_a_run { key_of(ThumbnailVariant::Thumbnail) } else { requested_key.clone() },
-            sprite_key: if shares_a_run { key_of(ThumbnailVariant::Sprite) } else { None },
-        };
-        let flight_key = job.primary_key.clone();
-        let pool = inner.pool_for(kind).clone();
-        let class = request.class;
-        let gate = async move { Ok::<_, Error>(pool.acquire(class).await) }.instrument(perf_span!("thumbnail_permit_wait", class = ?class));
-
-        // 生成枠と同じ key の生成を待つ時間も含む。生成そのものは `thumbnail_production` が測る。
-        let produced = async {
-            Ok::<_, Error>(match flight_key {
-                Some(flight_key) => {
-                    let work = inner.clone();
-                    let produced = inner
-                        .flights
-                        .run_gated(flight_key, gate, move |permit| async move { work.produce(job, permit).await })
-                        .await?;
-                    (*produced).clone()
-                }
-                None => {
-                    let permit = gate.await?;
-                    inner.clone().produce(job, permit).await?
-                }
-            })
-        }
-        .instrument(perf_span!("thumbnail_generation"))
-        .await?;
-
-        let image = match request.variant {
-            ThumbnailVariant::Sprite => produced
-                .sprite
-                .ok_or_else(|| Error::new(ErrorKind::UnexpectedError).with_message("the sprite was not produced"))?,
-            _ => produced.image,
-        };
-        Ok(plan.thumbnail(image, requested_key.as_ref()))
+            plan,
+            source,
+            requested_key,
+        })
     }
 
-    /// 実際に変換した回数。キャッシュと single-flight が効いているかを、テストが確かめるために使う。
-    #[cfg(test)]
-    fn conversions(&self) -> usize {
-        self.inner.conversions.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// ffmpeg を起動した回数。
-    #[cfg(test)]
-    fn ffmpeg_runs(&self) -> usize {
-        self.inner.ffmpeg_runs.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// heif-dec を起動した回数。
-    #[cfg(test)]
-    fn heif_dec_runs(&self) -> usize {
-        self.inner.heif_dec_runs.load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-impl Inner {
     /// path の最後の segment の、親を除いた名前。local は host の path、archive 内は `/` 区切りの path である。
     fn file_name(path: &NestedPathBuf) -> &str {
         path.iter().last().and_then(|segment| segment.rsplit(['/', '\\']).next()).unwrap_or_default()
@@ -362,6 +536,74 @@ impl Inner {
         })
     }
 
+    /// Plans the thumbnails that one decode also produces: the smallest size steps in both shapes, which the viewer's filmstrip asks for,
+    /// and, for a thumbnail or a sprite, the other shape at the requested size. The keys exclude the primary, so that it is not made twice.
+    /// The caller passes a source that has a cache key; a source without one has no companions.
+    fn companion_plans(&self, plan: &Plan, kind: MediaKind, source: &SourceId) -> Vec<(ThumbnailKey, ImageConvertOptions)> {
+        let option = |resize_type, width, height| ImageConvertOptions {
+            format_type: self.format,
+            quality: self.quality,
+            resize_type,
+            resampler_type: ImageResamplerType::Lanczos3,
+            anchor_position_type: ImageAnchorPositionType::Center,
+            width,
+            height,
+        };
+
+        let mut options = Vec::new();
+        for step in self.sizes.smallest(COMPANION_STEPS) {
+            options.push(option(ImageResizeType::Crop, Some(*step), Some(*step)));
+            options.push(option(ImageResizeType::Fit, Some(*step), Some(*step)));
+        }
+        if matches!(plan.variant, ThumbnailVariant::Thumbnail | ThumbnailVariant::Sprite) {
+            let other = match plan.convert.resize_type {
+                ImageResizeType::Crop => Some(ImageResizeType::Fit),
+                ImageResizeType::Fit => Some(ImageResizeType::Crop),
+                _ => None,
+            };
+            if let Some(other) = other {
+                options.push(option(other, plan.convert.width, plan.convert.height));
+            }
+        }
+
+        // A sprite request makes its thumbnail in the same run, so the primary of a sprite is the thumbnail. The sprite's own key has another tag.
+        let primary_variant = if plan.variant == ThumbnailVariant::Sprite {
+            ThumbnailVariant::Thumbnail
+        } else {
+            plan.variant
+        };
+        let mut seen = HashSet::from([plan.key(source, primary_variant, kind)]);
+        let companion_plan = |convert: ImageConvertOptions| Plan {
+            variant: ThumbnailVariant::Thumbnail,
+            bucket: CacheBucket::Thumbnail,
+            convert,
+        };
+        options
+            .into_iter()
+            .filter_map(|convert| {
+                let key = companion_plan(convert.clone()).key(source, ThumbnailVariant::Thumbnail, kind);
+                seen.insert(key.clone()).then_some((key, convert))
+            })
+            .collect()
+    }
+
+    /// Drops the outputs that the cache already has, without reading them: the items that want them read the cache after the job.
+    /// A failed lookup keeps the output.
+    async fn missing_outputs(&self, specs: Vec<OutputSpec>) -> Vec<OutputSpec> {
+        let mut missing = Vec::with_capacity(specs.len());
+        for spec in specs {
+            if let Some(key) = &spec.key {
+                match self.cache.contains(key).await {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(error) => warn!(error = ?error, "failed to look up a thumbnail in the cache"),
+                }
+            }
+            missing.push(spec);
+        }
+        missing
+    }
+
     /// `mtime` を取れない local file は、更新を検知できないため、キャッシュしない。
     fn source_id(&self, path: &ResolvedStoragePath, entry: &NestedFsEntry) -> Option<SourceId> {
         if let Some(key) = path.entry_cache_key() {
@@ -376,48 +618,188 @@ impl Inner {
     }
 
     /// 画像の変換と、外部プロセスの ffmpeg と heif-dec は、別の資源として数える。
+    /// The ffmpeg runs for videos are a third resource, apart from the image decodes of ffmpeg and heif-dec.
     /// 枠を待つ間に要求が drop されたら、何も始まらない。
     fn pool_for(&self, kind: MediaKind) -> &crate::core::schedule::PriorityPool {
         match kind {
             MediaKind::Image => &self.pools.images,
-            MediaKind::FfmpegImage | MediaKind::HeifImage | MediaKind::Video => &self.pools.processes,
+            MediaKind::FfmpegImage | MediaKind::HeifImage => &self.pools.processes,
+            MediaKind::Video => &self.pools.videos,
         }
     }
 
-    /// 生成してキャッシュへ入れる。独立した task で走るため、始まった後に要求が切れても最後まで走る。
-    async fn produce(self: Arc<Self>, job: Job, permit: SchedulePermit) -> Result<Produced> {
-        self.produce_traced(job, permit).instrument(perf_span!("thumbnail_production")).await
+    /// The images a request asks for. A video's thumbnail and sprite sheet are made in one ffmpeg run, so each asks for both.
+    /// `source` is `None` for a file that cannot be cached, whose images have no keys.
+    fn requested_specs(&self, plan: &Plan, kind: MediaKind, source: Option<&SourceId>) -> Vec<OutputSpec> {
+        let key_of = |variant| source.map(|source| plan.key(source, variant, kind));
+        let spec = |key, shape, bucket| OutputSpec {
+            key,
+            convert: plan.convert.clone(),
+            shape,
+            bucket,
+            requested: true,
+        };
+        if kind == MediaKind::Video && plan.variant != ThumbnailVariant::Display {
+            vec![
+                spec(key_of(ThumbnailVariant::Thumbnail), OutputShape::Single, plan.bucket),
+                spec(key_of(ThumbnailVariant::Sprite), OutputShape::Sprite, CacheBucket::Thumbnail),
+            ]
+        } else {
+            vec![spec(key_of(plan.variant), OutputShape::Single, plan.bucket)]
+        }
     }
 
-    async fn produce_traced(self: Arc<Self>, job: Job, _permit: SchedulePermit) -> Result<Produced> {
-        // 直前に終わった同じ key の処理が入れた結果を、重ねて作らない。
-        if let Some(cached) = self.cached(&job).await? {
-            return Ok(cached);
+    /// Fixes what a job makes from its items: every image they ask for, and the companions of each, without duplicates.
+    /// Returns the keys of all of them, which later items use to find that this job makes their image.
+    fn plan_job(&self, context: &SourceContext, items: &[Plan]) -> (HashSet<ThumbnailKey>, Vec<OutputSpec>) {
+        let mut keys = HashSet::new();
+        let mut specs = Vec::new();
+        for plan in items {
+            for spec in self.requested_specs(plan, context.kind, Some(&context.source)) {
+                if spec.key.as_ref().is_none_or(|key| keys.insert(key.clone())) {
+                    specs.push(spec);
+                }
+            }
+        }
+        for plan in items {
+            for (key, convert) in self.companion_plans(plan, context.kind, &context.source) {
+                if keys.insert(key.clone()) {
+                    specs.push(OutputSpec {
+                        key: Some(key),
+                        convert,
+                        shape: OutputShape::Single,
+                        bucket: CacheBucket::Thumbnail,
+                        requested: false,
+                    });
+                }
+            }
+        }
+        (keys, specs)
+    }
+
+    /// Gets the image of `wanted` through the source job of its source, and makes a job if none can make it.
+    /// Dropping the returned future takes the item out of its job; a job that has not started and has no item left never starts.
+    async fn generate_in_job(self: &Arc<Self>, context: Arc<SourceContext>, plan: &Plan, wanted: ThumbnailKey, class: WorkClass) -> Result<CachedImage> {
+        let source_key = context.source.key();
+        for _ in 0..MAX_PLACEMENTS {
+            let placed = self.jobs.place(&source_key, &wanted, plan.clone(), class);
+            #[cfg(test)]
+            self.probe.placements.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let created = placed.created.is_some();
+            if let Some(created) = placed.created {
+                tokio::spawn(self.clone().run_job(context.clone(), source_key.clone(), created).in_current_span());
+            }
+            // The time to wait for a job of the source, which the item may have started itself or joined.
+            let output = placed.handle.wait().instrument(perf_span!("thumbnail_job_wait", created)).await?;
+            if let Some(image) = output.images.get(&wanted) {
+                return Ok(image.clone());
+            }
+            if let Some(error) = output.error_for(&wanted) {
+                return Err(error);
+            }
+            // The job found the image in the cache, or dropped it as a companion, or its store failed.
+            if let Some(image) = self.cache.get(&wanted).await? {
+                return Ok(image);
+            }
+        }
+        Err(Error::new(ErrorKind::UnexpectedError).with_message("the image was not produced"))
+    }
+
+    /// Runs a source job in a task of its own, so that it runs to the end once it has started, whatever happens to its items.
+    async fn run_job(self: Arc<Self>, context: Arc<SourceContext>, source_key: ThumbnailKey, created: Created<JobOutput>) {
+        let mut guard = JobGuard {
+            jobs: self.jobs.clone(),
+            source: source_key.clone(),
+            id: created.id,
+            finished: false,
+        };
+        let outcome = self.wait_and_produce(&context, &source_key, &created).await;
+        guard.finish(outcome);
+    }
+
+    async fn wait_and_produce(self: &Arc<Self>, context: &SourceContext, source_key: &ThumbnailKey, created: &Created<JobOutput>) -> Outcome<JobOutput> {
+        let discarded = || Arc::new(Error::new(ErrorKind::UnexpectedError).with_message("the source job was discarded"));
+
+        // The next job of a source starts waiting for its slot when the job decoding the source ends.
+        if let Some(previous) = &created.previous {
+            let _ = previous.wait().await;
         }
 
+        // Ask for the slot with the class of the job, and again when an Interactive item raises it.
+        let pool = self.pool_for(context.kind);
+        let permit = loop {
+            let Some(class) = self.jobs.class_of(source_key, created.id) else {
+                return Err(discarded());
+            };
+            let acquire = pool.acquire(class).instrument(perf_span!("thumbnail_permit_wait", class = ?class));
+            tokio::select! {
+                permit = acquire => break permit,
+                () = created.wake.notified() => {}
+            }
+        };
+
+        let Some(specs) = self.jobs.start(source_key, created.id, |items| self.plan_job(context, items)) else {
+            return Err(discarded());
+        };
+        self.produce(context, specs, permit)
+            .instrument(perf_span!("thumbnail_production"))
+            .await
+            .map(Arc::new)
+            .map_err(Arc::new)
+    }
+
+    /// Makes the images of a job and puts them in the cache.
+    async fn produce(self: &Arc<Self>, context: &SourceContext, specs: Vec<OutputSpec>, permit: SchedulePermit) -> Result<JobOutput> {
+        // The images that another job stored meanwhile are not made again. Their items read them from the cache.
+        let specs = self.missing_outputs(specs).await;
+        if specs.is_empty() {
+            return Ok(JobOutput::default());
+        }
+        let results = self.convert_outputs(&context.target, context.kind, &specs, permit).await?;
+        let output = JobOutput::collect(&specs, results);
+        self.store(&specs, &output).instrument(perf_span!("thumbnail_store")).await;
+        Ok(output)
+    }
+
+    /// Gets the image of a file that cannot be cached, for its request alone. If the request is dropped, the generation stops.
+    async fn generate_alone(self: &Arc<Self>, target: &ResolvedStoragePath, kind: MediaKind, plan: &Plan, class: WorkClass) -> Result<CachedImage> {
+        let permit = self.pool_for(kind).acquire(class).instrument(perf_span!("thumbnail_permit_wait", class = ?class)).await;
+        let specs = self.requested_specs(plan, kind, None);
+        let results = self.convert_outputs(target, kind, &specs, permit).instrument(perf_span!("thumbnail_production")).await?;
+        let wanted = if plan.variant == ThumbnailVariant::Sprite {
+            OutputShape::Sprite
+        } else {
+            OutputShape::Single
+        };
+        specs
+            .iter()
+            .zip(results)
+            .find_map(|(spec, result)| (spec.shape == wanted).then_some(result))
+            .unwrap_or_else(|| Err(Error::new(ErrorKind::UnexpectedError).with_message("the image was not produced")))
+    }
+
+    /// Decodes the file once and makes every image of `specs` from it. The results are aligned with `specs`.
+    /// An error is a failure of the file, not of one image: the file could not be read or decoded.
+    async fn convert_outputs(&self, target: &ResolvedStoragePath, kind: MediaKind, specs: &[OutputSpec], permit: SchedulePermit) -> Result<Vec<Result<CachedImage>>> {
+        #[cfg(test)]
+        let _counted = self.probe.enter().await;
         // 変換が終わるまで、archive 内の file の lease を保つ。
-        let file = job.source.materialize_file().instrument(perf_span!("thumbnail_materialize")).await?;
-        let produced = async {
-            Ok::<_, Error>(match job.kind {
+        let file = target.materialize_file().instrument(perf_span!("thumbnail_materialize")).await?;
+        let results = async {
+            Ok::<_, Error>(match kind {
                 MediaKind::Image => {
                     let read = perf_span!("thumbnail_source_read", bytes = Empty);
                     let input = tokio::fs::read(file.path()).instrument(read.clone()).await?;
                     read.record("bytes", input.len());
-                    Produced {
-                        image: self.convert_one(input, &job.plan).await?,
-                        sprite: None,
-                    }
+                    self.convert_many(input, specs.to_vec()).await?
                 }
                 MediaKind::FfmpegImage | MediaKind::HeifImage => {
                     let decode = perf_span!("thumbnail_external_decode", bytes = Empty);
-                    let input = self.decode_ffmpeg_image(&job.source, file.path(), job.kind).instrument(decode.clone()).await?;
+                    let input = self.decode_ffmpeg_image(target, file.path(), kind).instrument(decode.clone()).await?;
                     decode.record("bytes", input.len());
-                    Produced {
-                        image: self.convert_one(input, &job.plan).await?,
-                        sprite: None,
-                    }
+                    self.convert_many(input, specs.to_vec()).await?
                 }
-                MediaKind::Video => self.produce_video(file.path(), &job.source, &job.plan).await?,
+                MediaKind::Video => self.produce_video(file.path(), target, specs.to_vec()).await?,
             })
         }
         .instrument(perf_span!("thumbnail_convert"))
@@ -425,92 +807,141 @@ impl Inner {
         #[cfg(test)]
         self.conversions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        self.store(&job, &produced).instrument(perf_span!("thumbnail_store")).await;
-        Ok(produced)
-    }
-
-    async fn cached(&self, job: &Job) -> Result<Option<Produced>> {
-        let Some(primary_key) = &job.primary_key else {
-            return Ok(None);
-        };
-        let Some(image) = self.cache.get(primary_key).await? else {
-            return Ok(None);
-        };
-        let sprite = match &job.sprite_key {
-            Some(key) => match self.cache.get(key).await? {
-                Some(sprite) => Some(sprite),
-                None => return Ok(None),
-            },
-            None => None,
-        };
-        Ok(Some(Produced { image, sprite }))
+        // The conversion is done, so the slot goes to the next generation while this one stores.
+        drop(permit);
+        Ok(results)
     }
 
     /// キャッシュへ入れられなくても、生成した画像は返す。
-    async fn store(&self, job: &Job, produced: &Produced) {
-        let targets = [
-            (&job.primary_key, Some(&produced.image), job.plan.bucket),
-            (&job.sprite_key, produced.sprite.as_ref(), CacheBucket::Thumbnail),
-        ];
-        for (key, image, bucket) in targets {
-            if let (Some(key), Some(image)) = (key, image)
-                && let Err(error) = self.cache.put(key, bucket, image).await
-            {
-                warn!(error = ?error, "failed to store a thumbnail in the cache");
+    ///
+    /// All entries go in one batch: the companions first, then the requested images, so that a small bucket
+    /// evicts the oldest companions and not the images that were just requested.
+    /// An entry that exceeds the bucket is skipped, and a failed store is logged. Neither fails the response.
+    async fn store(&self, specs: &[OutputSpec], output: &JobOutput) {
+        let mut entries: Vec<(&ThumbnailKey, CacheBucket, &CachedImage)> = Vec::new();
+        for requested in [false, true] {
+            for spec in specs.iter().filter(|spec| spec.requested == requested) {
+                if let Some(key) = &spec.key
+                    && let Some(image) = output.images.get(key)
+                {
+                    entries.push((key, spec.bucket, image));
+                }
             }
+        }
+
+        match self.cache.put_many(&entries).await {
+            Ok(stored) => {
+                if stored.contains(&false) {
+                    debug!("a thumbnail is larger than the cache bucket, so it is not stored");
+                }
+            }
+            Err(error) => warn!(error = ?error, "failed to store thumbnails in the cache"),
         }
     }
 
-    async fn convert_one(&self, input: Vec<u8>, plan: &Plan) -> Result<CachedImage> {
-        let options = plan.convert.clone();
+    /// Decodes the input once, then resizes and encodes every image of `specs` from that one decoded image.
+    /// The results are aligned with `specs`. A decode failure fails the whole call.
+    async fn convert_many(&self, input: Vec<u8>, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
         let span = Span::current();
-        let bytes = tokio::task::spawn_blocking(move || span.in_scope(|| ImageConverter::convert(&input, &options)))
-            .await
-            .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?
-            .map_err(Self::decode_error)?;
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| {
+                let image = ImageConverter::decode(&input).map_err(Self::decode_error)?;
+                Ok(specs
+                    .iter()
+                    .map(|spec| match spec.shape {
+                        OutputShape::Single => Self::convert_decoded(&image, &spec.convert).map_err(Self::decode_error),
+                        OutputShape::Sprite => Err(Error::new(ErrorKind::InvalidInput).with_message("a sprite sheet requires a video")),
+                    })
+                    .collect())
+            })
+        })
+        .await
+        .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?
+    }
+
+    fn convert_decoded(image: &DynamicImage, options: &ImageConvertOptions) -> Result<CachedImage> {
+        let resized = ImageConverter::resize_ref(image, options)?;
         Ok(CachedImage {
-            bytes: Bytes::from(bytes),
+            bytes: Bytes::from(ImageConverter::encode(&resized, options.format_type, options.quality)?),
             frame_count: None,
         })
     }
 
-    /// 動画のフレームを取り出し、サムネイルと、フレームを横に並べたスプライトシートを作る。
-    /// 表示用画像は、最初のフレームだけを使う。
-    async fn produce_video(&self, file: &Path, source: &ResolvedStoragePath, plan: &Plan) -> Result<Produced> {
+    /// 動画のフレームを取り出し、`specs` の画像を作る。結果は `specs` と同じ並びで返す。
+    /// サムネイルと表示用画像は最初のフレームから、スプライトシートはすべてのフレームを縮小して横に並べて作る。
+    /// スプライトシートがなければ、最初のフレームだけを取り出す。
+    ///
+    /// Only the first frame is kept at full size, for the single images and the heads of the sprite sheets. The other frames are decoded, resized, and dropped one at a time.
+    async fn produce_video(&self, file: &Path, source: &ResolvedStoragePath, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
         let duration = self.media_info.probe_video(source).await?.duration_secs;
         let mut positions = FRAME_SPEC.positions(duration);
-        if plan.variant == ThumbnailVariant::Display {
+        if !specs.iter().any(|spec| spec.shape == OutputShape::Sprite) {
             positions.truncate(1);
         }
         let frames = self.extract_frames(file, &positions).await?;
 
-        let plan = plan.clone();
         let span = Span::current();
-        tokio::task::spawn_blocking(move || -> Result<Produced> {
+        tokio::task::spawn_blocking(move || -> Result<Vec<Result<CachedImage>>> {
             let _entered = span.enter();
-            let resized = frames
-                .iter()
-                .map(|frame| ImageConverter::decode(frame).and_then(|image| ImageConverter::resize(image, &plan.convert)))
-                .collect::<Result<Vec<_>>>()
+            let first = frames
+                .first()
+                .ok_or_else(|| Error::new(ErrorKind::UnexpectedError).with_message("no frame was extracted from the video"))
+                .and_then(|frame| ImageConverter::decode(frame))
                 .map_err(Self::decode_error)?;
 
-            let image = CachedImage {
-                bytes: Bytes::from(ImageConverter::encode(&resized[0], plan.convert.format_type, plan.convert.quality)?),
-                frame_count: None,
-            };
-            let sprite = if plan.variant == ThumbnailVariant::Display {
-                None
-            } else {
-                Some(CachedImage {
-                    bytes: Bytes::from(ImageConverter::encode(
-                        &ImageConverter::tile_horizontally(&resized),
-                        plan.convert.format_type,
-                        plan.convert.quality,
-                    )?),
-                    frame_count: Some(resized.len() as u32),
+            // The head of a sprite sheet is its first frame, resized once and also used for the single image of the same conditions.
+            let heads: Vec<Option<Result<DynamicImage>>> = specs
+                .iter()
+                .map(|spec| (spec.shape == OutputShape::Sprite).then(|| ImageConverter::resize_ref(&first, &spec.convert).map(std::borrow::Cow::into_owned)))
+                .collect();
+            let mut results: Vec<Option<Result<CachedImage>>> = specs
+                .iter()
+                .map(|spec| {
+                    (spec.shape == OutputShape::Single).then(|| {
+                        let shared_head = specs.iter().zip(&heads).find_map(|(other, head)| match head {
+                            Some(Ok(head)) if other.shape == OutputShape::Sprite && other.convert == spec.convert => Some(head),
+                            _ => None,
+                        });
+                        match shared_head {
+                            Some(head) => ImageConverter::encode(head, spec.convert.format_type, spec.convert.quality).map(|bytes| CachedImage {
+                                bytes: Bytes::from(bytes),
+                                frame_count: None,
+                            }),
+                            None => Self::convert_decoded(&first, &spec.convert),
+                        }
+                        .map_err(Self::decode_error)
+                    })
                 })
-            };
-            Ok(Produced { image, sprite })
+                .collect();
+            drop(first);
+
+            for (index, (spec, head)) in specs.iter().zip(heads).enumerate() {
+                let Some(head) = head else {
+                    continue;
+                };
+                results[index] = Some(head.map_err(Self::decode_error).and_then(|head| {
+                    let mut resized = vec![head];
+                    for frame in &frames[1..] {
+                        resized.push(
+                            ImageConverter::decode(frame)
+                                .and_then(|image| ImageConverter::resize(image, &spec.convert))
+                                .map_err(Self::decode_error)?,
+                        );
+                    }
+                    Ok(CachedImage {
+                        bytes: Bytes::from(ImageConverter::encode(
+                            &ImageConverter::tile_horizontally(&resized),
+                            spec.convert.format_type,
+                            spec.convert.quality,
+                        )?),
+                        frame_count: Some(resized.len() as u32),
+                    })
+                }));
+            }
+            Ok(results
+                .into_iter()
+                .map(|result| result.expect("every output is made from the first frame or the frames"))
+                .collect())
         })
         .await
         .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?
@@ -842,6 +1273,43 @@ mod tests {
         assert_eq!(size(&before)?, (256, 128));
         assert_eq!(size(&after)?, (128, 256));
         assert_eq!(fixture.generator.conversions(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_current_key_is_the_key_of_the_image_and_costs_no_conversion_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let generator = &fixture.generator;
+        let album = fixture.dir.path().join("album");
+        std::fs::create_dir_all(&album)?;
+        let file = album.join("1.png");
+        write_png(&file, 600, 300)?;
+        std::fs::write(album.join("note.txt"), b"text")?;
+        let request = thumbnail_request(256, 256);
+        let resolve = |path: std::path::PathBuf| {
+            let fs = generator.inner.fs.clone();
+            async move { fs.resolve_entry(&nested(&path)).await }
+        };
+
+        let key = generator.current_key(resolve(file.clone()).await?, &request).await?.expect("a file has a key");
+        assert_eq!(generator.conversions(), 0, "the key is found without converting");
+        assert_eq!(generator.inner.pools.images.running(WorkClass::Foreground), 0);
+
+        // The key is the one the generated image carries, and a folder gives the key of its representative.
+        let generated = generator.generate(&nested(&file), &request).await?;
+        assert_eq!(generated.key.as_deref(), Some(key.as_str()));
+        assert_eq!(generator.current_key(resolve(album.clone()).await?, &request).await?, Some(key.clone()));
+
+        // A replaced file has another key, and a folder without an image has none to give.
+        write_png(&file, 300, 600)?;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let replaced = generator.current_key(resolve(file.clone()).await?, &request).await?;
+        assert_ne!(replaced, Some(key));
+        let empty = fixture.dir.path().join("empty");
+        std::fs::create_dir_all(&empty)?;
+        let error = generator.current_key(resolve(empty).await?, &request).await.unwrap_err();
+        assert_eq!(*error.kind(), ErrorKind::NotFound);
+        assert_eq!(generator.conversions(), 1, "only the generation above converted");
         Ok(())
     }
 
@@ -1670,6 +2138,718 @@ mod tests {
         let error = fixture.generator.generate(&nested(&video), &thumbnail_request(128, 128)).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError, "実行ファイルがないのは、利用者のファイルの問題ではない");
         fixture.generator.generate(&nested(&png), &thumbnail_request(128, 128)).await?;
+        Ok(())
+    }
+
+    // The tests below pin the companions: the thumbnails that one decode also produces. They request WebP, because the configured default
+    // format is WebP and a companion never matches a request for another format.
+
+    fn webp(variant: ThumbnailVariant, side: u32, resize: ImageResizeType) -> ThumbnailRequest {
+        request(variant, Some(side), Some(side), ImageFormatType::Webp, resize)
+    }
+
+    fn webp_display() -> ThumbnailRequest {
+        request(ThumbnailVariant::Display, None, None, ImageFormatType::Webp, ImageResizeType::Fit)
+    }
+
+    fn write_noisy_png(path: &Path, width: u32, height: u32) -> TestResult {
+        let mut output = Vec::new();
+        RgbaImage::from_fn(width, height, |x, y| {
+            let v = x.wrapping_mul(2654435761).wrapping_add(y.wrapping_mul(40503)) >> 8;
+            Rgba([v as u8, (v >> 3) as u8, (v >> 5) as u8, 255])
+        })
+        .write_to(&mut Cursor::new(&mut output), ImageFormat::Png)?;
+        std::fs::write(path, output)?;
+        Ok(())
+    }
+
+    async fn source_of(fixture: &Fixture, file: &Path) -> TestResult<SourceId> {
+        let inner = &fixture.generator.inner;
+        let resolved = inner.fs.resolve_entry(&nested(file)).await?;
+        let entry = resolved.get_entry().await?;
+        Ok(inner.source_id(&resolved, &entry).ok_or("the file has no cache key")?)
+    }
+
+    /// The key of a default-format thumbnail, which is what a companion is.
+    fn companion_key(source: &SourceId, kind: MediaKind, resize: ImageResizeType, side: u32) -> ThumbnailKey {
+        Plan {
+            variant: ThumbnailVariant::Thumbnail,
+            bucket: CacheBucket::Thumbnail,
+            convert: ImageConvertOptions {
+                format_type: ImageFormatType::Webp,
+                quality: 80,
+                resize_type: resize,
+                resampler_type: ImageResamplerType::Lanczos3,
+                anchor_position_type: ImageAnchorPositionType::Center,
+                width: Some(side),
+                height: Some(side),
+            },
+        }
+        .key(source, ThumbnailVariant::Thumbnail, kind)
+    }
+
+    fn companion_keys_of(fixture: &Fixture, source: &SourceId, kind: MediaKind, request: &ThumbnailRequest) -> TestResult<Vec<ThumbnailKey>> {
+        let inner = &fixture.generator.inner;
+        let plan = inner.plan(request)?;
+        Ok(inner.companion_plans(&plan, kind, source).into_iter().map(|(key, _)| key).collect())
+    }
+
+    #[tokio::test]
+    async fn videos_and_images_use_separate_external_process_pools_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let inner = &fixture.generator.inner;
+        let _held = inner.pools.videos.acquire(WorkClass::Foreground).await;
+        assert!(
+            inner.pool_for(MediaKind::Video).try_acquire(WorkClass::Foreground).is_none(),
+            "the video pool has one shared slot"
+        );
+        for kind in [MediaKind::FfmpegImage, MediaKind::HeifImage, MediaKind::Image] {
+            assert!(inner.pool_for(kind).try_acquire(WorkClass::Foreground).is_some(), "{kind:?}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn companion_plans_cover_the_filmstrip_sizes_and_the_other_shape_test() -> TestResult {
+        use ImageResizeType::{Crop, Fit};
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+        let source = source_of(&fixture, &file).await?;
+        let key = |resize, side| companion_key(&source, MediaKind::Image, resize, side);
+
+        let filmstrip = [key(Crop, 128), key(Fit, 128), key(Crop, 256), key(Fit, 256), key(Crop, 512), key(Fit, 512)];
+        let listing = companion_keys_of(&fixture, &source, MediaKind::Image, &webp(ThumbnailVariant::Thumbnail, 1024, Crop))?;
+        assert_eq!(
+            listing,
+            [filmstrip.as_slice(), &[key(Fit, 1024)]].concat(),
+            "the smallest three steps in both shapes and the other shape at 1024"
+        );
+        assert_eq!(listing.iter().collect::<HashSet<_>>().len(), listing.len(), "the keys are unique");
+
+        let display = companion_keys_of(&fixture, &source, MediaKind::Image, &webp_display())?;
+        assert_eq!(display, filmstrip, "a display request has only the smallest three steps in both shapes");
+
+        let at_the_smallest = companion_keys_of(&fixture, &source, MediaKind::Image, &webp(ThumbnailVariant::Thumbnail, 128, Crop))?;
+        assert_eq!(
+            at_the_smallest,
+            filmstrip[1..],
+            "the primary key is removed, and so is the other shape that is already a filmstrip size"
+        );
+        assert!(!at_the_smallest.contains(&key(Crop, 128)));
+
+        assert!(!listing.contains(&key(Crop, 1024)), "the primary key is not in the companions");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn companion_plans_of_a_sprite_leave_out_the_thumbnail_it_makes_and_never_the_sprite_key_test() -> TestResult {
+        use ImageResizeType::{Crop, Fit};
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+        let source = source_of(&fixture, &file).await?;
+        let key = |resize, side| companion_key(&source, MediaKind::Video, resize, side);
+
+        let request = webp(ThumbnailVariant::Sprite, 128, Fit);
+        let keys = companion_keys_of(&fixture, &source, MediaKind::Video, &request)?;
+        assert_eq!(keys, [key(Crop, 128), key(Crop, 256), key(Fit, 256), key(Crop, 512), key(Fit, 512)]);
+        let plan = fixture.generator.inner.plan(&request)?;
+        assert!(!keys.contains(&plan.key(&source, ThumbnailVariant::Sprite, MediaKind::Video)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn switching_the_shape_is_served_from_the_cache_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+
+        let crop = fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop))
+            .await?;
+        assert_eq!(size(&crop)?, (512, 512));
+        assert_eq!(fixture.generator.conversions(), 1);
+
+        let fit = fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Fit))
+            .await?;
+        assert_eq!(size(&fit)?, (512, 256));
+        assert_eq!(fixture.generator.conversions(), 1, "the other shape was made from the same decode");
+
+        let direct = self::fixture(ThumbnailOptions::default()).await?;
+        let other = direct.dir.path().join("a.png");
+        write_png(&other, 1000, 500)?;
+        let expected = direct
+            .generator
+            .generate(&nested(&other), &webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Fit))
+            .await?;
+        assert_eq!(fit.bytes, expected.bytes, "the companion is the same image as a direct request");
+        assert_eq!(fit.format, ImageFormatType::Webp);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_filmstrip_request_hits_after_a_listing_request_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 3000, 2000)?;
+
+        let listing = fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 1024, ImageResizeType::Crop))
+            .await?;
+        assert_eq!(size(&listing)?, (1024, 1024));
+        for side in [128, 256, 512] {
+            let thumbnail = fixture
+                .generator
+                .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, side, ImageResizeType::Crop))
+                .await?;
+            assert_eq!(size(&thumbnail)?, (side, side));
+        }
+        assert_eq!(fixture.generator.conversions(), 1);
+        assert_eq!((fixture.generator.ffmpeg_runs(), fixture.generator.heif_dec_runs()), (0, 0));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_display_request_warms_the_companions_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 3000, 2000)?;
+
+        fixture.generator.generate(&nested(&file), &webp_display()).await?;
+        for resize in [ImageResizeType::Crop, ImageResizeType::Fit] {
+            for side in [128, 256, 512] {
+                fixture.generator.generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, side, resize)).await?;
+            }
+        }
+        assert_eq!(fixture.generator.conversions(), 1, "the filmstrip is warmed by the display image's decode");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_primary_cache_hit_does_not_decode_for_companions_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+        let request = webp(ThumbnailVariant::Thumbnail, 1024, ImageResizeType::Crop);
+
+        fixture.generator.generate(&nested(&file), &request).await?;
+        let source = source_of(&fixture, &file).await?;
+        // Forget one companion so that a request for the primary would have a reason to decode again.
+        let forgotten = companion_key(&source, MediaKind::Image, ImageResizeType::Crop, 128);
+        fixture.generator.inner.cache.forget(&forgotten).await?;
+        assert!(!fixture.generator.inner.cache.contains(&forgotten).await?);
+
+        fixture.generator.generate(&nested(&file), &request).await?;
+        assert_eq!(fixture.generator.conversions(), 1, "the primary hit returns without generating companions");
+        assert!(!fixture.generator.inner.cache.contains(&forgotten).await?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_cached_companion_is_not_made_again_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+        let source = source_of(&fixture, &file).await?;
+
+        let sentinel = CachedImage {
+            bytes: Bytes::from_static(b"already cached"),
+            frame_count: None,
+        };
+        let cached = companion_key(&source, MediaKind::Image, ImageResizeType::Crop, 256);
+        fixture.generator.inner.cache.put(&cached, CacheBucket::Thumbnail, &sentinel).await?;
+
+        fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 1024, ImageResizeType::Crop))
+            .await?;
+        assert_eq!(
+            fixture.generator.inner.cache.get(&cached).await?,
+            Some(sentinel),
+            "the cached companion is neither encoded nor overwritten"
+        );
+        let fresh = companion_key(&source, MediaKind::Image, ImageResizeType::Fit, 256);
+        assert!(fixture.generator.inner.cache.contains(&fresh).await?, "the companions that were missing are made");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_companion_that_fails_to_convert_is_dropped_and_the_primary_survives_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+        let source = source_of(&fixture, &file).await?;
+        let inner = &fixture.generator.inner;
+        let plan = inner.plan(&webp(ThumbnailVariant::Thumbnail, 256, ImageResizeType::Crop))?;
+
+        let mut companions = inner.companion_plans(&plan, MediaKind::Image, &source);
+        let valid = companions.len();
+        // JPEG has no transparency, so it cannot be combined with a pad.
+        let invalid = ImageConvertOptions {
+            format_type: ImageFormatType::Jpeg,
+            resize_type: ImageResizeType::Pad,
+            ..companions[0].1.clone()
+        };
+        companions.insert(0, (companion_key(&source, MediaKind::Image, ImageResizeType::Manual, 64), invalid));
+
+        let companion = |(key, convert): (ThumbnailKey, ImageConvertOptions)| OutputSpec {
+            key: Some(key),
+            convert,
+            shape: OutputShape::Single,
+            bucket: CacheBucket::Thumbnail,
+            requested: false,
+        };
+        let mut specs = inner.requested_specs(&plan, MediaKind::Image, Some(&source));
+        specs.extend(companions.into_iter().map(companion));
+        let results = inner.convert_many(std::fs::read(&file)?, specs.clone()).await?;
+        assert_eq!(results.len(), specs.len(), "the results are aligned with the specs");
+        let primary = results[0].as_ref().expect("the primary is made");
+        assert_eq!(image::guess_format(&primary.bytes)?, ImageFormat::WebP);
+        assert!(results[1].is_err(), "the invalid companion fails to convert");
+
+        // The job drops the failed companion and keeps the primary.
+        let output = JobOutput::collect(&specs, results);
+        assert_eq!(output.images.len(), 1 + valid, "only the invalid companion is dropped");
+        assert!(output.errors.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_primary_that_fails_to_decode_fails_the_request_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("broken.png");
+        std::fs::write(&file, b"not a png")?;
+        let error = fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 256, ImageResizeType::Crop))
+            .await
+            .unwrap_err();
+        assert_eq!(*error.kind(), ErrorKind::UnsupportedType);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_bucket_that_cannot_hold_any_entry_still_returns_the_primary_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions {
+            cache_capacity_bytes: 1,
+            ..ThumbnailOptions::default()
+        })
+        .await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+
+        let thumbnail = fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop))
+            .await?;
+        assert_eq!(size(&thumbnail)?, (512, 512));
+        Ok(())
+    }
+
+    fn cached_bytes(root: &Path) -> u64 {
+        fn walk(dir: &Path) -> u64 {
+            std::fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| match entry.metadata() {
+                    Ok(meta) if meta.is_dir() => walk(&entry.path()),
+                    Ok(meta) => meta.len(),
+                    Err(_) => 0,
+                })
+                .sum()
+        }
+        walk(&root.join("files"))
+    }
+
+    #[tokio::test]
+    async fn a_small_bucket_keeps_the_primary_and_evicts_companions_test() -> TestResult {
+        let request = webp(ThumbnailVariant::Thumbnail, 1024, ImageResizeType::Crop);
+
+        // Measure the bytes of the primary and of all the companions with a bucket that holds everything.
+        let measured = fixture(ThumbnailOptions::default()).await?;
+        let file = measured.dir.path().join("a.png");
+        write_noisy_png(&file, 1500, 1200)?;
+        let primary = measured.generator.generate(&nested(&file), &request).await?.bytes.len() as u64;
+        let all = cached_bytes(&measured.dir.path().join("thumbnail"));
+        let companions = all - primary;
+        assert!(companions > 0);
+
+        // The primary fits, and all the companions together do not.
+        let capacity = primary + companions / 2;
+        let small = fixture(ThumbnailOptions {
+            cache_capacity_bytes: capacity,
+            ..ThumbnailOptions::default()
+        })
+        .await?;
+        let other = small.dir.path().join("a.png");
+        write_noisy_png(&other, 1500, 1200)?;
+        let first = small.generator.generate(&nested(&other), &request).await?;
+        assert_eq!(first.bytes.len() as u64, primary);
+        let stored = cached_bytes(&small.dir.path().join("thumbnail"));
+        assert!(stored <= capacity && stored < all, "the bucket evicted companions: {stored} of {all}, capacity {capacity}");
+
+        let second = small.generator.generate(&nested(&other), &request).await?;
+        assert_eq!(second, first);
+        assert_eq!(small.generator.conversions(), 1, "the primary stayed in the cache");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_failing_store_does_not_fail_the_response_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+        // Every store writes through the staging directory first.
+        std::fs::remove_dir_all(fixture.dir.path().join("thumbnail").join("staging"))?;
+
+        let thumbnail = fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop))
+            .await?;
+        assert_eq!(size(&thumbnail)?, (512, 512));
+        assert_eq!(image::guess_format(&thumbnail.bytes)?, ImageFormat::WebP);
+        Ok(())
+    }
+
+    // The tests of source jobs wait on the counters of `ConversionProbe` and on the pool, not on time,
+    // so a slow machine only makes them slower.
+    async fn until(condition: impl Fn() -> bool) {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !condition() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the condition was not reached in time");
+    }
+
+    /// Takes every slot of a pool, so that the jobs that ask for it wait.
+    /// The shared slots go first: Foreground does not start while Interactive runs, so it could not take them after the reserved slot.
+    async fn hold_all(pool: &crate::core::schedule::PriorityPool) -> Vec<SchedulePermit> {
+        let limits = pool.limits();
+        let mut held = Vec::new();
+        for _ in 0..limits.shared {
+            held.push(pool.acquire(WorkClass::Foreground).await);
+        }
+        for _ in 0..limits.interactive {
+            held.push(pool.acquire(WorkClass::Interactive).await);
+        }
+        held
+    }
+
+    fn placements(fixture: &Fixture) -> usize {
+        fixture.generator.inner.probe.placements.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// How many conversions reached the gate, that is, how many jobs started to decode.
+    fn reached(fixture: &Fixture) -> usize {
+        fixture.generator.inner.probe.reached.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn peak(fixture: &Fixture) -> usize {
+        fixture.generator.inner.probe.peak.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Holds the conversions that start from now on at the gate.
+    fn close_the_gate(fixture: &Fixture) {
+        fixture.generator.inner.probe.gate.forget_permits(tokio::sync::Semaphore::MAX_PERMITS);
+    }
+
+    fn open_the_gate(fixture: &Fixture) {
+        fixture.generator.inner.probe.gate.add_permits(tokio::sync::Semaphore::MAX_PERMITS);
+    }
+
+    fn spawn_generate(fixture: &Fixture, file: &Path, request: ThumbnailRequest) -> tokio::task::JoinHandle<Result<Thumbnail>> {
+        let generator = fixture.generator.clone();
+        let path = nested(file);
+        tokio::spawn(async move { generator.generate(&path, &request).await })
+    }
+
+    #[tokio::test]
+    async fn requests_for_two_sizes_that_wait_for_a_slot_share_one_job_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1200, 800)?;
+        let held = hold_all(&fixture.generator.inner.pools.images).await;
+
+        // 1024 is not a companion of 512, so only a job that holds both requests can make both from one decode.
+        let large = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 1024, ImageResizeType::Crop));
+        let small = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 128, ImageResizeType::Crop));
+        until(|| placements(&fixture) == 2).await;
+        drop(held);
+
+        assert_eq!(size(&large.await??)?, (1024, 1024));
+        assert_eq!(size(&small.await??)?, (128, 128));
+        assert_eq!(fixture.generator.conversions(), 1);
+        until(|| fixture.generator.inner.jobs.sources() == 0).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_request_for_a_companion_of_the_running_job_waits_for_it_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1200, 800)?;
+        close_the_gate(&fixture);
+
+        let large = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop));
+        until(|| reached(&fixture) == 1).await;
+        // 128 `crop` is a companion of the running job, which has fixed what it makes.
+        let small = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 128, ImageResizeType::Crop));
+        until(|| placements(&fixture) == 2).await;
+        assert_eq!(reached(&fixture), 1, "the second request did not start a decode of its own");
+        open_the_gate(&fixture);
+
+        assert_eq!(size(&large.await??)?, (512, 512));
+        assert_eq!(size(&small.await??)?, (128, 128));
+        assert_eq!(fixture.generator.conversions(), 1);
+        assert_eq!(peak(&fixture), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn other_sizes_and_display_images_wait_for_the_running_job_and_then_share_the_next_one_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1200, 800)?;
+        close_the_gate(&fixture);
+
+        let first = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop));
+        until(|| reached(&fixture) == 1).await;
+        // 1024 is not a companion of the running job, and a display image is not one either.
+        let other_size = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 1024, ImageResizeType::Crop));
+        let display = spawn_generate(&fixture, &file, webp_display());
+        until(|| placements(&fixture) == 3).await;
+        assert_eq!(reached(&fixture), 1, "the source is decoded by one job at a time");
+        open_the_gate(&fixture);
+
+        assert_eq!(size(&first.await??)?, (512, 512));
+        assert_eq!(size(&other_size.await??)?, (1024, 1024));
+        assert_eq!(image::guess_format(&display.await??.bytes)?, ImageFormat::WebP);
+        assert_eq!(fixture.generator.conversions(), 2, "the running job, and one job for the two requests that waited");
+        assert_eq!(peak(&fixture), 1, "two conversions of one source never ran at the same time");
+        until(|| fixture.generator.inner.jobs.sources() == 0).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_interactive_request_moves_its_waiting_job_ahead_of_an_older_foreground_job_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let (older, newer) = (fixture.dir.path().join("a.png"), fixture.dir.path().join("b.png"));
+        write_png(&older, 1000, 500)?;
+        write_png(&newer, 1000, 500)?;
+        let inner = &fixture.generator.inner;
+        let pool = &inner.pools.images;
+        let mut held = hold_all(pool).await;
+        close_the_gate(&fixture);
+
+        // Both jobs wait as Foreground, the older one first.
+        let older_task = spawn_generate(&fixture, &older, webp(ThumbnailVariant::Thumbnail, 256, ImageResizeType::Crop));
+        until(|| pool.waiting(WorkClass::Foreground) == 1).await;
+        let newer_task = spawn_generate(&fixture, &newer, webp(ThumbnailVariant::Thumbnail, 256, ImageResizeType::Crop));
+        until(|| pool.waiting(WorkClass::Foreground) == 2).await;
+        // The display image of the newer file joins its waiting job, which then asks for its slot as Interactive.
+        let display = spawn_generate(&fixture, &newer, webp_display());
+        until(|| pool.waiting(WorkClass::Interactive) == 1 && pool.waiting(WorkClass::Foreground) == 1).await;
+
+        // One shared slot frees up. It goes to the Interactive job, not to the Foreground job that has waited longer.
+        drop(held.remove(0));
+        until(|| reached(&fixture) == 1).await;
+        assert_eq!(pool.running(WorkClass::Interactive), 2, "the held slot and the newer file's job");
+        assert_eq!(pool.waiting(WorkClass::Foreground), 1, "the older file's job still waits");
+        assert!(!older_task.is_finished());
+
+        open_the_gate(&fixture);
+        drop(held);
+        assert_eq!(size(&newer_task.await??)?, (256, 256));
+        assert_eq!(image::guess_format(&display.await??.bytes)?, ImageFormat::WebP);
+        assert_eq!(size(&older_task.await??)?, (256, 256));
+        assert_eq!(fixture.generator.conversions(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_waiting_job_whose_requests_were_all_cut_starts_nothing_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+        let pool = &fixture.generator.inner.pools.images;
+        let held = hold_all(pool).await;
+
+        let first = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop));
+        let second = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 128, ImageResizeType::Crop));
+        until(|| placements(&fixture) == 2 && pool.waiting(WorkClass::Foreground) == 1).await;
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        assert_eq!(fixture.generator.inner.jobs.sources(), 1, "the second request still waits in the job");
+        second.abort();
+        assert!(second.await.unwrap_err().is_cancelled());
+
+        until(|| fixture.generator.inner.jobs.sources() == 0 && pool.waiting(WorkClass::Foreground) == 0).await;
+        drop(held);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(reached(&fixture), 0);
+        assert_eq!(fixture.generator.conversions(), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_job_that_started_stores_its_images_when_its_requests_were_all_cut_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+        let source = source_of(&fixture, &file).await?;
+        close_the_gate(&fixture);
+
+        let task = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop));
+        until(|| reached(&fixture) == 1).await;
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        open_the_gate(&fixture);
+
+        let primary = companion_key(&source, MediaKind::Image, ImageResizeType::Crop, 512);
+        until(|| fixture.generator.conversions() == 1).await;
+        // The store follows the conversion.
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !fixture.generator.inner.cache.contains(&primary).await.unwrap_or(false) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+        until(|| fixture.generator.inner.jobs.sources() == 0).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_file_without_a_cache_key_is_generated_for_its_request_alone_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("a.png");
+        write_png(&file, 1000, 500)?;
+        let inner = &fixture.generator.inner;
+        let target = inner.fs.resolve_entry(&nested(&file)).await?;
+        let plan = inner.plan(&webp(ThumbnailVariant::Thumbnail, 256, ImageResizeType::Crop))?;
+
+        let image = inner.clone().generate_alone(&target, MediaKind::Image, &plan, WorkClass::Foreground).await?;
+        assert_eq!(image::guess_format(&image.bytes)?, ImageFormat::WebP);
+        assert_eq!(cached_bytes(&fixture.dir.path().join("thumbnail")), 0, "an image without a key is not stored");
+
+        // If the request is cut while it waits for a slot, nothing is generated.
+        let held = hold_all(&inner.pools.images).await;
+        let waiting = {
+            let (inner, target, plan) = (inner.clone(), target.clone(), plan.clone());
+            tokio::spawn(async move { inner.generate_alone(&target, MediaKind::Image, &plan, WorkClass::Foreground).await })
+        };
+        until(|| inner.pools.images.waiting(WorkClass::Foreground) == 1).await;
+        waiting.abort();
+        assert!(waiting.await.unwrap_err().is_cancelled());
+        until(|| inner.pools.images.waiting(WorkClass::Foreground) == 0).await;
+        drop(held);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(fixture.generator.conversions(), 1, "only the first request was converted");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_source_that_cannot_be_decoded_fails_every_request_for_it_test() -> TestResult {
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("broken.png");
+        std::fs::write(&file, b"not a png")?;
+        let held = hold_all(&fixture.generator.inner.pools.images).await;
+
+        let first = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop));
+        let second = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 1024, ImageResizeType::Crop));
+        until(|| placements(&fixture) == 2).await;
+        drop(held);
+
+        for task in [first, second] {
+            assert_eq!(*task.await?.unwrap_err().kind(), ErrorKind::UnsupportedType);
+        }
+        until(|| fixture.generator.inner.jobs.sources() == 0).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_ffmpeg_image_fans_out_from_one_ffmpeg_run_test() -> TestResult {
+        if skip_without_ffmpeg() {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let file = fixture.dir.path().join("photo.jxl");
+        write_png(&file, 1000, 500)?;
+
+        fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop))
+            .await?;
+        let fit = fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Fit))
+            .await?;
+        fixture
+            .generator
+            .generate(&nested(&file), &webp(ThumbnailVariant::Thumbnail, 128, ImageResizeType::Crop))
+            .await?;
+        assert_eq!(size(&fit)?, (512, 256));
+        assert_eq!(fixture.generator.conversions(), 1);
+        assert_eq!(fixture.generator.ffmpeg_runs(), 1, "the companions do not run ffmpeg again");
+        assert_eq!(fixture.generator.heif_dec_runs(), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_video_fans_out_from_the_first_frame_test() -> TestResult {
+        if skip_without_ffmpeg() {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let video = fixture.dir.path().join("clip.mp4");
+        write_video(&video, 10, 320, 240)?;
+
+        let crop = fixture
+            .generator
+            .generate(&nested(&video), &webp(ThumbnailVariant::Thumbnail, 128, ImageResizeType::Crop))
+            .await?;
+        assert_eq!(size(&crop)?, (128, 128));
+        let fit = fixture
+            .generator
+            .generate(&nested(&video), &webp(ThumbnailVariant::Thumbnail, 128, ImageResizeType::Fit))
+            .await?;
+        assert_eq!(size(&fit)?, (128, 96));
+        let large = fixture
+            .generator
+            .generate(&nested(&video), &webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop))
+            .await?;
+        assert_eq!(size(&large)?, (512, 512));
+        assert_eq!(fixture.generator.ffmpeg_runs(), 1, "the other shape and the filmstrip sizes come from the same run");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_video_sprite_warms_the_same_companions_and_keeps_its_frames_test() -> TestResult {
+        if skip_without_ffmpeg() {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let video = fixture.dir.path().join("clip.mp4");
+        write_video(&video, 10, 320, 240)?;
+
+        let sprite = fixture
+            .generator
+            .generate(&nested(&video), &webp(ThumbnailVariant::Sprite, 128, ImageResizeType::Fit))
+            .await?;
+        assert_eq!(sprite.frame_count, Some(8));
+        assert_eq!(size(&sprite)?, (8 * 128, 96));
+        for (side, resize) in [(128, ImageResizeType::Crop), (256, ImageResizeType::Fit), (512, ImageResizeType::Crop)] {
+            fixture.generator.generate(&nested(&video), &webp(ThumbnailVariant::Thumbnail, side, resize)).await?;
+        }
+        assert_eq!(fixture.generator.ffmpeg_runs(), 1);
+        assert_eq!(fixture.generator.conversions(), 1);
         Ok(())
     }
 }

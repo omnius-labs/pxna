@@ -10,10 +10,18 @@ json = false
 dir = "../../ui-web/dist"
 # insecure_cookie = true # Drops Secure and __Host-. Only when the path is protected by other means, such as Tailscale
 
+# [scheduler]
+# image_slots = 4               # Concurrent image conversions for the viewer and thumbnails
+# image_interactive_slots = 1   # Extra conversions only for the image the viewer shows now
+# process_slots = 2             # Concurrent ffmpeg and heif-dec runs for images (HEIF, AVIF, JXL, JP2)
+# process_interactive_slots = 1 # Extra runs only for the image the viewer shows now
+# video_slots = 1               # Concurrent ffmpeg runs for videos, apart from process_slots
+# video_interactive_slots = 1   # Extra video runs only for what the viewer shows now
+
 # [media]
 # ffmpeg_path = "ffmpeg"
 # ffprobe_path = "ffprobe"
-# heif_dec_path = "heif-dec" # libheif. Used for HEIC/AVIF with alpha and as a fallback
+# heif_dec_path = "heif-dec" # libheif 1.17 or newer. Used for HEIC/AVIF with alpha and as a fallback; TIFF when built with libtiff (1.19+), level-0 PNG otherwise
 
 # [video]
 # max_concurrent_transcodes = 1

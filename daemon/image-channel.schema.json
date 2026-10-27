@@ -1,0 +1,149 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://pxna.invalid/image-channel.schema.json",
+    "title": "ImageChannelContract",
+    "description": "Everything that crosses the image channel (GET /api/v1/image-channel, upgraded to a WebSocket). The client sends the text messages of ClientMessage. The server sends the text messages of ServerMessage and the binary frames of an image: a 4-byte big-endian length, a FrameHeader as UTF-8 JSON of that length, and one chunk of the image. This is the contract; docs/design/image-channel.md gives the reasons.",
+    "anyOf": [
+        { "$ref": "#/$defs/ClientMessage" },
+        { "$ref": "#/$defs/ServerMessage" },
+        { "$ref": "#/$defs/FrameHeader" }
+    ],
+    "$defs": {
+        "ItemId": {
+            "title": "ItemId",
+            "description": "Names an item within one connection. The client chooses it, and every message about the item carries it.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+        },
+        "ItemKind": {
+            "title": "ItemKind",
+            "description": "Which image of the entry an item wants. A sprite sheet is for a video only.",
+            "type": "string",
+            "enum": ["thumbnail", "sprite", "display"]
+        },
+        "Shape": {
+            "title": "Shape",
+            "description": "How a thumbnail or a sprite sheet fits its square: crop fills it, fit keeps the aspect ratio inside it. A display image always fits.",
+            "type": "string",
+            "enum": ["crop", "fit"]
+        },
+        "RequestClass": {
+            "title": "RequestClass",
+            "description": "How urgently an item is wanted: shown now in the viewer, on screen, or expected soon.",
+            "type": "string",
+            "enum": ["interactive", "visible", "prefetch"]
+        },
+        "ErrorKind": {
+            "title": "ErrorKind",
+            "description": "The kind of the API's error response (openapi.yaml, ErrorKind).",
+            "type": "string",
+            "enum": [
+                "InternalServerError",
+                "InvalidRequest",
+                "UnsupportedType",
+                "LimitExceeded",
+                "NotFound",
+                "Unauthorized",
+                "Forbidden",
+                "PasswordRequired",
+                "AlreadyInitialized",
+                "RangeNotSatisfiable",
+                "Conflict",
+                "PayloadTooLarge",
+                "InsufficientStorage",
+                "Timeout"
+            ]
+        },
+        "WantedItem": {
+            "title": "WantedItem",
+            "description": "One image the client wants. The output format, resampler, and anchor are the server's configuration, so an item does not carry them. Width and height round up to the server's size steps; a thumbnail or a sprite sheet without them is 256, and a display image without them fits the largest display size.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "libraryId", "path", "kind", "class", "order"],
+            "properties": {
+                "id": { "$ref": "#/$defs/ItemId" },
+                "libraryId": { "type": "string", "minLength": 1 },
+                "path": { "description": "The Library-relative path of a file, a folder, or an archive.", "type": "string", "minLength": 1 },
+                "kind": { "$ref": "#/$defs/ItemKind" },
+                "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+                "height": { "type": "integer", "minimum": 1, "maximum": 4096 },
+                "shape": { "$ref": "#/$defs/Shape", "default": "crop" },
+                "class": { "$ref": "#/$defs/RequestClass" },
+                "order": { "description": "The place of the item within its class, smaller first.", "type": "number", "minimum": 0 },
+                "etag": { "description": "The ETag of the image the client holds for this item. If it is still the current one, the server answers unchanged and sends no image.", "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+        },
+        "Want": {
+            "title": "Want",
+            "description": "Adds items to the wanted set. An id that is already in the set may only change its class, order, and etag; changing what it asks for closes the channel with 4400.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "items"],
+            "properties": {
+                "type": { "const": "want" },
+                "items": { "type": "array", "items": { "$ref": "#/$defs/WantedItem" }, "maxItems": 4096 }
+            }
+        },
+        "Drop": {
+            "title": "Drop",
+            "description": "Removes items from the wanted set. An id that is not in the set is ignored.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "ids"],
+            "properties": {
+                "type": { "const": "drop" },
+                "ids": { "type": "array", "items": { "$ref": "#/$defs/ItemId" }, "maxItems": 4096 }
+            }
+        },
+        "ClientMessage": {
+            "title": "ClientMessage",
+            "description": "A text message from the client, at most 256 KiB.",
+            "oneOf": [{ "$ref": "#/$defs/Want" }, { "$ref": "#/$defs/Drop" }]
+        },
+        "Unchanged": {
+            "title": "Unchanged",
+            "description": "The image the client holds for the item is still the current one. The item leaves the wanted set.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "id"],
+            "properties": {
+                "type": { "const": "unchanged" },
+                "id": { "$ref": "#/$defs/ItemId" }
+            }
+        },
+        "Failed": {
+            "title": "Failed",
+            "description": "The image of the item could not be made. The item leaves the wanted set.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "id", "kind"],
+            "properties": {
+                "type": { "const": "failed" },
+                "id": { "$ref": "#/$defs/ItemId" },
+                "kind": { "$ref": "#/$defs/ErrorKind" },
+                "message": { "type": "string" }
+            }
+        },
+        "ServerMessage": {
+            "title": "ServerMessage",
+            "description": "A text message from the server.",
+            "oneOf": [{ "$ref": "#/$defs/Unchanged" }, { "$ref": "#/$defs/Failed" }]
+        },
+        "FrameHeader": {
+            "title": "FrameHeader",
+            "description": "The header of a binary frame, which carries the chunk of an image from offset. The image is complete when the chunks cover total bytes. Frames for an item that the client has dropped are ignored.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "etag", "contentType", "frameCount", "offset", "total"],
+            "properties": {
+                "id": { "$ref": "#/$defs/ItemId" },
+                "etag": { "description": "The ETag of the image, or null for an image that has no cache key and cannot be revalidated.", "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+                "contentType": { "type": "string", "enum": ["image/webp", "image/jpeg", "image/png"] },
+                "frameCount": { "description": "How many frames a sprite sheet holds, and null for any other image.", "type": ["integer", "null"], "minimum": 1 },
+                "offset": { "type": "integer", "minimum": 0 },
+                "total": { "type": "integer", "minimum": 0 }
+            }
+        }
+    }
+}

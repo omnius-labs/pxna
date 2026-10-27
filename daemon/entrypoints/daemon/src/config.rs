@@ -129,6 +129,8 @@ struct SchedulerConfigToml {
     pub image_interactive_slots: Option<usize>,
     pub process_slots: Option<usize>,
     pub process_interactive_slots: Option<usize>,
+    pub video_slots: Option<usize>,
+    pub video_interactive_slots: Option<usize>,
 }
 
 impl SchedulerConfigToml {
@@ -139,6 +141,8 @@ impl SchedulerConfigToml {
             image_interactive_slots: self.image_interactive_slots.unwrap_or(defaults.image_interactive_slots),
             process_slots: self.process_slots.unwrap_or(defaults.process_slots),
             process_interactive_slots: self.process_interactive_slots.unwrap_or(defaults.process_interactive_slots),
+            video_slots: self.video_slots.unwrap_or(defaults.video_slots),
+            video_interactive_slots: self.video_interactive_slots.unwrap_or(defaults.video_interactive_slots),
         };
         options.validate().map_err(|error| {
             let message = error.message().unwrap_or_default().to_string();
@@ -192,7 +196,8 @@ impl ThumbnailConfigToml {
             ("max_concurrent_videos", self.max_concurrent_videos.is_some()),
         ] {
             if moved {
-                return Err(Error::new(ErrorKind::InvalidFormat).with_message(format!("invalid [thumbnail]: {key} was replaced by image_slots and process_slots in [scheduler]")));
+                let replacement = if key == "max_concurrent_videos" { "video_slots" } else { "image_slots" };
+                return Err(Error::new(ErrorKind::InvalidFormat).with_message(format!("invalid [thumbnail]: {key} was replaced by {replacement} in [scheduler]")));
             }
         }
         let defaults = ThumbnailOptions::default();
@@ -530,21 +535,33 @@ mod tests {
     #[tokio::test]
     async fn scheduler_defaults_overrides_and_moved_thumbnail_keys_test() -> TestResult {
         assert_eq!(load(BASE_TOML).await?.scheduler, ScheduleOptions::default());
-        let config = load(&format!("{BASE_TOML}\n[scheduler]\nimage_slots = 2\nprocess_interactive_slots = 0\n")).await?;
+        let config = load(&format!(
+            "{BASE_TOML}\n[scheduler]\nimage_slots = 2\nprocess_interactive_slots = 0\nvideo_slots = 3\nvideo_interactive_slots = 2\n"
+        ))
+        .await?;
         assert_eq!(
             config.scheduler,
             ScheduleOptions {
                 image_slots: 2,
                 process_interactive_slots: 0,
+                video_slots: 3,
+                video_interactive_slots: 2,
                 ..Default::default()
             }
         );
         load(&format!("{BASE_TOML}\n[scheduler]\nprocess_slots = 0\n"))
             .await
             .expect_err("a pool needs a shared slot");
+        load(&format!("{BASE_TOML}\n[scheduler]\nvideo_slots = 0\n"))
+            .await
+            .expect_err("the video pool needs a shared slot");
         for key in ["max_concurrent_images", "max_concurrent_videos"] {
             let error = load(&format!("{BASE_TOML}\n[thumbnail]\n{key} = 2\n")).await.expect_err("moved key");
-            assert!(error.message().unwrap_or_default().contains("[scheduler]"), "{key}: {error:?}");
+            let replacement = if key == "max_concurrent_videos" { "video_slots" } else { "image_slots" };
+            assert!(
+                error.message().unwrap_or_default().contains(&format!("replaced by {replacement} in [scheduler]")),
+                "{key}: {error:?}"
+            );
         }
         Ok(())
     }

@@ -127,12 +127,14 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_System_Threading",
 ] }
 
-axum = { version = "0.8", features = ["multipart"] }
+axum = { version = "0.8", features = ["multipart", "ws"] }
 axum-extra = { version = "0.12", features = [
   "cookie",
   "query",
   "typed-header",
 ] }
 bytes = "1"
+jsonschema = { version = "0.60", default-features = false }
+tokio-tungstenite = "0.30"
 headers = "0.4"
 http = "1"

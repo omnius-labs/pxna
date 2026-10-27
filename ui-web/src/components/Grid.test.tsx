@@ -3,13 +3,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-
+import { ImageWants } from "../images/wants";
 import { type Entry, entryPlace, type FolderListing } from "../library/entries";
 import type { ListingSource } from "../library/listing";
 import { emptySelection } from "../library/selection";
 import { CROSS_LIBRARY_SCOPE, entryAddress } from "../location";
 import { stubResizeObserver } from "../testing/preferences";
-import { ThumbnailQueue } from "../thumbnails/queue";
 import { Grid } from "./Grid";
 
 const mock = vi.hoisted(() => ({ get: vi.fn(), first: 0, last: 2 }));
@@ -240,7 +239,7 @@ it("グリッドは結果があるときも打ち切りを示す", async () => {
 });
 
 it("only wants visible folder/archive thumbnails while retaining image/video prefetch", async () => {
-    const spy = vi.spyOn(ThumbnailQueue.prototype, "setWanted").mockImplementation(() => {});
+    const spy = vi.spyOn(ImageWants.prototype, "setWanted").mockImplementation(() => {});
     const data: FolderListing = {
         entries: Array.from({ length: 60 }, (_, i) => ({
             name: i % 4 === 0 ? `d${i}` : i % 4 === 1 ? `a${i}.zip` : i % 4 === 2 ? `i${i}.png` : `v${i}.mp4`,

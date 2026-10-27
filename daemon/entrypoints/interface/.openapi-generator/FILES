@@ -6,6 +6,7 @@ src/apis/auth.rs
 src/apis/files.rs
 src/apis/folders.rs
 src/apis/health.rs
+src/apis/image_channel.rs
 src/apis/libraries.rs
 src/apis/mod.rs
 src/apis/operations.rs
@@ -15,7 +16,6 @@ src/apis/rating.rs
 src/apis/search.rs
 src/apis/setup.rs
 src/apis/tags.rs
-src/apis/thumbnails.rs
 src/apis/timeline.rs
 src/apis/uploads.rs
 src/apis/video.rs

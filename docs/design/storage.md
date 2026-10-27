@@ -828,7 +828,7 @@ Each resource is one pool of a single scheduler. A pool has shared slots for Int
 Foreground does not start while Interactive runs or waits in the same pool. Background does not start while Interactive or Foreground runs or waits in any pool. Work that started is not stopped, and within a class work starts in arrival order.
 Interactive and Foreground never wait for a Background slot, so Background work that holds one pool while it waits for another does not stall them.
 The pools are the listing workers and the listing streams below, image conversion, and ffmpeg and heif-dec runs ([Thumbnail Design §7](./thumbnail.md#7-order-and-concurrency-of-generation)).
-While a video segment the player waits for is not yet written, and while the media info of an opened file is read, the ffmpeg pool counts Interactive work without using a slot.
+While a video segment the player waits for is not yet written, and while the media info of an opened file is read, the video pool (`video_slots`) counts Interactive work for a video or a file of unknown type, and the image process pool (`process_slots`) counts it for an image, without using a slot.
 The child processes that Background work starts run with nice 10.
 
 Across all Libraries and all requests of the same local driver, the attribute-fetch batches of listings, the batches of name enumeration, and the leaf attribute fetches of detail fetching are summed. 3 shared slots and 1 Background slot are reserved, for a total of at most 4 slots.

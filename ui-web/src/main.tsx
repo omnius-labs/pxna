@@ -4,21 +4,27 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { clientTimings } from "./api/clientTimings";
-import { createAppQueryClient } from "./auth/unauthorized";
+import { createAppQueryClient, leaveForLogin } from "./auth/unauthorized";
 import { Toaster } from "./components/ui/sonner";
 import "./index.css";
+import { createBrowserImageChannel } from "./images/channel";
+import { notifyImageSessionEnded, onImageSessionEnded, setImageSource } from "./images/source";
 import { followSystemTheme } from "./library/theme";
 import { createAppRouter } from "./router";
 
 followSystemTheme();
 
-const queryClient = createAppQueryClient(() => ({
+const navigator = () => ({
     currentHref: () => router.state.location.href,
     currentPathname: () => router.state.location.pathname,
-    toLogin: (redirect) => void router.navigate({ to: "/login", search: { redirect }, replace: true }),
-}));
+    toLogin: (redirect: string) => void router.navigate({ to: "/login", search: { redirect }, replace: true }),
+});
+const queryClient = createAppQueryClient(navigator);
 const router = createAppRouter(queryClient);
 clientTimings.attach(queryClient);
+// image channel が、セッションが終わったと言って閉じられたら、API の 401 と同じようにログインへ移す。
+onImageSessionEnded(() => leaveForLogin(queryClient, navigator()));
+setImageSource(createBrowserImageChannel(notifyImageSessionEnded));
 
 const root = document.getElementById("root");
 if (!root) {

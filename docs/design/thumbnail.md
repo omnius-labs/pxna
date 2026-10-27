@@ -13,12 +13,13 @@ The definitions of words are not in this document.
 | --- | --- |
 | This document | Generating thumbnails, sprite sheets, and display images, determining targets, the order and concurrency of generation, caches, reasons for adoption, deferred items |
 | [design.md](../design.md) | Pxna's overall scope, overall structure, boundaries between concerns, and cross-cutting design decisions |
-| [Client Design](./client.md) | Which tile's thumbnail to request and when, and when to cancel |
+| [Image Channel Design](./image-channel.md) | How the client says which images it wants, request classes and the order of items, delivery, revalidation |
+| [Client Design](./client.md) | Which images each part of the web client wants and when, and the client's image cache |
 | [Video Playback Design](./video.md) | Media info and conversion for playing videos in the viewer |
 | [Storage Layer Design](./storage.md) | Resolving `NestedPath`, materializing entries in archives, the definition of `EntryCacheKey` |
 | [terms.md](../terms.md) | Definitions of terms |
 | [issues.md](../issues.md) | Clear defects confirmed in code and handling policies |
-| [daemon/openapi.yaml](../../daemon/openapi.yaml) | The authoritative thumbnail API paths, parameters, and status codes |
+| [daemon/image-channel.schema.json](../../daemon/image-channel.schema.json) | The authoritative fields and values of an item and of the images returned for it |
 
 The entry point of the design document family is [design.md](../design.md).
 
@@ -30,8 +31,8 @@ If you want to know what works now, read §11 first.
 
 ## 2. Responsibilities and Boundaries
 
-This document covers the span from receiving a checked `NestedPath` to returning the converted image as a response.
-Images, videos, folders, and archives are all requested from the client through the same thumbnail API, and `ThumbnailGenerator` chooses the generation method according to the kind of target.
+This document covers the span from receiving an item with a checked `NestedPath` to handing the converted image to the image channel.
+Images, videos, folders, and archives are all wanted by the client through the image channel ([Image Channel Design](./image-channel.md)), and `ThumbnailGenerator` chooses the generation method according to the kind of target.
 
 Pxna's purpose is to quickly browse files on a home server from a phone or a browser ([design.md §2](../design.md#2-what-pxna-is)).
 If the server shrinks before sending, the client can draw a listing without reading the original files.
@@ -43,7 +44,8 @@ The boundaries with other concerns are as follows.
 | --- | --- |
 | The procedure for building a `NestedPath` from a Library-relative path and checking the boundary | [design.md §4.3](../design.md#43-resolving-library-and-archive-boundaries) |
 | How to turn an entry in an archive into a readable file, and its cache | [Storage Layer Design §5.2](./storage.md#52-default-implementations-centered-on-materialize) |
-| Which tiles to request first, and when to cancel requests for tiles that left the screen | [Client Design §4](./client.md#4-thumbnail-requests) |
+| Which images the client wants, and when it drops them | [Client Design §4](./client.md#4-thumbnail-requests) |
+| The order in which wanted items reach generation, and how images are sent and revalidated | [Image Channel Design §5](./image-channel.md#5-request-classes-and-order), [§6](./image-channel.md#6-delivery), [§7](./image-channel.md#7-revalidation) |
 | How name order is compared | [design.md §11.1](../design.md#compare-name-order-in-natural-order) |
 | The mapping from the engine's error kinds to HTTP status | [design.md §4.4](../design.md#44-error-model-and-http-mapping) |
 
@@ -85,6 +87,10 @@ Pointing at the first stream gives only one tile, so ffmpeg is not given a strea
 ffmpeg 9 also applies the rotation of `irot`.
 heif-dec assembles the grid and applies the rotation and alpha for HEIC/HEIF/AVIF with alpha ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
 
+One decode of an image or a video also produces the **companions**: the thumbnails of the smallest three size steps in both `crop` and `fit`, and, when the request is a thumbnail or a sprite sheet, the other shape at the requested size ([§8.3](#83-keys), [§10.1](#decode-once-and-warm-the-companions)).
+They are produced for the requests of `thumbnail`, `display`, and `sprite`, only on a primary cache miss.
+The filmstrip of the viewer asks for `crop` at one of these steps, and a switch between `crop` and `fit` in the listing asks for the other shape, so both are answered from the cache without decoding the source again.
+
 ffmpeg, ffprobe, and heif-dec are started by the daemon as external processes.
 The path of a physical file is passed to them.
 For an entry in an archive, it is made a physical file with `materialize_file` and then passed, and the lease is held until generation finishes.
@@ -122,7 +128,7 @@ The shape is specified by the API's `resize` and `anchor`.
 The other three return an image of the frame's size, so they have no means of obtaining an image of the same aspect ratio as the original.
 
 The output format is chosen from WebP, JPEG, and PNG.
-If the request does not specify a format, the configuration `[thumbnail] format` is used, and its default is WebP.
+The configuration `[thumbnail] format` decides it, and its default is WebP.
 WebP and JPEG are compressed lossily, and for quality, `quality` is used for thumbnails and sprite sheets and `display_quality` for display images.
 Display images are shown filling the screen in the viewer, so the coarseness of compression is more noticeable than for thumbnails seen at tile size.
 For that reason the quality values are separated.
@@ -156,10 +162,9 @@ The selection of the representative is reused after checking the target's versio
 The chosen Entry's attributes are checked on every request, and the cache key of the image itself and the cache key of the representative selection are kept separate.
 The direct children of an archive can be looked up from the index cache, so each file is not extracted to make the selection.
 
-The URL of a representative thumbnail is the folder's or archive's path, so it stays the same when the chosen Entry changes.
-For that reason, the response for a folder or archive carries `Cache-Control: private, no-cache` and the `ETag` of the chosen Entry's key, and the browser revalidates it on every request.
-While the representative is the same, revalidation returns 304 and the image is not transferred again.
-The response for a file can be cached for a day, because a replaced file gets a new key and therefore a new `ETag` ([design decision](#representative-revalidation)).
+An item for a representative thumbnail names the folder or archive, so it stays the same when the chosen Entry changes.
+Its `ETag` is the chosen Entry's key, and the client revalidates every want with the `ETag` of the image it holds, as for any image ([Image Channel Design §7](./image-channel.md#7-revalidation)).
+The server compares it with the key of the Entry chosen now, so a new representative is sent at once, and while it is the same the answer is `unchanged` and the image is not transferred again ([design decision](#representative-revalidation)).
 
 ## 6. Video Frame Sequence
 
@@ -185,8 +190,12 @@ Generating them separately would pay twice for starting ffmpeg and for materiali
 Done once, these costs are paid only once.
 If both are in place at the moment a tile becomes visible, flipbook playback can start at the instant of mouse-over or long press.
 
-Both are in place only when the thumbnail and the sprite sheet are requested with the same width, height, shape, and output format.
+Both are in place only when the thumbnail and the sprite sheet are requested with the same width, height, and shape.
 The key includes the conversion conditions (§8.3), so a request with different conditions does not hit the other request's cache and becomes a separate run.
+The companions (§3) are the exception: they use the default format and the thumbnail quality, so they are in place for every thumbnail, sprite sheet, and display request of an image or a video.
+
+A video keeps only the first frame at full size. The primary thumbnail and every companion are resized from it, and the remaining frames are decoded, resized, and dropped one at a time, as before, so eight full-size frames are never held at once.
+No other frame is extracted or decoded for the companions.
 
 Each position is reached at keyframe granularity, allowing a deviation from the specified time.
 Frames for browsing in a listing do not need an exact time, and the less is decoded, the faster it is.
@@ -206,30 +215,36 @@ Each run has a deadline of `video_timeout_secs`, and when it passes the process 
 
 ## 7. Order and Concurrency of Generation
 
-Generation is done when a request is received.
-Which tile is generated when is decided by the order of the client's requests, and the display image a viewer shows now goes ahead of them.
-
-**Among tiles, it is the client that has priority, and the server processes in arrival order.**
-The server does not know, at the time it receives a request, whether that tile is still on screen.
-Only the client that has the screen knows that.
-The client requests only the tiles in the visible range and the prefetch margin, limits the number it sends at the same time, and cancels requests for tiles that left the screen ([Client Design §4](./client.md#4-thumbnail-requests)).
+Generation is done when an item of the image channel needs it.
+Which item reaches generation when is decided by the wanted sets of the channels: each connection passes its items in the order of request class and then order, a few at a time, so items that left the screen do not take the slots ([Image Channel Design §5](./image-channel.md#5-request-classes-and-order)).
 
 **The display image a viewer shows now is Interactive.**
-A display image requested with `Pxna-Priority: interactive`, the default, is Interactive, and one requested with `prefetch` is Foreground like the tiles.
-Image conversion and the ffmpeg and heif-dec runs are each one resource of the scheduler ([Storage Layer Design §9.1](./storage.md#listing-work-budget)).
+An `interactive` item is Interactive work, and `visible` and `prefetch` items are Foreground work.
+Image conversion, the ffmpeg and heif-dec runs for images, and the ffmpeg runs for videos are each one resource of the scheduler ([Storage Layer Design §9.1](./storage.md#listing-work-budget)).
 While an Interactive generation runs or waits in a resource, no new Foreground generation starts there, and no Background work starts anywhere.
 Interactive also has slots of its own besides the shared slots, so a display image does not wait for tile generations that already started.
-The viewer requests the image it shows as `interactive` and its neighbors as `prefetch`, and cancels the requests of images it no longer shows or neighbors.
-When it moves to an image whose prefetch is still loading, it cancels the prefetch and requests the image again as `interactive`.
+Each resource runs the work of one class in arrival order up to its limit on concurrency.
 
-The server-side rules are the following three.
+**A source has at most one source job decoding it, in the whole daemon.**
+An item whose image is already in the cache is answered from it and needs no job.
+Every other item that reaches generation, from any connection, belongs to the source job of its source: the `SourceKey` of the file, or of the Entry chosen as the representative of a folder or an archive (§8.3).
+An item is placed by the first of the following that applies.
 
-- Image conversion and ffmpeg and heif-dec runs each have a limit on concurrency. Requests that reach the limit wait in priority order, and in arrival order within the same priority
-- Concurrent requests for the same cache key are merged into one generation by single-flight
-- A request whose connection was cut while waiting is discarded without starting generation. A request cut after generation started is generated to the end and put in the cache
+1. The source has a job decoding it, and the job's plans include the item's key, as a requested plan or as a companion. The item waits for that job and is answered from it.
+2. The source has a job waiting for its slot. The item joins it, and its plan is added to the job's plans. If the item is Interactive and the job waits as Foreground, the job waits again as Interactive.
+3. The source has a job decoding it, and its plans do not include the item's key. The item starts the source's next job, which starts waiting for its slot when the decoding job ends. A display image waits in this way too.
+4. The source has no job. The item starts one.
 
-A local file whose modification time cannot be obtained cannot be put in the cache and cannot be merged by single-flight.
-That request generates directly within the request, so if it is cut, the generation also stops.
+When a job gets its slot, its plans are fixed: the plans of its items and the companions of each, without duplicates (§3, [design decision](#decode-once-and-warm-the-companions)).
+The images that the cache already has are left out, and the items that want them read the cache after the job.
+The job decodes the source once and makes all the rest, releases its slot, stores them in one batch, and answers each of its items with its own image.
+If a job fails to decode or read the source, every item of the job gets that error, including an item that waited for it as a companion.
+If a job leaves no image for an item, because the store failed or the entry exceeded the bucket and was evicted, the item places itself again, at most 3 times.
+A video's thumbnail and sprite sheet are plans of the same job, so one ffmpeg run makes both (§6.2).
+A job still waiting for its slot is discarded when all its items are dropped or their connections close. A job that has started runs to the end and stores its images even if no item is left.
+
+A local file whose modification time cannot be obtained has no `SourceKey`, so it is neither cached nor merged into a source job.
+Each of its items is generated on its own, and dropping the item stops the generation.
 
 We do not stop a generation once started because, in scrolling back and forth through a listing, a tile that once left the screen may come back.
 If the conversion spent so far were discarded, the same cost would be paid again on return.
@@ -265,6 +280,12 @@ The capacity limit is split into a budget for thumbnails and sprite sheets and a
 We split the budgets because the sizes differ by an order of magnitude.
 If put in the same budget, merely flipping through a few dozen photos in the viewer would evict the listing's thumbnails, and they would have to be regenerated on returning to the listing.
 
+The companions are ordinary entries of the thumbnail budget. A generation stores all its entries in one batch, in the order companions, requested image, sprite sheet, so that a small budget evicts the oldest companions and not the image that was just requested.
+The batch takes the lock once, reflects the pending recency once, writes the index in one transaction with `last_accessed` following that order, and evicts once per budget. The files are staged outside the lock.
+The generation releases its scheduler slot when the conversion ends, before the batch, so the store does not hold the slot of the next generation. The response still waits for the batch.
+The cache's SQLite uses `synchronous=NORMAL`. The cache is regenerable and a power loss may lose the latest entries, which the reconciliation at open drops; `sqlite.db` keeps its own setting.
+An entry that alone exceeds the budget is skipped and is not an error. A failed store is logged. Neither fails the response.
+
 ### 8.3 Keys
 
 The key is a SHA3-256 value combining a value that points to the original Entry and the conversion conditions.
@@ -290,7 +311,12 @@ For that reason the storage layer's `EntryCacheKey` is used as the value for the
 A representative thumbnail uses the chosen Entry's `ThumbnailKey` as it is.
 The cache is one whether the same image is requested as a file or as a folder's representative.
 
+A companion is a thumbnail whose key is computed with the same `SourceKey`, the `thumbnail` kind, the center anchor, `Lanczos3`, the configured default format, the thumbnail `quality`, and a width and height step.
+The keys are collected as a set, and the primary key and duplicates are dropped. The sprite sheet's `kind` differs, so it never needs comparing.
+Because the keys are the same as those of a direct request, a companion and a request for it are one cache entry. The primary's keys and bytes do not change.
+
 If the conversion implementation, the encoder's quality, or the way frames are extracted is changed, raise `THUMBNAIL_FORMAT_VERSION`.
+Adding companions changes neither the primary's key nor its bytes, so the version stays.
 
 ## 9. Configuration
 
@@ -303,19 +329,21 @@ Byte sizes, counts, times, and parallelism allow only positive values and are va
 | --- | ---: | --- |
 | `[thumbnail] sizes` | `[128, 256, 512, 1024]` | Size steps of thumbnails and sprite sheets |
 | `[thumbnail] display_sizes` | `[2048, 4096]` | Size steps of display images |
-| `[thumbnail] format` | `"webp"` | Output format when the request does not specify one (`webp`, `jpeg`, `png`) |
+| `[thumbnail] format` | `"webp"` | Output format of thumbnails, sprite sheets, and display images (`webp`, `jpeg`, `png`) |
 | `[thumbnail] quality` | 80 | Quality of lossy compression for thumbnails and sprite sheets (1 to 100) |
 | `[thumbnail] display_quality` | 90 | Quality of lossy compression for display images (1 to 100) |
 | `[thumbnail] cache_capacity_bytes` | 2 GiB | Capacity budget for thumbnails and sprite sheets |
 | `[thumbnail] display_cache_capacity_bytes` | 2 GiB | Capacity budget for display images |
 | `[scheduler] image_slots` | 4 | Number of image conversions running at the same time for Interactive and Foreground |
 | `[scheduler] image_interactive_slots` | 1 | Additional image conversions that only Interactive uses |
-| `[scheduler] process_slots` | 2 | Number of ffmpeg and heif-dec runs at the same time for Interactive and Foreground (heif-dec is used for alpha and as a fallback) |
-| `[scheduler] process_interactive_slots` | 1 | Additional ffmpeg and heif-dec runs that only Interactive uses |
+| `[scheduler] process_slots` | 2 | Number of ffmpeg and heif-dec runs for images (HEIF, AVIF, JXL, JP2) at the same time for Interactive and Foreground (heif-dec is used for alpha and as a fallback) |
+| `[scheduler] process_interactive_slots` | 1 | Additional ffmpeg and heif-dec runs for images that only Interactive uses |
+| `[scheduler] video_slots` | 1 | Number of ffmpeg runs for videos at the same time for Interactive and Foreground, apart from `process_slots` |
+| `[scheduler] video_interactive_slots` | 1 | Additional video ffmpeg runs that only Interactive uses |
 | `[thumbnail] video_timeout_secs` | 60 | Deadline for one frame extraction |
 | `[media] ffmpeg_path` | `ffmpeg` | The ffmpeg executable |
 | `[media] ffprobe_path` | `ffprobe` | The ffprobe executable |
-| `[media] heif_dec_path` | `heif-dec` | libheif's heif-dec executable, used for HEIC/HEIF/AVIF with alpha and as a fallback. `heif-convert` of libheif before 1.17 takes the same arguments |
+| `[media] heif_dec_path` | `heif-dec` | libheif's heif-dec executable, from libheif 1.17 or newer, used for HEIC/HEIF/AVIF with alpha and as a fallback. TIFF is used when the build supports it (1.19 or newer with libtiff); otherwise the decode uses a level-0 PNG |
 
 The defaults of `[media]` are names searched from `PATH`.
 The Docker image for distribution bundles all three ([design.md §9.3](../design.md#93-distribution)).
@@ -327,7 +355,7 @@ The Docker image for distribution bundles all three ([design.md §9.3](../design
 #### Generate When a Request Is Received
 
 **Decision**
-Thumbnails are generated when a client request is received, and there is no bulk generation in the background.
+Thumbnails are generated when a client wants them through the image channel, and there is no bulk generation in the background.
 
 **Reason**
 The folders being browsed are a small part of the Library, and converting files nobody sees only costs.
@@ -337,19 +365,6 @@ If the key includes size and modification time, the file will be generated as a 
 **Rejected alternative**
 A method that scans the whole Library in the background and generates thumbnails in advance.
 Even a folder opened for the first time would not need to be waited on, but it would generate even files nobody looks at, and need a mechanism to keep tracking additions and changes of files, so we rejected it.
-
-#### Let the Client Hold the Priority of Generation
-
-**Decision**
-Which tile to generate first is decided by the client through the order of requests and cancellation, and the server processes in arrival order (§7).
-
-**Reason**
-Only the client knows which part of the screen is visible.
-If the client controls the number of requests and cancellation, the server can follow the priorities using only HTTP requests and connection cuts.
-
-**Rejected alternative**
-A method in which the client sends the set of visible paths to the server and the server holds a prioritized queue.
-It would need a dedicated API and per-client state on the server, so we rejected it.
 
 #### Generate Video Frames Together When the Tile Becomes Visible
 
@@ -363,6 +378,76 @@ If the sprite sheet is already in the cache at the time of the operation that st
 **Rejected alternative**
 A method that makes only one frame when the tile becomes visible and makes the rest at the time of mouse-over or long press.
 It reduces the conversion volume for videos that are only looked at, but every time flipbook playback starts for the first time there would be a wait to reopen the video, so we rejected it.
+
+<a id="decode-once-and-warm-the-companions"></a>
+#### Decode Once and Warm the Companions
+
+**Decision**
+One generation of an image or a video decodes the source once, and from that decode produces the requested image, the smallest three size steps in both `crop` and `fit`, and the other shape at the requested size of a thumbnail or a sprite sheet (§3).
+The companions use the default format, the thumbnail quality, `Lanczos3`, and the center anchor, and are stored in the thumbnail budget before the requested image (§8.2).
+They are made only on a primary cache miss, synchronously in the same job, and best effort: a companion that fails to validate or encode is logged and dropped, and the response does not fail.
+The companions already in the cache are found by the index alone and are not made again.
+
+**Reason**
+The decode is the expensive part: a HEIC takes far longer to decode than to shrink and encode. The listing decodes a source for the size it asked for, and the viewer decoded the same source again for the filmstrip, and a switch of the thumbnail shape decoded every visible source again.
+Shrinking an already decoded image to a few more sizes costs little next to that.
+
+**Rejected alternative 1**
+Producing the display image together with the listing's thumbnail. It roughly doubles the listing's generation time and is wasted for images that are never opened.
+
+**Rejected alternative 2**
+Keeping the decoded source on disk as PNG, PPM, or WebP. Encoding it costs more than the HEIC decode it would save.
+
+**Rejected alternative 3**
+Asking ffmpeg to write WebP directly. With fan-out it needs several outputs and a second implementation of the shape and size rules.
+
+**Rejected alternative 4**
+Lowering libwebp's `method` below 2, or changing the display image's output size, to make a generation cheaper.
+
+**Rejected alternative 5**
+Decoding tiles of a tile grid in parallel ourselves. ffmpeg already does what it can.
+
+**Residual risk**
+The companions use thumbnail budget that the requested images would otherwise use, so a small budget loses older thumbnails sooner. The measurement ([record](../measurements.md#2-record-list)) records the bytes added per image.
+The batch store keeps the items waiting for the store; moving it to the background is a separate change if it matters.
+
+<a id="one-source-job-per-source"></a>
+#### Merge Every Item for a Source into One Source Job
+
+**Decision**
+All the items for one source, from every connection, are merged into one source job, and a source has at most one job decoding it at a time (§7).
+An item that a decoding job makes, as a requested plan or a companion, waits for it; any other item, a display image included, waits for the next job of the source.
+
+**Reason**
+The decode is the expensive part, so the number of decodes is what the merging has to bound. In the 2026-10-26 log of browsing a library of iPhone HEIC with the viewer, 8 of 90 external decodes ran while another decode of the same source ran. In 7 of them the request was for a companion of the running generation, such as the filmstrip's 128 `crop` next to the listing's 512 `fit`, or a thumbnail next to the display image; the other one was a display image.
+Merging by source rather than by key lets one decode answer every size that is wanted before the job starts, and the companions of a running job answer most of what is wanted after.
+Keeping one decoding job per source also keeps one image from taking two slots and competing with itself for the CPU. A HEIC decodes in about 0.7 seconds ([HEIF decision](#read-heif-and-avif-as-ppm-and-use-heif-dec-for-alpha)), which bounds what a display image waits behind a thumbnail job of the same image.
+
+**Rejected alternative 1**
+Merging only requests for the same cache key by single-flight. This was the form before source jobs, and a request for another size decoded the source again while a generation of it ran.
+
+**Rejected alternative 2**
+Keeping single-flight by key and registering the companion keys of a running generation, so that a request for one of them waits. It removes most of the duplicates seen in the log, but a size outside the companions and a display image still decode a second time, and it adds a second lookup beside the flights.
+
+**Rejected alternative 3**
+Merging only the items of one connection. It removes the duplicates between the parts of one tab, but two tabs or two devices showing the same folder would still decode each source twice.
+
+**Rejected alternative 4**
+Letting a display image start a second decode while a job of its source runs. The viewer would not wait for the thumbnail job, but the image would be decoded twice at the same time, and the two decodes would slow each other.
+
+**Residual risk**
+A display image waits behind a decoding job of its own source. For a video, that job extracts every frame of the sprite sheet, which took 22 s for an action-camera video (§10.1 "Give Videos Their Own External Process Slots").
+
+#### Give Videos Their Own External Process Slots
+
+**Decision**
+The ffmpeg runs for videos (frame extraction and the video service's runs) have their own pool, `video_slots` (default 1) and `video_interactive_slots` (default 1). `process_slots` (default 2) is only for the ffmpeg and heif-dec runs that decode images.
+
+**Reason**
+In a real log, extracting frames from an action-camera video took 22 s and decoding a HEIC took 10 to 16 s. With one shared pool, a video held a slot that HEIC tiles needed, and `thumbnail_permit_wait` reached 38 s.
+
+**Rejected alternative**
+Keeping one pool and raising its size. It would let several slow videos run at once and compete for the CPU with the image decodes.
 
 #### Return the Frame Sequence as a Sprite Sheet
 
@@ -400,27 +485,33 @@ HEIC/HEIF/AVIF images with alpha are decoded with libheif's heif-dec instead, so
 If ffmpeg fails for a HEIC/HEIF/AVIF image, the cause is logged and heif-dec reads it.
 If alpha was detected and heif-dec fails, the request fails instead of silently dropping the transparency.
 If the alpha probe fails, HEIC/HEIF/AVIF are decoded with heif-dec rather than risk dropping alpha.
-ffmpeg and ffprobe must be version 9 or newer at startup. heif-dec is required at startup on Linux and macOS; on Windows it is only needed when an image with alpha is requested.
+An image has alpha when ffprobe returns a gray video stream that stands on its own and has the size of the primary image or of one of its tiles. A stream stands on its own when it is not the primary stream, not `dependent`, and not a member of any stream group. The primary image is the default `Tile Grid`, or the first one when none is the default; without a grid, it is the default video stream, or the first video stream.
+heif-dec writes an uncompressed TIFF when the build supports it, and a level-0 PNG otherwise. The TIFF holds the same 8-bit pixels as the PNG, with alpha when the image has it, but skips the PNG filtering pass.
+ffmpeg and ffprobe must be version 9 or newer at startup. heif-dec must be libheif 1.17 or newer, which is checked at startup by `--png-compression-level` appearing in its help. The decode asks for a TIFF first and retries with a level-0 PNG when the output suffix or libtiff is missing; TIFF output needs libheif 1.19 and a build with libtiff. heif-dec is required at startup on Linux and macOS; on Windows it is only needed when an image with alpha is requested.
 
 **Reason**
-heif-dec writes the decoded image as a PNG. In the measured workload, heif-dec took 0.61 to 0.74 seconds, while ffmpeg's PPM extraction took 0.13 to 0.20 seconds; the difference includes writing and reading the intermediate PNG. Avoiding it makes a first display image about 2.3 times faster and a thumbnail about 3.5 times faster ([measurement](../measurements/2026-10-24-heif-ppm.md)).
+heif-dec writes the decoded image as an uncompressed TIFF when it can. On a 12MP alpha HEIC, TIFF took 0.38 seconds (0.24 tiled) against 0.64 (0.51 tiled) for a level-0 PNG; both intermediates are 49 MB, so the PNG filtering pass is what the TIFF avoids, and the Rust image crate decodes the TIFF in 52 ms against 42 ms for the PNG ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
+The fallback to a level-0 PNG keeps builds without libtiff working. Ubuntu 26.04's libheif 1.21.2 lists `tif` in its help but is built without libtiff and fails with `TIFF support has not been compiled in.` ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
+The PPM path replaced heif-dec for images without alpha: in the measurement that introduced it, PPM took 0.13 to 0.20 seconds against 0.61 to 0.74 for heif-dec's PNG, making a first display image about 2.3 times faster and a thumbnail about 3.5 times faster ([measurement](../measurements/2026-10-24-heif-ppm.md)). TIFF narrows that gap but does not remove it.
 ffmpeg 9 assembles tile grids, applies `irot`, and writes PPM with the dimensions after rotation ([ffmpeg and HEIF tile grids](../knowledge/ffmpeg-heif-tile-grid.md)). PPM is uncompressed pixels with a small header, so it is as fast as raw output and does not need a separate size probe.
 JXL keeps the PNG path because its alpha is in the primary stream and already preserved there; moving it to PPM would drop the transparency for no benefit to the formats this change is about.
 ffmpeg's default selection does not read the auxiliary alpha image of HEIC/AVIF, while libheif does, including tiled and rotated images. That is why alpha is the one case that stays with heif-dec ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)).
-A gray video stream next to another video stream is treated as alpha. A tiled grayscale image without alpha is therefore also routed to heif-dec; it is slower but still correct.
+ffprobe shows alpha and the other auxiliary images alike as gray video streams, and only how the streams are grouped and sized tells them apart ([ffprobe and HEIC auxiliary images](../knowledge/ffprobe-heic-auxiliary-images.md)). An iPhone HEIC carries a depth map, an HDR gain map, and segmentation mattes as gray streams. Under the earlier rule, which took any gray stream next to another video stream for alpha, every such photo went to heif-dec. In the logs of a library of iPhone photos, 78 of 90 HEIC decodes took that path at 0.32 seconds per megapixel, against 0.043 for the PPM path, and one 24-megapixel image took 0.7 seconds with ffmpeg and 12 seconds with heif-dec.
+The rule keeps the alpha of untiled and tiled HEIC and AVIF: their alpha streams are not grouped and have the size of the image or of a color tile. A tiled grayscale image is made of grouped `dependent` tiles, so it now stays on the PPM path. A depth map or a matte that happens to have the size of the image or of a tile would still be taken for alpha; that keeps the image correct at the cost of speed.
+The PNG writer spent most of its run on filtering and writing even at level 0: the 24-megapixel image took 12 seconds with the default compression and 2.0 seconds with none ([libheif's heif-dec](../knowledge/libheif-heif-dec.md)). TIFF stores the same uncompressed pixels without that pass, which is why the decode asks for a TIFF first. libheif 1.15.1 and 1.17 have only PNG; 1.19 added TIFF, and the decode uses it when the build has libtiff. The level-0 PNG fallback keeps 1.17 working.
 Requiring ffmpeg 9 at startup keeps an older ffmpeg from silently reading only one tile of a tile grid.
 
 **Rejected alternative 1**
 Keeping heif-dec as the primary decoder.
-It works on old libheif and ffmpeg versions, but the intermediate PNG dominates the time and makes HEIF about 3 to 4 times slower than JPEG, so we rejected it.
+It works on old libheif and ffmpeg versions, but the intermediate file dominates the time and makes HEIF about 3 to 4 times slower than JPEG, so we rejected it.
 
 **Rejected alternative 2**
 A method that links libheif as a library through bindings.
-It removes the PNG and the process boundary, but a decoder anomaly would spread to the daemon's process, and the 3-OS CI would need libheif's development files, so we rejected it (same reason as §10.1 "Call ffmpeg as an External Process").
+It removes the intermediate file and the process boundary, but a decoder anomaly would spread to the daemon's process, and the 3-OS CI would need libheif's development files, so we rejected it (same reason as §10.1 "Call ffmpeg as an External Process").
 
 **Rejected alternative 3**
 Having ffmpeg write WebP directly instead of PPM.
-It is faster only when the request is WebP and no resizing is needed (0.27 to 0.32 seconds). For JPEG/PNG requests, images larger than the display step, and thumbnails, it needs a second decode and encode and loses quality twice. PPM keeps one path for all formats and sizes.
+It is faster only when the output is WebP and no resizing is needed (0.27 to 0.32 seconds). For JPEG/PNG output, images larger than the display step, and thumbnails, it needs a second decode and encode and loses quality twice. PPM keeps one path for all sizes.
 
 **Rejected alternative 4**
 Merging the alpha stream with ffmpeg's `alphamerge`.
@@ -433,6 +524,22 @@ The same PPM path is faster and the rotation behavior is unchanged. We unified i
 **Rejected alternative 6**
 Moving JXL and JP2 to PPM for a single ffmpeg path.
 ffmpeg's JXL decode carries alpha in the primary stream, and the current PNG path preserves it. PPM would drop that transparency. JXL is not the target of this change, so it keeps the PNG path.
+
+**Rejected alternative 7**
+Asking libheif's `heif-info` whether the image has alpha.
+Its answer is exact, but it adds one more process per image, and its output is meant for people and may change between libheif versions, so we rejected it.
+
+**Rejected alternative 8**
+Decoding every HEIC/HEIF/AVIF with ffmpeg and using heif-dec only when ffmpeg fails.
+It is the simplest, but the transparency of HEIC and AVIF with alpha would be lost, so we rejected it.
+
+**Rejected alternative 9**
+Requiring libheif 1.19 and libtiff, with no PNG fallback.
+Version 1.19 does not guarantee libtiff: Ubuntu 26.04's 1.21.2 is built without it, and alpha images would fail there. The slower PNG path is better than failing, so we keep the fallback.
+
+**Rejected alternative 10**
+Keeping level-0 PNG for every build.
+It is the simplest, but gives up the measured 1.7 to 2.2 times gain on builds with libtiff, so we use TIFF when it is available.
 
 #### Announce Images and Videos with the Listing's contentType
 
@@ -474,7 +581,7 @@ It could no longer express frames other than squares, so we rejected it.
 #### Let the Server Choose the Representative Thumbnail
 
 **Decision**
-When the thumbnail API is given the path of a folder or archive, the server chooses a representative from the direct children and returns it (§5).
+When an item names a folder or archive, the server chooses a representative from the direct children and returns it (§5).
 
 **Reason**
 One request per tile suffices, and requesting and canceling can follow the same rules as file tiles.
@@ -487,7 +594,7 @@ The API would not change, but there would be two round trips per tile, and the s
 #### Choose the Output Format and Quality by Configuration, Defaulting to WebP
 
 **Decision**
-The output format of thumbnails, sprite sheets, and display images can be chosen from WebP, JPEG, and PNG, and the format used when the request does not specify one, and the quality of lossy compression, are decided by the server's configuration (§4.2).
+The output format of thumbnails, sprite sheets, and display images can be chosen from WebP, JPEG, and PNG, and the format and the quality of lossy compression are decided by the server's configuration (§4.2).
 The default format is lossy WebP.
 Encoding calls libwebp-sys directly and fixes the compression effort (`method`) at 2.
 
@@ -573,23 +680,22 @@ The previous method of selecting again every time is simple, but repeats enumera
 #### Revalidate Representative Thumbnails and Request Them Again After Our Own Changes
 
 **Decision**
-The response for a folder or archive is revalidated by the browser on every request (§5).
-After the daemon's own change, when the web client rereads the listing, it discards the states of the folder and archive tiles in the thumbnail queue, whether read or failed, and requests them again ([Client Design §4](./client.md#4-thumbnail-requests)).
+The image of a folder or archive is revalidated against the representative chosen now on every want, like any image (§5).
+After the daemon's own change, when the web client rereads the listing, it forgets the folder and archive tiles it has shown or failed, and wants them again with the `ETag` of the image it holds ([Client Design §4](./client.md#4-thumbnail-requests)).
 External changes appear when the tile leaves the request targets and returns, within the 30-second expiry of the representative selection ([representative-selection-cache](#representative-selection-cache)).
 
 **Reason**
-With the one-day cache of file responses, a request that the client makes again still receives the old representative from the browser cache.
-Revalidation fixes that without changing the URL, and costs a 304 while the representative is the same.
-Requesting again only right after our own change keeps scrolling back and forth in the same listing from adding requests or generation.
-The tiles requested again are at most those in the request targets, and the server's selection has already been invalidated by the same change.
+An item for a folder names the folder, so it stays the same when the representative changes, and only a comparison with the current selection shows the new one. It costs an `unchanged` while the representative is the same.
+Wanting again only right after our own change keeps scrolling back and forth in the same listing from adding wants or generation.
+The tiles wanted again are at most those in the request targets, and the server's selection has already been invalidated by the same change.
 
 **Rejected alternative 1**
-A method that changes only the server's cache header.
+Revalidating only when a tile returns to the request targets.
 A tile that stays in the request targets would keep showing the old image until it leaves them, so we rejected it.
 
 **Rejected alternative 2**
-A method that leaves the current behavior as it is.
-There is no data loss, but a tile could show a stale representative for up to a day, so we rejected it.
+Showing a held image without revalidating it.
+There is no data loss, but a tile could show a stale representative until the client's cache drops the image, so we rejected it.
 
 <a id="folder-thumbnail-delay"></a>
 #### Request Folder Thumbnails After the Listing Is Displayed
@@ -597,12 +703,23 @@ There is no data loss, but a tile could show a stale representative for up to a 
 **Decision**
 The web client delays thumbnails of folders and archives by at least 200 ms after the listing's row appears, and requests only the visible range. The existing prefetch of images and videos is maintained.
 The delay for the same visible Entry is not restarted on every redraw, and unsent timers and requests of Entries that moved away are canceled. An Entry that returns is treated as a new display.
-The delay and priority are held by the client, and the server does not guess the visible range. The existing limits and single-flight of the generation semaphore and the image cache are maintained.
+The delay and priority are held by the client, and the server does not guess the visible range. The existing limits of generation, the merging of §7, and the image cache are maintained.
 
 **Reason**
 The time at which the listing becomes operable is not delayed by the scan and conversion of folder representative selection. Contributions are measured separately for listing display, representative selection, and generation.
 
 ### 10.2 Deferred
+
+#### Threads and Slots of the External Processes for Images
+
+**Current state**
+`process_slots` (default 2) and `process_interactive_slots` (default 1) limit how many ffmpeg and heif-dec runs decode images at once, and each run uses as many threads as ffmpeg or libheif choose. In the 2026-10-26 log with `process_slots = 4`, an Interactive display image of a 24-megapixel HEIC got its slot at once but took 16 seconds to decode while four thumbnail decodes of the same size ran; at that time those images went to heif-dec with a compressed PNG (§10.1).
+
+**Why not decide now**
+The images of that log now take the PPM path, which decoded one of them in 0.7 seconds instead of 12, so the decodes the display image competes with are far shorter. How much they still slow it down has not been measured.
+
+**Conditions for deciding**
+When a log after that change shows an Interactive display image of a HEIC or AVIF whose `thumbnail_external_decode` takes more than twice its time when it runs alone, while Foreground external decodes run.
 
 #### Settings for the Number and Positions of Frames
 
@@ -641,20 +758,21 @@ Representative selection, candidate attributes, the lookup, read, and LRU update
 `ThumbnailGenerator` generates according to the rules of §3 through §8.
 It handles images, HEIF images read with ffmpeg (or heif-dec for alpha), images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
 The cache is a SQLite index and real files in `state_dir/thumbnail/`, with a budget for thumbnails and sprite sheets and a budget for display images.
-The thumbnail API is returned by a hand-written route outside the generated router ([design.md §11.1](../design.md#return-thumbnail-responses-outside-the-generated-router)).
-Responses for folders and archives carry the same `Cache-Control: private, max-age=86400` as files, and the web client does not request the tiles again after the daemon's own changes, so the revalidation of §5 is not in place.
+Thumbnails, sprite sheets, and display images are returned over the image channel ([Image Channel Design §10](./image-channel.md#10-current-state-and-remaining-work)), and there is no HTTP route for them. Each item that misses the cache is placed in the source job of its source (§7), in `ThumbnailGenerator`, so one source is decoded by one job at a time, whichever requests are for it. The order in which items reach the slots is their class and order on the channel.
+The client revalidates a held image by sending its `ETag` (§5), and the web client does not yet request folder and archive tiles again after the daemon's own changes.
 
 All the keys in §9.1 can be specified from the configuration file.
-The output formats are WebP, JPEG, and PNG, and if the request does not specify one, it is `[thumbnail] format` (the default is WebP).
+The output format is `[thumbnail] format` (the default is WebP), chosen from WebP, JPEG, and PNG.
 Lossy WebP is encoded with libwebp-sys with the compression effort fixed at 2, and for quality, `quality` is used for thumbnails and sprite sheets and `display_quality` for display images.
 The key includes quality only for lossy formats, and the default of `display_sizes` is `[2048, 4096]`.
 The number and positions of frames cannot be configured and are fixed to the defaults in code (8 frames, 10% to 90%).
+A generation also makes the companions of §3, and the tests of them request WebP, because the existing test helpers request JPEG, which never matches a WebP companion.
 A video's duration is obtained from the media info service shared with video playback. The LRU and the merging of concurrent requests are common with the video's media info ([Video Playback Design §3](./video.md#3-media-info)).
 
 In environments where ffmpeg and ffprobe are not on `PATH`, the tests for videos and images read with ffmpeg are skipped with the reason printed.
 The tests that assemble tile grids with ffmpeg are also skipped when ffmpeg is older than 8, and the test that reads the rotation of a tile grid with ffprobe when it is older than 9.
-The HEIF tests use ffmpeg 9 and heif-dec or heif-convert from `PATH`, and are skipped without them.
-Linux CI installs a pinned ffmpeg 9 and libheif, and makes these tests mandatory with `PXNA_REQUIRE_FFMPEG=1` and `PXNA_REQUIRE_HEIF_DEC=1`.
+The HEIF tests use ffmpeg 9 and heif-dec or heif-convert 1.17 or newer from `PATH`, and are skipped without them.
+Linux CI installs a pinned ffmpeg 9 and libheif on `ubuntu-latest`, and makes these tests mandatory with `PXNA_REQUIRE_FFMPEG=1` and `PXNA_REQUIRE_HEIF_DEC=1`. The Linux job exercises the PNG fallback and the macOS job the TIFF output.
 
 ### 11.2 Roadmap
 
@@ -666,8 +784,8 @@ Only the dependencies must be respected.
 
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
-| T1 | Return folder and archive responses with `no-cache` revalidation, and have the web client request folder and archive tiles again after the daemon's own changes ([design decision](#representative-revalidation)) | None | Not started |
+| T1 | Have the web client want folder and archive tiles again after the daemon's own changes ([design decision](#representative-revalidation)) | IC2 of [Image Channel Design §10.2](./image-channel.md#102-roadmap) | Not started |
 
-T1 corresponds to M20 of [design.md §12.2](../design.md#122-roadmap).
+T1 corresponds to M20 of [design.md §12.2](../design.md#122-roadmap). The revalidation of §5 itself comes with the image channel (IC1).
 
 For confirmed defects, see [issues.md](../issues.md).

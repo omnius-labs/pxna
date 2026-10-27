@@ -9,8 +9,8 @@ interface ModalProps {
     children: ReactNode;
 }
 
-/// 外枠の中に Portal で描く、Radix の確認のダイアログとメニュー。
-const NESTED_LAYER = "[role='alertdialog'], [role='menu']";
+/// 外枠の中に Portal で描く、Radix の確認のダイアログとメニューと、ビューアの設定のポップオーバー（`role="dialog"`）。
+const NESTED_LAYER = "[role='alertdialog'], [role='menu'], [role='dialog']";
 
 /** ビューアの背面を操作不能にし、閉じた後は開く前の位置へ戻す。 */
 export function Modal({ label, onClose, outerRef, children }: ModalProps) {

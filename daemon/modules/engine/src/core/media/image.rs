@@ -17,7 +17,7 @@ pub struct ImageInfo {
     /// 保存された画像を、表示のために反時計回りに回す角度（0、90、180、270 度）。`width` と `height` には反映していない。
     /// ffmpeg で読む形式だけが、0 以外になりうる。
     pub rotation: u16,
-    /// アルファの補助画像を持つか。ffprobe が gray の映像 stream と色の映像 stream の両方を返したときに true にする。
+    /// アルファの補助画像を持つか。ffprobe が、主画像かそのタイルと同じ寸法の、独立した gray の映像 stream を返したときに true にする。
     pub has_alpha: bool,
     pub exif: ImageExif,
 }
@@ -116,12 +116,25 @@ struct ProbeImageOutput {
 
 #[derive(Deserialize)]
 struct ProbeImageStream {
+    index: Option<u32>,
     codec_type: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
     pix_fmt: Option<String>,
     #[serde(default)]
+    disposition: ProbeDisposition,
+    #[serde(default)]
     side_data_list: Vec<ProbeSideData>,
+}
+
+/// The dispositions of a stream or a stream group that tell the primary image from the images that only make up or accompany it.
+#[derive(Deserialize, Default)]
+struct ProbeDisposition {
+    #[serde(default)]
+    default: u32,
+    /// Set on the tiles of a Tile Grid, which are not images on their own.
+    #[serde(default)]
+    dependent: u32,
 }
 
 #[derive(Deserialize)]
@@ -130,6 +143,18 @@ struct ProbeStreamGroup {
     group_type: Option<String>,
     #[serde(default)]
     components: Vec<ProbeTileGrid>,
+    #[serde(default)]
+    disposition: ProbeDisposition,
+    /// The tiles of the group, with their stream index and the size of one tile.
+    #[serde(default)]
+    streams: Vec<ProbeGroupStream>,
+}
+
+#[derive(Deserialize)]
+struct ProbeGroupStream {
+    index: Option<u32>,
+    width: Option<u32>,
+    height: Option<u32>,
 }
 
 /// Tile Grid の group の component。組み立てた後の画像の幅と高さと、回転を持つ。
@@ -160,21 +185,28 @@ impl ProbeSideData {
 }
 
 impl ProbeImageOutput {
-    /// 最初の Tile Grid の寸法。タイルの stream はタイル 1 枚の寸法しか持たないので、こちらを優先する。
+    /// The Tile Grid of the primary image: the default one, or the first one when none is marked.
+    /// An iPhone HEIC also has a Tile Grid for its HDR gain map, which is not the default.
+    fn primary_tile_grid(&self) -> Option<&ProbeStreamGroup> {
+        let mut grids = self.stream_groups.iter().filter(|group| group.group_type.as_deref() == Some("Tile Grid"));
+        grids.clone().find(|group| group.disposition.default != 0).or_else(|| grids.next())
+    }
+
+    /// 主画像の Tile Grid の寸法。タイルの stream はタイル 1 枚の寸法しか持たないので、こちらを優先する。
     fn tile_grid_size(&self) -> Option<(u32, u32, u16)> {
-        self.stream_groups
-            .iter()
-            .filter(|group| group.group_type.as_deref() == Some("Tile Grid"))
-            .flat_map(|group| &group.components)
-            .find_map(|grid| {
-                grid.width
-                    .zip(grid.height)
-                    .map(|(width, height)| (width, height, ProbeSideData::display_rotation(&grid.side_data_list)))
-            })
+        self.primary_tile_grid().into_iter().flat_map(|group| &group.components).find_map(|grid| {
+            grid.width
+                .zip(grid.height)
+                .map(|(width, height)| (width, height, ProbeSideData::display_rotation(&grid.side_data_list)))
+        })
+    }
+
+    fn video_streams(&self) -> impl Iterator<Item = &ProbeImageStream> {
+        self.streams.iter().filter(|stream| stream.codec_type.as_deref() == Some("video"))
     }
 
     fn first_video_stream_size(&self) -> Option<(u32, u32, u16)> {
-        self.streams.iter().find(|stream| stream.codec_type.as_deref() == Some("video")).and_then(|stream| {
+        self.video_streams().next().and_then(|stream| {
             stream
                 .width
                 .zip(stream.height)
@@ -182,22 +214,37 @@ impl ProbeImageOutput {
         })
     }
 
-    /// gray の映像 stream があり、色の stream もあれば、アルファの補助画像を持つとみなす。
-    /// モノクロ画像とモノクロのアルファのように gray が 2 本以上並ぶ場合も拾うため、映像 stream が複数あるときも対象にする。
-    /// タイル化されたグレースケール画像はアルファなしでも複数の gray stream を持つため、heif-dec に回る（遅いが正しい）。
+    /// An alpha image is a gray video stream that stands on its own and has the size of the primary image or of one of its tiles.
+    ///
+    /// A stream that stands on its own is not the primary stream, not `dependent`, and not a member of any stream group.
+    /// This leaves out the auxiliary images of an iPhone HEIC: the HDR gain map is a separate Tile Grid of `dependent` tiles,
+    /// and the depth map and the segmentation mattes have sizes of their own. They used to be taken for alpha and sent the image to heif-dec.
+    /// The alpha of a tiled image is tiled like the color but is not grouped, so its streams have the size of a color tile.
     fn has_alpha(&self) -> bool {
-        let mut video_count = 0;
-        let mut gray = false;
-        let mut color = false;
-        for stream in self.streams.iter().filter(|stream| stream.codec_type.as_deref() == Some("video")) {
-            video_count += 1;
-            match stream.pix_fmt.as_deref() {
-                Some(pix_fmt) if pix_fmt.starts_with("gray") => gray = true,
-                Some(_) => color = true,
-                None => {}
+        let grouped: Vec<u32> = self.stream_groups.iter().flat_map(|group| &group.streams).filter_map(|stream| stream.index).collect();
+        let (primary, sizes): (Option<&ProbeImageStream>, Vec<(u32, u32)>) = match self.primary_tile_grid() {
+            Some(grid) => (
+                None,
+                grid.components
+                    .iter()
+                    .filter_map(|component| component.width.zip(component.height))
+                    .chain(grid.streams.iter().filter_map(|tile| tile.width.zip(tile.height)))
+                    .collect(),
+            ),
+            None => {
+                let Some(primary) = self.video_streams().find(|stream| stream.disposition.default != 0).or_else(|| self.video_streams().next()) else {
+                    return false;
+                };
+                (Some(primary), primary.width.zip(primary.height).into_iter().collect())
             }
-        }
-        gray && (color || video_count > 1)
+        };
+        self.video_streams().any(|stream| {
+            stream.pix_fmt.as_deref().is_some_and(|pix_fmt| pix_fmt.starts_with("gray"))
+                && !primary.is_some_and(|primary| std::ptr::eq(primary, stream))
+                && stream.disposition.dependent == 0
+                && !stream.index.is_some_and(|index| grouped.contains(&index))
+                && stream.width.zip(stream.height).is_some_and(|size| sizes.contains(&size))
+        })
     }
 }
 
@@ -467,8 +514,14 @@ mod tests {
         let untiled = br#"{"streams":[{"codec_type":"video","width":512,"height":512,"pix_fmt":"yuvj420p"},{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"}]}"#;
         assert_eq!(ImageInfo::parse_probe_size(untiled)?, (512, 512, 0, true));
 
-        let tiled = br#"{"streams":[{"codec_type":"video","width":512,"height":512,"pix_fmt":"yuvj420p"},{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"}],
-            "stream_groups":[{"type":"Tile Grid","components":[{"width":1024,"height":1024}]}]}"#;
+        // The shape ffprobe 9.0 returns for tests/fixtures/alpha-grid.heic, cut to two of its four tiles: the alpha tiles are not grouped.
+        let tiled = br#"{"streams":[
+            {"index":0,"codec_type":"video","width":512,"height":512,"pix_fmt":"yuvj420p","disposition":{"default":0,"dependent":1}},
+            {"index":1,"codec_type":"video","width":512,"height":512,"pix_fmt":"gray","disposition":{"default":0,"dependent":0}},
+            {"index":2,"codec_type":"video","width":512,"height":512,"pix_fmt":"yuvj420p","disposition":{"default":0,"dependent":1}},
+            {"index":3,"codec_type":"video","width":512,"height":512,"pix_fmt":"gray","disposition":{"default":0,"dependent":0}}],
+            "stream_groups":[{"type":"Tile Grid","disposition":{"default":1,"dependent":0},"components":[{"width":1024,"height":1024}],
+            "streams":[{"index":0,"width":512,"height":512},{"index":2,"width":512,"height":512}]}]}"#;
         assert_eq!(ImageInfo::parse_probe_size(tiled)?, (1024, 1024, 0, true));
 
         let grayscale_only = br#"{"streams":[{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"}]}"#;
@@ -479,6 +532,41 @@ mod tests {
 
         let gray_and_gray = br#"{"streams":[{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"},{"codec_type":"video","width":512,"height":512,"pix_fmt":"gray"}]}"#;
         assert_eq!(ImageInfo::parse_probe_size(gray_and_gray)?, (512, 512, 0, true), "モノクロ画像 + モノクロのアルファ");
+        Ok(())
+    }
+
+    #[test]
+    fn the_auxiliary_images_of_an_iphone_heic_are_not_alpha_test() -> TestResult {
+        // The shape ffprobe 9.0 returns for an iPhone HEIC, cut to two tiles per grid and one segmentation matte.
+        // The primary grid and the HDR gain map grid are made of `dependent` tiles, the thumbnail stands alone,
+        // and the depth map (768x576) and the mattes (2016x1512) are gray streams of their own sizes.
+        let iphone = br#"{"streams":[
+            {"index":0,"codec_type":"video","width":640,"height":896,"pix_fmt":"yuvj420p","disposition":{"default":0,"dependent":1}},
+            {"index":1,"codec_type":"video","width":640,"height":896,"pix_fmt":"yuvj420p","disposition":{"default":0,"dependent":1}},
+            {"index":2,"codec_type":"video","width":416,"height":312,"pix_fmt":"yuvj420p","disposition":{"default":0,"dependent":0}},
+            {"index":3,"codec_type":"video","width":640,"height":896,"pix_fmt":"gray","disposition":{"default":0,"dependent":1}},
+            {"index":4,"codec_type":"video","width":640,"height":896,"pix_fmt":"gray","disposition":{"default":0,"dependent":1}},
+            {"index":5,"codec_type":"video","width":768,"height":576,"pix_fmt":"gray","disposition":{"default":0,"dependent":0}},
+            {"index":6,"codec_type":"video","width":2016,"height":1512,"pix_fmt":"gray","disposition":{"default":0,"dependent":0}}],
+            "stream_groups":[
+            {"type":"Tile Grid","disposition":{"default":1,"dependent":0},"components":[{"width":5712,"height":4284}],
+            "streams":[{"index":0,"width":640,"height":896},{"index":1,"width":640,"height":896}]},
+            {"type":"Tile Grid","disposition":{"default":0,"dependent":0},"components":[{"width":2856,"height":2142}],
+            "streams":[{"index":3,"width":640,"height":896},{"index":4,"width":640,"height":896}]}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(iphone)?, (5712, 4284, 0, false));
+
+        // A tiled grayscale image without alpha: every gray stream is a tile of the primary grid.
+        let tiled_grayscale = br#"{"streams":[
+            {"index":0,"codec_type":"video","width":512,"height":512,"pix_fmt":"gray","disposition":{"default":0,"dependent":1}},
+            {"index":1,"codec_type":"video","width":512,"height":512,"pix_fmt":"gray","disposition":{"default":0,"dependent":1}}],
+            "stream_groups":[{"type":"Tile Grid","disposition":{"default":1,"dependent":0},"components":[{"width":1024,"height":512}],
+            "streams":[{"index":0,"width":512,"height":512},{"index":1,"width":512,"height":512}]}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(tiled_grayscale)?, (1024, 512, 0, false));
+
+        // A gray stream of a size of its own next to an untiled image is a depth map or a matte, not alpha.
+        let depth = br#"{"streams":[{"codec_type":"video","width":4032,"height":3024,"pix_fmt":"yuvj420p","disposition":{"default":1,"dependent":0}},
+            {"codec_type":"video","width":768,"height":576,"pix_fmt":"gray"}]}"#;
+        assert_eq!(ImageInfo::parse_probe_size(depth)?, (4032, 3024, 0, false));
         Ok(())
     }
 }

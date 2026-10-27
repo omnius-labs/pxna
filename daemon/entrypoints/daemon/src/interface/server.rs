@@ -9,7 +9,7 @@ use omnius_pxna_interface::{apis, apis::BasicAuthKind};
 
 use crate::{
     interface::{
-        features::{files::FileContentRoute, thumbnails::ThumbnailRoute, uploads::UploadContentRoute, video::VideoRoute},
+        features::{files::FileContentRoute, image_channel::ImageChannelRoute, uploads::UploadContentRoute, video::VideoRoute},
         middleware::{OriginCheck, UnauthorizedBody},
         session::{BearerToken, Claims, SessionAuth, SessionCookie},
         web::WebAssets,
@@ -60,7 +60,7 @@ impl ApiServer {
         let api = axum::Router::new()
             .route(FileContentRoute::PATH, axum::routing::get(FileContentRoute::get).put(FileContentRoute::put))
             .route(UploadContentRoute::PATH, axum::routing::put(UploadContentRoute::put))
-            .route(ThumbnailRoute::PATH, axum::routing::get(ThumbnailRoute::get))
+            .route(ImageChannelRoute::PATH, axum::routing::get(ImageChannelRoute::get))
             .route(VideoRoute::PLAYLIST, axum::routing::get(VideoRoute::playlist))
             .route(VideoRoute::SEGMENT, axum::routing::get(VideoRoute::segment))
             .with_state(state.clone())
@@ -78,6 +78,14 @@ impl ApiServer {
 
         let listener = tokio::net::TcpListener::bind(state.conf.core.listen_addr.clone()).await?;
         info!(addr = state.conf.core.listen_addr, "listen start");
+
+        // 開いたままの image channel は、閉じなければ graceful shutdown が終わらない。
+        let channels = state.image_channels.clone();
+        let shutdown = token.clone();
+        tokio::spawn(async move {
+            shutdown.cancelled().await;
+            channels.closing().cancel();
+        });
         axum::serve(listener, app).with_graceful_shutdown(token.cancelled_owned()).await?;
 
         Ok(())
@@ -149,12 +157,6 @@ pub(crate) mod tests {
 
         pub(crate) fn header(&self, name: &str) -> Option<&str> {
             self.headers.get(name)?.to_str().ok()
-        }
-
-        /// 画像の応答を decode して、大きさを返す。
-        pub(crate) fn image_size(&self) -> TestResult<(u32, u32)> {
-            let image = image::load_from_memory(&self.bytes)?;
-            Ok((image.width(), image.height()))
         }
     }
 
@@ -848,6 +850,15 @@ pub(crate) mod tests {
                 response.status
             );
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn router_returns_not_found_for_the_removed_thumbnail_route_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let router = router(&fixture);
+        let response = send(&router, Method::GET, "/api/v1/libraries/photos/thumbnails?path=/photos/notes.txt", &[], None).await?;
+        assert_eq!(response.status, StatusCode::NOT_FOUND, "the image channel is the only path");
         Ok(())
     }
 

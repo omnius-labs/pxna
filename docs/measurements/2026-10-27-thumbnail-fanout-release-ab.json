@@ -1,0 +1,244 @@
+{
+    "date": "2026-10-27",
+    "subject": "release-build A/B of the thumbnail fan-out",
+    "build": {
+        "a_command": "cd daemon && RUSTC_WRAPPER= cargo build --release -p omnius-pxna-daemon",
+        "b_command": "the same, after a temporary early return of Vec::new() in ThumbnailGenerator::companion_plans",
+        "profile": "release (opt-level 3 by default, debug = 1); no LTO change",
+        "b_binary_sha256": "f550ebe709986513f41c07eda39b9d2c857311567ba5bc564a58e9b924d7e3c8",
+        "generator_before_sha256": "80485487e4a8ca52220ad3ce03f70dfe5889015709eee166b6a4fd8326647290",
+        "generator_patched_sha256": "d4576b2d34ea7ef99196b0ad9aedb14bbf21a3ff44ec39712bfca6d3e576ced1",
+        "generator_restored_sha256": "80485487e4a8ca52220ad3ce03f70dfe5889015709eee166b6a4fd8326647290",
+        "a_binary_sha256_after_restore_rebuild": "00a440ad16e876b32cec17a8110e39afd48cfcdb26079382e58d246c84b07f4d"
+    },
+    "environment": {
+        "os": "Debian GNU/Linux 13 (trixie) x86_64",
+        "cpu_cores": 10,
+        "memory_bytes": 8589934592,
+        "rust": "1.96.0",
+        "ffmpeg": "n9.0.2-17-g2a571b6068",
+        "heif_dec": "1.23.6",
+        "browser": "Headless Chrome 156",
+        "viewport": "1280x720",
+        "pixel_ratio": 1
+    },
+    "fixture": {
+        "sources": 5,
+        "source_type": "iPhone 15 Plus HEIC",
+        "source_bytes": 3552847,
+        "source_dimensions": "5712x4284",
+        "note": "The same HEIC copied under five names; each copy is a distinct SourceKey."
+    },
+    "procedure": "Fresh daemon state and empty thumbnail cache for each side. One image channel sends, one request at a time, a 512x512 crop thumbnail, a 512x512 fit thumbnail, and a 128x128 crop thumbnail for each source. The same sequence and fixtures are used for A and B.",
+    "a": {
+        "runs": [
+            {
+                "source": "/fanout_1.heic",
+                "primary_request_ms": 792.6,
+                "production_ms": 791.2,
+                "companion_conversion_ms": 193.7,
+                "shape_request_ms": 1.2,
+                "filmstrip_request_ms": 0.9,
+                "store_ms": 4.4,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 62030,
+                "companion_count": 5,
+                "shape_hit": true,
+                "filmstrip_hit": true
+            },
+            {
+                "source": "/fanout_2.heic",
+                "primary_request_ms": 670.2,
+                "production_ms": 669.3,
+                "companion_conversion_ms": 187.7,
+                "shape_request_ms": 0.9,
+                "filmstrip_request_ms": 0.9,
+                "store_ms": 3.9,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 62030,
+                "companion_count": 5,
+                "shape_hit": true,
+                "filmstrip_hit": true
+            },
+            {
+                "source": "/fanout_3.heic",
+                "primary_request_ms": 658.9,
+                "production_ms": 658.0,
+                "companion_conversion_ms": 194.0,
+                "shape_request_ms": 0.9,
+                "filmstrip_request_ms": 0.8,
+                "store_ms": 3.6,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 62030,
+                "companion_count": 5,
+                "shape_hit": true,
+                "filmstrip_hit": true
+            },
+            {
+                "source": "/fanout_4.heic",
+                "primary_request_ms": 702.4,
+                "production_ms": 701.6,
+                "companion_conversion_ms": 210.7,
+                "shape_request_ms": 0.9,
+                "filmstrip_request_ms": 0.8,
+                "store_ms": 3.6,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 62030,
+                "companion_count": 5,
+                "shape_hit": true,
+                "filmstrip_hit": true
+            },
+            {
+                "source": "/fanout_5.heic",
+                "primary_request_ms": 1071.1,
+                "production_ms": 1070.4,
+                "companion_conversion_ms": 202.5,
+                "shape_request_ms": 1.1,
+                "filmstrip_request_ms": 0.9,
+                "store_ms": 388.1,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 62030,
+                "companion_count": 5,
+                "shape_hit": true,
+                "filmstrip_hit": true
+            }
+        ],
+        "medians": {
+            "primary_request_ms": 702.4,
+            "production_ms": 701.6,
+            "companion_conversion_ms": 194.0,
+            "shape_request_ms": 0.9,
+            "filmstrip_request_ms": 0.9,
+            "store_ms": 3.9,
+            "primary_bytes": 39428,
+            "added_companion_bytes": 62030,
+            "companion_count": 5
+        },
+        "external_decodes": 5,
+        "conversions": 5,
+        "generations": 5,
+        "hits": 10,
+        "requests": 15,
+        "stored_bytes_per_source": 101458,
+        "hit_rate": 0.6666666666666666,
+        "client_medians": {
+            "primary": 703.5,
+            "shape": 2.2,
+            "filmstrip": 1.6
+        }
+    },
+    "b": {
+        "runs": [
+            {
+                "source": "/fanout_1.heic",
+                "primary_request_ms": 1488.7,
+                "production_ms": 1486.3,
+                "companion_conversion_ms": 0,
+                "shape_request_ms": 1167.9,
+                "filmstrip_request_ms": 1082.8,
+                "store_ms": 3.1,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 0,
+                "companion_count": 0,
+                "shape_hit": false,
+                "filmstrip_hit": false
+            },
+            {
+                "source": "/fanout_2.heic",
+                "primary_request_ms": 1455.9,
+                "production_ms": 1454.2,
+                "companion_conversion_ms": 0,
+                "shape_request_ms": 519.4,
+                "filmstrip_request_ms": 485.8,
+                "store_ms": 1.5,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 0,
+                "companion_count": 0,
+                "shape_hit": false,
+                "filmstrip_hit": false
+            },
+            {
+                "source": "/fanout_3.heic",
+                "primary_request_ms": 499.7,
+                "production_ms": 498.8,
+                "companion_conversion_ms": 0,
+                "shape_request_ms": 465.3,
+                "filmstrip_request_ms": 477.2,
+                "store_ms": 1.4,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 0,
+                "companion_count": 0,
+                "shape_hit": false,
+                "filmstrip_hit": false
+            },
+            {
+                "source": "/fanout_4.heic",
+                "primary_request_ms": 489.2,
+                "production_ms": 488.2,
+                "companion_conversion_ms": 0,
+                "shape_request_ms": 467.8,
+                "filmstrip_request_ms": 478.2,
+                "store_ms": 1.6,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 0,
+                "companion_count": 0,
+                "shape_hit": false,
+                "filmstrip_hit": false
+            },
+            {
+                "source": "/fanout_5.heic",
+                "primary_request_ms": 541.4,
+                "production_ms": 540.6,
+                "companion_conversion_ms": 0,
+                "shape_request_ms": 456.6,
+                "filmstrip_request_ms": 467.3,
+                "store_ms": 1.5,
+                "primary_bytes": 39428,
+                "added_companion_bytes": 0,
+                "companion_count": 0,
+                "shape_hit": false,
+                "filmstrip_hit": false
+            }
+        ],
+        "medians": {
+            "primary_request_ms": 541.4,
+            "production_ms": 540.6,
+            "companion_conversion_ms": 0,
+            "shape_request_ms": 467.8,
+            "filmstrip_request_ms": 478.2,
+            "store_ms": 1.5,
+            "primary_bytes": 39428,
+            "added_companion_bytes": 0,
+            "companion_count": 0
+        },
+        "external_decodes": 15,
+        "conversions": 15,
+        "generations": 15,
+        "hits": 0,
+        "requests": 15,
+        "stored_bytes_per_source": 39428,
+        "hit_rate": 0.0,
+        "client_medians": {
+            "primary": 542.7,
+            "shape": 469,
+            "filmstrip": 479
+        }
+    },
+    "delta": {
+        "primary_request_ms": 161.0,
+        "production_ms": 161.0,
+        "shape_request_ms": -466.9,
+        "filmstrip_request_ms": -477.3,
+        "external_decodes": -10,
+        "stored_bytes_per_source": 62030,
+        "hit_rate": 0.6667,
+        "added_companion_bytes": 62030,
+        "client_primary_ms": 160.8
+    },
+    "limits": [
+        "The fixture repeats one file, so the medians do not cover other HEIC sizes or pixel content.",
+        "Five runs per side, one process and an empty cache; the OS file cache was not controlled.",
+        "B was built from a temporary local patch that returned an empty companion list and was restored byte-for-byte; the A binary was built from the current worktree before that patch.",
+        "The browser ran on the same host as the daemon; transfer and scheduling outside the daemon are included in the client-observed latencies but not in the server spans."
+    ]
+}
