@@ -183,6 +183,23 @@ impl Scheduler {
     pub fn counts(&self, kind: WorkKind) -> (usize, usize) {
         (self.started[kind as usize].load(Ordering::Relaxed), self.finished[kind as usize].load(Ordering::Relaxed))
     }
+
+    /// Runs `f` on a blocking thread while holding `guards` until it really ends.
+    /// Dropping the returned future does not stop `f` or release the guards. The span is carried over.
+    pub async fn run_blocking_with<G, T, F>(guards: G, f: F) -> Result<T>
+    where
+        G: Send + 'static,
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        let span = Span::current();
+        tokio::task::spawn_blocking(move || {
+            let _guards = guards;
+            span.in_scope(f)
+        })
+        .await
+        .map_err(|error| Error::from_error(error, ErrorKind::TaskError))
+    }
 }
 
 /// 1 つの資源の枠。複製しても同じ資源を指す。
@@ -265,14 +282,7 @@ impl SchedulePermit {
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        let span = Span::current();
-        tokio::task::spawn_blocking(move || {
-            let _permit = self;
-            let _guards = guards;
-            span.in_scope(f)
-        })
-        .await
-        .map_err(|error| Error::from_error(error, ErrorKind::TaskError))
+        Scheduler::run_blocking_with((self, guards), f).await
     }
 }
 

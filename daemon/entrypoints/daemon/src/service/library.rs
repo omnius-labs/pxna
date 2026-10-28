@@ -98,10 +98,11 @@ impl LibraryBrowser {
         let version = SnapshotVersion::for_folder(&folder, &entry, false);
         let root = library.path.clone();
         let include_hidden = options.include_hidden();
+        let budget = self.storage.work_budget().clone();
         let snapshot = self
             .snapshots
             .summaries()
-            .get_or_scan(key, version, move || async move { SummaryData::scan(&folder, &root, include_hidden).await })
+            .get_or_scan(key, version, move || async move { SummaryData::scan(&folder, &root, include_hidden, &budget).await })
             .await?;
         Ok(snapshot.page(options))
     }

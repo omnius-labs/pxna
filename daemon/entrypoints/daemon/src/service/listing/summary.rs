@@ -12,7 +12,10 @@ use futures::{
     future::{BoxFuture, WeakShared},
 };
 use omnius_core_base::clock::Clock;
-use omnius_pxna_engine::{perf_span, service::ResolvedStoragePath};
+use omnius_pxna_engine::{
+    perf_span,
+    service::{ResolvedStoragePath, WorkBudget, WorkKind},
+};
 use omnius_pxna_interface::models;
 use serde::{Deserialize, Serialize};
 use tracing::{Instrument as _, Span, field::Empty};
@@ -99,12 +102,12 @@ pub struct SummaryData {
 }
 
 impl SummaryData {
-    pub async fn scan(folder: &ResolvedStoragePath, root: &Path, include_hidden: bool) -> Result<Self> {
+    pub async fn scan(folder: &ResolvedStoragePath, root: &Path, include_hidden: bool, budget: &WorkBudget) -> Result<Self> {
         let span = perf_span!("summary_scan", entry_count = Empty);
-        Self::scan_traced(folder, root, include_hidden).instrument(span).await
+        Self::scan_traced(folder, root, include_hidden, budget).instrument(span).await
     }
 
-    async fn scan_traced(folder: &ResolvedStoragePath, root: &Path, include_hidden: bool) -> Result<Self> {
+    async fn scan_traced(folder: &ResolvedStoragePath, root: &Path, include_hidden: bool, budget: &WorkBudget) -> Result<Self> {
         let mut stream = folder.find_entry_summaries().await?;
         let converter = EntryConverter::new(root);
         let mut entries = Vec::new();
@@ -118,9 +121,11 @@ impl SummaryData {
                 entry,
             });
         }
-        let data = tokio::task::spawn_blocking(move || Self::new(entries))
+        let data = budget
+            .io()
+            .run_blocking(WorkKind::Summary, move || Self::new(entries))
             .await
-            .map_err(|error| Error::from_error(error, ErrorKind::TaskError).with_message("cannot sort summary"))?;
+            .map_err(|error| error.with_message("cannot sort summary"))?;
         Span::current().record("entry_count", data.entries.len());
         Ok(data)
     }

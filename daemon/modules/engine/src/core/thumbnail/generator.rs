@@ -316,7 +316,7 @@ impl SourceId {
 
 impl ThumbnailGenerator {
     pub async fn open(fs: Arc<StorageService>, cache_dir: &Path, options: ThumbnailOptions, media: MediaOptions) -> Result<Self> {
-        let media_info = Arc::new(MediaInfoService::new(media.clone(), options.video_timeout));
+        let media_info = Arc::new(MediaInfoService::new(media.clone(), options.video_timeout).with_budget(fs.work_budget().clone()));
         let pools = MediaPools::new(&Arc::new(Scheduler::default()), &ScheduleOptions::default());
         Self::open_with_media(fs, cache_dir, options, media, media_info, pools).await
     }
