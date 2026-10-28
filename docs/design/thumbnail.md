@@ -13,13 +13,13 @@ The definitions of words are not in this document.
 | --- | --- |
 | This document | Generating thumbnails, sprite sheets, and display images, determining targets, the order and concurrency of generation, caches, reasons for adoption, deferred items |
 | [design.md](../design.md) | Pxna's overall scope, overall structure, boundaries between concerns, and cross-cutting design decisions |
-| [Image Channel Design](./image-channel.md) | How the client says which images it wants, request classes and the order of items, delivery, revalidation |
+| [Image Socket Design](./image-socket.md) | How the client says which images it wants, request classes and the order of items, delivery, revalidation |
 | [Client Design](./client.md) | Which images each part of the web client wants and when, and the client's image cache |
 | [Video Playback Design](./video.md) | Media info and conversion for playing videos in the viewer |
 | [Storage Layer Design](./storage.md) | Resolving `NestedPath`, materializing entries in archives, the definition of `EntryCacheKey` |
 | [terms.md](../terms.md) | Definitions of terms |
 | [issues.md](../issues.md) | Clear defects confirmed in code and handling policies |
-| [daemon/image-channel.schema.json](../../daemon/image-channel.schema.json) | The authoritative fields and values of an item and of the images returned for it |
+| [daemon/sockets/image.schema.json](../../daemon/sockets/image.schema.json) | The authoritative fields and values of an item and of the images returned for it |
 
 The entry point of the design document family is [design.md](../design.md).
 
@@ -31,8 +31,8 @@ If you want to know what works now, read §11 first.
 
 ## 2. Responsibilities and Boundaries
 
-This document covers the span from receiving an item with a checked `NestedPath` to handing the converted image to the image channel.
-Images, videos, folders, and archives are all wanted by the client through the image channel ([Image Channel Design](./image-channel.md)), and `ThumbnailGenerator` chooses the generation method according to the kind of target.
+This document covers the span from receiving an item with a checked `NestedPath` to handing the converted image to the image socket.
+Images, videos, folders, and archives are all wanted by the client through the image socket ([Image Socket Design](./image-socket.md)), and `ThumbnailGenerator` chooses the generation method according to the kind of target.
 
 Pxna's purpose is to quickly browse files on a home server from a phone or a browser ([design.md §2](../design.md#2-what-pxna-is)).
 If the server shrinks before sending, the client can draw a listing without reading the original files.
@@ -45,7 +45,7 @@ The boundaries with other concerns are as follows.
 | The procedure for building a `NestedPath` from a Library-relative path and checking the boundary | [design.md §4.3](../design.md#43-resolving-library-and-archive-boundaries) |
 | How to turn an entry in an archive into a readable file, and its cache | [Storage Layer Design §5.2](./storage.md#52-default-implementations-centered-on-materialize) |
 | Which images the client wants, and when it drops them | [Client Design §4](./client.md#4-thumbnail-requests) |
-| The order in which wanted items reach generation, and how images are sent and revalidated | [Image Channel Design §5](./image-channel.md#5-request-classes-and-order), [§6](./image-channel.md#6-delivery), [§7](./image-channel.md#7-revalidation) |
+| The order in which wanted items reach generation, and how images are sent and revalidated | [Image Socket Design §5](./image-socket.md#5-request-classes-and-order), [§6](./image-socket.md#6-delivery), [§7](./image-socket.md#7-revalidation) |
 | How name order is compared | [design.md §11.1](../design.md#compare-name-order-in-natural-order) |
 | The mapping from the engine's error kinds to HTTP status | [design.md §4.4](../design.md#44-error-model-and-http-mapping) |
 
@@ -163,7 +163,7 @@ The chosen Entry's attributes are checked on every request, and the cache key of
 The direct children of an archive can be looked up from the index cache, so each file is not extracted to make the selection.
 
 An item for a representative thumbnail names the folder or archive, so it stays the same when the chosen Entry changes.
-Its `ETag` is the chosen Entry's key, and the client revalidates every want with the `ETag` of the image it holds, as for any image ([Image Channel Design §7](./image-channel.md#7-revalidation)).
+Its `ETag` is the chosen Entry's key, and the client revalidates every want with the `ETag` of the image it holds, as for any image ([Image Socket Design §7](./image-socket.md#7-revalidation)).
 The server compares it with the key of the Entry chosen now, so a new representative is sent at once, and while it is the same the answer is `unchanged` and the image is not transferred again ([design decision](#representative-revalidation)).
 
 ## 6. Video Frame Sequence
@@ -215,8 +215,8 @@ Each run has a deadline of `video_timeout_secs`, and when it passes the process 
 
 ## 7. Order and Concurrency of Generation
 
-Generation is done when an item of the image channel needs it.
-Which item reaches generation when is decided by the wanted sets of the channels: each connection passes its items in the order of request class and then order, a few at a time, so items that left the screen do not take the slots ([Image Channel Design §5](./image-channel.md#5-request-classes-and-order)).
+Generation is done when an item of the image socket needs it.
+Which item reaches generation when is decided by the wanted sets of the sockets: each connection passes its items in the order of request class and then order, a few at a time, so items that left the screen do not take the slots ([Image Socket Design §5](./image-socket.md#5-request-classes-and-order)).
 
 **The display image a viewer shows now is Interactive.**
 An `interactive` item is Interactive work, and `visible` and `prefetch` items are Foreground work.
@@ -355,7 +355,7 @@ The Docker image for distribution bundles all three ([design.md §9.3](../design
 #### Generate When a Request Is Received
 
 **Decision**
-Thumbnails are generated when a client wants them through the image channel, and there is no bulk generation in the background.
+Thumbnails are generated when a client wants them through the image socket, and there is no bulk generation in the background.
 
 **Reason**
 The folders being browsed are a small part of the Library, and converting files nobody sees only costs.
@@ -758,7 +758,7 @@ Representative selection, candidate attributes, the lookup, read, and LRU update
 `ThumbnailGenerator` generates according to the rules of §3 through §8.
 It handles images, HEIF images read with ffmpeg (or heif-dec for alpha), images read with ffmpeg, videos, folders, and archives, and returns thumbnails, sprite sheets, and display images.
 The cache is a SQLite index and real files in `state_dir/thumbnail/`, with a budget for thumbnails and sprite sheets and a budget for display images.
-Thumbnails, sprite sheets, and display images are returned over the image channel ([Image Channel Design §10](./image-channel.md#10-current-state-and-remaining-work)), and there is no HTTP route for them. Each item that misses the cache is placed in the source job of its source (§7), in `ThumbnailGenerator`, so one source is decoded by one job at a time, whichever requests are for it. The order in which items reach the slots is their class and order on the channel.
+Thumbnails, sprite sheets, and display images are returned over the image socket ([Image Socket Design §10](./image-socket.md#10-current-state-and-remaining-work)), and there is no HTTP route for them. Each item that misses the cache is placed in the source job of its source (§7), in `ThumbnailGenerator`, so one source is decoded by one job at a time, whichever requests are for it. The order in which items reach the slots is their class and order on the socket.
 The client revalidates a held image by sending its `ETag` (§5), and the web client does not yet request folder and archive tiles again after the daemon's own changes.
 
 All the keys in §9.1 can be specified from the configuration file.
@@ -784,8 +784,8 @@ Only the dependencies must be respected.
 
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
-| T1 | Have the web client want folder and archive tiles again after the daemon's own changes ([design decision](#representative-revalidation)) | IC2 of [Image Channel Design §10.2](./image-channel.md#102-roadmap) | Not started |
+| T1 | Have the web client want folder and archive tiles again after the daemon's own changes ([design decision](#representative-revalidation)) | IC2 of [Image Socket Design §10.2](./image-socket.md#102-roadmap) | Not started |
 
-T1 corresponds to M20 of [design.md §12.2](../design.md#122-roadmap). The revalidation of §5 itself comes with the image channel (IC1).
+T1 corresponds to M20 of [design.md §12.2](../design.md#122-roadmap). The revalidation of §5 itself comes with the image socket (IC1).
 
 For confirmed defects, see [issues.md](../issues.md).

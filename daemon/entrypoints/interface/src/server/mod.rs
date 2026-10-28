@@ -25,7 +25,7 @@ where
         + apis::files::Files<E, Claims = C>
         + apis::folders::Folders<E, Claims = C>
         + apis::health::Health<E>
-        + apis::image_channel::ImageChannel<E, Claims = C>
+        + apis::image_socket::ImageSocket<E, Claims = C>
         + apis::libraries::Libraries<E, Claims = C>
         + apis::operations::Operations<E, Claims = C>
         + apis::performance::Performance<E, Claims = C>
@@ -52,7 +52,6 @@ where
         .route("/api/v1/auth/session", delete(delete_current_session::<I, A, E, C>))
         .route("/api/v1/capabilities", get(get_capabilities::<I, A, E, C>))
         .route("/api/v1/health", get(get_health::<I, A, E>))
-        .route("/api/v1/image-channel", get(get_image_channel::<I, A, E, C>))
         .route("/api/v1/libraries", get(list_libraries::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}", get(get_library::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/entries/details", post(get_entry_details::<I, A, E, C>))
@@ -99,6 +98,7 @@ where
         .route("/api/v1/search/entries", get(list_search_entries::<I, A, E, C>))
         .route("/api/v1/setup", post(create_initial_setup::<I, A, E>))
         .route("/api/v1/setup/status", get(get_setup_status::<I, A, E>))
+        .route("/api/v1/sockets/image", get(get_image_socket::<I, A, E, C>))
         .route("/api/v1/tags", get(list_tags::<I, A, E, C>))
         .route("/api/v1/timeline/entries", get(list_timeline_entries::<I, A, E, C>))
         .route("/api/v1/timeline/months", get(list_timeline_months::<I, A, E, C>))
@@ -3725,12 +3725,12 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-fn get_image_channel_validation() -> std::result::Result<(), ValidationErrors> {
+fn get_image_socket_validation() -> std::result::Result<(), ValidationErrors> {
     Ok(())
 }
-/// GetImageChannel - GET /api/v1/image-channel
+/// GetImageSocket - GET /api/v1/sockets/image
 #[tracing::instrument(skip_all)]
-async fn get_image_channel<I, A, E, C>(
+async fn get_image_socket<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
@@ -3739,7 +3739,7 @@ async fn get_image_channel<I, A, E, C>(
 ) -> Result<Response, StatusCode>
 where
     I: AsRef<A> + Send + Sync,
-    A: apis::image_channel::ImageChannel<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    A: apis::image_socket::ImageSocket<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
     E: std::fmt::Debug + Send + Sync + 'static,
 {
     // Authentication
@@ -3754,7 +3754,7 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_image_channel_validation()).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || get_image_socket_validation()).await.unwrap();
 
     let Ok(()) = validation else {
         return Response::builder()
@@ -3763,17 +3763,17 @@ where
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().get_image_channel(&method, &host, &cookies, &claims).await;
+    let result = api_impl.as_ref().get_image_socket(&method, &host, &cookies, &claims).await;
 
     let mut response = Response::builder();
 
     let resp = match result {
         Ok(rsp) => match rsp {
-            apis::image_channel::GetImageChannelResponse::Status101_TheConnectionIsUpgradedToAWebSocket => {
+            apis::image_socket::GetImageSocketResponse::Status101_TheConnectionIsUpgradedToAWebSocket => {
                 let mut response = response.status(101);
                 response.body(Body::empty())
             }
-            apis::image_channel::GetImageChannelResponse::Status400_InvalidRequest(body) => {
+            apis::image_socket::GetImageSocketResponse::Status400_InvalidRequest(body) => {
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -3790,7 +3790,7 @@ where
                 .unwrap()?;
                 response.body(Body::from(body_content))
             }
-            apis::image_channel::GetImageChannelResponse::Status401_MissingOrInvalidAuthentication(body) => {
+            apis::image_socket::GetImageSocketResponse::Status401_MissingOrInvalidAuthentication(body) => {
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -3807,7 +3807,7 @@ where
                 .unwrap()?;
                 response.body(Body::from(body_content))
             }
-            apis::image_channel::GetImageChannelResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
+            apis::image_socket::GetImageSocketResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -3824,7 +3824,7 @@ where
                 .unwrap()?;
                 response.body(Body::from(body_content))
             }
-            apis::image_channel::GetImageChannelResponse::Status429_TheSessionAlreadyHasTheMostImageChannelsItMayKeepOpen(body) => {
+            apis::image_socket::GetImageSocketResponse::Status429_TheSessionAlreadyHasTheMostImageSocketsItMayKeepOpen(body) => {
                 let mut response = response.status(429);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -3841,7 +3841,7 @@ where
                 .unwrap()?;
                 response.body(Body::from(body_content))
             }
-            apis::image_channel::GetImageChannelResponse::Status500_InternalServerError(body) => {
+            apis::image_socket::GetImageSocketResponse::Status500_InternalServerError(body) => {
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();

@@ -16,10 +16,10 @@ use crate::{
     db::DatabaseBootstrap,
     prelude::*,
     service::{
-        image_channel::{ImageChannelLimits, ImageChannels},
         library::LibraryBrowser,
         listing::ListingSnapshots,
         mutation::{LibraryMutation, OperationService, UploadService},
+        sockets::image::{ImageSocketLimits, ImageSockets},
         timeline::TimelineService,
         video::VideoService,
     },
@@ -42,8 +42,8 @@ pub struct DaemonState {
     pub pools: MediaPools,
     pub videos: Arc<VideoService>,
     pub timeline: Arc<TimelineService>,
-    /// The open image channels, their limits, and the signal that closes them at shutdown.
-    pub image_channels: Arc<ImageChannels>,
+    /// The open image sockets, their limits, and the signal that closes them at shutdown.
+    pub image_sockets: Arc<ImageSockets>,
 }
 
 impl DaemonState {
@@ -138,7 +138,7 @@ impl DaemonState {
             pools,
             videos,
             timeline,
-            image_channels: ImageChannels::new(ImageChannelLimits::default()),
+            image_sockets: ImageSockets::new(ImageSocketLimits::default()),
         })
     }
 

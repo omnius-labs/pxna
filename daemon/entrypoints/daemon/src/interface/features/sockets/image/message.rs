@@ -1,4 +1,4 @@
-//! The messages of the image channel. `daemon/image-channel.schema.json` is the contract, and the tests check these types against it.
+//! The messages of the image socket. `daemon/sockets/image.schema.json` is the contract, and the tests check these types against it.
 use serde::{Deserialize, Serialize};
 
 use omnius_pxna_interface::models;
@@ -153,7 +153,7 @@ mod tests {
 
     /// Validates `instance` against one definition of the contract.
     fn validate(definition: &str, instance: &Value) -> std::result::Result<(), String> {
-        let mut schema: Value = serde_json::from_str(include_str!("../../../../../../image-channel.schema.json")).expect("the schema is JSON");
+        let mut schema: Value = serde_json::from_str(include_str!("../../../../../../../sockets/image.schema.json")).expect("the schema is JSON");
         schema.as_object_mut().expect("the schema is an object").remove("anyOf");
         schema["$ref"] = json!(format!("#/$defs/{definition}"));
         let validator = jsonschema::validator_for(&schema).expect("the schema is a schema");

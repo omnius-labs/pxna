@@ -36,8 +36,8 @@ impl OriginCheck {
         Self::matches_host(headers)
     }
 
-    /// image channel の WebSocket の upgrade は `GET` なので `middleware` を素通りするが、ブラウザは cookie を付けて送る。
-    /// そのため channel 自身が、cookie を持つ upgrade に同じ検証をする（design.md §8.5）。
+    /// image socket の WebSocket の upgrade は `GET` なので `middleware` を素通りするが、ブラウザは cookie を付けて送る。
+    /// そのため socket 自身が、cookie を持つ upgrade に同じ検証をする（design.md §8.5）。
     pub fn allows_upgrade(headers: &HeaderMap) -> bool {
         !Self::has_session_cookie(headers) || Self::matches_host(headers)
     }

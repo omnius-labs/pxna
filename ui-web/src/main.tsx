@@ -8,10 +8,10 @@ import { createAppQueryClient, leaveForLogin } from "./auth/unauthorized";
 import { Toaster } from "./components/ui/sonner";
 import { useLanguage } from "./i18n";
 import "./index.css";
-import { createBrowserImageChannel } from "./images/channel";
 import { notifyImageSessionEnded, onImageSessionEnded, setImageSource } from "./images/source";
 import { followSystemTheme } from "./library/theme";
 import { createAppRouter } from "./router";
+import { createBrowserImageSocket } from "./sockets/image";
 
 followSystemTheme();
 
@@ -23,9 +23,9 @@ const navigator = () => ({
 const queryClient = createAppQueryClient(navigator);
 const router = createAppRouter(queryClient);
 clientTimings.attach(queryClient);
-// image channel が、セッションが終わったと言って閉じられたら、API の 401 と同じようにログインへ移す。
+// image socket が、セッションが終わったと言って閉じられたら、API の 401 と同じようにログインへ移す。
 onImageSessionEnded(() => leaveForLogin(queryClient, navigator()));
-setImageSource(createBrowserImageChannel(notifyImageSessionEnded));
+setImageSource(createBrowserImageSocket(notifyImageSessionEnded));
 
 const root = document.getElementById("root");
 if (!root) {

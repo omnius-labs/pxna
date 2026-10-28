@@ -17,13 +17,13 @@ Note that the web client's interface is shown in English or Japanese (§3.11). W
 | [design.md](../design.md) | Pxna's overall scope, how the web client is served, carrying sessions, conventions for mutating APIs, constraints common to clients |
 | [Listing and Search Design](./listing.md) | How the server sorts, filters, and cuts listings from snapshots |
 | [Thumbnail Design](./thumbnail.md) | How the server generates and caches thumbnails, sprite sheets, and display images |
-| [Image Channel Design](./image-channel.md) | The connection that carries thumbnails, sprite sheets, and display images, request classes, delivery, revalidation |
+| [Image Socket Design](./image-socket.md) | The connection that carries thumbnails, sprite sheets, and display images, request classes, delivery, revalidation |
 | [Video Playback Design](./video.md) | The server-side mechanisms for media info of images and videos, direct playback, and transcoded playback |
 | [Timeline Design](./timeline.md) | What is listed in the timeline, timeline dates, the server's aggregation and reading |
 | [terms.md](../terms.md) | Definitions of terms |
 | [issues.md](../issues.md) | Clear defects confirmed in code and handling policies |
 | [daemon/openapi.yaml](../../daemon/openapi.yaml) | The authoritative paths, schemas, and status codes of the APIs the client calls |
-| [daemon/image-channel.schema.json](../../daemon/image-channel.schema.json) | The authoritative messages of the image channel |
+| [daemon/sockets/image.schema.json](../../daemon/sockets/image.schema.json) | The authoritative messages of the image socket |
 
 The entry point of the design document family is [design.md](../design.md).
 
@@ -194,7 +194,7 @@ A flick is a horizontal movement of more than 50 CSS px within 300 ms, a downwar
 The order of previous and next follows the same sort as the listing.
 When moving to an Entry on a page not yet read, that page is read.
 The display images of one before and one after are requested in advance, so they are shown without waiting when moved to.
-The shown image is wanted with the `interactive` request class and the ones before and after with `prefetch`, so the server starts the shown image first ([Image Channel Design §5](./image-channel.md#5-request-classes-and-order)).
+The shown image is wanted with the `interactive` request class and the ones before and after with `prefetch`, so the server starts the shown image first ([Image Socket Design §5](./image-socket.md#5-request-classes-and-order)).
 The wants of images that are neither shown nor next to the shown image are dropped while loading. Besides the shown image and its neighbors, up to 6 more loaded display images are kept, the most recent first.
 Moving to an image whose prefetch is still loading raises its want to `interactive`, so the server moves it ahead without starting it over.
 The original images before and after are not requested in advance.
@@ -551,16 +551,16 @@ The daemon and the API are not translated.
 
 ## 4. Thumbnail Requests
 
-The client receives thumbnails, sprite sheets, and display images only through the image channel ([Image Channel Design](./image-channel.md)).
-One image channel client per tab gathers the wants of every part: the grid, the list, the timeline, the filmstrip, flipbook playback, the info panel, and the viewer's display images.
+The client receives thumbnails, sprite sheets, and display images only through the image socket ([Image Socket Design](./image-socket.md)).
+One image socket client per tab gathers the wants of every part: the grid, the list, the timeline, the filmstrip, flipbook playback, the info panel, and the viewer's display images.
 Each part tells it which images it needs now, with a request class and an order within the class.
-The channel client merges an image that several parts want, the same Library, path, kind, width, height, and shape, into one item with the highest class and the smallest order, and sends the changes of the merged set to the server.
-The server decides from this set what to generate and send next ([Image Channel Design §5](./image-channel.md#5-request-classes-and-order)), so the client neither limits how many images it asks for at once nor cancels requests.
+The socket client merges an image that several parts want, the same Library, path, kind, width, height, and shape, into one item with the highest class and the smallest order, and sends the changes of the merged set to the server.
+The server decides from this set what to generate and send next ([Image Socket Design §5](./image-socket.md#5-request-classes-and-order)), so the client neither limits how many images it asks for at once nor cancels requests.
 
 A listing wants the thumbnails of only the visible tiles and the tiles in the prefetch margin around them.
 The prefetch margin is one screen in the direction of scrolling.
 Visible tiles are `visible` and tiles in the margin are `prefetch`, and within each class tiles nearer the center of the screen get a smaller order.
-When a tile leaves the screen and the prefetch margin, the listing stops wanting it, and the channel client drops the item unless another part still wants it.
+When a tile leaves the screen and the prefetch margin, the listing stops wanting it, and the socket client drops the item unless another part still wants it.
 
 The width and height requested are the tile's display size multiplied by the pixel density.
 The server rounds up to size steps, so the client need not know the step values.
@@ -573,16 +573,16 @@ It does not want again merely because the listing's width changed and columns wi
 This is so that wants do not change in succession while the width is being changed.
 The output format is not specified and is left to the server's configuration ([Thumbnail Design §4.2](./thumbnail.md#42-shape-and-output-format)).
 
-The channel client keeps the images it receives in IndexedDB, by the same Library, path, kind, width, height, and shape, with the image's `ETag`.
-When a part wants an image the cache holds, the channel client shows it at once and wants the item with that `ETag`. On `unchanged` it keeps the image, and on a new image it replaces the image in the cache and on screen ([Image Channel Design §7](./image-channel.md#7-revalidation)).
+The socket client keeps the images it receives in IndexedDB, by the same Library, path, kind, width, height, and shape, with the image's `ETag`.
+When a part wants an image the cache holds, the socket client shows it at once and wants the item with that `ETag`. On `unchanged` it keeps the image, and on a new image it replaces the image in the cache and on screen ([Image Socket Design §7](./image-socket.md#7-revalidation)).
 Thumbnails and sprite sheets have a budget of 256 MiB and display images one of 512 MiB, and each drops its least recently used images beyond the budget, so opening many display images does not push out the listing's thumbnails.
 Logging out deletes the cache, because its images show the Library to whoever uses the browser next.
-The channel client turns an image into a blob URL for the parts, and releases the URL when no part wants the image any more.
+The socket client turns an image into a blob URL for the parts, and releases the URL when no part wants the image any more.
 
 A tile whose item failed with the server's deadline expiry (`Timeout`) becomes an icon showing the kind, like files whose thumbnail cannot be made, and is not wanted again while that folder is displayed.
 As with the failure of a listing, this is because repeating can hit the same deadline expiry.
-When the channel closes, the channel client reconnects and sends its whole set again; items that were not answered are wanted again with new ids ([Image Channel Design §3](./image-channel.md#3-connection)).
-When the server closes the channel because the session ended, the web client returns to login, and when it closes it for a contract error, the tiles that were not answered become icons.
+When the socket closes, the socket client reconnects and sends its whole set again; items that were not answered are wanted again with new ids ([Image Socket Design §3](./image-socket.md#3-connection)).
+When the server closes the socket because the session ended, the web client returns to login, and when it closes it for a contract error, the tiles that were not answered become icons.
 
 The exception is right after the daemon's own change.
 When the listing is reread after a change made through Pxna, the shown and failed states of folder and archive tiles are discarded, and the tiles in the request targets are wanted again with the `ETag` of the image the cache holds.
@@ -1071,22 +1071,22 @@ Behavior would be the same regardless of format, but the display image never bec
 A method that switches to the original image with a viewer button.
 The user could decide the transfer volume, but an operation would be needed every time a photo is flipped, so we rejected it.
 
-#### Gather Every Image Want of a Tab in One Image Channel Client
+#### Gather Every Image Want of a Tab in One Image Socket Client
 
 **Decision**
-One image channel client per tab merges the image wants of every part and sends them on one image channel (§4).
+One image socket client per tab merges the image wants of every part and sends them on one image socket (§4).
 
 **Reason**
-The listing, the filmstrip, the list, the info panel, the timeline, and the viewer each had their own queue, limited to 4 requests, and none saw what the others asked for. The same image was asked for in two sizes by the listing and the filmstrip, and the server decoded it twice, and the queues and the display images shared the browser's six connections to the daemon ([Image Channel Design §9.1](./image-channel.md#91-decided)).
+The listing, the filmstrip, the list, the info panel, the timeline, and the viewer each had their own queue, limited to 4 requests, and none saw what the others asked for. The same image was asked for in two sizes by the listing and the filmstrip, and the server decoded it twice, and the queues and the display images shared the browser's six connections to the daemon ([Image Socket Design §9.1](./image-socket.md#91-decided)).
 With one client, the same image wanted by two parts is one item, and the server receives every want of the tab and merges them by source.
 
 **Rejected alternative**
-Letting each part open its own channel. The parts would keep their own state, but the server would see several connections and the tab would hold several sockets.
+Letting each part open its own socket. The parts would keep their own state, but the server would see several connections and the tab would hold several sockets.
 
 #### Keep Received Images in IndexedDB and Revalidate Them
 
 **Decision**
-The channel client keeps received images in IndexedDB with their `ETag`, with separate budgets for thumbnails and sprite sheets (256 MiB) and display images (512 MiB), drops the least recently used beyond the budget, revalidates each kept image when it is wanted, and deletes the cache on logout (§4).
+The socket client keeps received images in IndexedDB with their `ETag`, with separate budgets for thumbnails and sprite sheets (256 MiB) and display images (512 MiB), drops the least recently used beyond the budget, revalidates each kept image when it is wanted, and deletes the cache on logout (§4).
 
 **Reason**
 The browser's HTTP cache does not keep what a WebSocket carries. Without a cache of its own, every reload and every new tab would transfer every image again. IndexedDB holds blobs with the fields needed to find and evict them, which the Cache API, keyed by request, does not.
@@ -1637,7 +1637,7 @@ When the info panel has been used on real screens and one can judge whether over
 Summary listings and detail completion are implemented in [entries.ts](../../ui-web/src/library/entries.ts) and [listing.ts](../../ui-web/src/library/listing.ts). Support is confirmed with capabilities, and names and kinds are displayed first. The existence of children for visible rows is checked one request at a time by [ChildProbeQueue](../../ui-web/src/library/childProbes.ts). It cancels on leaving the screen and on snapshot change, and returns to unconfirmed after the remaining TTL. Waiting for a probe does not stop normal expansion.
 
 The web client is a Vite SPA that the daemon serves from `[web] dir`.
-It has initial setup and login, the toolbar (mode switch, breadcrumb, user menu), the tree, the grid and list, the status bar, selection, the image channel client, flipbook playback of videos, and the image viewer.
+It has initial setup and login, the toolbar (mode switch, breadcrumb, user menu), the tree, the grid and list, the status bar, selection, the image socket client, flipbook playback of videos, and the image viewer.
 The video viewer chooses direct playback or HLS from media info, and on closing ends playback and the transcode session.
 The screen skeleton lines up the toolbar, tree, listing, and status bar on a wide screen (the tree and info panel change width with [ResizeHandle.tsx](../../ui-web/src/components/ResizeHandle.tsx)), and folds the tree into a drawer on a narrow screen. The color scheme follows the OS's light and dark setting.
 Display preferences wait for loading at the entrance of authenticated screens, and run with defaults if they cannot be read. Changes are written back as a whole when they have stopped for 500 ms, and on failure return to the saved values.
@@ -1659,8 +1659,8 @@ Internal drag moves to the same Library's tree and folder tiles, and copies when
 [upload.ts](../../ui-web/src/library/upload.ts) sends the toolbar's file and folder selection and OS drops in a queue of at most 2. Files of 32 MiB or less are written directly, and larger files send 16 MiB chunks. Folders are created first, and the conflict policy is also applied to what is underneath. For OS folders, it reads from the same reader until an empty batch, and does not drop the tail of what is underneath ([Measurements of Chromium](../knowledge/chromium-directory-reader.md)). A session is discarded when canceled, and the listing and tree are reread once per published file.
 The activity panel is shown overlaid at the bottom right and shows the progress, state, and failures and skips of Operations and uploads. Operations are updated every second only while running, and return even after a reload. Uploads show the number of bytes sent and can be canceled while waiting and sending. When collapsed it becomes a status bar button and shows the unread count. The items lined up when it is opened become read and are shown faintly, and finished items can be removed with ×. During an upload a leave confirmation is registered, and it is released when a terminal state is reached. On narrow screens, the entrances to operations and the panel are not shown.
 The viewer does not have back-and-forth movement by left and right flicks, zoom by pinch or double tap, or closing by a downward swipe.
-Thumbnails, sprite sheets, and display images are received only over the image channel (IC2): one client per tab ([channel.ts](../../ui-web/src/images/channel.ts)) merges the wants of the grid, list, timeline, info panel, filmstrip, and viewer into items with a class and an order, and keeps received images in IndexedDB with the budgets of §4 ([cache.ts](../../ui-web/src/images/cache.ts)). A part subscribes with [useImageWants](../../ui-web/src/images/wants.ts) or [DisplayImages](../../ui-web/src/viewer/displayImages.ts) and gets a blob URL. A cache hit is shown at once and wanted again with its `ETag`, so an unchanged file costs no image transfer. The per-part `ThumbnailQueue`, `fetchThumbnail`, and `loadDisplayImage`, and the browser's HTTP cache of thumbnails, are gone. Logging out clears the cache.
-The image channel client does not yet discard the states of folder and archive tiles after the daemon's own changes, and search mode does not display the notice for results the name index did not answer.
+Thumbnails, sprite sheets, and display images are received only over the image socket (IC2): one client per tab ([image.ts](../../ui-web/src/sockets/image.ts)) merges the wants of the grid, list, timeline, info panel, filmstrip, and viewer into items with a class and an order, and keeps received images in IndexedDB with the budgets of §4 ([cache.ts](../../ui-web/src/images/cache.ts)). A part subscribes with [useImageWants](../../ui-web/src/images/wants.ts) or [DisplayImages](../../ui-web/src/viewer/displayImages.ts) and gets a blob URL. A cache hit is shown at once and wanted again with its `ETag`, so an unchanged file costs no image transfer. The per-part `ThumbnailQueue`, `fetchThumbnail`, and `loadDisplayImage`, and the browser's HTTP cache of thumbnails, are gone. Logging out clears the cache.
+The image socket client does not yet discard the states of folder and archive tiles after the daemon's own changes, and search mode does not display the notice for results the name index did not answer.
 To the right of the listing on a wide screen, the info panel ([InfoPanel.tsx](../../ui-web/src/components/InfoPanel.tsx)), which can be opened and closed with a toolbar button, is placed.
 The open/closed state is saved in the browser's `localStorage`, and is open when first opened.
 When one item is selected, the name, kind, size, modification date, and Library-relative path are shown from the Entry the selection holds, without a request.

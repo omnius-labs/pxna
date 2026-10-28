@@ -9,7 +9,7 @@ use omnius_pxna_interface::{apis, apis::BasicAuthKind};
 
 use crate::{
     interface::{
-        features::{files::FileContentRoute, image_channel::ImageChannelRoute, uploads::UploadContentRoute, video::VideoRoute},
+        features::{files::FileContentRoute, sockets::image::ImageSocketRoute, uploads::UploadContentRoute, video::VideoSessionRoute},
         middleware::{OriginCheck, UnauthorizedBody},
         session::{BearerToken, Claims, SessionAuth, SessionCookie},
         web::WebAssets,
@@ -60,9 +60,9 @@ impl ApiServer {
         let api = axum::Router::new()
             .route(FileContentRoute::PATH, axum::routing::get(FileContentRoute::get).put(FileContentRoute::put))
             .route(UploadContentRoute::PATH, axum::routing::put(UploadContentRoute::put))
-            .route(ImageChannelRoute::PATH, axum::routing::get(ImageChannelRoute::get))
-            .route(VideoRoute::PLAYLIST, axum::routing::get(VideoRoute::playlist))
-            .route(VideoRoute::SEGMENT, axum::routing::get(VideoRoute::segment))
+            .route(ImageSocketRoute::PATH, axum::routing::get(ImageSocketRoute::get))
+            .route(VideoSessionRoute::PLAYLIST, axum::routing::get(VideoSessionRoute::playlist))
+            .route(VideoSessionRoute::SEGMENT, axum::routing::get(VideoSessionRoute::segment))
             .with_state(state.clone())
             .fallback_service(generated);
         let app = match &state.conf.web.dir {
@@ -79,12 +79,12 @@ impl ApiServer {
         let listener = tokio::net::TcpListener::bind(state.conf.core.listen_addr.clone()).await?;
         info!(addr = state.conf.core.listen_addr, "listen start");
 
-        // 開いたままの image channel は、閉じなければ graceful shutdown が終わらない。
-        let channels = state.image_channels.clone();
+        // 開いたままの image socket は、閉じなければ graceful shutdown が終わらない。
+        let sockets = state.image_sockets.clone();
         let shutdown = token.clone();
         tokio::spawn(async move {
             shutdown.cancelled().await;
-            channels.closing().cancel();
+            sockets.closing().cancel();
         });
         axum::serve(listener, app).with_graceful_shutdown(token.cancelled_owned()).await?;
 
@@ -858,7 +858,7 @@ pub(crate) mod tests {
         let fixture = fixture(ArchiveOptions::default()).await?;
         let router = router(&fixture);
         let response = send(&router, Method::GET, "/api/v1/libraries/photos/thumbnails?path=/photos/notes.txt", &[], None).await?;
-        assert_eq!(response.status, StatusCode::NOT_FOUND, "the image channel is the only path");
+        assert_eq!(response.status, StatusCode::NOT_FOUND, "the image socket is the only path");
         Ok(())
     }
 

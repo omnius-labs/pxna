@@ -12,7 +12,7 @@
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
         "gen:api": "openapi-typescript ../daemon/openapi.yaml -o src/api/schema.d.ts",
-        "gen:channel": "json2ts -i ../daemon/image-channel.schema.json -o src/api/imageChannel.d.ts --no-additionalProperties --bannerComment \"/* Generated from daemon/image-channel.schema.json by npm run gen:channel. Do not edit by hand. */\""
+        "gen:image-socket": "json2ts -i ../daemon/sockets/image.schema.json -o src/api/imageSocket.d.ts --no-additionalProperties --bannerComment \"/* Generated from daemon/sockets/image.schema.json by npm run gen:image-socket. Do not edit by hand. */\""
     },
     "dependencies": {
         "@fontsource-variable/geist": "^5.3.0",

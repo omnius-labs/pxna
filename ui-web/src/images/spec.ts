@@ -1,4 +1,4 @@
-import type { ErrorKind, ItemKind, RequestClass, Shape } from "../api/imageChannel";
+import type { ErrorKind, ItemKind, RequestClass, Shape } from "../api/imageSocket";
 
 export type { ErrorKind, Shape };
 /// 欲しい画像の種類。サムネイル、動画のスプライトシート、ビューアの表示用画像。

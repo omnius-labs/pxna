@@ -1,4 +1,4 @@
-import type { FrameHeader, ServerMessage } from "../api/imageChannel";
+import type { FrameHeader, ServerMessage } from "../api/imageSocket";
 
 /// セッションが終わったために daemon が閉じた。ログインへ移る。
 export const CLOSE_SESSION_ENDED = 4401;

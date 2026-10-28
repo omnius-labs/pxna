@@ -54,7 +54,7 @@ tags:
       description: Folder metadata and folder listing.
     - name: Files
       description: File metadata and byte content.
-    - name: ImageChannel
+    - name: ImageSocket
       description: The WebSocket through which clients receive thumbnails, sprite sheets, and display images.
     - name: Uploads
       description: Resumable chunked upload sessions.
@@ -1239,29 +1239,29 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
-    /image-channel:
+    /sockets/image:
         get:
             tags:
-                - ImageChannel
-            summary: Open the image channel
+                - ImageSocket
+            summary: Open the image socket
             description: |
                 Upgrades the connection to a WebSocket, through which the
                 client wants thumbnails, sprite sheets, and display images and
                 receives them. Every message and binary frame is defined by
-                `image-channel.schema.json` next to this file; this entry
+                `sockets/image.schema.json` in this directory; this entry
                 names only the upgrade.
 
                 The upgrade carries the session cookie or a Bearer token like
                 any other request. When it carries the session cookie, its
                 `Origin` must match its `Host`, as for a mutation, and `403`
                 is returned otherwise, also when `Origin` is missing. A session
-                may keep a limited number of channels open, and `429` is
+                may keep a limited number of sockets open, and `429` is
                 returned beyond it.
 
-                The daemon closes the channel with code `4401` when the
+                The daemon closes the socket with code `4401` when the
                 session ends, `4400` when the client breaks the contract or a
                 limit, and `1001` when it shuts down.
-            operationId: getImageChannel
+            operationId: getImageSocket
             responses:
                 "101":
                     description: The connection is upgraded to a WebSocket.
@@ -1272,7 +1272,7 @@ paths:
                 "403":
                     $ref: "#/components/responses/Forbidden"
                 "429":
-                    description: The session already has the most image channels it may keep open. `kind` is `LimitExceeded`.
+                    description: The session already has the most image sockets it may keep open. `kind` is `LimitExceeded`.
                     content:
                         application/json:
                             schema:

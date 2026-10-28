@@ -6,8 +6,9 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 use http::{HeaderMap, StatusCode};
-use omnius_pxna_interface::models;
 use validator::Validate as _;
+
+use omnius_pxna_interface::models;
 
 use crate::{
     error::ApiError,

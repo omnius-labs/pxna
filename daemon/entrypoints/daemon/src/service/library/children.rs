@@ -1,33 +1,39 @@
-use super::{LibraryBrowser, LibraryRelativePath};
-use crate::{
-    prelude::*,
-    service::listing::{ListingInvalidation, SnapshotVersion, SummaryKey},
-};
-use omnius_pxna_engine::service::ChildProbeVersion;
-use omnius_pxna_interface::{models, types::Nullable};
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
+
 use tokio_util::sync::CancellationToken;
+
+use omnius_pxna_engine::service::ChildProbeVersion;
+use omnius_pxna_interface::{models, types::Nullable};
+
+use super::{LibraryBrowser, LibraryRelativePath};
+use crate::{
+    prelude::*,
+    service::listing::{ListingInvalidation, SnapshotVersion, SummaryKey},
+};
 
 #[derive(Default)]
 pub struct ChildProbeCache {
     entries: Mutex<HashMap<SummaryKey, CachedProbe>>,
     epoch: AtomicU64,
 }
+
 struct CachedProbe {
     version: String,
     has_children: bool,
     expires: Instant,
 }
+
 impl ChildProbeCache {
     pub fn invalidate(&self, invalidation: &ListingInvalidation) {
         self.epoch.fetch_add(1, Ordering::SeqCst);
         let libraries = invalidation.entries();
         self.entries.lock().retain(|key, _| !libraries.contains_key(key.library()));
     }
+
     fn get(&self, key: &SummaryKey, version: &str) -> Option<models::FolderChildrenProbe> {
         let now = Instant::now();
         let mut entries = self.entries.lock();
@@ -43,6 +49,7 @@ impl ChildProbeCache {
         response.source_version = Some(version.to_owned());
         Some(response)
     }
+
     fn insert(&self, key: SummaryKey, version: String, value: bool, epoch: u64) {
         let mut entries = self.entries.lock();
         if self.epoch.load(Ordering::SeqCst) != epoch {
@@ -64,6 +71,7 @@ impl ChildProbeCache {
         );
     }
 }
+
 impl LibraryBrowser {
     pub async fn probe_folder_children(&self, library_id: &str, path: &str, include_hidden: bool) -> Result<models::FolderChildrenProbe> {
         let library = self.library(library_id)?;
@@ -99,6 +107,7 @@ impl LibraryBrowser {
             })
             .await)
     }
+
     async fn run_child_probe<F>(&self, task: F) -> models::FolderChildrenProbe
     where
         F: FnOnce(Instant, CancellationToken) -> Option<models::FolderChildrenProbe> + Send + 'static,

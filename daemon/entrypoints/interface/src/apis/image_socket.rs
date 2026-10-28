@@ -11,7 +11,7 @@ use crate::{models, types::*};
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
-pub enum GetImageChannelResponse {
+pub enum GetImageSocketResponse {
     /// The connection is upgraded to a WebSocket.
     Status101_TheConnectionIsUpgradedToAWebSocket,
     /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
@@ -20,20 +20,20 @@ pub enum GetImageChannelResponse {
     Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
     /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
     Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
-    /// The session already has the most image channels it may keep open. `kind` is `LimitExceeded`.
-    Status429_TheSessionAlreadyHasTheMostImageChannelsItMayKeepOpen(models::ErrorResponse),
+    /// The session already has the most image sockets it may keep open. `kind` is `LimitExceeded`.
+    Status429_TheSessionAlreadyHasTheMostImageSocketsItMayKeepOpen(models::ErrorResponse),
     /// Internal server error.
     Status500_InternalServerError(models::ErrorResponse),
 }
 
-/// ImageChannel
+/// ImageSocket
 #[async_trait]
 #[allow(clippy::ptr_arg)]
-pub trait ImageChannel<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHandler<E> {
+pub trait ImageSocket<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHandler<E> {
     type Claims;
 
-    /// Open the image channel.
+    /// Open the image socket.
     ///
-    /// GetImageChannel - GET /api/v1/image-channel
-    async fn get_image_channel(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> Result<GetImageChannelResponse, E>;
+    /// GetImageSocket - GET /api/v1/sockets/image
+    async fn get_image_socket(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> Result<GetImageSocketResponse, E>;
 }

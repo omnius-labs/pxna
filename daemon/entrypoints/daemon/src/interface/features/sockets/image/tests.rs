@@ -1,4 +1,4 @@
-//! The image channel through a real WebSocket: the upgrade, the images it carries, the order they come in, and the ways it closes.
+//! The image socket through a real WebSocket: the upgrade, the images it carries, the order they come in, and the ways it closes.
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -9,24 +9,25 @@ use std::{
 
 use futures::{SinkExt as _, StreamExt as _};
 use http::{Method, StatusCode};
+use serde_json::{Value, json};
+use testresult::TestResult;
+use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest as _};
+
 use omnius_core_base::clock::ClockUtc;
 use omnius_pxna_engine::{
     model::ImageFormatType,
     service::{ArchiveOptions, SchedulePermit, ThumbnailOptions, WorkClass},
 };
-use serde_json::{Value, json};
-use testresult::TestResult;
-use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest as _};
 
 use super::message::{FrameCodec, FrameHeader, ServerMessage};
 use crate::{
     interface::server::tests::*,
-    service::image_channel::{ImageChannelLimits, ImageChannels},
+    service::sockets::image::{ImageSocketLimits, ImageSockets},
 };
 
 type Socket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-/// What the client reads from the channel.
+/// What the client reads from the socket.
 #[derive(Debug)]
 enum Event {
     Text(ServerMessage),
@@ -45,13 +46,13 @@ struct Harness {
 }
 
 impl Harness {
-    async fn start(limits: ImageChannelLimits) -> TestResult<Self> {
+    async fn start(limits: ImageSocketLimits) -> TestResult<Self> {
         Self::start_with(limits, ThumbnailOptions::default()).await
     }
 
-    async fn start_with(limits: ImageChannelLimits, thumbnail: ThumbnailOptions) -> TestResult<Self> {
+    async fn start_with(limits: ImageSocketLimits, thumbnail: ThumbnailOptions) -> TestResult<Self> {
         let mut fixture = fixture_with_thumbnail(ArchiveOptions::default(), None, Arc::new(ClockUtc), thumbnail).await?;
-        Arc::get_mut(&mut fixture.server.state).expect("nothing shares the state yet").image_channels = ImageChannels::new(limits);
+        Arc::get_mut(&mut fixture.server.state).expect("nothing shares the state yet").image_sockets = ImageSockets::new(limits);
         let router = router(&fixture);
         let setup = send(&router, Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "cookie")).await?;
         let cookie = cookie(&setup)?;
@@ -89,7 +90,7 @@ impl Harness {
         &self.fixture.server.state
     }
 
-    /// Opens a channel with the owner's cookie and an `Origin` that matches the host.
+    /// Opens a socket with the owner's cookie and an `Origin` that matches the host.
     async fn open(&self) -> TestResult<Socket> {
         Ok(self
             .try_open(Some(&self.cookie), Some(&format!("http://{}", self.addr)), None)
@@ -99,7 +100,7 @@ impl Harness {
 
     /// The upgrade request with the given credentials. `Err` is the status the daemon refused with.
     async fn try_open(&self, cookie: Option<&str>, origin: Option<&str>, bearer: Option<&str>) -> std::result::Result<Socket, StatusCode> {
-        let mut request = format!("ws://{}/api/v1/image-channel", self.addr).into_client_request().expect("a valid request");
+        let mut request = format!("ws://{}/api/v1/sockets/image", self.addr).into_client_request().expect("a valid request");
         let headers = request.headers_mut();
         if let Some(cookie) = cookie {
             headers.insert("cookie", cookie.parse().expect("a header value"));
@@ -174,7 +175,7 @@ struct Received {
     frames: usize,
 }
 
-/// The client side of the channel: reading what the server sends and sending what it wants.
+/// The client side of the socket: reading what the server sends and sending what it wants.
 struct Wire;
 
 impl Wire {
@@ -243,7 +244,7 @@ impl Wire {
                     }
                 }
                 Event::Ping => {}
-                Event::Closed(code) => return Err(format!("the channel closed with {code:?}").into()),
+                Event::Closed(code) => return Err(format!("the socket closed with {code:?}").into()),
             }
         }
         Ok((done, texts))
@@ -269,7 +270,7 @@ impl Wire {
 
 #[tokio::test]
 async fn the_upgrade_needs_a_session_and_a_matching_origin_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits::default()).await?;
+    let harness = Harness::start(ImageSocketLimits::default()).await?;
     let matching = format!("http://{}", harness.addr);
     let cookie = harness.cookie.as_str();
 
@@ -294,10 +295,10 @@ async fn the_upgrade_needs_a_session_and_a_matching_origin_test() -> TestResult 
 }
 
 #[tokio::test]
-async fn a_session_may_keep_a_limited_number_of_channels_open_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits {
-        max_channels_per_session: 2,
-        ..ImageChannelLimits::default()
+async fn a_session_may_keep_a_limited_number_of_sockets_open_test() -> TestResult {
+    let harness = Harness::start(ImageSocketLimits {
+        max_sockets_per_session: 2,
+        ..ImageSocketLimits::default()
     })
     .await?;
     let first = harness.open().await?;
@@ -321,9 +322,9 @@ async fn a_session_may_keep_a_limited_number_of_channels_open_test() -> TestResu
 
 #[tokio::test]
 async fn an_image_arrives_in_chunks_in_the_default_format_with_an_etag_per_key_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits {
+    let harness = Harness::start(ImageSocketLimits {
         chunk_bytes: 1024,
-        ..ImageChannelLimits::default()
+        ..ImageSocketLimits::default()
     })
     .await?;
     harness.write_noisy_png("wide.png", 600, 300)?;
@@ -357,7 +358,7 @@ async fn an_image_arrives_in_chunks_in_the_default_format_with_an_etag_per_key_t
 #[tokio::test]
 async fn the_default_format_follows_the_configuration_test() -> TestResult {
     let harness = Harness::start_with(
-        ImageChannelLimits::default(),
+        ImageSocketLimits::default(),
         ThumbnailOptions {
             format: ImageFormatType::Jpeg,
             ..ThumbnailOptions::default()
@@ -375,7 +376,7 @@ async fn the_default_format_follows_the_configuration_test() -> TestResult {
 
 #[tokio::test]
 async fn an_item_for_a_folder_or_an_archive_uses_its_representative_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits::default()).await?;
+    let harness = Harness::start(ImageSocketLimits::default()).await?;
     let photos = harness.library();
     std::fs::create_dir_all(photos.join("album"))?;
     std::fs::create_dir_all(photos.join("empty"))?;
@@ -426,7 +427,7 @@ async fn an_item_for_a_folder_or_an_archive_uses_its_representative_test() -> Te
 
 #[tokio::test]
 async fn an_item_with_the_current_etag_is_answered_unchanged_without_a_slot_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits::default()).await?;
+    let harness = Harness::start(ImageSocketLimits::default()).await?;
     harness.write_png("a.png", 600, 300)?;
     let mut socket = harness.open().await?;
     Wire::want(&mut socket, vec![Wire::wanted(1, "/photos/a.png", "thumbnail", "visible", 0)]).await?;
@@ -461,7 +462,7 @@ async fn an_item_with_the_current_etag_is_answered_unchanged_without_a_slot_test
 
 #[tokio::test]
 async fn an_item_that_cannot_be_made_fails_with_its_kind_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits::default()).await?;
+    let harness = Harness::start(ImageSocketLimits::default()).await?;
     std::fs::write(harness.library().join("notes.txt"), b"text")?;
     let mut socket = harness.open().await?;
     Wire::want(
@@ -490,9 +491,9 @@ async fn an_item_that_cannot_be_made_fails_with_its_kind_test() -> TestResult {
 
 #[tokio::test]
 async fn items_go_to_generation_in_limited_number_and_the_interactive_one_goes_first_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits {
+    let harness = Harness::start(ImageSocketLimits {
         max_generating: 3,
-        ..ImageChannelLimits::default()
+        ..ImageSocketLimits::default()
     })
     .await?;
     for index in 0..11 {
@@ -530,7 +531,7 @@ async fn a_sprite_carries_its_frame_count_and_a_thumbnail_shows_the_first_frame_
     if Harness::skip_without_ffmpeg() {
         return Ok(());
     }
-    let harness = Harness::start(ImageChannelLimits::default()).await?;
+    let harness = Harness::start(ImageSocketLimits::default()).await?;
     let video = harness.library().join("clip.mp4");
     let status = std::process::Command::new("ffmpeg")
         .args([
@@ -577,9 +578,9 @@ async fn a_sprite_carries_its_frame_count_and_a_thumbnail_shows_the_first_frame_
 
 #[tokio::test]
 async fn an_item_dropped_before_its_job_starts_is_never_made_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits {
+    let harness = Harness::start(ImageSocketLimits {
         max_generating: 2,
-        ..ImageChannelLimits::default()
+        ..ImageSocketLimits::default()
     })
     .await?;
     for index in 0..6 {
@@ -615,11 +616,11 @@ async fn an_item_dropped_before_its_job_starts_is_never_made_test() -> TestResul
 }
 
 #[tokio::test]
-async fn the_channel_is_closed_with_4400_when_the_client_breaks_the_contract_or_a_limit_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits {
+async fn the_socket_is_closed_with_4400_when_the_client_breaks_the_contract_or_a_limit_test() -> TestResult {
+    let harness = Harness::start(ImageSocketLimits {
         max_items: 3,
         max_text_bytes: 2048,
-        ..ImageChannelLimits::default()
+        ..ImageSocketLimits::default()
     })
     .await?;
     // The file exists and every slot is taken, so a wanted item stays in the wanted set instead of ending at once.
@@ -628,7 +629,7 @@ async fn the_channel_is_closed_with_4400_when_the_client_breaks_the_contract_or_
     let _held = harness.hold_all().await;
     let item = |id: u64| Wire::wanted(id, "/photos/a.png", "thumbnail", "visible", 0);
 
-    // Each case needs a channel of its own, because the daemon closes the one that breaks the contract.
+    // Each case needs a socket of its own, because the daemon closes the one that breaks the contract.
     let cases: Vec<(&str, tungstenite::Message)> = vec![
         ("not JSON", tungstenite::Message::text("nonsense")),
         ("an unknown type", tungstenite::Message::text(json!({ "type": "reload" }).to_string())),
@@ -660,10 +661,10 @@ async fn the_channel_is_closed_with_4400_when_the_client_breaks_the_contract_or_
         let mut socket = harness.open().await?;
         socket.send(message).await?;
         let closed = tokio::time::timeout(Duration::from_secs(5), Wire::expect_close(&mut socket)).await;
-        assert_eq!(closed.map_err(|_| format!("{name}: the channel was not closed"))??, Some(4400), "{name}");
+        assert_eq!(closed.map_err(|_| format!("{name}: the socket was not closed"))??, Some(4400), "{name}");
     }
 
-    // An id reused for another image breaks the contract too, and a channel that obeys it is not closed.
+    // An id reused for another image breaks the contract too, and a socket that obeys it is not closed.
     let mut socket = harness.open().await?;
     Wire::want(&mut socket, vec![item(1)]).await?;
     Wire::want(&mut socket, vec![Wire::wanted(1, "/photos/other.png", "thumbnail", "visible", 0)]).await?;
@@ -686,10 +687,10 @@ async fn the_channel_is_closed_with_4400_when_the_client_breaks_the_contract_or_
 }
 
 #[tokio::test]
-async fn the_channel_is_closed_with_4401_after_logout_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits {
+async fn the_socket_is_closed_with_4401_after_logout_test() -> TestResult {
+    let harness = Harness::start(ImageSocketLimits {
         ping_interval: Duration::from_millis(100),
-        ..ImageChannelLimits::default()
+        ..ImageSocketLimits::default()
     })
     .await?;
     let mut socket = harness.open().await?;
@@ -708,24 +709,24 @@ async fn the_channel_is_closed_with_4401_after_logout_test() -> TestResult {
 }
 
 #[tokio::test]
-async fn the_channel_is_closed_with_1001_when_the_daemon_shuts_down_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits::default()).await?;
+async fn the_socket_is_closed_with_1001_when_the_daemon_shuts_down_test() -> TestResult {
+    let harness = Harness::start(ImageSocketLimits::default()).await?;
     let mut socket = harness.open().await?;
-    harness.state().image_channels.closing().cancel();
+    harness.state().image_sockets.closing().cancel();
     assert_eq!(Wire::expect_close(&mut socket).await?, Some(1001));
     Ok(())
 }
 
 #[tokio::test]
 async fn a_client_that_does_not_answer_pings_is_closed_test() -> TestResult {
-    let harness = Harness::start(ImageChannelLimits {
+    let harness = Harness::start(ImageSocketLimits {
         ping_interval: Duration::from_millis(100),
-        ..ImageChannelLimits::default()
+        ..ImageSocketLimits::default()
     })
     .await?;
     let mut socket = harness.open().await?;
 
-    // The client does not read, so it answers nothing. Two pings go unanswered, and the next tick closes the channel.
+    // The client does not read, so it answers nothing. Two pings go unanswered, and the next tick closes the socket.
     tokio::time::sleep(Duration::from_millis(600)).await;
     let mut pings = 0;
     let code = loop {

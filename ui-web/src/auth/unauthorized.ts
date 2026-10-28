@@ -15,7 +15,7 @@ function isAuthQuery(queryKey: readonly unknown[]): boolean {
 }
 
 /// 表示中にセッションが終わったら、手元のキャッシュを捨ててログインへ移し、ログインの後に今の画面へ戻す。
-/// API の 401 と、image channel が閉じられたとき（close code 4401）の両方で使う。ログインとセットアップの画面では何もしない。
+/// API の 401 と、image socket が閉じられたとき（close code 4401）の両方で使う。ログインとセットアップの画面では何もしない。
 export function leaveForLogin(queryClient: QueryClient, nav: UnauthorizedNavigator): void {
     if (nav.currentPathname() === "/login" || nav.currentPathname() === "/setup") {
         return;

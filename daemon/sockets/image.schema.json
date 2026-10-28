@@ -1,8 +1,8 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://pxna.invalid/image-channel.schema.json",
-    "title": "ImageChannelContract",
-    "description": "Everything that crosses the image channel (GET /api/v1/image-channel, upgraded to a WebSocket). The client sends the text messages of ClientMessage. The server sends the text messages of ServerMessage and the binary frames of an image: a 4-byte big-endian length, a FrameHeader as UTF-8 JSON of that length, and one chunk of the image. This is the contract; docs/design/image-channel.md gives the reasons.",
+    "$id": "https://pxna.invalid/sockets/image.schema.json",
+    "title": "ImageSocketContract",
+    "description": "Everything that crosses the image socket (GET /api/v1/sockets/image, upgraded to a WebSocket). The client sends the text messages of ClientMessage. The server sends the text messages of ServerMessage and the binary frames of an image: a 4-byte big-endian length, a FrameHeader as UTF-8 JSON of that length, and one chunk of the image. This is the contract; docs/design/image-socket.md gives the reasons.",
     "anyOf": [
         { "$ref": "#/$defs/ClientMessage" },
         { "$ref": "#/$defs/ServerMessage" },
@@ -76,7 +76,7 @@
         },
         "Want": {
             "title": "Want",
-            "description": "Adds items to the wanted set. An id that is already in the set may only change its class, order, and etag; changing what it asks for closes the channel with 4400.",
+            "description": "Adds items to the wanted set. An id that is already in the set may only change its class, order, and etag; changing what it asks for closes the socket with 4400.",
             "type": "object",
             "additionalProperties": false,
             "required": ["type", "items"],

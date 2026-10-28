@@ -24,7 +24,7 @@ During implementation, advance the state of the child and of this document, and 
 | [thumbnail-fanout-and-viewer-settings](./plans/thumbnail-fanout-and-viewer-settings.md) | One decode warms the listing's, filmstrip's, and both-shape thumbnails, and the viewer gets its own settings panel | In progress | - |
 | [thumbnail-store-batching](./plans/thumbnail-store-batching.md) | A generation stores its thumbnails in one batch and frees its slot first | Done | thumbnail-fanout-and-viewer-settings |
 | [source-jobs](./plans/source-jobs.md) | While several requests for different sizes or kinds of one image arrive, the daemon decodes it once at a time | Done | thumbnail-fanout-and-viewer-settings |
-| [image-channel-server](./plans/image-channel-server.md) | A client can want images over one WebSocket and receive them in priority order, with held images answered by `unchanged` | Done | source-jobs |
+| [image-socket-server](./plans/image-socket-server.md) | A client can want images over one WebSocket and receive them in priority order, with held images answered by `unchanged` | Done | source-jobs |
 | [split-video-and-image-pools](./plans/split-video-and-image-pools.md) | Video ffmpeg runs have their own slots, so a slow video does not block HEIC decodes | Done | - |
 | [lan-plaintext-exposure](./plans/lan-plaintext-exposure.md) | Setting `PXNA_BIND` lets a phone on the LAN or a VPN log in to the compose setup over plain HTTP | Not started | - |
 | [viewer-touch-gestures](./plans/viewer-touch-gestures.md) | The image viewer can be operated with one hand on a phone | Not started | - |

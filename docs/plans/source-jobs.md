@@ -10,7 +10,7 @@ The thumbnail generator merges only concurrent requests for the same cache key, 
 | --- | --- |
 | This document | The steps, completion conditions, and scope of this work |
 | [Thumbnail Design §7](../design/thumbnail.md#7-order-and-concurrency-of-generation), [§10.1](../design/thumbnail.md#one-source-job-per-source), [§11](../design/thumbnail.md#11-current-state-and-remaining-work) | The placing rules of source jobs, the decision with its reasons, and the roadmap row T2 |
-| [Image Channel Design](../design/image-channel.md) | The channel that will pass items to source jobs, which this work does not build |
+| [Image Socket Design](../design/image-socket.md) | The socket that will pass items to source jobs, which this work does not build |
 
 [design.md](../design.md#11-division-of-responsibility-between-documents) holds the map of the document family.
 
@@ -36,7 +36,7 @@ While several requests for different sizes or kinds of one image arrive, from on
 
 ### 2.2 Non-Goals
 
-- The image channel and the switch of the web client to it. They are IC1 and IC2 of [Image Channel Design §10.2](../design/image-channel.md#102-roadmap), planned in [image-channel-server](./image-channel-server.md) and [image-channel-client](./image-channel-client.md).
+- The image socket and the switch of the web client to it. They are IC1 and IC2 of [Image Socket Design §10.2](../design/image-socket.md#102-roadmap), planned in [image-socket-server](./image-socket-server.md) and [image-socket-client](./image-socket-client.md).
 - Changing the slots or threads of external processes. It is deferred ([Thumbnail Design §10.2](../design/thumbnail.md#threads-and-slots-of-the-external-processes-for-images)).
 
 ## 3. Current State
@@ -118,7 +118,7 @@ The tests of conditions 1, 2, and 3 fail on the build before step 2 and pass aft
 [thumbnail.md](../design/thumbnail.md), [plans.md](../plans.md)
 
 **What to do**
-Remove the sentence about the missing source jobs from Thumbnail Design §11.1 and the row T2 from §11.2, remove T2 from the dependencies of IC1 in [Image Channel Design §10.2](../design/image-channel.md#102-roadmap) and from the breakdown of M23 in design.md §12.2, and set the state of this plan to done in `plans.md`. The plan and its row are deleted when the plan is folded, after the review of the change.
+Remove the sentence about the missing source jobs from Thumbnail Design §11.1 and the row T2 from §11.2, remove T2 from the dependencies of IC1 in [Image Socket Design §10.2](../design/image-socket.md#102-roadmap) and from the breakdown of M23 in design.md §12.2, and set the state of this plan to done in `plans.md`. The plan and its row are deleted when the plan is folded, after the review of the change.
 
 **Completion condition**
 `rg -n 'T2' docs/design.md docs/design` finds nothing, and Thumbnail Design §11.1 states no gap about source jobs.
