@@ -82,7 +82,7 @@ On a wide screen, one screen is divided into the following regions.
 ```
 
 Because the tree and the listing are laid out on one screen, the listing of contents is not interrupted by screen transitions when moving through the hierarchy.
-The width of the tree and the info panel can be changed by dragging the handle at the border with the listing. The handles can also be moved with the left and right arrow keys. The width ranges from 160 to 480 CSS px for the tree and 240 to 640 CSS px for the info panel, and when changed it is saved per device in the browser's `localStorage` and restored the next time it is opened. The timeline's list of months does not change width. Narrow screens show no handles.
+The width of the tree, the timeline's list of months, and the info panel can be changed by dragging the handle at the border with the listing. The handles can also be moved with the left and right arrow keys. The width ranges from 160 to 480 CSS px for the tree and the timeline's list of months (saved separately) and 240 to 640 CSS px for the info panel, and when changed it is saved per device in the browser's `localStorage` and restored the next time it is opened. The search conditions do not change width. Narrow screens show no handles.
 This screen is called folder view, and the toolbar's "フォルダ / タイムライン / 検索" (Folder / Timeline / Search) switch, three choices laid out side by side, goes back and forth between it, the timeline (§3.10), and search mode (§3.6).
 On a wide screen, the current mode is shown only by the switch's highlight, and the name of the mode is not written next to it.
 The breadcrumb to the right of the switch starts below the Library, and nothing is shown at the Library root, because the tree already shows which Library is open.
@@ -409,6 +409,7 @@ For that reason, if the page is about to be closed during an upload, the browser
 
 The info panel is placed to the right of the listing on a wide screen and shows the details of the selected Entry.
 Its width can be changed with the handle at the left edge (§3.1), and it is opened and closed with a toolbar button.
+The height of the thumbnail frame can be changed from 96 to 640 CSS px with the handle at its bottom edge (drag or the up and down arrow keys), and it is saved per device like the width (initial 224). The side of the requested thumbnail is the smallest of 256, 384, 512, and 640 CSS px that covers the larger of the frame's width and height, and it is not requested again while the size is still changing.
 The open/closed state is saved in the browser, and when opened for the first time it is in the open state (§5.1).
 When nothing is selected, it guides that details appear when an Entry is selected.
 

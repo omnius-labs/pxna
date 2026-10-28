@@ -2,8 +2,13 @@ import { useCallback, useState } from "react";
 
 /// ツリーの幅を保存する `localStorage` のキー。値は CSS px の整数である。
 export const TREE_WIDTH_KEY = "pxna.treeWidth";
+/// タイムラインの左の領域の幅を保存する `localStorage` のキー。値は CSS px の整数である。
+export const TIMELINE_WIDTH_KEY = "pxna.timelineWidth";
 /// 情報パネルの幅を保存する `localStorage` のキー。値は CSS px の整数である。
 export const INFO_PANEL_WIDTH_KEY = "pxna.infoPanelWidth";
+
+/// 情報パネルのサムネイル枠の高さを保存する `localStorage` のキー。値は CSS px の整数である。
+export const INFO_THUMBNAIL_HEIGHT_KEY = "pxna.infoThumbnailHeight";
 
 export interface WidthRange {
     min: number;
@@ -12,7 +17,11 @@ export interface WidthRange {
 }
 
 export const TREE_WIDTH: WidthRange = { min: 160, max: 480, initial: 224 };
+/// タイムラインの左の領域の幅。ツリーと同じ範囲である。
+export const TIMELINE_WIDTH: WidthRange = TREE_WIDTH;
 export const INFO_PANEL_WIDTH: WidthRange = { min: 240, max: 640, initial: 288 };
+/// 情報パネルのサムネイル枠の高さ。
+export const INFO_THUMBNAIL_HEIGHT: WidthRange = { min: 96, max: 640, initial: 224 };
 
 /// キー操作で 1 回に動かす幅（CSS px）。
 export const WIDTH_KEY_STEP = 16;

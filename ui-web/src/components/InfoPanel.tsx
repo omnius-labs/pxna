@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { t } from "i18next";
 import { PanelRight } from "lucide-react";
-import { type ReactNode, useEffect, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { IDLE } from "../images/spec";
 import { useImageWants } from "../images/wants";
 import { ENTRY_KIND_LABELS, type Entry, entryKind, isThumbnailable } from "../library/entries";
@@ -16,14 +16,16 @@ import {
     formatModifiedAt,
     formatTakenAt,
 } from "../library/format";
-import { INFO_PANEL_THUMBNAIL_SIDE } from "../library/infoPanel";
+import { infoThumbnailSide } from "../library/infoPanel";
 import { retryEntryDetails } from "../library/listing";
+import { INFO_THUMBNAIL_HEIGHT, INFO_THUMBNAIL_HEIGHT_KEY, usePanelWidth } from "../library/panelWidth";
 import { librariesQuery, type MediaInfo, mediaInfoQuery } from "../library/queries";
 import { type Selection, selectionBytes } from "../library/selection";
 import { useSettled } from "../library/useSettled";
 import { CROSS_LIBRARY_SCOPE, entryAddress } from "../location";
 import { EntryIcon } from "./EntryIcon";
 import { EntryTags } from "./EntryTags";
+import { ResizeHandle } from "./ResizeHandle";
 import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
 
@@ -55,7 +57,12 @@ export function InfoPanel({ libraryId, selection }: InfoPanelProps) {
     const [only] = items;
     // 大きめのサムネイルは、1 件を選んでいて、選択が 200 ms 変わらなかったときにだけ要求する。
     const settled = useSettled(items.length === 1 ? only?.entry : undefined);
-    const { wants } = useImageWants(libraryId, 1, false, "fit", INFO_PANEL_THUMBNAIL_SIDE);
+    // サムネイル枠の高さと幅。要求する大きさは段階で決め、幅の変化は落ち着いてから反映するので、ドラッグ中に要求し直さない。
+    const height = usePanelWidth(INFO_THUMBNAIL_HEIGHT_KEY, INFO_THUMBNAIL_HEIGHT);
+    const [frameWidth, setFrameWidth] = useState(0);
+    const settledWidth = useSettled(frameWidth) ?? frameWidth;
+    const side = infoThumbnailSide(settledWidth, useSettled(height.width) ?? height.width);
+    const { wants } = useImageWants(libraryId, 1, false, "fit", side);
     useEffect(() => {
         wants.setWanted(settled !== undefined && isThumbnailable(settled) ? new Map([[settled.path, 0]]) : new Map());
     }, [wants, settled]);
@@ -78,6 +85,8 @@ export function InfoPanel({ libraryId, selection }: InfoPanelProps) {
         <EntryDetail
             entry={only.entry}
             onRetry={() => retryEntryDetails(client, libraryId, [only.entry.path])}
+            thumbnailHeight={height}
+            onFrameWidth={setFrameWidth}
             thumbnailUrl={thumbnail.status === "ready" ? thumbnail.url : undefined}
             libraryId={libraryId}
             tagsTarget={mediaTarget}
@@ -112,10 +121,14 @@ function EntryDetail({
     entry,
     onRetry,
     thumbnailUrl,
+    thumbnailHeight,
+    onFrameWidth,
     libraryId,
     tagsTarget,
     media,
 }: {
+    thumbnailHeight: ReturnType<typeof usePanelWidth>;
+    onFrameWidth(width: number): void;
     entry: Entry;
     libraryId: string;
     /// 評価とタグを出す Entry。選択が落ち着いた画像と動画だけで、メディア情報と同じ規則で決める。
@@ -124,6 +137,14 @@ function EntryDetail({
     thumbnailUrl: string | undefined;
     media: MediaState | undefined;
 }) {
+    const frameRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const frame = frameRef.current;
+        if (!frame) return;
+        const observer = new ResizeObserver(() => onFrameWidth(frame.clientWidth));
+        observer.observe(frame);
+        return () => observer.disconnect();
+    }, [onFrameWidth]);
     const kind = entryKind(entry);
     const hasSize = kind !== "folder" && kind !== "archive";
     // タイムラインの Entry は Library を横断するので、Library の名前と、Library 相対パスを分けて出す。
@@ -133,13 +154,26 @@ function EntryDetail({
     return (
         <>
             <div className="p-4">
-                <div className="flex h-56 items-center justify-center overflow-hidden rounded-lg bg-muted text-muted-foreground">
+                <div
+                    ref={frameRef}
+                    className="flex items-center justify-center overflow-hidden rounded-lg bg-muted text-muted-foreground"
+                    style={{ height: thumbnailHeight.width }}
+                >
                     {thumbnailUrl === undefined ? (
                         <EntryIcon kind={kind} className="size-16" />
                     ) : (
-                        <img src={thumbnailUrl} alt="" draggable={false} className="max-h-56 w-full object-contain" />
+                        <img src={thumbnailUrl} alt="" draggable={false} className="h-full w-full object-contain" />
                     )}
                 </div>
+                <ResizeHandle
+                    label={t("info.thumbnailHeight")}
+                    range={INFO_THUMBNAIL_HEIGHT}
+                    width={thumbnailHeight.width}
+                    orientation="horizontal"
+                    grows="down"
+                    onResize={thumbnailHeight.resize}
+                    onCommit={thumbnailHeight.commit}
+                />
                 <h2 className="mt-3 truncate font-heading text-sm font-semibold" title={entry.name}>
                     {entry.name}
                 </h2>

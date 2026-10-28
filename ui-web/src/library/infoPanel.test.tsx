@@ -3,7 +3,13 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { INFO_PANEL_OPEN_KEY, readInfoPanelOpen, useInfoPanel, writeInfoPanelOpen } from "./infoPanel";
+import {
+    INFO_PANEL_OPEN_KEY,
+    infoThumbnailSide,
+    readInfoPanelOpen,
+    useInfoPanel,
+    writeInfoPanelOpen,
+} from "./infoPanel";
 
 beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -79,4 +85,12 @@ it("localStorage が例外を出しても、開いた状態で動き、切り替
     await act(async () => view.state().toggle());
     expect(view.state().open).toBe(false);
     await view.unmount();
+});
+
+it("サムネイルの一辺は、枠の幅と高さの大きい方が収まる最小の段で、最大の段を超えない", () => {
+    expect(infoThumbnailSide(0, 224)).toBe(256);
+    expect(infoThumbnailSide(256, 96)).toBe(256);
+    expect(infoThumbnailSide(257, 96)).toBe(384);
+    expect(infoThumbnailSide(300, 600)).toBe(640);
+    expect(infoThumbnailSide(1000, 1000)).toBe(640);
 });
