@@ -20,7 +20,7 @@ use crate::{
             request::{Thumbnail, ThumbnailRequest, ThumbnailVariant},
             source_job::{Created, Outcome, SourceJobs},
         },
-        work::WorkClass,
+        work::{WorkClass, WorkKind},
     },
     perf_span,
     prelude::*,
@@ -687,7 +687,7 @@ impl Inner {
             self.probe.placements.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let created = placed.created.is_some();
             if let Some(created) = placed.created {
-                tokio::spawn(self.clone().run_job(context.clone(), source_key.clone(), created).in_current_span());
+                WorkClass::spawn(self.clone().run_job(context.clone(), source_key.clone(), created));
             }
             // The time to wait for a job of the source, which the item may have started itself or joined.
             let output = placed.handle.wait().instrument(perf_span!("thumbnail_job_wait", created)).await?;
@@ -725,18 +725,23 @@ impl Inner {
             let _ = previous.wait().await;
         }
 
-        // Ask for the slot with the class of the job, and again when an Interactive item raises it.
+        // Wait for the slot with the class of the job. An Interactive item that joins the job raises its ticket meanwhile.
         let pool = self.pool_for(context.kind);
-        let permit = loop {
-            let Some(class) = self.jobs.class_of(source_key, created.id) else {
-                return Err(discarded());
-            };
-            let acquire = pool.acquire(class).instrument(perf_span!("thumbnail_permit_wait", class = ?class));
-            tokio::select! {
-                permit = acquire => break permit,
-                () = created.wake.notified() => {}
-            }
+        let Some(class) = self.jobs.class_of(source_key, created.id) else {
+            return Err(discarded());
         };
+        let ticket = pool.enqueue_counted(class, WorkKind::Convert);
+        let handle = ticket.handle();
+        // An item may have raised the job before the ticket existed, so the ticket takes the job's class when it is attached.
+        let Some(class) = self.jobs.attach(source_key, created.id, handle.clone()) else {
+            return Err(discarded());
+        };
+        handle.raise(class);
+        let permit = ticket
+            .acquire()
+            .instrument(perf_span!("thumbnail_permit_wait", class = ?class))
+            .await
+            .map_err(|_| discarded())?;
 
         let Some(specs) = self.jobs.start(source_key, created.id, |items| self.plan_job(context, items)) else {
             return Err(discarded());
@@ -791,15 +796,15 @@ impl Inner {
                     let read = perf_span!("thumbnail_source_read", bytes = Empty);
                     let input = tokio::fs::read(file.path()).instrument(read.clone()).await?;
                     read.record("bytes", input.len());
-                    self.convert_many(input, specs.to_vec()).await?
+                    self.convert_many(permit, input, specs.to_vec()).await?
                 }
                 MediaKind::FfmpegImage | MediaKind::HeifImage => {
                     let decode = perf_span!("thumbnail_external_decode", bytes = Empty);
                     let input = self.decode_ffmpeg_image(target, file.path(), kind).instrument(decode.clone()).await?;
                     decode.record("bytes", input.len());
-                    self.convert_many(input, specs.to_vec()).await?
+                    self.convert_many(permit, input, specs.to_vec()).await?
                 }
-                MediaKind::Video => self.produce_video(file.path(), target, specs.to_vec()).await?,
+                MediaKind::Video => self.produce_video(permit, file.path(), target, specs.to_vec()).await?,
             })
         }
         .instrument(perf_span!("thumbnail_convert"))
@@ -807,8 +812,7 @@ impl Inner {
         #[cfg(test)]
         self.conversions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        // The conversion is done, so the slot goes to the next generation while this one stores.
-        drop(permit);
+        // The conversion is done and its slot went back with the blocking job, so the next generation can start while this one stores.
         Ok(results)
     }
 
@@ -841,10 +845,9 @@ impl Inner {
 
     /// Decodes the input once, then resizes and encodes every image of `specs` from that one decoded image.
     /// The results are aligned with `specs`. A decode failure fails the whole call.
-    async fn convert_many(&self, input: Vec<u8>, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
-        let span = Span::current();
-        tokio::task::spawn_blocking(move || {
-            span.in_scope(|| {
+    async fn convert_many(&self, permit: SchedulePermit, input: Vec<u8>, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
+        permit
+            .run_blocking(move || -> Result<Vec<Result<CachedImage>>> {
                 let image = ImageConverter::decode(&input).map_err(Self::decode_error)?;
                 Ok(specs
                     .iter()
@@ -854,9 +857,7 @@ impl Inner {
                     })
                     .collect())
             })
-        })
-        .await
-        .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?
+            .await?
     }
 
     fn convert_decoded(image: &DynamicImage, options: &ImageConvertOptions) -> Result<CachedImage> {
@@ -872,7 +873,7 @@ impl Inner {
     /// スプライトシートがなければ、最初のフレームだけを取り出す。
     ///
     /// Only the first frame is kept at full size, for the single images and the heads of the sprite sheets. The other frames are decoded, resized, and dropped one at a time.
-    async fn produce_video(&self, file: &Path, source: &ResolvedStoragePath, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
+    async fn produce_video(&self, permit: SchedulePermit, file: &Path, source: &ResolvedStoragePath, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
         let duration = self.media_info.probe_video(source).await?.duration_secs;
         let mut positions = FRAME_SPEC.positions(duration);
         if !specs.iter().any(|spec| spec.shape == OutputShape::Sprite) {
@@ -880,71 +881,69 @@ impl Inner {
         }
         let frames = self.extract_frames(file, &positions).await?;
 
-        let span = Span::current();
-        tokio::task::spawn_blocking(move || -> Result<Vec<Result<CachedImage>>> {
-            let _entered = span.enter();
-            let first = frames
-                .first()
-                .ok_or_else(|| Error::new(ErrorKind::UnexpectedError).with_message("no frame was extracted from the video"))
-                .and_then(|frame| ImageConverter::decode(frame))
-                .map_err(Self::decode_error)?;
+        permit
+            .run_blocking(move || -> Result<Vec<Result<CachedImage>>> {
+                let first = frames
+                    .first()
+                    .ok_or_else(|| Error::new(ErrorKind::UnexpectedError).with_message("no frame was extracted from the video"))
+                    .and_then(|frame| ImageConverter::decode(frame))
+                    .map_err(Self::decode_error)?;
 
-            // The head of a sprite sheet is its first frame, resized once and also used for the single image of the same conditions.
-            let heads: Vec<Option<Result<DynamicImage>>> = specs
-                .iter()
-                .map(|spec| (spec.shape == OutputShape::Sprite).then(|| ImageConverter::resize_ref(&first, &spec.convert).map(std::borrow::Cow::into_owned)))
-                .collect();
-            let mut results: Vec<Option<Result<CachedImage>>> = specs
-                .iter()
-                .map(|spec| {
-                    (spec.shape == OutputShape::Single).then(|| {
-                        let shared_head = specs.iter().zip(&heads).find_map(|(other, head)| match head {
-                            Some(Ok(head)) if other.shape == OutputShape::Sprite && other.convert == spec.convert => Some(head),
-                            _ => None,
-                        });
-                        match shared_head {
-                            Some(head) => ImageConverter::encode(head, spec.convert.format_type, spec.convert.quality).map(|bytes| CachedImage {
-                                bytes: Bytes::from(bytes),
-                                frame_count: None,
-                            }),
-                            None => Self::convert_decoded(&first, &spec.convert),
+                // The head of a sprite sheet is its first frame, resized once and also used for the single image of the same conditions.
+                let heads: Vec<Option<Result<DynamicImage>>> = specs
+                    .iter()
+                    .map(|spec| (spec.shape == OutputShape::Sprite).then(|| ImageConverter::resize_ref(&first, &spec.convert).map(std::borrow::Cow::into_owned)))
+                    .collect();
+                let mut results: Vec<Option<Result<CachedImage>>> = specs
+                    .iter()
+                    .map(|spec| {
+                        (spec.shape == OutputShape::Single).then(|| {
+                            let shared_head = specs.iter().zip(&heads).find_map(|(other, head)| match head {
+                                Some(Ok(head)) if other.shape == OutputShape::Sprite && other.convert == spec.convert => Some(head),
+                                _ => None,
+                            });
+                            match shared_head {
+                                Some(head) => ImageConverter::encode(head, spec.convert.format_type, spec.convert.quality).map(|bytes| CachedImage {
+                                    bytes: Bytes::from(bytes),
+                                    frame_count: None,
+                                }),
+                                None => Self::convert_decoded(&first, &spec.convert),
+                            }
+                            .map_err(Self::decode_error)
+                        })
+                    })
+                    .collect();
+                drop(first);
+
+                for (index, (spec, head)) in specs.iter().zip(heads).enumerate() {
+                    let Some(head) = head else {
+                        continue;
+                    };
+                    results[index] = Some(head.map_err(Self::decode_error).and_then(|head| {
+                        let mut resized = vec![head];
+                        for frame in &frames[1..] {
+                            resized.push(
+                                ImageConverter::decode(frame)
+                                    .and_then(|image| ImageConverter::resize(image, &spec.convert))
+                                    .map_err(Self::decode_error)?,
+                            );
                         }
-                        .map_err(Self::decode_error)
-                    })
-                })
-                .collect();
-            drop(first);
-
-            for (index, (spec, head)) in specs.iter().zip(heads).enumerate() {
-                let Some(head) = head else {
-                    continue;
-                };
-                results[index] = Some(head.map_err(Self::decode_error).and_then(|head| {
-                    let mut resized = vec![head];
-                    for frame in &frames[1..] {
-                        resized.push(
-                            ImageConverter::decode(frame)
-                                .and_then(|image| ImageConverter::resize(image, &spec.convert))
-                                .map_err(Self::decode_error)?,
-                        );
-                    }
-                    Ok(CachedImage {
-                        bytes: Bytes::from(ImageConverter::encode(
-                            &ImageConverter::tile_horizontally(&resized),
-                            spec.convert.format_type,
-                            spec.convert.quality,
-                        )?),
-                        frame_count: Some(resized.len() as u32),
-                    })
-                }));
-            }
-            Ok(results
-                .into_iter()
-                .map(|result| result.expect("every output is made from the first frame or the frames"))
-                .collect())
-        })
-        .await
-        .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?
+                        Ok(CachedImage {
+                            bytes: Bytes::from(ImageConverter::encode(
+                                &ImageConverter::tile_horizontally(&resized),
+                                spec.convert.format_type,
+                                spec.convert.quality,
+                            )?),
+                            frame_count: Some(resized.len() as u32),
+                        })
+                    }));
+                }
+                Ok(results
+                    .into_iter()
+                    .map(|result| result.expect("every output is made from the first frame or the frames"))
+                    .collect())
+            })
+            .await?
     }
 
     async fn extract_frames(&self, file: &Path, positions_secs: &[f64]) -> Result<Vec<Vec<u8>>> {
@@ -2406,7 +2405,8 @@ mod tests {
         };
         let mut specs = inner.requested_specs(&plan, MediaKind::Image, Some(&source));
         specs.extend(companions.into_iter().map(companion));
-        let results = inner.convert_many(std::fs::read(&file)?, specs.clone()).await?;
+        let permit = inner.pools.cpu.acquire(WorkClass::Foreground).await;
+        let results = inner.convert_many(permit, std::fs::read(&file)?, specs.clone()).await?;
         assert_eq!(results.len(), specs.len(), "the results are aligned with the specs");
         let primary = results[0].as_ref().expect("the primary is made");
         assert_eq!(image::guess_format(&primary.bytes)?, ImageFormat::WebP);

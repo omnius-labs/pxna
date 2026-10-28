@@ -111,95 +111,94 @@ impl LocalListingRuntime {
     }
 
     pub async fn open_directory(&self, path: PathBuf, cancellation: CancellationToken) -> Result<LocalDirectory> {
-        let permit = self.budget.acquire(WorkClass::current(), WorkKind::Listing).await?;
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            if cancellation.is_cancelled() {
-                return Err(Error::new(ErrorKind::Cancelled));
-            }
-            let reader = std::fs::read_dir(&path).map_err(|error| FileStorageLocal::io_error(error, &path.to_string_lossy()))?;
-            Ok(Arc::new(Mutex::new(reader)))
-        })
-        .await?
+        self.budget
+            .io()
+            .run_blocking(WorkKind::Listing, move || {
+                if cancellation.is_cancelled() {
+                    return Err(Error::new(ErrorKind::Cancelled));
+                }
+                let reader = std::fs::read_dir(&path).map_err(|error| FileStorageLocal::io_error(error, &path.to_string_lossy()))?;
+                Ok(Arc::new(Mutex::new(reader)))
+            })
+            .await?
     }
 
     pub async fn read_paths(&self, directory: LocalDirectory, cancellation: CancellationToken) -> Result<Vec<PathBuf>> {
-        let permit = self.budget.acquire(WorkClass::current(), WorkKind::Listing).await?;
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            let mut reader = directory.lock();
-            let mut paths = Vec::with_capacity(Self::BATCH_SIZE);
-            for _ in 0..Self::BATCH_SIZE {
-                if cancellation.is_cancelled() {
-                    return Err(Error::new(ErrorKind::Cancelled));
+        self.budget
+            .io()
+            .run_blocking(WorkKind::Listing, move || {
+                let mut reader = directory.lock();
+                let mut paths = Vec::with_capacity(Self::BATCH_SIZE);
+                for _ in 0..Self::BATCH_SIZE {
+                    if cancellation.is_cancelled() {
+                        return Err(Error::new(ErrorKind::Cancelled));
+                    }
+                    let Some(entry) = reader.next() else {
+                        break;
+                    };
+                    paths.push(entry?.path());
                 }
-                let Some(entry) = reader.next() else {
-                    break;
-                };
-                paths.push(entry?.path());
-            }
-            Ok(paths)
-        })
-        .await?
+                Ok(paths)
+            })
+            .await?
     }
 
     pub async fn read_summaries(&self, directory: LocalDirectory, cancellation: CancellationToken) -> Result<Vec<FsEntrySummary>> {
-        let permit = self.budget.acquire(WorkClass::current(), WorkKind::Listing).await?;
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            let mut reader = directory.lock();
-            let mut entries = Vec::with_capacity(Self::BATCH_SIZE);
-            for _ in 0..Self::BATCH_SIZE {
-                if cancellation.is_cancelled() {
-                    return Err(Error::new(ErrorKind::Cancelled));
+        self.budget
+            .io()
+            .run_blocking(WorkKind::Listing, move || {
+                let mut reader = directory.lock();
+                let mut entries = Vec::with_capacity(Self::BATCH_SIZE);
+                for _ in 0..Self::BATCH_SIZE {
+                    if cancellation.is_cancelled() {
+                        return Err(Error::new(ErrorKind::Cancelled));
+                    }
+                    let Some(item) = reader.next() else {
+                        break;
+                    };
+                    let item = item?;
+                    let path = FileStorageLocal::to_utf8(&item.path())?;
+                    // std は列挙時の種別を使い、必要な環境では属性照会へフォールバックする。
+                    // 参照先の metadata は読まない。種別取得のための追加 syscall 数は OS に依存する。
+                    let kind = item.file_type().map_err(|error| FileStorageLocal::io_error(error, &path))?;
+                    let kind = if kind.is_dir() {
+                        FsEntryKind::Dir
+                    } else if kind.is_file() {
+                        FsEntryKind::File
+                    } else if kind.is_symlink() {
+                        FsEntryKind::Link
+                    } else {
+                        return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("unsupported entry: {path}")));
+                    };
+                    entries.push(FsEntrySummary {
+                        archive: kind == FsEntryKind::File && ArchiveFormat::supports_path(&path),
+                        path,
+                        kind,
+                    });
                 }
-                let Some(item) = reader.next() else {
-                    break;
-                };
-                let item = item?;
-                let path = FileStorageLocal::to_utf8(&item.path())?;
-                // std は列挙時の種別を使い、必要な環境では属性照会へフォールバックする。
-                // 参照先の metadata は読まない。種別取得のための追加 syscall 数は OS に依存する。
-                let kind = item.file_type().map_err(|error| FileStorageLocal::io_error(error, &path))?;
-                let kind = if kind.is_dir() {
-                    FsEntryKind::Dir
-                } else if kind.is_file() {
-                    FsEntryKind::File
-                } else if kind.is_symlink() {
-                    FsEntryKind::Link
-                } else {
-                    return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("unsupported entry: {path}")));
-                };
-                entries.push(FsEntrySummary {
-                    archive: kind == FsEntryKind::File && ArchiveFormat::supports_path(&path),
-                    path,
-                    kind,
-                });
-            }
-            Ok(entries)
-        })
-        .await?
+                Ok(entries)
+            })
+            .await?
     }
 
     pub async fn read_batch(&self, paths: Vec<PathBuf>, cancellation: CancellationToken) -> Result<LocalListingBatch> {
-        let permit = self.budget.acquire(WorkClass::current(), WorkKind::Listing).await?;
         let reader = self.reader.clone();
-        tokio::task::spawn_blocking(move || {
-            // JoinHandle が捨てられても実際の worker が終わるまで枠を返さない。
-            let _permit = permit;
-            let mut entries = Vec::with_capacity(paths.len());
-            let mut metadata_sec = 0.0;
-            for path in paths {
-                if cancellation.is_cancelled() {
-                    return Err(Error::new(ErrorKind::Cancelled));
+        self.budget
+            .io()
+            .run_blocking(WorkKind::Listing, move || {
+                let mut entries = Vec::with_capacity(paths.len());
+                let mut metadata_sec = 0.0;
+                for path in paths {
+                    if cancellation.is_cancelled() {
+                        return Err(Error::new(ErrorKind::Cancelled));
+                    }
+                    let listed = reader.read(&path)?;
+                    entries.push(listed.entry);
+                    metadata_sec += listed.metadata_sec;
                 }
-                let listed = reader.read(&path)?;
-                entries.push(listed.entry);
-                metadata_sec += listed.metadata_sec;
-            }
-            Ok(LocalListingBatch { entries, metadata_sec })
-        })
-        .await?
+                Ok(LocalListingBatch { entries, metadata_sec })
+            })
+            .await?
     }
 }
 

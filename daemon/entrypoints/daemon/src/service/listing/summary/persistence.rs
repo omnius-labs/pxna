@@ -406,17 +406,19 @@ impl PersistenceState {
             PendingWrite::Save { snapshot, .. } => {
                 let snapshot = snapshot.clone();
                 let limit = self.config.summary_index_capacity_bytes.min(MAX_PAYLOAD as u64) as usize;
-                let background = self.budget.acquire(WorkClass::Background, WorkKind::Summary).await?;
-                tokio::task::spawn_blocking(move || {
-                    let _background = background;
-                    let mut output = PayloadWriter {
-                        bytes: Vec::with_capacity(limit.min(32768)),
-                        limit,
-                    };
-                    serde_json::to_writer(&mut output, &*snapshot).ok().map(|()| output.bytes)
-                })
-                .await
-                .map_err(|error| Error::from_error(error, ErrorKind::TaskError).with_message("cannot encode summary index"))
+                let encoded = self
+                    .budget
+                    .io()
+                    .run_blocking_as(WorkClass::Background, WorkKind::Summary, move || {
+                        let mut output = PayloadWriter {
+                            bytes: Vec::with_capacity(limit.min(32768)),
+                            limit,
+                        };
+                        serde_json::to_writer(&mut output, &*snapshot).ok().map(|()| output.bytes)
+                    })
+                    .await
+                    .map_err(|error| error.with_message("cannot encode summary index"))?;
+                Ok(encoded)
             }
             PendingWrite::Touch { .. } => Ok(Some(Vec::new())),
             #[cfg(test)]

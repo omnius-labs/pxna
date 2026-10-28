@@ -21,6 +21,7 @@
 //!   すべて 1 つの lock の中で行う。残った札は、その段の保留を止め続けてしまう。
 use std::{
     collections::VecDeque,
+    future::Future,
     pin::pin,
     sync::{
         Arc,
@@ -221,6 +222,32 @@ impl SchedulePermit {
         self.class
     }
 
+    /// 持っている枠のまま `future` を task として動かす。枠は `future` が本当に終わるまで返さない。
+    /// 返ってきた future を drop しても、動き出した `future` は止まらず、枠もそのままである。段と Span は引き継ぐ。
+    pub async fn run<T, F>(self, future: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+    {
+        self.run_with((), future).await
+    }
+
+    /// [`Self::run`] に加えて、`guards`（ほかの枠や許可）も `future` が終わるまで持つ。
+    pub async fn run_with<G, T, F>(self, guards: G, future: F) -> Result<T>
+    where
+        G: Send + 'static,
+        T: Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+    {
+        WorkClass::spawn(async move {
+            let _permit = self;
+            let _guards = guards;
+            future.await
+        })
+        .await
+        .map_err(|error| Error::from_error(error, ErrorKind::TaskError))
+    }
+
     /// 持っている枠のまま `f` を blocking thread で動かす。枠は `f` が本当に終わるまで返さない。
     /// 返ってきた future を drop しても、動き出した `f` は止まらず、枠もそのままである。
     pub async fn run_blocking<T, F>(self, f: F) -> Result<T>
@@ -346,6 +373,11 @@ impl PriorityPool {
     /// 待ち行列に並ぶ。札を [`Ticket::acquire`] で待つ。
     pub fn enqueue(&self, class: WorkClass) -> Ticket {
         self.enqueue_as(class, None)
+    }
+
+    /// [`Self::enqueue`] と同じで、`kind` の処理として数える。
+    pub fn enqueue_counted(&self, class: WorkClass, kind: WorkKind) -> Ticket {
+        self.enqueue_as(class, Some(kind))
     }
 
     fn enqueue_as(&self, class: WorkClass, kind: Option<WorkKind>) -> Ticket {
@@ -843,6 +875,35 @@ mod tests {
             }
         })
         .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn run_keeps_the_permit_and_the_guards_until_the_future_ends_test() -> TestResult {
+        let scheduler = Arc::new(Scheduler::default());
+        let pool = scheduler.pool(LIMITS);
+        let guard = Arc::new(());
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = tokio::sync::oneshot::channel::<()>();
+        let permit = pool.acquire_counted(WorkClass::Background, WorkKind::Probe).await;
+        let job = tokio::spawn(permit.run_with(guard.clone(), async move {
+            started.send(WorkClass::current()).unwrap();
+            wait.await.unwrap();
+        }));
+        assert_eq!(ready.await?, WorkClass::Foreground, "spawn した task の段は、呼んだ場所の段である");
+        job.abort();
+        let _ = job.await;
+        assert_eq!(scheduler.counts(WorkKind::Probe), (1, 0), "呼んだ側を捨てても task は動いている");
+        assert_eq!(Arc::strong_count(&guard), 2);
+        release.send(()).map_err(|()| "the job was dropped")?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while scheduler.counts(WorkKind::Probe).1 == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert_eq!(pool.running(WorkClass::Background), 0);
+        assert_eq!(Arc::strong_count(&guard), 1);
         Ok(())
     }
 }

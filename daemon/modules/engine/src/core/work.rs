@@ -2,8 +2,14 @@
 //!
 //! 枠の規則は [`super::schedule`] が持つ。ここは一覧の io と stream の 2 つの資源と、処理の種類ごとの回数を持つ。
 use crate::prelude::*;
-use std::{future::Future, sync::Arc};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
+use futures::Stream;
 use tokio::task::JoinHandle;
 use tracing::Instrument as _;
 
@@ -41,6 +47,14 @@ impl WorkClass {
         Self::current().spawn_as(future)
     }
 
+    /// 作った時点の段を、`stream` の poll ごとに掛けて動かす。作った場所の外で poll される stream（一覧など）が、段を落とさないために使う。
+    pub fn bind_stream<S: Stream>(self, stream: S) -> BoundStream<S> {
+        BoundStream {
+            class: self,
+            inner: Box::pin(stream),
+        }
+    }
+
     /// [`Self::spawn`] を、段を指定して行う。
     pub fn spawn_as<F>(self, future: F) -> JoinHandle<F::Output>
     where
@@ -48,6 +62,21 @@ impl WorkClass {
         F::Output: Send + 'static,
     {
         tokio::spawn(CLASS.scope(self, future).in_current_span())
+    }
+}
+
+/// 段を決めて動かす stream（[`WorkClass::bind_stream`]）。
+pub struct BoundStream<S> {
+    class: WorkClass,
+    inner: Pin<Box<S>>,
+}
+
+impl<S: Stream> Stream for BoundStream<S> {
+    type Item = S::Item;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let class = self.class;
+        CLASS.sync_scope(class, || self.inner.as_mut().poll_next(cx))
     }
 }
 

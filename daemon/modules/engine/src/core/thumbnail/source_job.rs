@@ -11,9 +11,12 @@ use std::{
     },
 };
 
-use tokio::sync::{Notify, watch};
+use tokio::sync::watch;
 
-use crate::{core::work::WorkClass, prelude::*};
+use crate::{
+    core::{schedule::RaiseHandle, work::WorkClass},
+    prelude::*,
+};
 
 /// What every item of a job receives: the output the job made, or the error that ended it.
 pub(super) type Outcome<O> = std::result::Result<Arc<O>, Arc<Error>>;
@@ -62,7 +65,8 @@ struct Waiting<P, O> {
     items: Vec<P>,
     /// The items that wait for this job and have not been dropped. A job with none is discarded.
     handles: usize,
-    wake: Arc<Notify>,
+    /// Where the job waits for its slot, once the driver has queued it. Raising or discarding the job goes through it.
+    ticket: Option<RaiseHandle>,
     done: Arc<Done<O>>,
 }
 
@@ -95,8 +99,6 @@ impl<S, K, P, O> Clone for SourceJobs<S, K, P, O> {
 /// The part of a placement that only the caller that created the job needs: what it takes to run it.
 pub(super) struct Created<O> {
     pub(super) id: u64,
-    /// Rung when the job's class rises or the job is discarded.
-    pub(super) wake: Arc<Notify>,
     /// The job decoding the source when this one was created. This job starts waiting for its slot when that one ends.
     pub(super) previous: Option<Arc<Done<O>>>,
 }
@@ -197,7 +199,10 @@ where
             waiting.handles += 1;
             if class == WorkClass::Interactive && waiting.class != WorkClass::Interactive {
                 waiting.class = WorkClass::Interactive;
-                waiting.wake.notify_one();
+                // The scheduler lock is taken inside the table lock, never the other way around.
+                if let Some(ticket) = &waiting.ticket {
+                    ticket.raise(WorkClass::Interactive);
+                }
             }
             return Placed {
                 handle: handle(waiting.id, true, waiting.done.clone()),
@@ -206,7 +211,6 @@ where
         }
 
         let id = self.table.next_id.fetch_add(1, Ordering::Relaxed);
-        let wake = Arc::new(Notify::new());
         let done = Done::new();
         let previous = entry.running.as_ref().map(|running| running.done.clone());
         entry.waiting = Some(Waiting {
@@ -214,12 +218,12 @@ where
             class,
             items: vec![item],
             handles: 1,
-            wake: wake.clone(),
+            ticket: None,
             done: done.clone(),
         });
         Placed {
             handle: handle(id, true, done),
-            created: Some(Created { id, wake, previous }),
+            created: Some(Created { id, previous }),
         }
     }
 
@@ -228,6 +232,19 @@ where
         let entries = self.table.entries.lock();
         let waiting = entries.get(source)?.waiting.as_ref()?;
         (waiting.id == id).then_some(waiting.class)
+    }
+
+    /// Hands the waiting job the ticket it was queued with, so that a later Interactive item raises it and the last dropped item discards it.
+    /// Returns the class the job has now, which the caller raises its ticket to: an item may have raised the job before the ticket existed.
+    /// `None` if the job was discarded or has started; the caller then drops its ticket.
+    pub(super) fn attach(&self, source: &S, id: u64, ticket: RaiseHandle) -> Option<WorkClass> {
+        let mut entries = self.table.entries.lock();
+        let waiting = entries.get_mut(source)?.waiting.as_mut()?;
+        if waiting.id != id {
+            return None;
+        }
+        waiting.ticket = Some(ticket);
+        Some(waiting.class)
     }
 
     /// Moves the waiting job to running. `plan` gets the items it holds, which are fixed from here on, and returns the keys of
@@ -281,8 +298,9 @@ where
             waiting.handles -= 1;
             if waiting.handles == 0
                 && let Some(waiting) = entry.waiting.take()
+                && let Some(ticket) = &waiting.ticket
             {
-                waiting.wake.notify_one();
+                ticket.discard();
             }
         }
         if entry.running.is_none() && entry.waiting.is_none() {
@@ -302,6 +320,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::core::schedule::{PoolLimits, PriorityPool, SchedulePermit, Scheduler};
 
     type Jobs = SourceJobs<u32, u32, u32, String>;
 
@@ -369,40 +388,97 @@ mod tests {
         assert_eq!(items, Some(vec![99]), "only the item that made the next job is in it");
     }
 
+    /// A pool whose only shared slot is taken, so that a ticket queued in it waits.
+    async fn full_pool() -> (PriorityPool, SchedulePermit) {
+        let pool = Arc::new(Scheduler::default()).pool(PoolLimits {
+            shared: 1,
+            interactive: 0,
+            background: 1,
+        });
+        let held = pool.acquire(WorkClass::Foreground).await;
+        (pool, held)
+    }
+
     #[tokio::test]
     async fn an_interactive_item_raises_the_class_of_the_waiting_job_test() {
         let jobs = Jobs::new();
+        let (pool, _held) = full_pool().await;
         let first = jobs.place(&1, &10, 10, WorkClass::Foreground);
         let created = first.created.as_ref().unwrap();
         assert_eq!(jobs.class_of(&1, created.id), Some(WorkClass::Foreground));
+        let ticket = pool.enqueue(WorkClass::Foreground);
+        assert_eq!(jobs.attach(&1, created.id, ticket.handle()), Some(WorkClass::Foreground));
 
         let _second = jobs.place(&1, &20, 20, WorkClass::Interactive);
         assert_eq!(jobs.class_of(&1, created.id), Some(WorkClass::Interactive));
-        tokio::time::timeout(Duration::from_millis(100), created.wake.notified())
-            .await
-            .expect("the job is woken so that it asks its slot again");
+        assert_eq!(
+            (pool.waiting(WorkClass::Interactive), pool.waiting(WorkClass::Foreground)),
+            (1, 0),
+            "the queued ticket is raised"
+        );
 
         // A Foreground item does not lower the class.
         let _third = jobs.place(&1, &30, 30, WorkClass::Foreground);
         assert_eq!(jobs.class_of(&1, created.id), Some(WorkClass::Interactive));
+        assert_eq!(pool.waiting(WorkClass::Interactive), 1);
     }
 
     #[tokio::test]
-    async fn a_waiting_job_with_no_item_left_is_discarded_test() {
+    async fn a_job_raised_before_its_ticket_is_attached_hands_the_new_class_to_the_ticket_test() {
         let jobs = Jobs::new();
+        let (pool, _held) = full_pool().await;
+        let first = jobs.place(&1, &10, 10, WorkClass::Foreground);
+        let created = first.created.as_ref().unwrap();
+        let ticket = pool.enqueue(WorkClass::Foreground);
+        let _second = jobs.place(&1, &20, 20, WorkClass::Interactive);
+        assert_eq!(pool.waiting(WorkClass::Foreground), 1, "the ticket does not exist for the job yet, so nothing is raised");
+
+        let class = jobs.attach(&1, created.id, ticket.handle()).expect("the job is still waiting");
+        assert_eq!(class, WorkClass::Interactive);
+        ticket.handle().raise(class);
+        assert_eq!(pool.waiting(WorkClass::Interactive), 1);
+    }
+
+    #[tokio::test]
+    async fn a_waiting_job_with_no_item_left_is_discarded_and_its_ticket_ends_test() {
+        let jobs = Jobs::new();
+        let (pool, _held) = full_pool().await;
         let first = jobs.place(&1, &10, 10, WorkClass::Foreground);
         let id = first.created.as_ref().unwrap().id;
-        let wake = first.created.as_ref().unwrap().wake.clone();
         let second = jobs.place(&1, &20, 20, WorkClass::Foreground);
+        let ticket = pool.enqueue(WorkClass::Foreground);
+        assert!(jobs.attach(&1, id, ticket.handle()).is_some());
+        let waiting = tokio::spawn(ticket.acquire());
 
         drop(first);
         assert_eq!(jobs.class_of(&1, id), Some(WorkClass::Foreground), "one item is still waiting");
+        assert_eq!(pool.waiting(WorkClass::Foreground), 1);
         drop(second);
         assert_eq!(jobs.class_of(&1, id), None);
-        tokio::time::timeout(Duration::from_millis(100), wake.notified())
+        let error = tokio::time::timeout(Duration::from_millis(100), waiting)
             .await
-            .expect("the job's driver is woken to end");
+            .expect("the job's ticket is discarded so that the driver ends")
+            .unwrap()
+            .err()
+            .expect("a discarded ticket gets no slot");
+        assert_eq!(error.kind(), &ErrorKind::Cancelled);
+        assert_eq!(pool.waiting(WorkClass::Foreground), 0);
         assert_eq!(jobs.start(&1, id, |_| (keys(&[]), ())), None, "a discarded job does not start");
+        assert_eq!(jobs.sources(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_job_discarded_before_its_ticket_exists_refuses_the_ticket_test() {
+        let jobs = Jobs::new();
+        let (pool, _held) = full_pool().await;
+        let first = jobs.place(&1, &10, 10, WorkClass::Foreground);
+        let id = first.created.as_ref().unwrap().id;
+        drop(first);
+        assert_eq!(jobs.class_of(&1, id), None);
+        let ticket = pool.enqueue(WorkClass::Foreground);
+        assert_eq!(jobs.attach(&1, id, ticket.handle()), None, "the driver sees that the job is gone");
+        drop(ticket);
+        assert_eq!(pool.waiting(WorkClass::Foreground), 0);
         assert_eq!(jobs.sources(), 0);
     }
 

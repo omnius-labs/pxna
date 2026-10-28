@@ -379,13 +379,13 @@ impl TimelineScanner {
         match kind {
             MediaKind::Image | MediaKind::FfmpegImage | MediaKind::HeifImage => {
                 let path = file.to_path_buf();
-                let permit = self.storage.work_budget().acquire(WorkClass::Background, WorkKind::Exif).await.ok()?;
-                let exif = tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    ImageInspector::read_exif(&path)
-                })
-                .await
-                .ok()?;
+                let exif = self
+                    .storage
+                    .work_budget()
+                    .io()
+                    .run_blocking_as(WorkClass::Background, WorkKind::Exif, move || ImageInspector::read_exif(&path))
+                    .await
+                    .ok()?;
                 exif.taken_at.as_deref().and_then(TimelineDate::from_exif)
             }
             MediaKind::Video => {
@@ -393,13 +393,7 @@ impl TimelineScanner {
                 let permit = self.probes.clone().acquire_owned().await.ok()?;
                 let tools = self.tools.clone();
                 let path = file.to_path_buf();
-                let result = tokio::spawn(async move {
-                    let _background = background;
-                    let _permit = permit;
-                    tools.probe_creation_time(&path).await
-                })
-                .await
-                .ok()?;
+                let result = background.run_with(permit, async move { tools.probe_creation_time(&path).await }).await.ok()?;
                 match result {
                     Ok(time) => time.and_then(|time| TimelineDate::from_creation_time(&self.zone, time)),
                     Err(error) => {
