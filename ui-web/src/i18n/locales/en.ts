@@ -339,6 +339,7 @@ export const en = {
         collapse: "Collapse the info panel",
         open: "Open the info panel",
         label: "Info panel",
+        thumbnailHeight: "Thumbnail height",
         chooseEntry: "Choose an item to see its details.",
         selectedCount: "{{count}} selected",
         total: "Total {{bytes}}",

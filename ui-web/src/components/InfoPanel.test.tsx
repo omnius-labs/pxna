@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { components } from "../api/schema";
 import type { Entry } from "../library/entries";
@@ -10,6 +10,7 @@ import { formatBytes, formatModifiedAt } from "../library/format";
 import { emptySelection, type Selection, selectionItem, selectionValue } from "../library/selection";
 import { testEntry } from "../testing/entries";
 import { FakeImageSource } from "../testing/images";
+import { stubResizeObserver } from "../testing/preferences";
 import { InfoPanel, InfoPanelToggle } from "./InfoPanel";
 
 const mocks = vi.hoisted(() => ({ get: vi.fn() }));
@@ -17,6 +18,10 @@ vi.mock("../api/client", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../api/client")>()),
     api: { GET: mocks.get },
 }));
+
+beforeAll(() => {
+    stubResizeObserver();
+});
 
 const selectionOf = (...entries: Entry[]): Selection => ({
     items: new Map(entries.map((entry) => [entry.path, selectionValue(selectionItem(entry, false))])),
@@ -454,4 +459,19 @@ describe("メディア情報", () => {
         expect(mediaRequests()).toHaveLength(0);
         await view.unmount();
     });
+});
+
+it("サムネイル枠の高さは、下端のつまみのキー操作で変え、端末に保存する", async () => {
+    window.localStorage.removeItem("pxna.infoThumbnailHeight");
+    const view = await render(<InfoPanel libraryId="photos" selection={selectionOf(photo)} />);
+    try {
+        const handle = view.host.querySelector<HTMLElement>("[role=separator][aria-label='Thumbnail height']")!;
+        expect(handle.getAttribute("aria-orientation")).toBe("horizontal");
+        expect(handle.getAttribute("aria-valuenow")).toBe("224");
+        await act(async () => handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+        expect(handle.getAttribute("aria-valuenow")).toBe("240");
+        expect(window.localStorage.getItem("pxna.infoThumbnailHeight")).toBe("240");
+    } finally {
+        await view.dispose();
+    }
 });

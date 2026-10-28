@@ -337,6 +337,7 @@ export const ja = {
         collapse: "情報パネルを畳む",
         open: "情報パネルを開く",
         label: "情報パネル",
+        thumbnailHeight: "サムネイルの高さ",
         chooseEntry: "Entry を選ぶと、詳細が出ます。",
         selectedCount: "{{count}} 件を選択中",
         total: "合計 {{bytes}}",

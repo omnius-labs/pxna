@@ -3,8 +3,14 @@ import { useState } from "react";
 /// 情報パネルの開閉を保存する `localStorage` のキー。値は `true` か `false` である。
 export const INFO_PANEL_OPEN_KEY = "pxna.infoPanelOpen";
 
-/// パネルの大きめのサムネイルの一辺（CSS px）。パネルの幅から余白を除いた値である。
-export const INFO_PANEL_THUMBNAIL_SIDE = 256;
+/// パネルの大きめのサムネイルの一辺（CSS px）の段階。枠の幅と高さの大きい方が収まる最小の段を使う。
+export const INFO_PANEL_THUMBNAIL_SIDES = [256, 384, 512, 640] as const;
+
+/// 枠の幅と高さ（CSS px）から、要求するサムネイルの一辺を決める。
+export function infoThumbnailSide(width: number, height: number): number {
+    const need = Math.max(width, height);
+    return INFO_PANEL_THUMBNAIL_SIDES.find((side) => side >= need) ?? INFO_PANEL_THUMBNAIL_SIDES.at(-1)!;
+}
 
 /// 保存した開閉を読む。保存がないときと、読めないときは、開いた状態にする。
 export function readInfoPanelOpen(): boolean {

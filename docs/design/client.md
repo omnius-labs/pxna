@@ -409,6 +409,7 @@ For that reason, if the page is about to be closed during an upload, the browser
 
 The info panel is placed to the right of the listing on a wide screen and shows the details of the selected Entry.
 Its width can be changed with the handle at the left edge (§3.1), and it is opened and closed with a toolbar button.
+The height of the thumbnail frame can be changed from 96 to 640 CSS px with the handle at its bottom edge (drag or the up and down arrow keys), and it is saved per device like the width (initial 224). The side of the requested thumbnail is the smallest of 256, 384, 512, and 640 CSS px that covers the larger of the frame's width and height, and it is not requested again while the size is still changing.
 The open/closed state is saved in the browser, and when opened for the first time it is in the open state (§5.1).
 When nothing is selected, it guides that details appear when an Entry is selected.
 
