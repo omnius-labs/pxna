@@ -1,4 +1,4 @@
-//! One connection of the image channel: its wanted set, the items it passes to generation, and the images it sends (Image Channel Design §4 to §7).
+//! One connection of the image socket: its wanted set, the items it passes to generation, and the images it sends (Image Socket Design §4 to §7).
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
@@ -22,11 +22,11 @@ use crate::{
     error::ApiError,
     interface::session::SessionAuth,
     prelude::*,
-    service::image_channel::{ChannelSlot, ImageChannelLimits},
+    service::sockets::image::{ImageSocketLimits, SocketSlot},
     state::DaemonState,
 };
 
-/// Close codes the client acts on (Image Channel Design §3).
+/// Close codes the client acts on (Image Socket Design §3).
 struct CloseCode;
 
 impl CloseCode {
@@ -117,13 +117,13 @@ pub(super) struct Connection {
     state: Arc<DaemonState>,
     /// The session's token, checked again at each ping.
     credential: String,
-    _slot: ChannelSlot,
+    _slot: SocketSlot,
 }
 
 /// The state of one connection while it runs.
 struct Run {
     state: Arc<DaemonState>,
-    limits: ImageChannelLimits,
+    limits: ImageSocketLimits,
     items: HashMap<u64, Item>,
     next_generation: u64,
     tasks: JoinSet<Finished>,
@@ -143,13 +143,13 @@ struct Run {
 }
 
 impl Connection {
-    pub(super) fn new(state: Arc<DaemonState>, credential: String, slot: ChannelSlot) -> Self {
+    pub(super) fn new(state: Arc<DaemonState>, credential: String, slot: SocketSlot) -> Self {
         Self { state, credential, _slot: slot }
     }
 
     pub(super) async fn run(self, socket: WebSocket) {
-        let limits = self.state.image_channels.limits().clone();
-        let closing = self.state.image_channels.closing().clone();
+        let limits = self.state.image_sockets.limits().clone();
+        let closing = self.state.image_sockets.closing().clone();
         let (mut sink, mut stream) = socket.split();
 
         // Only the writer waits for the socket. The connection hands it one message at a time, so that it chooses the next chunk
@@ -226,7 +226,7 @@ impl Connection {
 }
 
 impl Run {
-    fn new(state: Arc<DaemonState>, limits: ImageChannelLimits) -> Self {
+    fn new(state: Arc<DaemonState>, limits: ImageSocketLimits) -> Self {
         Self {
             state,
             limits,
@@ -480,7 +480,7 @@ impl Run {
                     return;
                 };
                 if error.is_panic() {
-                    error!(error = ?error, "a task of the image channel panicked");
+                    error!(error = ?error, "a task of the image socket panicked");
                     let failure = Error::new(ErrorKind::UnexpectedError).with_message("the image could not be made");
                     self.finished(Finished {
                         id,
@@ -556,7 +556,7 @@ impl Run {
     fn control_message(&mut self, message: &ServerMessage) {
         match serde_json::to_string(message) {
             Ok(text) => self.control.push_back(Message::Text(text.into())),
-            Err(error) => error!(error = ?error, "failed to serialize a message of the image channel"),
+            Err(error) => error!(error = ?error, "failed to serialize a message of the image socket"),
         }
     }
 
@@ -597,7 +597,7 @@ impl Run {
         match frame {
             Ok(frame) => Some(Message::Binary(frame.into())),
             Err(error) => {
-                error!(error = ?error, "failed to write a frame of the image channel");
+                error!(error = ?error, "failed to write a frame of the image socket");
                 None
             }
         }
@@ -649,7 +649,7 @@ mod tests {
         }
     }
 
-    async fn run_with(limits: ImageChannelLimits) -> TestResult<Run> {
+    async fn run_with(limits: ImageSocketLimits) -> TestResult<Run> {
         let fixture = fixture(ArchiveOptions::default()).await?;
         Ok(Run::new(fixture.server.state.clone(), limits))
     }
@@ -699,9 +699,9 @@ mod tests {
 
     #[tokio::test]
     async fn an_image_leaves_in_chunks_and_a_more_urgent_image_goes_between_them_test() -> TestResult {
-        let mut run = run_with(ImageChannelLimits {
+        let mut run = run_with(ImageSocketLimits {
             chunk_bytes: 4,
-            ..ImageChannelLimits::default()
+            ..ImageSocketLimits::default()
         })
         .await?;
         run.want(vec![item(1, RequestClass::Prefetch, 0.0), item(2, RequestClass::Visible, 0.0)])
@@ -723,7 +723,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_order_within_a_class_and_the_arrival_decide_between_equal_images_test() -> TestResult {
-        let mut run = run_with(ImageChannelLimits::default()).await?;
+        let mut run = run_with(ImageSocketLimits::default()).await?;
         run.want(vec![
             item(1, RequestClass::Visible, 5.0),
             item(2, RequestClass::Visible, 1.0),
@@ -740,7 +740,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_header_carries_the_etag_content_type_and_frame_count_test() -> TestResult {
-        let mut run = run_with(ImageChannelLimits::default()).await?;
+        let mut run = run_with(ImageSocketLimits::default()).await?;
         run.want(vec![item(1, RequestClass::Visible, 0.0)]).map_err(|closing| closing.reason)?;
         finish(&mut run, 1, image(3));
         let Some(Message::Binary(frame)) = run.next_message() else {
@@ -764,9 +764,9 @@ mod tests {
 
     #[tokio::test]
     async fn items_go_to_generation_by_class_and_order_within_their_budgets_test() -> TestResult {
-        let mut run = run_with(ImageChannelLimits {
+        let mut run = run_with(ImageSocketLimits {
             max_generating: 2,
-            ..ImageChannelLimits::default()
+            ..ImageSocketLimits::default()
         })
         .await?;
         run.want(vec![
@@ -790,10 +790,10 @@ mod tests {
 
     #[tokio::test]
     async fn images_that_wait_to_be_sent_hold_back_new_generations_test() -> TestResult {
-        let mut run = run_with(ImageChannelLimits {
+        let mut run = run_with(ImageSocketLimits {
             max_unsent_bytes: 10,
             chunk_bytes: 8,
-            ..ImageChannelLimits::default()
+            ..ImageSocketLimits::default()
         })
         .await?;
         run.want(vec![item(1, RequestClass::Visible, 0.0), item(2, RequestClass::Visible, 1.0)])
@@ -815,7 +815,7 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_an_item_takes_it_out_wherever_it_is_test() -> TestResult {
-        let mut run = run_with(ImageChannelLimits::default()).await?;
+        let mut run = run_with(ImageSocketLimits::default()).await?;
         run.want(vec![
             item(1, RequestClass::Visible, 0.0),
             item(2, RequestClass::Visible, 1.0),
@@ -838,9 +838,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_want_is_checked_against_the_contract_and_the_limits_test() -> TestResult {
-        let mut run = run_with(ImageChannelLimits {
+        let mut run = run_with(ImageSocketLimits {
             max_items: 2,
-            ..ImageChannelLimits::default()
+            ..ImageSocketLimits::default()
         })
         .await?;
         run.want(vec![item(1, RequestClass::Visible, 0.0)]).map_err(|closing| closing.reason)?;

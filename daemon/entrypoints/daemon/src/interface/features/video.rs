@@ -98,7 +98,7 @@ impl apis::video::Video for ApiServer {
         path_params: &models::GetVideoSegmentPathParams,
     ) -> std::result::Result<apis::video::GetVideoSegmentResponse, ()> {
         let result = async {
-            let index = VideoRoute::index(&path_params.segment_name)?;
+            let index = VideoSessionRoute::index(&path_params.segment_name)?;
             let mut reader = self.state.videos.segment(&path_params.library_id, &path_params.session_id, index).await?;
             let mut bytes = Vec::new();
             tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut bytes).await?;

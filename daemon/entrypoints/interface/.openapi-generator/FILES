@@ -6,7 +6,7 @@ src/apis/auth.rs
 src/apis/files.rs
 src/apis/folders.rs
 src/apis/health.rs
-src/apis/image_channel.rs
+src/apis/image_socket.rs
 src/apis/libraries.rs
 src/apis/mod.rs
 src/apis/operations.rs

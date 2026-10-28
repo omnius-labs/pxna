@@ -701,7 +701,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/image-channel": {
+    "/sockets/image": {
         parameters: {
             query?: never;
             header?: never;
@@ -709,25 +709,25 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Open the image channel
+         * Open the image socket
          * @description Upgrades the connection to a WebSocket, through which the
          *     client wants thumbnails, sprite sheets, and display images and
          *     receives them. Every message and binary frame is defined by
-         *     `image-channel.schema.json` next to this file; this entry
+         *     `sockets/image.schema.json` in this directory; this entry
          *     names only the upgrade.
          *
          *     The upgrade carries the session cookie or a Bearer token like
          *     any other request. When it carries the session cookie, its
          *     `Origin` must match its `Host`, as for a mutation, and `403`
          *     is returned otherwise, also when `Origin` is missing. A session
-         *     may keep a limited number of channels open, and `429` is
+         *     may keep a limited number of sockets open, and `429` is
          *     returned beyond it.
          *
-         *     The daemon closes the channel with code `4401` when the
+         *     The daemon closes the socket with code `4401` when the
          *     session ends, `4400` when the client breaks the contract or a
          *     limit, and `1001` when it shuts down.
          */
-        get: operations["getImageChannel"];
+        get: operations["getImageSocket"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3181,7 +3181,7 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    getImageChannel: {
+    getImageSocket: {
         parameters: {
             query?: never;
             header?: never;
@@ -3200,7 +3200,7 @@ export interface operations {
             400: components["responses"]["InvalidRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description The session already has the most image channels it may keep open. `kind` is `LimitExceeded`. */
+            /** @description The session already has the most image sockets it may keep open. `kind` is `LimitExceeded`. */
             429: {
                 headers: {
                     [name: string]: unknown;

@@ -19,7 +19,7 @@ Definitions of words are not in this document.
 | [Listing and Search Design](./design/listing.md) | Sorting and filtering of listings, snapshots, name search, the name index, recursion limits                                                         |
 | [Thumbnail Design](./design/thumbnail.md)     | Generating thumbnails, sprite sheets, and display images, how representative thumbnails are chosen, generation concurrency, caches                      |
 | [Video Playback Design](./design/video.md)    | Media info for images and videos, direct playback, HLS transcoded delivery and transcode sessions                                                       |
-| [Image Channel Design](./design/image-channel.md) | The WebSocket that carries thumbnails, sprite sheets, and display images, wanted sets, request classes, delivery, revalidation                     |
+| [Image Socket Design](./design/image-socket.md) | The WebSocket that carries thumbnails, sprite sheets, and display images, wanted sets, request classes, delivery, revalidation                     |
 | [Client Design](./design/client.md)           | Screen structure of the web client, behavior of tiles and the viewer, how thumbnails and listings are requested, Entry operations, display preferences |
 | [Timeline Design](./design/timeline.md)       | What is listed in the timeline, timeline dates, the timeline index, aggregation and reading                                                              |
 | [Rating and Tag Design](./design/rating-tags.md) | What can be rated and tagged, value rules, storage, following changes, filtering listings, API conventions                                          |
@@ -31,7 +31,7 @@ Definitions of words are not in this document.
 | [reviews.md](./reviews.md)                    | History of reviews and transcription status of findings                                                                                                  |
 | [Rust Coding Conventions](./coding/rust.md)  | The shape of Rust code, the reasons, check methods, how to make exceptions                                                                               |
 | [daemon/openapi.yaml](../daemon/openapi.yaml) | API paths, parameters, schemas, status codes                                                                                                             |
-| [daemon/image-channel.schema.json](../daemon/image-channel.schema.json) | The messages of the image channel and their value ranges                                                                          |
+| [daemon/sockets/image.schema.json](../daemon/sockets/image.schema.json) | The messages of the image socket and their value ranges                                                                          |
 | [README.md](../README.md)                     | Setup procedure and dependent packages                                                                                                                   |
 
 This document does not hold an exhaustive list of API paths or status codes.
@@ -117,7 +117,7 @@ flowchart TB
         static["Static serving<br/>web build output"]
         iface["omnius-pxna-interface<br/>generated router"]
         stream["Hand-written routes<br/>file content, HLS"]
-        channel["Image channel<br/>WebSocket"]
+        socket["Image socket<br/>WebSocket"]
         handler["ApiServer<br/>implementation of generated traits"]
         video["Video transcode sessions<br/>src/service/video"]
         timeline["Timeline aggregation<br/>src/service/timeline"]
@@ -144,11 +144,11 @@ flowchart TB
 
     web -->|"HTTP + Cookie"| iface
     web --> stream
-    web -->|"WebSocket + Cookie"| channel
+    web -->|"WebSocket + Cookie"| socket
     static -.->|"initial load"| web
     iface --> handler
     stream --> fs
-    channel --> thumb
+    socket --> thumb
     stream --> video
     handler --> fs
     handler --> video
@@ -177,7 +177,7 @@ This premise is what makes the CSRF protection in §8.5 hold.
 
 Only the responses for file content and HLS are returned by hand-written routes that do not go through the generated router (§11.1).
 This is because the generated router cannot return the response body as a stream.
-Thumbnails, sprite sheets, and display images go through the image channel, a WebSocket route also outside the generated router, whose messages are defined by `daemon/image-channel.schema.json` ([Image Channel Design](./design/image-channel.md)).
+Thumbnails, sprite sheets, and display images go through the image socket, a WebSocket route also outside the generated router, whose messages are defined by `daemon/sockets/image.schema.json` ([Image Socket Design](./design/image-socket.md)).
 Authentication and Library boundary checks go through the same daemon-layer processing as other paths.
 ffmpeg, ffprobe, and libheif's heif-dec are not linked into the daemon and are started as external processes.
 ffmpeg decodes HEIC/HEIF and the other ffmpeg-read images; heif-dec is used for images with alpha and as a fallback.
@@ -244,10 +244,10 @@ The procedure for changing the API is as follows.
 
 `daemon/watch-openapi.sh` is an auxiliary script that previews the specification in a browser with Scalar, and is not involved in generation.
 
-The exception is the paths that return file content and HLS playlists and segments, and the image channel.
+The exception is the paths that return file content and HLS playlists and segments, and the image socket.
 The daemon holds these as hand-written axum routes (§11.1).
 The contract of the first two remains written in `openapi.yaml`, and the correspondence with the implementation is kept by tests.
-The image channel's messages are defined by `daemon/image-channel.schema.json`, which `openapi.yaml` points to from the upgrade path; the web client's types are generated from it, and the daemon's types are tested against it ([Image Channel Design §8](./design/image-channel.md#8-contract)).
+The image socket's messages are defined by `daemon/sockets/image.schema.json`, which `openapi.yaml` points to from the upgrade path; the web client's types are generated from it, and the daemon's types are tested against it ([Image Socket Design §8](./design/image-socket.md#8-contract)).
 
 The generated router has routes with the same path and method, so hand-written routes cannot be added with `merge`.
 We build an outer router that holds the hand-written routes and pass the generated router to it as the fallback.
@@ -336,8 +336,8 @@ The driver contract, limits, caches, how archives are extracted, handling of sym
 It shrinks images, extracts multiple frames from videos with ffmpeg to make a sprite sheet, and returns the first image or video among the direct children of a folder or archive as the representative thumbnail.
 The display image the viewer shows first is also generated by the same path.
 
-Generation is done only when a client wants an image through the image channel, and there is no bulk background generation.
-The client tells the server which images it wants and how urgently, the server orders generation by that, and every want for one source, from any connection, is merged into one generation ([Image Channel Design](./design/image-channel.md), [Thumbnail Design §7](./design/thumbnail.md#7-order-and-concurrency-of-generation)).
+Generation is done only when a client wants an image through the image socket, and there is no bulk background generation.
+The client tells the server which images it wants and how urgently, the server orders generation by that, and every want for one source, from any connection, is merged into one generation ([Image Socket Design](./design/image-socket.md), [Thumbnail Design §7](./design/thumbnail.md#7-order-and-concurrency-of-generation)).
 The cache is held as a SQLite index plus real files, and managed by an LRU with separate capacity budgets for thumbnails and display images.
 
 The rules of generation, the cache keys, the configuration, and the reasons for adoption are authoritative in [Thumbnail Design](./design/thumbnail.md).
@@ -522,7 +522,7 @@ When a request other than `GET` and `HEAD` has a session cookie, it returns 403 
 It also gives 403 when there is no `Origin`.
 If a request without an `Origin` were let through, the whole validation would be bypassed once a way to have one sent without an `Origin` was found.
 Requests without a cookie (bearer requests and requests before setup and login) are not validated.
-The WebSocket upgrade of the image channel is a `GET` that carries the session cookie, so the channel applies the same check itself: an upgrade with a session cookie needs an `Origin` that matches the `Host` ([Image Channel Design §3](./design/image-channel.md#3-connection)).
+The WebSocket upgrade of the image socket is a `GET` that carries the session cookie, so the socket applies the same check itself: an upgrade with a session cookie needs an `Origin` that matches the `Host` ([Image Socket Design §3](./design/image-socket.md#3-connection)).
 
 **This decision depends on the serving method in §10.1.**
 If the configuration were changed to serve the web client from a different origin, this would need to be redesigned.
@@ -728,7 +728,7 @@ The web client represents the current position with the URL path ([Client Design
 For paths starting with `/api/`, even when no route matches, it does not return `index.html` but returns the API's 404.
 This is so that a mistaken API call does not look like a success as an HTML 200.
 
-During development, Vite's dev server forwards `/api` to the daemon, including the WebSocket upgrade of the image channel, keeping the origin as seen from the browser to one.
+During development, Vite's dev server forwards `/api` to the daemon, including the WebSocket upgrade of the image socket, keeping the origin as seen from the browser to one.
 The forwarding destination defaults to `http://localhost:6050` and can be changed with the environment variable `PXNA_DAEMON_ORIGIN`.
 The forwarding does not rewrite `Host`.
 The `Origin` validation in §8.5 compares `Origin` with `Host`, so if `Host` were rewritten to the daemon's listening address, mutating requests with a cookie would give 403.
@@ -851,7 +851,7 @@ The client would branch by parsing the wording, and it would break whenever the 
 **Decision**
 We write `openapi.yaml` by hand and wipe and regenerate `entrypoints/interface` from it.
 The generated output is not edited by hand.
-Only the paths for file content and HLS have the contract written in `openapi.yaml` and are implemented by hand-written routes ("Return file content responses as streams"). The image channel, which OpenAPI cannot describe, keeps the contract first in a JSON Schema ([Image Channel Design §9.1](./design/image-channel.md#make-a-json-schema-the-contract-of-the-channel)).
+Only the paths for file content and HLS have the contract written in `openapi.yaml` and are implemented by hand-written routes ("Return file content responses as streams"). The image socket, which OpenAPI cannot describe, keeps the contract first in a JSON Schema ([Image Socket Design §9.1](./design/image-socket.md#make-a-json-schema-the-contract-of-the-socket)).
 
 **Reason**
 The API is the contract between the server and the two kinds of clients, and we want it placed above Rust types.
@@ -1265,7 +1265,7 @@ The content response is returned as a stream by a hand-written route and carries
 The engine's `Timeout` is returned as a 504 `Timeout`.
 When `[web] dir` is set, the daemon serves the web build output outside `/api`.
 
-Thumbnails, sprite sheets, and display images are served only over the image channel ([Image Channel Design §10](./design/image-channel.md#10-current-state-and-remaining-work)).
+Thumbnails, sprite sheets, and display images are served only over the image socket ([Image Socket Design §10](./design/image-socket.md#10-current-state-and-remaining-work)).
 It returns them for images, videos, folders, and archives, and this is verified by tests that go through a real WebSocket.
 CI installs ffmpeg and ffprobe and makes the video tests mandatory with `PXNA_REQUIRE_FFMPEG=1`.
 Locally, if neither executable is present and the requirement is not specified, the video tests are skipped.
@@ -1308,7 +1308,7 @@ M7 is a retired number and is not used.
 | M20 | Have the web client want folder and archive thumbnails again after the daemon's own changes, so that a changed representative appears | M13, M23 | Not started |
 | M21 | Make the address the compose port is published on configurable with `PXNA_BIND` (default `127.0.0.1`) and enable `insecure_cookie` in the bundled configuration (§11.1) | M9 | Not started |
 | M22 | Implement the search API across Libraries of the [Listing and Search Design](./design/listing.md#53-searching-across-libraries), and the web client's search mode with its conditions in the left area and the three-choice mode switch | M12, M17, M18 | Done |
-| M23 | Merge every want for a source into one source job, carry thumbnails, sprite sheets, and display images over the [image channel](./design/image-channel.md), switch the web client to it with its own image cache, and remove the thumbnail HTTP route | M4, M12, M14 | Done |
+| M23 | Merge every want for a source into one source job, carry thumbnails, sprite sheets, and display images over the [image socket](./design/image-socket.md), switch the web client to it with its own image cache, and remove the thumbnail HTTP route | M4, M12, M14 | Done |
 
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
@@ -1317,7 +1317,7 @@ The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-ro
 The server side of M14 is V5 of the same §8.2.
 The current state of the completed M13 and M14, and the client-side remaining work of M15, are in [Client Design §6](./design/client.md#6-current-state-and-remaining-work).
 The breakdown of M19 is L1 of [Listing and Search Design §9.2](./design/listing.md#92-roadmap) and C12 of [Client Design §6.2](./design/client.md#62-roadmap), and of M20 is T1 of [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap) and C11 of the same Client Design §6.2.
-The breakdown of M23 is IC1 to IC3 of [Image Channel Design §10.2](./design/image-channel.md#102-roadmap), and C13 of Client Design §6.2; M20 follows M23, because its revalidation comes with the image channel.
+The breakdown of M23 is IC1 to IC3 of [Image Socket Design §10.2](./design/image-socket.md#102-roadmap), and C13 of Client Design §6.2; M20 follows M23, because its revalidation comes with the image socket.
 M16, M17, and M18 have no remaining work. The current state of M16 is in [Timeline Design §10](./design/timeline.md#10-current-state-and-remaining-work), of M17 in [Client Design §6.1](./design/client.md#61-current-code), and of M18 in [Rating and Tag Design §9](./design/rating-tags.md#9-current-state-and-remaining-work).
 
 For confirmed defects, see [issues.md](./issues.md).

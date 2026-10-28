@@ -1,6 +1,6 @@
 import type { ImageSpec, ImageState, Want } from "./spec";
 
-/// 部品が画像を受け取る窓口。1 つのタブに 1 つあり、部品の「欲しい」をまとめて daemon の image channel へ伝える（Client Design §4）。
+/// 部品が画像を受け取る窓口。1 つのタブに 1 つあり、部品の「欲しい」をまとめて daemon の image socket へ伝える（Client Design §4）。
 export interface ImageSource {
     getState(spec: ImageSpec): ImageState;
     /// 状態が変わったときに呼ぶ。`useSyncExternalStore` に渡す。

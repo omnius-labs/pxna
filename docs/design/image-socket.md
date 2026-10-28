@@ -1,8 +1,8 @@
-# Image Channel Design
+# Image Socket Design
 
 ## 1. About This Document
 
-This document covers the image channel, the one connection through which the web client receives thumbnails, sprite sheets, and display images, and defines its connection, wanted set, priority, delivery, revalidation, contract, and the reasons for adoption.
+This document covers the image socket, the one connection through which the web client receives thumbnails, sprite sheets, and display images, and defines its connection, wanted set, priority, delivery, revalidation, contract, and the reasons for adoption.
 The intended readers are developers and AI agents who implement or review this concern.
 It assumes the vocabulary of [terms.md](../terms.md).
 The definitions of words are not in this document.
@@ -11,13 +11,13 @@ The definitions of words are not in this document.
 
 | Document | What it covers |
 | --- | --- |
-| This document | The image channel's connection and authentication, wanted sets, request classes and ordering, delivery in chunks, revalidation, limits, the contract, reasons for adoption, deferred items |
+| This document | The image socket's connection and authentication, wanted sets, request classes and ordering, delivery in chunks, revalidation, limits, the contract, reasons for adoption, deferred items |
 | [design.md](../design.md) | Pxna's overall scope, overall structure, sessions, CSRF, and cross-cutting design decisions |
 | [Thumbnail Design](./thumbnail.md) | How a wanted item is generated: source jobs, size steps, companions, caches, keys |
 | [Client Design](./client.md) | Which images the web client wants and when, how it merges the wants of its parts, and its image cache |
 | [terms.md](../terms.md) | Definitions of terms |
 | [issues.md](../issues.md) | Clear defects confirmed in code and handling policies |
-| [daemon/image-channel.schema.json](../../daemon/image-channel.schema.json) | The authoritative messages, fields, and value ranges of the image channel |
+| [daemon/sockets/image.schema.json](../../daemon/sockets/image.schema.json) | The authoritative messages, fields, and value ranges of the image socket |
 
 The entry point of the design document family is [design.md](../design.md).
 
@@ -30,11 +30,11 @@ If you want to know what works now, read §10 first.
 ## 2. Responsibilities and Boundaries
 
 A listing asks for the thumbnails of as many Entries as it shows, the viewer's filmstrip asks for other sizes of the same images, and the viewer asks for display images, all at the same time.
-The image channel carries all of these through one WebSocket per browser tab.
+The image socket carries all of these through one WebSocket per browser tab.
 The client tells the server which images it wants and how urgently, and the server decides what to generate and send next, and sends each image as it is ready.
 
 Holding every want of a tab in one place lets the server merge the wants for one source into one generation ([Thumbnail Design §7](./thumbnail.md#7-order-and-concurrency-of-generation)) and reorder or drop wants without a request being cut.
-Because the channel is one connection, it also leaves the browser's six connections per origin over plain HTTP/1.1 to the listing, the content API, and video.
+Because the socket is one connection, it also leaves the browser's six connections per origin over plain HTTP/1.1 to the listing, the content API, and video.
 
 The boundaries with other concerns are as follows.
 
@@ -50,32 +50,32 @@ The boundaries with other concerns are as follows.
 
 - There is no HTTP path for thumbnails, sprite sheets, or display images. A client that cannot open a WebSocket cannot show them.
   Keeping one path keeps one set of priority, revalidation, and limit rules.
-- One channel is not shared between tabs. Each tab opens its own.
+- One socket is not shared between tabs. Each tab opens its own.
   The server merges the generation of the same source across connections anyway (§5), so sharing would save only the transfer.
 - The server does not send images that no item asks for, such as a notice that a file changed. A client learns of a change only when it wants the image again (§6).
 
 ## 3. Connection
 
-The client opens the channel with a WebSocket upgrade of `GET /api/v1/image-channel` on the same origin as the web client.
+The client opens the socket with a WebSocket upgrade of `GET /api/v1/sockets/image` on the same origin as the web client.
 The daemon authenticates the upgrade like any other API request: the session cookie, or a bearer token for clients that can set headers ([design.md §7.2](../design.md#72-sessions)).
 When the upgrade carries a session cookie, the daemon requires an `Origin` whose host and port match the `Host`, and answers 403 otherwise, including when `Origin` is missing ([design.md §8.5](../design.md#85-csrf)).
-The upgrade is a `GET`, so this check is made by the channel itself and not by the validation that covers only other methods.
-Without it, a page on another site could open a channel with the user's cookie; `SameSite=Strict` already keeps the cookie from such a page, and the check keeps that from being the only guard.
+The upgrade is a `GET`, so this check is made by the socket itself and not by the validation that covers only other methods.
+Without it, a page on another site could open a socket with the user's cookie; `SameSite=Strict` already keeps the cookie from such a page, and the check keeps that from being the only guard.
 
-While the channel is open, the daemon checks the session at every ping (below), and once it has ended by logout or expiry, closes the channel with close code 4401; the client returns to login.
+While the socket is open, the daemon checks the session at every ping (below), and once it has ended by logout or expiry, closes the socket with close code 4401; the client returns to login.
 On daemon shutdown it closes with 1001.
-A message that breaks the contract or a limit closes the channel with 4400; the client does not reconnect after 4400 and shows the images as failed.
+A message that breaks the contract or a limit closes the socket with 4400; the client does not reconnect after 4400 and shows the images as failed.
 
 After any other close, the client reconnects after 1 second, doubling the wait up to 30 seconds with random jitter, and sends its whole wanted set again.
 The server keeps no state for a closed connection, so reconnecting is the same as connecting for the first time.
 
-Both sides send a ping every 30 seconds. The daemon closes the channel with 1011 when two of its pings in a row get no answer from the client, and the client closes it when two of its pings get no pong.
+Both sides send a ping every 30 seconds. The daemon closes the socket with 1011 when two of its pings in a row get no answer from the client, and the client closes it when two of its pings get no pong.
 A home server's NAT and a phone that sleeps can drop a connection without a close, and without pings the client would wait for images that never come.
 
-When the daemon closes a channel, it sends the close frame and then waits up to 2 seconds for the client's close.
+When the daemon closes a socket, it sends the close frame and then waits up to 2 seconds for the client's close.
 A socket closed while the client's last messages are unread resets the connection, and the reset can make the client lose the close frame, and with it the code.
 
-The daemon limits each connection to 4096 wanted items and to 256 KiB per text message, and a session to 8 open channels; a ninth upgrade is answered with 429.
+The daemon limits each connection to 4096 wanted items and to 256 KiB per text message, and a session to 8 open sockets; a ninth upgrade is answered with 429.
 These keep one client from holding unbounded state in the daemon.
 
 ## 4. Wanted Set
@@ -136,7 +136,7 @@ A local file whose modification time cannot be obtained has no key; its items ar
 
 ## 8. Contract
 
-[daemon/image-channel.schema.json](../../daemon/image-channel.schema.json) is the authoritative contract: the text messages in both directions, the binary frame header, and their value ranges.
+[daemon/sockets/image.schema.json](../../daemon/sockets/image.schema.json) is the authoritative contract: the text messages in both directions, the binary frame header, and their value ranges.
 A binary frame is a 4-byte big-endian length, the header as JSON of that length, and the chunk.
 The web client's types are generated from the schema, and a check confirms that the generated file has no diff, as with `openapi.yaml` ([design.md §4.2](../design.md#42-openapi-driven-code-generation)).
 The daemon's message types are written by hand, and tests validate their serialized form against the schema.
@@ -149,7 +149,7 @@ The daemon's message types are written by hand, and tests validate their seriali
 #### Carry Thumbnails and Display Images over One WebSocket per Tab
 
 **Decision**
-The web client receives thumbnails, sprite sheets, and display images only through the image channel, one WebSocket per tab, and there is no HTTP path for them (§2.1).
+The web client receives thumbnails, sprite sheets, and display images only through the image socket, one WebSocket per tab, and there is no HTTP path for them (§2.1).
 
 **Reason**
 The listing, the filmstrip, the list, the info panel, the timeline, and the viewer each sent their own requests for the same images. In the 2026-10-26 log of browsing iPhone HEIC with the viewer, 8 of 90 external decodes ran while another decode of the same source ran, mostly the listing's 512 `fit` beside the filmstrip's 128 `crop`.
@@ -157,7 +157,7 @@ With every want of a tab on one connection, the server sees them together and me
 A WebSocket carries both directions on one connection, so the client can change what it wants while images are coming, which the other forms below cannot without new requests.
 
 **Rejected alternative 1**
-One `GET` per image from a hand-written route, with the client's queues deciding the order and cutting requests to cancel them. This was the form before the channel. The browser cached each URL for a day, but the parts of the client could not see each other's requests, and two sizes of one image decoded twice.
+One `GET` per image from a hand-written route, with the client's queues deciding the order and cutting requests to cancel them. This was the form before the socket. The browser cached each URL for a day, but the parts of the client could not see each other's requests, and two sizes of one image decoded twice.
 
 **Rejected alternative 2**
 A `POST` that lists many images and streams them back in one response as they are ready. It merges the wants of one moment, but every change of the visible range would cut the response and send a new list, and a part that wants an image later could not join the response already running.
@@ -180,7 +180,7 @@ The client sends which images it wants with a request class and an order, and th
 Only the client knows what is on screen, so the client still decides the class and the order. Holding the set on the server lets it merge items of different parts and connections by source, and lets a change of order or a drop take effect without cutting a request.
 
 **Rejected alternative**
-Keeping the client's queue, which sends a few requests at a time and cancels them, and using the channel only as the transport. It would keep the client's limit and its reordering, but the server could not merge what it has not been sent.
+Keeping the client's queue, which sends a few requests at a time and cancels them, and using the socket only as the transport. It would keep the client's limit and its reordering, but the server could not merge what it has not been sent.
 
 #### Order Items by Request Class and an Order Within It
 
@@ -202,7 +202,7 @@ Images are sent in chunks of up to 64 KiB, and the next chunk is chosen by class
 Display images and thumbnails share the connection. Whole images in completion order would let one display image hold back the thumbnails on screen.
 
 **Rejected alternative**
-A second channel for display images. It would avoid the interleaving, but the two channels would be ordered separately, and the viewer and the listing would compete again.
+A second socket for display images. It would avoid the interleaving, but the two sockets would be ordered separately, and the viewer and the listing would compete again.
 
 #### Revalidate with the ETag in the Want
 
@@ -218,10 +218,10 @@ Using a kept image without asking for a period, as the HTTP cache did. It saves 
 **Rejected alternative 2**
 Keeping images only in memory for the page. It is simpler, but every reload and every new tab would transfer all images again.
 
-#### Make a JSON Schema the Contract of the Channel
+#### Make a JSON Schema the Contract of the Socket
 
 **Decision**
-The messages are defined in `daemon/image-channel.schema.json`, the web client's types are generated from it, and the daemon's types are tested against it (§8).
+The messages are defined in `daemon/sockets/image.schema.json`, the web client's types are generated from it, and the daemon's types are tested against it (§8).
 
 **Reason**
 The HTTP API is written contract-first in `openapi.yaml` ([design.md §11.1](../design.md#run-openapi-spec-first)), and OpenAPI cannot describe WebSocket messages. A JSON Schema keeps the contract first and the client's types generated, with tools the web client already uses for JSON.
@@ -245,22 +245,22 @@ A token in the query string of the upgrade. It works without cookies, but the to
 
 ### 9.2 Deferred
 
-#### Sharing One Channel Between Tabs
+#### Sharing One Socket Between Tabs
 
 **Current state**
-Each tab opens its own channel, and the server merges generation across them (§2.1).
+Each tab opens its own socket, and the server merges generation across them (§2.1).
 
 **Why not decide now**
 Sharing needs a `SharedWorker` or a leader tab, and saves only the transfer of images that two tabs show at the same time.
 
 **Conditions for deciding**
-When the limit of 8 channels per session is reached in normal use, or a log shows the same images sent to several tabs of one session at the same time.
+When the limit of 8 sockets per session is reached in normal use, or a log shows the same images sent to several tabs of one session at the same time.
 
 ## 10. Current State and Remaining Work
 
 ### 10.1 Current Code
 
-The daemon serves the image channel at `GET /api/v1/image-channel` with everything in §3 to §8, and `daemon/image-channel.schema.json` is its contract.
+The daemon serves the image socket at `GET /api/v1/sockets/image` with everything in §3 to §8, and `daemon/sockets/image.schema.json` is its contract.
 The web client uses it for every thumbnail, sprite sheet, and display image ([Client Design §6.1](./client.md#61-current-code)), and there is no HTTP route for them.
 
 ### 10.2 Roadmap
@@ -270,8 +270,8 @@ Only the dependencies must be respected.
 
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
-| IC1 | Open the channel, authenticate it, hold the wanted sets, pass items to generation by class and order, and send images in chunks with revalidation (§3 to §8, [plan](../plans/image-channel-server.md)) | None | Done |
-| IC2 | Switch every part of the web client to the channel and keep images in its own cache ([Client Design §6.1](./client.md#61-current-code)) | IC1 | Done |
+| IC1 | Open the socket, authenticate it, hold the wanted sets, pass items to generation by class and order, and send images in chunks with revalidation (§3 to §8, [plan](../plans/image-socket-server.md)) | None | Done |
+| IC2 | Switch every part of the web client to the socket and keep images in its own cache ([Client Design §6.1](./client.md#61-current-code)) | IC1 | Done |
 | IC3 | Remove the thumbnail HTTP route ([plan](../plans/thumbnail-get-removal.md)) | IC2 | Done |
 
 For confirmed defects, see [issues.md](../issues.md).

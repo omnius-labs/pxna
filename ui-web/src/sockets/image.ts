@@ -1,8 +1,8 @@
 import { clientTimings } from "../api/clientTimings";
-import type { ClientMessage, FrameHeader, WantedItem } from "../api/imageChannel";
-import { cacheGroupOf, createBrowserImageCache, type ImageCache } from "./cache";
-import { CLOSE_BROKE_CONTRACT, CLOSE_SESSION_ENDED, decodeFrame, parseServerMessage } from "./protocol";
-import type { ImageSource } from "./source";
+import type { ClientMessage, FrameHeader, WantedItem } from "../api/imageSocket";
+import { cacheGroupOf, createBrowserImageCache, type ImageCache } from "../images/cache";
+import { CLOSE_BROKE_CONTRACT, CLOSE_SESSION_ENDED, decodeFrame, parseServerMessage } from "../images/protocol";
+import type { ImageSource } from "../images/source";
 import {
     compareWants,
     type ErrorKind,
@@ -12,10 +12,10 @@ import {
     type ImageState,
     specKey,
     type Want,
-} from "./spec";
+} from "../images/spec";
 
 /// `WebSocket` のうち、使う部分。テストが偽物を渡せるようにする。
-export type ChannelSocket = Pick<
+export type SocketLike = Pick<
     WebSocket,
     "binaryType" | "onopen" | "onmessage" | "onclose" | "onerror" | "send" | "close"
 >;
@@ -30,8 +30,8 @@ export interface SettledImage {
     cached: boolean;
 }
 
-export interface ChannelEnvironment {
-    open(): ChannelSocket;
+export interface ImageSocketEnvironment {
+    open(): SocketLike;
     cache: ImageCache;
     createUrl(blob: Blob): string;
     revokeUrl(url: string): void;
@@ -44,7 +44,7 @@ export interface ChannelEnvironment {
     onSettled?(settled: SettledImage): void;
 }
 
-/// 再接続を待つ時間は、1 秒から始めて倍にし、30 秒までにする（Image Channel Design §3）。
+/// 再接続を待つ時間は、1 秒から始めて倍にし、30 秒までにする（Image Socket Design §3）。
 const BACKOFF_FIRST_MS = 1000;
 const BACKOFF_MAX_MS = 30_000;
 /// 1 回の want に入れる件数。1 回の text message の上限（256 KiB）に収める。
@@ -78,18 +78,18 @@ interface Assembly {
     received: number;
 }
 
-/// image channel の WebSocket 1 本を持ち、部品の「欲しい」を項目にまとめ、受け取った画像を IndexedDB に残す。
+/// image socket の WebSocket 1 本を持ち、部品の「欲しい」を項目にまとめ、受け取った画像を IndexedDB に残す。
 ///
 /// 同じ画像を欲しい複数の部品は 1 つの項目にまとめ、最も急ぐものの急ぎ度で daemon に伝える。
 /// 手元に画像があれば先に出し、`ETag` を添えて欲しいと言い、最新なら `unchanged` だけが返る。
-export class ImageChannelClient implements ImageSource {
-    readonly #env: ChannelEnvironment;
+export class ImageSocketClient implements ImageSource {
+    readonly #env: ImageSocketEnvironment;
     readonly #items = new Map<string, Item>();
     readonly #byId = new Map<number, Item>();
     readonly #owners = new Map<object, Map<string, Want>>();
     readonly #listeners = new Set<() => void>();
     readonly #assembling = new Map<number, Assembly>();
-    #socket: ChannelSocket | undefined;
+    #socket: SocketLike | undefined;
     #open = false;
     #nextId = 1;
     #backoff = BACKOFF_FIRST_MS;
@@ -99,7 +99,7 @@ export class ImageChannelClient implements ImageSource {
     /// 契約を破ったと言われた後は、繰り返しても同じなので、つながない。
     #broken = false;
 
-    constructor(env: ChannelEnvironment) {
+    constructor(env: ImageSocketEnvironment) {
         this.#env = env;
     }
 
@@ -310,7 +310,7 @@ export class ImageChannelClient implements ImageSource {
     }
 
     #connect(): void {
-        let socket: ChannelSocket;
+        let socket: SocketLike;
         try {
             socket = this.#env.open();
         } catch {
@@ -493,9 +493,9 @@ export class ImageChannelClient implements ImageSource {
 }
 
 /// ブラウザの WebSocket と IndexedDB で動く窓口を作る。`onSessionEnded` は、セッションが終わったと言われたときに呼ぶ。
-export function createBrowserImageChannel(onSessionEnded: () => void): ImageChannelClient {
-    const url = `${globalThis.location.protocol === "https:" ? "wss" : "ws"}://${globalThis.location.host}/api/v1/image-channel`;
-    return new ImageChannelClient({
+export function createBrowserImageSocket(onSessionEnded: () => void): ImageSocketClient {
+    const url = `${globalThis.location.protocol === "https:" ? "wss" : "ws"}://${globalThis.location.host}/api/v1/sockets/image`;
+    return new ImageSocketClient({
         open: () => new WebSocket(url),
         cache: createBrowserImageCache(),
         createUrl: (blob) => URL.createObjectURL(blob),

@@ -15,9 +15,9 @@ use tokio_util::io::ReaderStream;
 use crate::{error::ApiError, interface::session::SessionAuth, prelude::*, state::DaemonState};
 
 /// HLS の MIME type と、file の寿命を保持した stream を生成ルータの外で扱う。
-pub struct VideoRoute;
+pub struct VideoSessionRoute;
 
-impl VideoRoute {
+impl VideoSessionRoute {
     pub const PLAYLIST: &str = "/api/v1/libraries/{libraryId}/video/sessions/{sessionId}/playlist.m3u8";
     pub const SEGMENT: &str = "/api/v1/libraries/{libraryId}/video/sessions/{sessionId}/segments/{segmentName}";
 

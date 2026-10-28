@@ -6,7 +6,7 @@
         "useIgnoreFile": true
     },
     "files": {
-        "includes": ["**", "!**/dist", "!src/api/schema.d.ts", "!src/api/imageChannel.d.ts"]
+        "includes": ["**", "!**/dist", "!src/api/schema.d.ts", "!src/api/imageSocket.d.ts"]
     },
     "formatter": {
         "enabled": true,

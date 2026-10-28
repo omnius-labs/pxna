@@ -1,9 +1,9 @@
-/* Generated from daemon/image-channel.schema.json by npm run gen:channel. Do not edit by hand. */
+/* Generated from daemon/sockets/image.schema.json by npm run gen:image-socket. Do not edit by hand. */
 
 /**
- * Everything that crosses the image channel (GET /api/v1/image-channel, upgraded to a WebSocket). The client sends the text messages of ClientMessage. The server sends the text messages of ServerMessage and the binary frames of an image: a 4-byte big-endian length, a FrameHeader as UTF-8 JSON of that length, and one chunk of the image. This is the contract; docs/design/image-channel.md gives the reasons.
+ * Everything that crosses the image socket (GET /api/v1/sockets/image, upgraded to a WebSocket). The client sends the text messages of ClientMessage. The server sends the text messages of ServerMessage and the binary frames of an image: a 4-byte big-endian length, a FrameHeader as UTF-8 JSON of that length, and one chunk of the image. This is the contract; docs/design/image-socket.md gives the reasons.
  */
-export type ImageChannelContract = ClientMessage | ServerMessage | FrameHeader;
+export type ImageSocketContract = ClientMessage | ServerMessage | FrameHeader;
 /**
  * A text message from the client, at most 256 KiB.
  */
@@ -48,7 +48,7 @@ export type ErrorKind =
   | "Timeout";
 
 /**
- * Adds items to the wanted set. An id that is already in the set may only change its class, order, and etag; changing what it asks for closes the channel with 4400.
+ * Adds items to the wanted set. An id that is already in the set may only change its class, order, and etag; changing what it asks for closes the socket with 4400.
  */
 export interface Want {
   type: "want";

@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ClientMessage, FrameHeader, WantedItem } from "../api/imageChannel";
-import { MemoryImageCache } from "./cache";
-import { type ChannelEnvironment, ImageChannelClient, type SettledImage } from "./channel";
-import { encodeFrame } from "./protocol";
-import { type ImageSpec, specKey, type Want } from "./spec";
+import type { ClientMessage, FrameHeader, WantedItem } from "../api/imageSocket";
+import { MemoryImageCache } from "../images/cache";
+import { encodeFrame } from "../images/protocol";
+import { type ImageSpec, specKey, type Want } from "../images/spec";
+import { ImageSocketClient, type ImageSocketEnvironment, type SettledImage } from "./image";
 
 const ETAG = "a".repeat(64);
 const OTHER_ETAG = "b".repeat(64);
@@ -69,7 +69,7 @@ function harness(cache = new MemoryImageCache()) {
     const sessionEnded = vi.fn();
     let urlCount = 0;
     let clock = 0;
-    const env: ChannelEnvironment = {
+    const env: ImageSocketEnvironment = {
         open: () => {
             const socket = new FakeSocket();
             sockets.push(socket);
@@ -95,7 +95,7 @@ function harness(cache = new MemoryImageCache()) {
         onSessionEnded: sessionEnded,
         onSettled: (image) => settled.push(image),
     };
-    const client = new ImageChannelClient(env);
+    const client = new ImageSocketClient(env);
     return {
         client,
         cache,
@@ -144,7 +144,7 @@ const wants = (...entries: [string, Want][]) => new Map(entries);
 /// 非同期の置き場の読み出しと、まとめて送る処理が終わるのを待つ。
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-describe("ImageChannelClient", () => {
+describe("ImageSocketClient", () => {
     it("opens no socket until something is wanted, and sends everything wanted in one message once it is open", async () => {
         const h = harness();
         expect(h.sockets).toHaveLength(0);

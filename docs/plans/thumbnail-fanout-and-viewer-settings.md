@@ -252,12 +252,12 @@ The new tests fail on the previous build and pass on this one.
 **Locations to change**
 [thumbnail.md](../design/thumbnail.md), [client.md](../design/client.md), [terms.md](../terms.md), [measurements.md](../measurements.md), [plans.md](../plans.md), [useFlipbook.ts](../../ui-web/src/thumbnails/useFlipbook.ts)
 
-The plan originally named `ui-web/src/thumbnails/api.ts` for the comment about the shared conditions. That file was removed by [image-channel-client](./image-channel-client.md), and the equivalent comment now lives in `useFlipbook.ts`.
+The plan originally named `ui-web/src/thumbnails/api.ts` for the comment about the shared conditions. That file was removed by [image-socket-client](./image-socket-client.md), and the equivalent comment now lives in `useFlipbook.ts`.
 
 **What to do**
 Write the fan-out rule, the companion keys and bucket, the store order, and the rejected alternatives (eager display, decoded-source cache, direct ffmpeg WebP, method change, tile parallelism) into Thumbnail Design §3, §6.2, §7, §8.2, §8.3, and §10.1. Update the sentence in §6.2 that says the thumbnail and sprite are both present only under the same conditions, so that it also covers the companions. Record the cache-pressure trade-off in §10.1 as a residual risk.
 Write the filmstrip size, the viewer settings panel, the moved original image swap, and the revised "gather display preferences" decision into Client Design §3.2, §3.4, §3.9, §5.1, and §6.1. Update the §3.9 table with `filmstripSize`, the "same width" sentence in §5.1, and the current-state header description in §6.1. Note that the narrow set's filmstrip size is saved but not used.
-Add the term "companion" to `terms.md`, and update the comment in `ui-web/src/thumbnails/useFlipbook.ts` that says the thumbnail and the sprite sheet are generated only under the same conditions, so that it also covers the companions. The original location, `ui-web/src/thumbnails/api.ts`, was removed by image-channel-client.
+Add the term "companion" to `terms.md`, and update the comment in `ui-web/src/thumbnails/useFlipbook.ts` that says the thumbnail and the sprite sheet are generated only under the same conditions, so that it also covers the companions. The original location, `ui-web/src/thumbnails/api.ts`, was removed by image-socket-client.
 Measure a listing thumbnail generation with and without companions, a shape switch, a filmstrip request that hits a companion, the bytes added per image, and the cache hit-rate change, using the existing fixture method. Add both the `.md` record and its `.json` aggregate to `docs/measurements/` and a row to `docs/measurements.md`.
 Remove this plan's row from `plans.md` when the work is done.
 

@@ -11,7 +11,7 @@ on:
       - "mise.toml"
       - "mise.lock"
       - "daemon/openapi.yaml"
-      - "daemon/image-channel.schema.json"
+      - "daemon/sockets/image.schema.json"
       - ".github/workflows/test-web.yml"
   pull_request:
     paths:
@@ -19,7 +19,7 @@ on:
       - "mise.toml"
       - "mise.lock"
       - "daemon/openapi.yaml"
-      - "daemon/image-channel.schema.json"
+      - "daemon/sockets/image.schema.json"
       - ".github/workflows/test-web.yml"
 
 permissions:
@@ -72,10 +72,10 @@ jobs:
           git status --porcelain -- src/api
           test -z "$(git status --porcelain -- src/api)"
 
-      - name: Regenerate channel types
-        run: npm run gen:channel
+      - name: Regenerate socket types
+        run: npm run gen:image-socket
 
-      - name: Check generated channel types are up to date
+      - name: Check generated socket types are up to date
         run: |
           git status --porcelain -- src/api
           test -z "$(git status --porcelain -- src/api)"

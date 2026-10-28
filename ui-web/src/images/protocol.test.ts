@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import type { FrameHeader } from "../api/imageChannel";
+import type { FrameHeader } from "../api/imageSocket";
 import { decodeFrame, encodeFrame, parseServerMessage } from "./protocol";
 
 const header: FrameHeader = {

@@ -2,7 +2,7 @@ pub mod auth;
 pub mod files;
 pub mod folders;
 pub mod health;
-pub mod image_channel;
+pub mod image_socket;
 pub mod libraries;
 pub mod operations;
 pub mod performance;
