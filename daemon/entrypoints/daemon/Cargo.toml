@@ -53,6 +53,8 @@ clap = { workspace = true }
 backtrace = { workspace = true }
 strum = { workspace = true }
 chrono = { workspace = true }
+glob = { workspace = true }
+regex = { workspace = true }
 jiff = { workspace = true }
 http = { workspace = true }
 bytes = { workspace = true }

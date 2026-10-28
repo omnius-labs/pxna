@@ -53,7 +53,7 @@ impl DaemonState {
 
     pub async fn new_with_clock(conf: DaemonConfig, clock: Arc<dyn Clock<Utc> + Send + Sync>) -> Result<Self> {
         conf.listing.validate()?;
-        conf.timeline.validate()?;
+        conf.timeline.validate(&conf.libraries)?;
         let state_dir = PathBuf::from(&conf.core.state_dir);
         tokio::fs::create_dir_all(&state_dir).await?;
 

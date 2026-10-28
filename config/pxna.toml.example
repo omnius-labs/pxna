@@ -46,6 +46,20 @@ insecure_cookie = true
 # max_concurrent_extractions = 1 # Concurrent archive extractions during aggregation
 # max_concurrent_probes = 1      # Concurrent ffprobe runs during aggregation
 
+# Date rules read a timeline date from the file name before Exif or the modification time.
+# They are tried in order; the first rule whose library, path, and file name match and whose
+# captured text parses wins. The path is a glob against the Library-relative path without the
+# leading slash, and the name is a partial regex match against the file name including its extension.
+# format is a chrono strftime string; a missing time becomes 00:00:00. A rule without time_zone
+# keeps the name's value as a date without a time zone, like Exif; with time_zone, the value is
+# treated as local time in that zone and converted into [timeline] time_zone for display.
+# [[timeline.date_rules]]
+# # library = "contents"         # Omit to apply to every Library
+# path = "**/WhatsApp/**"
+# name = '^IMG-(?P<date>\d{8}_\d{6})'
+# format = "%Y%m%d_%H%M%S"
+# time_zone = "Asia/Tokyo"
+
 [[libraries]]
 id = "contents"
 name = "Contents"

@@ -2810,6 +2810,7 @@ components:
                         - creationTime
                         - modified
                         - archiveModified
+                        - fileName
 
         TimelineMonths:
             type: object
