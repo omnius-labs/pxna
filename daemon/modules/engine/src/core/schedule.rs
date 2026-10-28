@@ -10,20 +10,30 @@
 //!   Background が 2 つ目の資源を待って止まっても、上位の段を巻き込んで止まらない。
 //!
 //! 始まった処理は止めない。同じ段の中では、待ち始めた順に始める。上位の段が続く間、下位の段は始まらない。
+//!
+//! Background を保留するかどうかは、枠を使っている処理と待ちに加えて、[`PriorityPool::occupy`] で数えているものも見る。
+//!
+//! 待ちの札（[`Ticket`]）の状態は、待ち行列に入っているかどうかだけで決まる。次の 2 つを守る。
+//!
+//! - 起こし損ねない。状態が変わって、待っている側が始められるようになり得るときは、必ず通知する。
+//!   待つ側は、通知を受ける用意（`enable`）をしてから状態を確かめる。
+//! - 誰も待っていない札が行列に残らない。行列から外すのは、枠を得た札、drop された札、[`RaiseHandle::discard`] された札だけで、
+//!   すべて 1 つの lock の中で行う。残った札は、その段の保留を止め続けてしまう。
 use std::{
     collections::VecDeque,
     pin::pin,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
 
 use tokio::sync::Notify;
+use tracing::Span;
 
 use crate::prelude::*;
 
-use super::work::WorkClass;
+use super::work::{WorkClass, WorkKind};
 
 const CLASSES: usize = 3;
 
@@ -61,6 +71,35 @@ struct PoolState {
 impl PoolState {
     fn limits(&self) -> PoolLimits {
         self.limits.expect("a registered pool has limits")
+    }
+
+    /// 待ち行列にいる `id` の、今の段。行列にいなければ（枠を得たか、外されたか）`None`。
+    fn class_of(&self, id: u64) -> Option<WorkClass> {
+        WorkClass::ALL.into_iter().find(|class| self.waiting[class.index()].contains(&id))
+    }
+
+    /// 待ち行列から `id` を外す。外したときだけ `true`。
+    fn remove(&mut self, id: u64) -> bool {
+        let Some(class) = self.class_of(id) else {
+            return false;
+        };
+        self.waiting[class.index()].retain(|waiter| *waiter != id);
+        true
+    }
+
+    /// `id` を、より上の段の行列へ移す。`id` は到着順（番号順）の位置に入るので、同じ段の中の順序は変わらない。
+    fn raise(&mut self, id: u64, target: WorkClass) -> bool {
+        let Some(current) = self.class_of(id) else {
+            return false;
+        };
+        if target.index() >= current.index() {
+            return false;
+        }
+        self.waiting[current.index()].retain(|waiter| *waiter != id);
+        let queue = &mut self.waiting[target.index()];
+        let position = queue.iter().position(|waiter| *waiter > id).unwrap_or(queue.len());
+        queue.insert(position, id);
+        true
     }
 
     fn active(&self, class: WorkClass) -> bool {
@@ -108,6 +147,9 @@ pub struct Scheduler {
     state: Mutex<State>,
     changed: Notify,
     next_waiter: AtomicU64,
+    /// 処理の種類ごとの、枠を得た数と返した数。すべての資源を合わせて数える。
+    started: [AtomicUsize; WorkKind::COUNT],
+    finished: [AtomicUsize; WorkKind::COUNT],
 }
 
 impl Default for Scheduler {
@@ -116,6 +158,8 @@ impl Default for Scheduler {
             state: Mutex::new(State { pools: Vec::new() }),
             changed: Notify::new(),
             next_waiter: AtomicU64::new(0),
+            started: std::array::from_fn(|_| AtomicUsize::new(0)),
+            finished: std::array::from_fn(|_| AtomicUsize::new(0)),
         }
     }
 }
@@ -133,6 +177,11 @@ impl Scheduler {
             index: state.pools.len() - 1,
         }
     }
+
+    /// `kind` の処理の（枠を得た数, 枠を返した数）。枠を返すのは、処理が本当に終わったときである。
+    pub fn counts(&self, kind: WorkKind) -> (usize, usize) {
+        (self.started[kind as usize].load(Ordering::Relaxed), self.finished[kind as usize].load(Ordering::Relaxed))
+    }
 }
 
 /// 1 つの資源の枠。複製しても同じ資源を指す。
@@ -142,22 +191,61 @@ pub struct PriorityPool {
     index: usize,
 }
 
-/// 枠を使っている間持つ。drop すると枠を返す。
+/// 枠を使っている間持つ。drop すると枠を返す。種類つきで取ったときは、返すときに終了を数える。
 pub struct SchedulePermit {
     pool: PriorityPool,
     class: WorkClass,
+    kind: Option<WorkKind>,
 }
 
 impl Drop for SchedulePermit {
     fn drop(&mut self) {
         self.pool.scheduler.state.lock().pools[self.pool.index].running[self.class.index()] -= 1;
+        // 枠を返してから数えるので、終了を見た側は、枠がもう空いていると見てよい。
+        if let Some(kind) = self.kind {
+            self.pool.scheduler.finished[kind as usize].fetch_add(1, Ordering::Relaxed);
+        }
         self.pool.scheduler.changed.notify_waiters();
     }
 }
 
 impl SchedulePermit {
+    fn new(pool: PriorityPool, class: WorkClass, kind: Option<WorkKind>) -> Self {
+        if let Some(kind) = kind {
+            pool.scheduler.started[kind as usize].fetch_add(1, Ordering::Relaxed);
+        }
+        Self { pool, class, kind }
+    }
+
     pub fn class(&self) -> WorkClass {
         self.class
+    }
+
+    /// 持っている枠のまま `f` を blocking thread で動かす。枠は `f` が本当に終わるまで返さない。
+    /// 返ってきた future を drop しても、動き出した `f` は止まらず、枠もそのままである。
+    pub async fn run_blocking<T, F>(self, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        self.run_blocking_with((), f).await
+    }
+
+    /// [`Self::run_blocking`] に加えて、`guards`（ほかの枠や許可）も `f` が終わるまで持つ。
+    pub async fn run_blocking_with<G, T, F>(self, guards: G, f: F) -> Result<T>
+    where
+        G: Send + 'static,
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        let span = Span::current();
+        tokio::task::spawn_blocking(move || {
+            let _permit = self;
+            let _guards = guards;
+            span.in_scope(f)
+        })
+        .await
+        .map_err(|error| Error::from_error(error, ErrorKind::TaskError))
     }
 }
 
@@ -174,63 +262,155 @@ impl Drop for Occupancy {
     }
 }
 
-/// 待っている間に drop されたら、待ち行列から外す。
-struct Waiting<'a> {
-    pool: &'a PriorityPool,
-    class: WorkClass,
+/// 枠を待っている札。drop すると、待ち行列から外れる。
+pub struct Ticket {
+    pool: PriorityPool,
     id: u64,
+    kind: Option<WorkKind>,
     queued: bool,
 }
 
-impl Drop for Waiting<'_> {
+/// 待っている札の段を上げる、または札を捨てるための持ち手。複製できる。
+/// 札はもう枠を得た（または外された）ときは、何もしない。
+#[derive(Clone)]
+pub struct RaiseHandle {
+    pool: PriorityPool,
+    id: u64,
+}
+
+impl RaiseHandle {
+    /// 札を `target` の段へ上げる。待ち行列の中の順序（到着順）は保つ。すでに同じ段か上の段にいる、または待っていないときは何もしない。
+    pub fn raise(&self, target: WorkClass) {
+        let scheduler = &self.pool.scheduler;
+        if scheduler.state.lock().pools[self.pool.index].raise(self.id, target) {
+            scheduler.changed.notify_waiters();
+        }
+    }
+
+    /// 札を待ち行列から外し、待っている [`Ticket::acquire`] を `Cancelled` で終わらせる。すでに枠を得ていたら何もしない。
+    pub fn discard(&self) {
+        let scheduler = &self.pool.scheduler;
+        if scheduler.state.lock().pools[self.pool.index].remove(self.id) {
+            scheduler.changed.notify_waiters();
+        }
+    }
+}
+
+impl Drop for Ticket {
     fn drop(&mut self) {
         if self.queued {
-            self.pool.scheduler.state.lock().pools[self.pool.index].waiting[self.class.index()].retain(|id| *id != self.id);
+            self.pool.scheduler.state.lock().pools[self.pool.index].remove(self.id);
             self.pool.scheduler.changed.notify_waiters();
         }
     }
 }
 
-impl PriorityPool {
-    /// 枠が空き、規則で始めてよくなるまで待つ。待つ間に drop されたら、何も始まらない。
-    pub async fn acquire(&self, class: WorkClass) -> SchedulePermit {
-        let scheduler = &self.scheduler;
-        let id = scheduler.next_waiter.fetch_add(1, Ordering::Relaxed);
-        scheduler.state.lock().pools[self.index].waiting[class.index()].push_back(id);
-        let mut waiting = Waiting {
-            pool: self,
-            class,
-            id,
-            queued: true,
-        };
+impl Ticket {
+    pub fn handle(&self) -> RaiseHandle {
+        RaiseHandle {
+            pool: self.pool.clone(),
+            id: self.id,
+        }
+    }
+
+    /// 枠が空き、規則で始めてよくなるまで待つ。段は待っている間に上がることがある。
+    /// 待つ間に drop されたら何も始まらない。[`RaiseHandle::discard`] で外されたら `Cancelled` を返す。
+    pub async fn acquire(mut self) -> Result<SchedulePermit> {
+        let scheduler = self.pool.scheduler.clone();
         loop {
             let mut changed = pin!(scheduler.changed.notified());
             changed.as_mut().enable();
             {
                 let mut state = scheduler.state.lock();
-                if state.can_start(self.index, class, Some(id)) {
-                    let pool = &mut state.pools[self.index];
+                let Some(class) = state.pools[self.pool.index].class_of(self.id) else {
+                    self.queued = false;
+                    return Err(Error::new(ErrorKind::Cancelled).with_message("the waiter was discarded"));
+                };
+                if state.can_start(self.pool.index, class, Some(self.id)) {
+                    let pool = &mut state.pools[self.pool.index];
                     pool.waiting[class.index()].pop_front();
                     pool.running[class.index()] += 1;
-                    waiting.queued = false;
+                    self.queued = false;
                     drop(state);
                     // 先頭が抜けたので、同じ段の次の待ちが始められるかもしれない。
                     scheduler.changed.notify_waiters();
-                    return SchedulePermit { pool: self.clone(), class };
+                    return Ok(SchedulePermit::new(self.pool.clone(), class, self.kind));
                 }
             }
             changed.await;
         }
     }
+}
+
+impl PriorityPool {
+    /// 待ち行列に並ぶ。札を [`Ticket::acquire`] で待つ。
+    pub fn enqueue(&self, class: WorkClass) -> Ticket {
+        self.enqueue_as(class, None)
+    }
+
+    fn enqueue_as(&self, class: WorkClass, kind: Option<WorkKind>) -> Ticket {
+        // 番号は lock の中で振る。lock の外で振ると、番号と行列の並びが食い違い、`raise` の到着順の挿入が崩れる。
+        let mut state = self.scheduler.state.lock();
+        let id = self.scheduler.next_waiter.fetch_add(1, Ordering::Relaxed);
+        state.pools[self.index].waiting[class.index()].push_back(id);
+        drop(state);
+        Ticket {
+            pool: self.clone(),
+            id,
+            kind,
+            queued: true,
+        }
+    }
+
+    /// 枠が空き、規則で始めてよくなるまで待つ。待つ間に drop されたら、何も始まらない。
+    pub async fn acquire(&self, class: WorkClass) -> SchedulePermit {
+        self.enqueue(class).acquire().await.expect("a waiter without a RaiseHandle is never discarded")
+    }
+
+    /// [`Self::acquire`] と同じで、`kind` の処理として数える。
+    pub async fn acquire_counted(&self, class: WorkClass, kind: WorkKind) -> SchedulePermit {
+        self.enqueue_as(class, Some(kind))
+            .acquire()
+            .await
+            .expect("a waiter without a RaiseHandle is never discarded")
+    }
 
     /// 待たずに始められるときだけ枠を取る。同じ段に待ちがあれば取らない。
     pub fn try_acquire(&self, class: WorkClass) -> Option<SchedulePermit> {
+        self.try_acquire_as(class, None)
+    }
+
+    /// [`Self::try_acquire`] と同じで、`kind` の処理として数える。
+    pub fn try_acquire_counted(&self, class: WorkClass, kind: WorkKind) -> Option<SchedulePermit> {
+        self.try_acquire_as(class, Some(kind))
+    }
+
+    fn try_acquire_as(&self, class: WorkClass, kind: Option<WorkKind>) -> Option<SchedulePermit> {
         let mut state = self.scheduler.state.lock();
         if !state.can_start(self.index, class, None) {
             return None;
         }
         state.pools[self.index].running[class.index()] += 1;
-        Some(SchedulePermit { pool: self.clone(), class })
+        drop(state);
+        Some(SchedulePermit::new(self.clone(), class, kind))
+    }
+
+    /// 現在の段で枠を取り、`f` を blocking thread で動かす。枠は `f` が本当に終わるまで返さない。
+    pub async fn run_blocking<T, F>(&self, kind: WorkKind, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        self.run_blocking_as(WorkClass::current(), kind, f).await
+    }
+
+    /// [`Self::run_blocking`] を、段を指定して行う。
+    pub async fn run_blocking_as<T, F>(&self, class: WorkClass, kind: WorkKind, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        self.acquire_counted(class, kind).await.run_blocking(f).await
     }
 
     /// 枠を使わずに、`class` の処理がこの資源で動いているものとして数える。
@@ -252,6 +432,11 @@ impl PriorityPool {
     /// 枠を待っている数。テストと計測に使う。
     pub fn waiting(&self, class: WorkClass) -> usize {
         self.scheduler.state.lock().pools[self.index].waiting[class.index()].len()
+    }
+
+    /// `kind` の処理の（枠を得た数, 枠を返した数）。この資源を持つ [`Scheduler`] の全資源の合計である。
+    pub fn counts(&self, kind: WorkKind) -> (usize, usize) {
+        self.scheduler.counts(kind)
     }
 }
 
@@ -447,6 +632,215 @@ mod tests {
         drop(occupancy);
         drop(_interactive);
         let _foreground = pool.try_acquire(WorkClass::Foreground).ok_or("数えるのをやめたら始められる")?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn raising_a_waiter_moves_it_ahead_of_foreground_and_keeps_arrival_order_test() -> TestResult {
+        let (pool, _) = pools();
+        let _a = pool.acquire(WorkClass::Foreground).await;
+        let _b = pool.acquire(WorkClass::Foreground).await;
+        let _c = pool.acquire(WorkClass::Interactive).await;
+        let first = pool.enqueue(WorkClass::Foreground);
+        let second = pool.enqueue(WorkClass::Foreground);
+        let handle = second.handle();
+        let (mut first, mut second) = (Box::pin(first.acquire()), Box::pin(second.acquire()));
+        assert!(is_pending(first.as_mut()).await);
+        assert!(is_pending(second.as_mut()).await);
+        handle.raise(WorkClass::Interactive);
+        assert_eq!((pool.waiting(WorkClass::Interactive), pool.waiting(WorkClass::Foreground)), (1, 1));
+        drop(_c);
+        let second = second.await?;
+        assert_eq!(second.class(), WorkClass::Interactive, "上げた札は Interactive の枠で始まる");
+        assert!(is_pending(first.as_mut()).await, "Interactive が動いている間、Foreground は始まらない");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn raising_a_granted_or_dropped_ticket_does_nothing_test() -> TestResult {
+        let (pool, _) = pools();
+        let ticket = pool.enqueue(WorkClass::Foreground);
+        let handle = ticket.handle();
+        let permit = ticket.acquire().await?;
+        handle.raise(WorkClass::Interactive);
+        handle.discard();
+        assert_eq!(
+            (pool.waiting(WorkClass::Interactive), pool.waiting(WorkClass::Foreground)),
+            (0, 0),
+            "枠を得た札を行列に戻さない"
+        );
+        assert_eq!(pool.running(WorkClass::Foreground), 1);
+        drop(permit);
+        assert!(pool.try_acquire(WorkClass::Background).is_some(), "取り残された待ちが Background を止めない");
+
+        let ticket = pool.enqueue(WorkClass::Foreground);
+        let handle = ticket.handle();
+        drop(ticket);
+        handle.raise(WorkClass::Interactive);
+        assert_eq!(pool.waiting(WorkClass::Interactive), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn discarding_a_waiter_ends_its_acquire_and_leaves_the_queue_test() -> TestResult {
+        let (pool, _) = pools();
+        let _a = pool.acquire(WorkClass::Foreground).await;
+        let _b = pool.acquire(WorkClass::Foreground).await;
+        let ticket = pool.enqueue(WorkClass::Foreground);
+        let handle = ticket.handle();
+        let mut waiting = Box::pin(ticket.acquire());
+        assert!(is_pending(waiting.as_mut()).await);
+        handle.discard();
+        let error = tokio::time::timeout(std::time::Duration::from_millis(100), waiting).await?.err().ok_or("discarded")?;
+        assert_eq!(error.kind(), &ErrorKind::Cancelled);
+        assert_eq!(pool.waiting(WorkClass::Foreground), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn run_blocking_keeps_the_permit_and_the_count_until_the_job_ends_test() -> TestResult {
+        let scheduler = Arc::new(Scheduler::default());
+        let pool = scheduler.pool(LIMITS);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let job = {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                pool.run_blocking_as(WorkClass::Foreground, WorkKind::Exif, move || {
+                    started.send(()).unwrap();
+                    wait.recv().unwrap();
+                })
+                .await
+            })
+        };
+        ready.await?;
+        job.abort();
+        let _ = job.await;
+        assert_eq!(scheduler.counts(WorkKind::Exif), (1, 0), "future を捨てても worker は動いている");
+        assert_eq!(pool.running(WorkClass::Foreground), 1);
+        release.send(())?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while scheduler.counts(WorkKind::Exif).1 == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert_eq!(scheduler.counts(WorkKind::Exif), (1, 1));
+        assert_eq!(pool.running(WorkClass::Foreground), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn run_blocking_uses_the_current_class_and_passes_the_value_test() -> TestResult {
+        let (pool, _) = pools();
+        let value = WorkClass::Background.scope(pool.run_blocking(WorkKind::Summary, WorkClass::current)).await?;
+        assert_eq!(value, WorkClass::Foreground, "blocking thread には段を引き継がない");
+        let (running, ()) = WorkClass::Background
+            .scope(async {
+                let permit = pool.acquire_counted(WorkClass::current(), WorkKind::Summary).await;
+                (permit.class(), ())
+            })
+            .await;
+        assert_eq!(running, WorkClass::Background);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn spawn_carries_the_class_test() -> TestResult {
+        let class = WorkClass::Background.scope(async { WorkClass::spawn(async { WorkClass::current() }).await }).await?;
+        assert_eq!(class, WorkClass::Background);
+        assert_eq!(WorkClass::Interactive.spawn_as(async { WorkClass::current() }).await?, WorkClass::Interactive);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn raised_waiters_start_in_arrival_order_in_the_target_class_test() -> TestResult {
+        let (pool, _) = pools();
+        let _a = pool.acquire(WorkClass::Foreground).await;
+        let _b = pool.acquire(WorkClass::Foreground).await;
+        let reserved = pool.acquire(WorkClass::Interactive).await;
+        let first = pool.enqueue(WorkClass::Foreground);
+        let second = pool.enqueue(WorkClass::Foreground);
+        let third = pool.enqueue(WorkClass::Foreground);
+        // 後から並んだ札を先に上げても、行列の中では到着順に並ぶ。
+        third.handle().raise(WorkClass::Interactive);
+        second.handle().raise(WorkClass::Interactive);
+        let (mut first, mut second, mut third) = (Box::pin(first.acquire()), Box::pin(second.acquire()), Box::pin(third.acquire()));
+        assert!(is_pending(first.as_mut()).await);
+        assert!(is_pending(second.as_mut()).await);
+        assert!(is_pending(third.as_mut()).await);
+        drop(reserved);
+        let second = second.await?;
+        assert!(is_pending(third.as_mut()).await, "Interactive の先頭は先に並んだ札");
+        assert!(is_pending(first.as_mut()).await, "Interactive が待つ間、Foreground は始まらない");
+        drop(second);
+        let _third = third.await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn discarding_or_raising_the_front_waiter_lets_the_next_one_start_test() -> TestResult {
+        let (pool, _) = pools();
+        let _a = pool.acquire(WorkClass::Foreground).await;
+        let hold = pool.acquire(WorkClass::Foreground).await;
+        let front = pool.enqueue(WorkClass::Foreground);
+        let next = pool.enqueue(WorkClass::Foreground);
+        let handle = front.handle();
+        let (mut front, mut next) = (Box::pin(front.acquire()), Box::pin(next.acquire()));
+        assert!(is_pending(front.as_mut()).await);
+        assert!(is_pending(next.as_mut()).await);
+        drop(hold);
+        // 枠が空いたので先頭が始まる。先頭を外せば、次が始まる。
+        handle.discard();
+        assert!(front.await.is_err());
+        let _next = tokio::time::timeout(std::time::Duration::from_millis(500), next).await??;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn waiter_numbers_follow_the_queue_order_when_threads_enqueue_together_test() -> TestResult {
+        let scheduler = Arc::new(Scheduler::default());
+        let pool = scheduler.pool(LIMITS);
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let pool = pool.clone();
+            tasks.push(tokio::spawn(async move { (0..200).map(|_| pool.enqueue(WorkClass::Foreground)).collect::<Vec<_>>() }));
+        }
+        let mut tickets = Vec::new();
+        for task in tasks {
+            tickets.extend(task.await?);
+        }
+        let state = scheduler.state.lock();
+        let queue = &state.pools[pool.index].waiting[WorkClass::Foreground.index()];
+        assert_eq!(queue.len(), 1600);
+        assert!(queue.iter().is_sorted(), "行列は番号の昇順である");
+        drop(state);
+        drop(tickets);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn run_blocking_with_keeps_the_guards_until_the_job_ends_test() -> TestResult {
+        let (pool, _) = pools();
+        let guard = Arc::new(());
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let permit = pool.acquire(WorkClass::Foreground).await;
+        let job = tokio::spawn(permit.run_blocking_with(guard.clone(), move || {
+            started.send(()).unwrap();
+            wait.recv().unwrap();
+        }));
+        ready.await?;
+        job.abort();
+        let _ = job.await;
+        assert_eq!(Arc::strong_count(&guard), 2, "future を捨てても guard は job が持つ");
+        release.send(())?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while Arc::strong_count(&guard) > 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
         Ok(())
     }
 }

@@ -2,13 +2,10 @@
 //!
 //! 枠の規則は [`super::schedule`] が持つ。ここは一覧の worker と stream の 2 つの資源と、処理の種類ごとの回数を持つ。
 use crate::prelude::*;
-use std::{
-    future::Future,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
+use std::{future::Future, sync::Arc};
+
+use tokio::task::JoinHandle;
+use tracing::Instrument as _;
 
 use super::schedule::{PoolLimits, PriorityPool, SchedulePermit, Scheduler};
 
@@ -25,11 +22,32 @@ pub enum WorkClass {
     Background,
 }
 impl WorkClass {
+    /// 上の段から順に並べたすべての段。
+    pub const ALL: [Self; 3] = [Self::Interactive, Self::Foreground, Self::Background];
+
     pub fn current() -> Self {
         CLASS.try_with(|class| *class).unwrap_or(Self::Foreground)
     }
     pub async fn scope<F: Future>(self, future: F) -> F::Output {
         CLASS.scope(self, future).await
+    }
+
+    /// 今の段と Span を引き継いで task を起こす。`tokio::spawn` は task_local を引き継がないので、段を落とさないためにこれを使う。
+    pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        Self::current().spawn_as(future)
+    }
+
+    /// [`Self::spawn`] を、段を指定して行う。
+    pub fn spawn_as<F>(self, future: F) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        tokio::spawn(CLASS.scope(self, future).in_current_span())
     }
 }
 
@@ -42,25 +60,22 @@ pub enum WorkKind {
     Archive,
     Summary,
     ChildProbe,
+    /// 画像の変換（decode、縮小、encode）。
+    Convert,
+    /// 画像の寸法や EXIF の読み取り。
+    Inspect,
+}
+impl WorkKind {
+    pub const COUNT: usize = 8;
 }
 
 pub struct WorkBudget {
     workers: PriorityPool,
     streams: PriorityPool,
-    started: [AtomicUsize; 6],
-    finished: [AtomicUsize; 6],
 }
 
-pub struct WorkPermit {
-    _permit: SchedulePermit,
-    budget: Arc<WorkBudget>,
-    kind: WorkKind,
-}
-impl Drop for WorkPermit {
-    fn drop(&mut self) {
-        self.budget.finished[self.kind as usize].fetch_add(1, Ordering::Relaxed);
-    }
-}
+/// 種類つきで取った枠。持っている間は動いているものとして数え、drop すると終了を数える。
+pub type WorkPermit = SchedulePermit;
 
 impl Default for WorkBudget {
     fn default() -> Self {
@@ -86,33 +101,22 @@ impl WorkBudget {
         Self {
             workers: scheduler.pool(Self::WORKERS),
             streams: scheduler.pool(Self::STREAMS),
-            started: std::array::from_fn(|_| AtomicUsize::new(0)),
-            finished: std::array::from_fn(|_| AtomicUsize::new(0)),
         }
     }
     pub async fn enter(&self, class: WorkClass) -> Result<SchedulePermit> {
         Ok(self.streams.acquire(class).await)
     }
     pub async fn acquire(self: &Arc<Self>, class: WorkClass, kind: WorkKind) -> Result<WorkPermit> {
-        let permit = self.workers.acquire(class).await;
-        Ok(self.record(permit, kind))
-    }
-    fn record(self: &Arc<Self>, permit: SchedulePermit, kind: WorkKind) -> WorkPermit {
-        self.started[kind as usize].fetch_add(1, Ordering::Relaxed);
-        WorkPermit {
-            _permit: permit,
-            budget: self.clone(),
-            kind,
-        }
+        Ok(self.workers.acquire_counted(class, kind).await)
     }
     /// 待たずに始められるときだけ、子の有無の探査の枠を取る。Background の worker か stream に待ちがあれば取らない。
     pub fn try_probe(self: &Arc<Self>) -> Option<(WorkPermit, SchedulePermit)> {
         let stream = self.streams.try_acquire(WorkClass::Background)?;
-        let worker = self.workers.try_acquire(WorkClass::Background)?;
-        Some((self.record(worker, WorkKind::ChildProbe), stream))
+        let worker = self.workers.try_acquire_counted(WorkClass::Background, WorkKind::ChildProbe)?;
+        Some((worker, stream))
     }
     pub fn counts(&self, kind: WorkKind) -> (usize, usize) {
-        (self.started[kind as usize].load(Ordering::Relaxed), self.finished[kind as usize].load(Ordering::Relaxed))
+        self.workers.counts(kind)
     }
     pub async fn background_if_needed(self: &Arc<Self>, kind: WorkKind) -> Result<Option<WorkPermit>> {
         if WorkClass::current() == WorkClass::Background {
