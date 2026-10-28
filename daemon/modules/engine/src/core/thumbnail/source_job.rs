@@ -14,7 +14,7 @@ use std::{
 use tokio::sync::watch;
 
 use crate::{
-    core::{schedule::RaiseHandle, work::WorkClass},
+    core::work::{RaiseHandle, WorkClass},
     prelude::*,
 };
 
@@ -320,7 +320,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::core::schedule::{PoolLimits, PriorityPool, SchedulePermit, Scheduler};
+    use crate::core::work::{PoolLimits, PriorityPool, SchedulePermit, Scheduler};
 
     type Jobs = SourceJobs<u32, u32, u32, String>;
 

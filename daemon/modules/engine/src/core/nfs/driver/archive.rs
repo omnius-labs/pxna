@@ -10,7 +10,7 @@ use tokio::{io::AsyncReadExt as _, sync::Semaphore};
 use crate::{
     core::{
         nfs::{FileStorageDriver, FsEntryStream, MaterializedFile, StagingFile},
-        schedule::Scheduler,
+        work::Scheduler,
     },
     prelude::*,
 };

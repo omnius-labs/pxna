@@ -914,7 +914,7 @@ When memory pressure on the daemon from the number of active archives is observe
 
 ### 10.1 Current Code
 
-The priority rule is owned by [schedule.rs](../../daemon/modules/engine/src/core/schedule.rs). [WorkBudget](../../daemon/modules/engine/src/core/work.rs) holds the listing worker pool with 3 shared and 1 Background slot, and the stream pool with 12 shared and 4 Background slots. When the daemon is constructed, the same budget is passed to the local driver, the archive runtime, the timeline, and the browse index. Name enumeration and attribute fetching acquire slots 64 items at a time and hold them until the blocking worker actually finishes. Child probes try both slots only when neither the normal background workers nor streams have waiters.
+The priority rule is owned by [work.rs](../../daemon/modules/engine/src/core/work.rs). `WorkBudget` holds the listing worker pool with 3 shared and 1 Background slot, and the stream pool with 12 shared and 4 Background slots. When the daemon is constructed, the same budget is passed to the local driver, the archive runtime, the timeline, and the browse index. Name enumeration and attribute fetching acquire slots 64 items at a time and hold them until the blocking worker actually finishes. Child probes try both slots only when neither the normal background workers nor streams have waiters.
 
 The driver contract has the shape of §5.
 `FileStorageDriver` receives a `&str` within the bound namespace in all methods, and `FsEntry.path` is a `String`.

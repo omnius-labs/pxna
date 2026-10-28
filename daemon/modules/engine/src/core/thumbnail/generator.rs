@@ -13,14 +13,13 @@ use crate::{
     core::{
         image::{ImageConvertOptions, ImageConverter, SizeSteps},
         media::{FrameSpec, MediaKind, MediaOptions, MediaTools},
-        schedule::{MediaPools, ScheduleOptions, SchedulePermit, Scheduler},
         thumbnail::{
             cache::{CacheBucket, CachedImage, ThumbnailCache, ThumbnailCacheOptions},
             key::{ThumbnailKey, ThumbnailKeyHasher},
             request::{Thumbnail, ThumbnailRequest, ThumbnailVariant},
             source_job::{Created, Outcome, SourceJobs},
         },
-        work::{WorkClass, WorkKind},
+        work::{MediaPools, ScheduleOptions, SchedulePermit, Scheduler, WorkClass, WorkKind},
     },
     perf_span,
     prelude::*,
@@ -620,7 +619,7 @@ impl Inner {
     /// 画像の変換と、外部プロセスの ffmpeg と heif-dec は、別の資源として数える。
     /// The ffmpeg runs for videos are a third resource, apart from the image decodes of ffmpeg and heif-dec.
     /// 枠を待つ間に要求が drop されたら、何も始まらない。
-    fn pool_for(&self, kind: MediaKind) -> &crate::core::schedule::PriorityPool {
+    fn pool_for(&self, kind: MediaKind) -> &crate::core::work::PriorityPool {
         match kind {
             MediaKind::Image => &self.pools.cpu,
             MediaKind::FfmpegImage | MediaKind::HeifImage => &self.pools.process_image,
@@ -2531,7 +2530,7 @@ mod tests {
 
     /// Takes every slot of a pool, so that the jobs that ask for it wait.
     /// The shared slots go first: Foreground does not start while Interactive runs, so it could not take them after the reserved slot.
-    async fn hold_all(pool: &crate::core::schedule::PriorityPool) -> Vec<SchedulePermit> {
+    async fn hold_all(pool: &crate::core::work::PriorityPool) -> Vec<SchedulePermit> {
         let limits = pool.limits();
         let mut held = Vec::new();
         for _ in 0..limits.shared {

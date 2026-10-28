@@ -27,7 +27,7 @@ Created 2026-10-26 / Target commit `d4030c6` with the uncommitted work
 
 | No. | Content | State |
 | --- | --- | --- |
-| 1 | Add the options and the pool in `schedule.rs` | Done |
+| 1 | Add the options and the pool in `work.rs` | Done |
 | 2 | Route `pool_for` and `VideoService` | Done |
 | 3 | Parse the keys in `config.rs`, update the examples | Done |
 | 4 | Add tests, update the design documents | Done |

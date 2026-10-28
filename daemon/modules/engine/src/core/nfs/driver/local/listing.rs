@@ -4,10 +4,7 @@ use std::{
     time::Instant,
 };
 
-use crate::core::{
-    schedule::SchedulePermit,
-    work::{WorkBudget, WorkClass, WorkKind},
-};
+use crate::core::work::{SchedulePermit, WorkBudget, WorkClass, WorkKind};
 use tokio_util::sync::CancellationToken;
 
 use super::{ArchiveFormat, FileStorageLocal};

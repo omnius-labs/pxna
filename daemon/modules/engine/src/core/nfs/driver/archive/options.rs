@@ -8,10 +8,7 @@ use tokio::{sync::Semaphore, time::Instant};
 
 use crate::{
     base::util::SingleFlight,
-    core::{
-        schedule::Scheduler,
-        work::{WorkBudget, WorkKind},
-    },
+    core::work::{Scheduler, WorkBudget, WorkKind},
     prelude::*,
 };
 
