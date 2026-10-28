@@ -308,6 +308,7 @@ export const ja = {
         searchDescription: "探す Library、場所、評価、タグを選びます。",
         browseDescription: "Library のフォルダを選んで移ります。",
         treeWidth: "ツリーの幅",
+        timelineWidth: "タイムラインの幅",
         infoWidth: "情報パネルの幅",
         infoPanel: "情報パネル",
     },

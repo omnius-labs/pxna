@@ -250,7 +250,20 @@ it("情報パネルは左端を左へ動かすと広がり、矢印キーでも�
     expect(aside().style.width).toBe("404px");
 });
 
-it("タイムラインの月の一覧には幅のつまみを出さず、狭い画面でもつまみを出さない", async () => {
+it("タイムラインの左の領域は、端のドラッグで幅を変え、ツリーとは別に保存する", async () => {
     await render(false, "/timeline/photos");
+    const side = () => host.querySelector<HTMLElement>("nav[aria-label=Library]")!;
     expect(host.querySelector('[role=separator][aria-label="Tree width"]')).toBeNull();
+    expect(side().style.width).toBe("224px");
+    await drag(separator("Timeline width"), 224, 300);
+    expect(side().style.width).toBe("300px");
+    expect(window.localStorage.getItem("pxna.timelineWidth")).toBe("300");
+    expect(window.localStorage.getItem("pxna.treeWidth")).toBeNull();
+});
+
+it("検索の条件の領域には、幅のつまみを出さない", async () => {
+    await render(false, "/search?lib=photos");
+    expect([...host.querySelectorAll("[role=separator]")].map((item) => item.getAttribute("aria-label"))).toEqual([
+        "Info panel width",
+    ]);
 });

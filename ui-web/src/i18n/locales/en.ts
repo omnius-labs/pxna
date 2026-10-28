@@ -310,6 +310,7 @@ export const en = {
         searchDescription: "Choose the Libraries to search, the place, the rating, and the tags.",
         browseDescription: "Choose a folder in a Library to go to it.",
         treeWidth: "Tree width",
+        timelineWidth: "Timeline width",
         infoWidth: "Info panel width",
         infoPanel: "Info panel",
     },

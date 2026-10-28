@@ -4,6 +4,8 @@ import { type ReactNode, useState } from "react";
 import {
     INFO_PANEL_WIDTH,
     INFO_PANEL_WIDTH_KEY,
+    TIMELINE_WIDTH,
+    TIMELINE_WIDTH_KEY,
     TREE_WIDTH,
     TREE_WIDTH_KEY,
     usePanelWidth,
@@ -58,7 +60,11 @@ export function AppShell({
     }
 
     const treeWidth = usePanelWidth(TREE_WIDTH_KEY, TREE_WIDTH);
+    const timelineWidth = usePanelWidth(TIMELINE_WIDTH_KEY, TIMELINE_WIDTH);
     const panelWidth = usePanelWidth(INFO_PANEL_WIDTH_KEY, INFO_PANEL_WIDTH);
+    // 幅を変えられる左の領域。検索の条件（`sidebar` で `timeline` でないもの）だけは固定である。
+    const leftWidth = timeline ? timelineWidth : treeWidth;
+    const resizable = timeline || !sidebar;
     const closeDrawer = () => setDrawerOpen(false);
     const left = sidebar ? sidebar(closeDrawer) : <Tree location={location} />;
 
@@ -110,19 +116,19 @@ export function AppShell({
                 <nav
                     aria-label={search ? t("appShell.searchConditions") : t("appShell.libraryNav")}
                     className="shrink-0 overflow-y-auto border-r bg-sidebar"
-                    style={{ width: sidebar ? (search ? "16rem" : "14rem") : treeWidth.width }}
+                    style={{ width: resizable ? leftWidth.width : "16rem" }}
                 >
                     {left}
                 </nav>
-                {/* 幅を変えられるのはツリーだけで、タイムラインの月の一覧と検索の条件（`sidebar`）は固定である。 */}
-                {!sidebar && (
+                {/* 幅を変えられるのはツリーとタイムラインの月の一覧で、検索の条件は固定である。 */}
+                {resizable && (
                     <ResizeHandle
-                        label={t("appShell.treeWidth")}
-                        range={TREE_WIDTH}
-                        width={treeWidth.width}
+                        label={timeline ? t("appShell.timelineWidth") : t("appShell.treeWidth")}
+                        range={timeline ? TIMELINE_WIDTH : TREE_WIDTH}
+                        width={leftWidth.width}
                         grows="right"
-                        onResize={treeWidth.resize}
-                        onCommit={treeWidth.commit}
+                        onResize={leftWidth.resize}
+                        onCommit={leftWidth.commit}
                     />
                 )}
                 <main className="min-w-0 flex-1 overflow-hidden">{children}</main>

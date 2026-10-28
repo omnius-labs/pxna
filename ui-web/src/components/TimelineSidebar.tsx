@@ -64,7 +64,7 @@ export function TimelineSidebar({ libraryIds, onChangeLibraries, activeMonth, on
         onSelectMonth(month);
     };
     return (
-        <div className="flex flex-col gap-3 py-2 text-sm">
+        <div className="flex flex-col gap-3 px-2 py-2 text-sm">
             <section aria-labelledby="timeline-libraries-heading">
                 <h2 id="timeline-libraries-heading" className="px-1 py-1 text-xs font-semibold text-muted-foreground">
                     Library
