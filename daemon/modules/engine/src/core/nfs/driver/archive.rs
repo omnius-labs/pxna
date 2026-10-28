@@ -121,13 +121,10 @@ impl ArchiveRuntime {
             let mut boundary = None;
             for end in 1..=rest.len() {
                 let prefix = rest[..end].join("/");
-                if let Some(entry) = inspected.index.get(&prefix) {
-                    if matches!(entry.fs_entry.detail, FsEntryDetail::File { archive: true }) {
-                        boundary = Some((prefix, end));
-                        break;
-                    }
-                } else {
-                    return None;
+                let entry = inspected.index.get(&prefix)?;
+                if matches!(entry.fs_entry.detail, FsEntryDetail::File { archive: true }) {
+                    boundary = Some((prefix, end));
+                    break;
                 }
             }
             let (prefix, end) = boundary?;

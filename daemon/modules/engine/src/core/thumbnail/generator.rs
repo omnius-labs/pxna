@@ -1043,7 +1043,7 @@ impl Plan {
             ThumbnailVariant::Display => "display",
             ThumbnailVariant::Sprite => "sprite",
         };
-        let dimension = |value: Option<u32>| value.map_or(0, |value| value).to_be_bytes();
+        let dimension = |value: Option<u32>| value.unwrap_or(0).to_be_bytes();
         hasher
             .field(tag.as_bytes())
             .field(self.convert.resize_type.as_ref().as_bytes())
