@@ -118,7 +118,7 @@ impl Harness {
     }
 
     fn pool(&self) -> &omnius_pxna_engine::service::PriorityPool {
-        &self.state().pools.images
+        &self.state().pools.cpu
     }
 
     fn write_png(&self, name: &str, width: u32, height: u32) -> TestResult {

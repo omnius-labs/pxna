@@ -441,6 +441,7 @@ impl PriorityPool {
 }
 
 /// `[scheduler]` の設定。画像の変換と外部プロセス（ffmpeg、heif-dec）の同時実行の枠の数。
+/// `image_*` は `cpu` の枠、`process_*` は `process_image` の枠、`video_*` は `process_video` の枠である。
 /// External processes have two pools: `process_*` for the images that ffmpeg or heif-dec decode, and `video_*` for videos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScheduleOptions {
@@ -480,32 +481,33 @@ impl ScheduleOptions {
     }
 }
 
-/// サムネイルと表示用画像の生成が使う資源。
+/// 処理の中身（資源の種類）ごとに分けた、サムネイルと表示用画像の生成が使う資源。
+/// 一覧の走査や EXIF の読み取りなど、ファイルを読む処理の資源（`io`）は [`super::work::WorkBudget`] が持つ。
 #[derive(Clone)]
 pub struct MediaPools {
-    /// 画像の変換（decode、縮小、encode）。
-    pub images: PriorityPool,
+    /// CPU を使う処理: 画像の変換（decode、縮小、encode）。
+    pub cpu: PriorityPool,
     /// External processes for images: ffmpeg and heif-dec for HEIF, AVIF, JXL, and JP2.
-    pub processes: PriorityPool,
-    /// ffmpeg runs for videos: frame extraction, and what the video service runs. A slow video does not take a slot of `processes`.
-    pub videos: PriorityPool,
+    pub process_image: PriorityPool,
+    /// ffmpeg runs for videos: frame extraction, and what the video service runs. A slow video does not take a slot of `process_image`.
+    pub process_video: PriorityPool,
 }
 
 impl MediaPools {
     pub fn new(scheduler: &Arc<Scheduler>, options: &ScheduleOptions) -> Self {
         // Background は今は使わないが、Background の処理から呼ばれても止まらないよう 1 つ持つ。
         Self {
-            images: scheduler.pool(PoolLimits {
+            cpu: scheduler.pool(PoolLimits {
                 shared: options.image_slots,
                 interactive: options.image_interactive_slots,
                 background: 1,
             }),
-            processes: scheduler.pool(PoolLimits {
+            process_image: scheduler.pool(PoolLimits {
                 shared: options.process_slots,
                 interactive: options.process_interactive_slots,
                 background: 1,
             }),
-            videos: scheduler.pool(PoolLimits {
+            process_video: scheduler.pool(PoolLimits {
                 shared: options.video_slots,
                 interactive: options.video_interactive_slots,
                 background: 1,
@@ -534,13 +536,13 @@ mod tests {
     #[tokio::test]
     async fn a_video_permit_does_not_block_the_image_pools_test() -> TestResult {
         let pools = MediaPools::new(&Arc::new(Scheduler::default()), &ScheduleOptions::default());
-        let _video = pools.videos.acquire(WorkClass::Foreground).await;
+        let _video = pools.process_video.acquire(WorkClass::Foreground).await;
         // The video pool has one shared slot, and it is taken.
-        assert!(pools.videos.try_acquire(WorkClass::Foreground).is_none());
-        let first = pools.processes.try_acquire(WorkClass::Foreground);
-        let second = pools.processes.try_acquire(WorkClass::Foreground);
+        assert!(pools.process_video.try_acquire(WorkClass::Foreground).is_none());
+        let first = pools.process_image.try_acquire(WorkClass::Foreground);
+        let second = pools.process_image.try_acquire(WorkClass::Foreground);
         assert!(first.is_some() && second.is_some(), "both shared slots of the image process pool are free");
-        assert!(pools.images.try_acquire(WorkClass::Foreground).is_some());
+        assert!(pools.cpu.try_acquire(WorkClass::Foreground).is_some());
         Ok(())
     }
 

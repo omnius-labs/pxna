@@ -300,7 +300,7 @@ mod tests {
         let waiting = runtime.read_entry("/next");
         tokio::pin!(waiting);
         assert!(futures::poll!(&mut waiting).is_pending());
-        assert_eq!(runtime.budget.workers().running(WorkClass::Background), 0, "Foreground の間は Background を始めない");
+        assert_eq!(runtime.budget.io().running(WorkClass::Background), 0, "Foreground の間は Background を始めない");
         assert!(runtime.budget.try_probe().is_none());
         probe.release();
         waiting.await?;
@@ -358,7 +358,7 @@ mod tests {
             entered.recv().await.unwrap();
         }
         assert_eq!(probe.calls.load(Ordering::SeqCst), LocalListingRuntime::MAX_WORKERS);
-        assert_eq!(runtime.budget.workers().running(WorkClass::Foreground), LocalListingRuntime::MAX_WORKERS);
+        assert_eq!(runtime.budget.io().running(WorkClass::Foreground), LocalListingRuntime::MAX_WORKERS);
         probe.release();
         for job in jobs {
             job.await??;
@@ -387,7 +387,7 @@ mod tests {
         let summaries = runtime.read_summaries(directory, CancellationToken::new());
         tokio::pin!(summaries);
         assert!(futures::poll!(&mut summaries).is_pending());
-        assert_eq!(runtime.budget.workers().running(WorkClass::Foreground), LocalListingRuntime::MAX_WORKERS);
+        assert_eq!(runtime.budget.io().running(WorkClass::Foreground), LocalListingRuntime::MAX_WORKERS);
         probe.release();
         let summaries = summaries.await?;
         for job in jobs {
@@ -454,7 +454,7 @@ mod tests {
         probe.release();
         let mut all_permits = Vec::new();
         for _ in 0..LocalListingRuntime::MAX_WORKERS {
-            all_permits.push(runtime.budget.workers().acquire(WorkClass::Foreground).await);
+            all_permits.push(runtime.budget.io().acquire(WorkClass::Foreground).await);
         }
         assert!(probe.calls.load(Ordering::SeqCst) <= LocalListingRuntime::PARALLEL_BATCHES);
         assert_eq!(probe.active.load(Ordering::SeqCst), 0);

@@ -185,7 +185,11 @@ impl From<ApiError> for apis::video::GetVideoSegmentResponse {
 /// A video, and a file with an unknown extension that ffprobe reads as a video, count in the video pool; an image counts in the image process pool.
 // omnius-lint:allow(free-fn) Pure pool choice for the media info handler, with no owning type
 fn media_info_pool<'a>(pools: &'a MediaPools, path: &str) -> &'a PriorityPool {
-    if uses_video_pool(MediaKind::of_name(path)) { &pools.videos } else { &pools.processes }
+    if uses_video_pool(MediaKind::of_name(path)) {
+        &pools.process_video
+    } else {
+        &pools.process_image
+    }
 }
 
 // omnius-lint:allow(free-fn) Pure kind check for media_info_pool, with no owning type

@@ -117,7 +117,7 @@ impl DaemonState {
             &state_dir.join("video"),
             conf.video.clone(),
             &conf.media,
-            pools.videos.clone(),
+            pools.process_video.clone(),
         )
         .await?;
 

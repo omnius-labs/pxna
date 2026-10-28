@@ -622,9 +622,9 @@ impl Inner {
     /// 枠を待つ間に要求が drop されたら、何も始まらない。
     fn pool_for(&self, kind: MediaKind) -> &crate::core::schedule::PriorityPool {
         match kind {
-            MediaKind::Image => &self.pools.images,
-            MediaKind::FfmpegImage | MediaKind::HeifImage => &self.pools.processes,
-            MediaKind::Video => &self.pools.videos,
+            MediaKind::Image => &self.pools.cpu,
+            MediaKind::FfmpegImage | MediaKind::HeifImage => &self.pools.process_image,
+            MediaKind::Video => &self.pools.process_video,
         }
     }
 
@@ -1293,7 +1293,7 @@ mod tests {
 
         let key = generator.current_key(resolve(file.clone()).await?, &request).await?.expect("a file has a key");
         assert_eq!(generator.conversions(), 0, "the key is found without converting");
-        assert_eq!(generator.inner.pools.images.running(WorkClass::Foreground), 0);
+        assert_eq!(generator.inner.pools.cpu.running(WorkClass::Foreground), 0);
 
         // The key is the one the generated image carries, and a folder gives the key of its representative.
         let generated = generator.generate(&nested(&file), &request).await?;
@@ -2198,7 +2198,7 @@ mod tests {
     async fn videos_and_images_use_separate_external_process_pools_test() -> TestResult {
         let fixture = fixture(ThumbnailOptions::default()).await?;
         let inner = &fixture.generator.inner;
-        let _held = inner.pools.videos.acquire(WorkClass::Foreground).await;
+        let _held = inner.pools.process_video.acquire(WorkClass::Foreground).await;
         assert!(
             inner.pool_for(MediaKind::Video).try_acquire(WorkClass::Foreground).is_none(),
             "the video pool has one shared slot"
@@ -2576,7 +2576,7 @@ mod tests {
         let fixture = fixture(ThumbnailOptions::default()).await?;
         let file = fixture.dir.path().join("a.png");
         write_png(&file, 1200, 800)?;
-        let held = hold_all(&fixture.generator.inner.pools.images).await;
+        let held = hold_all(&fixture.generator.inner.pools.cpu).await;
 
         // 1024 is not a companion of 512, so only a job that holds both requests can make both from one decode.
         let large = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 1024, ImageResizeType::Crop));
@@ -2645,7 +2645,7 @@ mod tests {
         write_png(&older, 1000, 500)?;
         write_png(&newer, 1000, 500)?;
         let inner = &fixture.generator.inner;
-        let pool = &inner.pools.images;
+        let pool = &inner.pools.cpu;
         let mut held = hold_all(pool).await;
         close_the_gate(&fixture);
 
@@ -2679,7 +2679,7 @@ mod tests {
         let fixture = fixture(ThumbnailOptions::default()).await?;
         let file = fixture.dir.path().join("a.png");
         write_png(&file, 1000, 500)?;
-        let pool = &fixture.generator.inner.pools.images;
+        let pool = &fixture.generator.inner.pools.cpu;
         let held = hold_all(pool).await;
 
         let first = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop));
@@ -2740,15 +2740,15 @@ mod tests {
         assert_eq!(cached_bytes(&fixture.dir.path().join("thumbnail")), 0, "an image without a key is not stored");
 
         // If the request is cut while it waits for a slot, nothing is generated.
-        let held = hold_all(&inner.pools.images).await;
+        let held = hold_all(&inner.pools.cpu).await;
         let waiting = {
             let (inner, target, plan) = (inner.clone(), target.clone(), plan.clone());
             tokio::spawn(async move { inner.generate_alone(&target, MediaKind::Image, &plan, WorkClass::Foreground).await })
         };
-        until(|| inner.pools.images.waiting(WorkClass::Foreground) == 1).await;
+        until(|| inner.pools.cpu.waiting(WorkClass::Foreground) == 1).await;
         waiting.abort();
         assert!(waiting.await.unwrap_err().is_cancelled());
-        until(|| inner.pools.images.waiting(WorkClass::Foreground) == 0).await;
+        until(|| inner.pools.cpu.waiting(WorkClass::Foreground) == 0).await;
         drop(held);
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(fixture.generator.conversions(), 1, "only the first request was converted");
@@ -2760,7 +2760,7 @@ mod tests {
         let fixture = fixture(ThumbnailOptions::default()).await?;
         let file = fixture.dir.path().join("broken.png");
         std::fs::write(&file, b"not a png")?;
-        let held = hold_all(&fixture.generator.inner.pools.images).await;
+        let held = hold_all(&fixture.generator.inner.pools.cpu).await;
 
         let first = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 512, ImageResizeType::Crop));
         let second = spawn_generate(&fixture, &file, webp(ThumbnailVariant::Thumbnail, 1024, ImageResizeType::Crop));

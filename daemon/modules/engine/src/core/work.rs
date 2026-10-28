@@ -1,6 +1,6 @@
 //! 一覧と背景処理の枠。HTTP の受付数や他の storage 操作は制限しない。
 //!
-//! 枠の規則は [`super::schedule`] が持つ。ここは一覧の worker と stream の 2 つの資源と、処理の種類ごとの回数を持つ。
+//! 枠の規則は [`super::schedule`] が持つ。ここは一覧の io と stream の 2 つの資源と、処理の種類ごとの回数を持つ。
 use crate::prelude::*;
 use std::{future::Future, sync::Arc};
 
@@ -70,7 +70,8 @@ impl WorkKind {
 }
 
 pub struct WorkBudget {
-    workers: PriorityPool,
+    /// ファイルを読む処理（一覧の走査、EXIF の読み取り、archive の探査など）の資源。
+    io: PriorityPool,
     streams: PriorityPool,
 }
 
@@ -83,8 +84,8 @@ impl Default for WorkBudget {
     }
 }
 impl WorkBudget {
-    /// 一覧の worker。Interactive と Foreground で 3、Background に 1。
-    const WORKERS: PoolLimits = PoolLimits {
+    /// ファイルを読む処理。Interactive と Foreground で 3、Background に 1。
+    const IO: PoolLimits = PoolLimits {
         shared: 3,
         interactive: 0,
         background: 1,
@@ -96,27 +97,30 @@ impl WorkBudget {
         background: 4,
     };
 
-    /// `scheduler` の資源として、一覧の worker と stream の枠を足す。
+    /// `scheduler` の資源として、一覧の io と stream の枠を足す。
     pub fn new(scheduler: &Arc<Scheduler>) -> Self {
         Self {
-            workers: scheduler.pool(Self::WORKERS),
+            io: scheduler.pool(Self::IO),
             streams: scheduler.pool(Self::STREAMS),
         }
+    }
+    pub fn io(&self) -> &PriorityPool {
+        &self.io
     }
     pub async fn enter(&self, class: WorkClass) -> Result<SchedulePermit> {
         Ok(self.streams.acquire(class).await)
     }
     pub async fn acquire(self: &Arc<Self>, class: WorkClass, kind: WorkKind) -> Result<WorkPermit> {
-        Ok(self.workers.acquire_counted(class, kind).await)
+        Ok(self.io.acquire_counted(class, kind).await)
     }
-    /// 待たずに始められるときだけ、子の有無の探査の枠を取る。Background の worker か stream に待ちがあれば取らない。
+    /// 待たずに始められるときだけ、子の有無の探査の枠を取る。Background の io か stream に待ちがあれば取らない。
     pub fn try_probe(self: &Arc<Self>) -> Option<(WorkPermit, SchedulePermit)> {
         let stream = self.streams.try_acquire(WorkClass::Background)?;
-        let worker = self.workers.try_acquire_counted(WorkClass::Background, WorkKind::ChildProbe)?;
+        let worker = self.io.try_acquire_counted(WorkClass::Background, WorkKind::ChildProbe)?;
         Some((worker, stream))
     }
     pub fn counts(&self, kind: WorkKind) -> (usize, usize) {
-        self.workers.counts(kind)
+        self.io.counts(kind)
     }
     pub async fn background_if_needed(self: &Arc<Self>, kind: WorkKind) -> Result<Option<WorkPermit>> {
         if WorkClass::current() == WorkClass::Background {
@@ -124,10 +128,6 @@ impl WorkBudget {
         } else {
             Ok(None)
         }
-    }
-    #[cfg(test)]
-    pub(crate) fn workers(&self) -> &PriorityPool {
-        &self.workers
     }
 }
 
