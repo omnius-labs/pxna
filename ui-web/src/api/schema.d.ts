@@ -1346,7 +1346,7 @@ export interface components {
              * @description Where `timelineDate` came from.
              * @enum {string}
              */
-            timelineDateSource: "exif" | "creationTime" | "modified" | "archiveModified";
+            timelineDateSource: "exif" | "creationTime" | "modified" | "archiveModified" | "fileName";
         };
         TimelineMonths: {
             months: components["schemas"]["TimelineMonth"][];

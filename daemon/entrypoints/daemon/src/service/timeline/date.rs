@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike as _, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, Datelike as _, NaiveDate, NaiveDateTime, Timelike as _, Utc};
 
 use crate::prelude::*;
 
@@ -9,6 +9,7 @@ pub enum TimelineDateSource {
     CreationTime,
     Modified,
     ArchiveModified,
+    FileName,
 }
 
 impl TimelineDateSource {
@@ -18,6 +19,7 @@ impl TimelineDateSource {
             Self::CreationTime => "creationTime",
             Self::Modified => "modified",
             Self::ArchiveModified => "archiveModified",
+            Self::FileName => "fileName",
         }
     }
 
@@ -27,6 +29,7 @@ impl TimelineDateSource {
             "creationTime" => Ok(Self::CreationTime),
             "modified" => Ok(Self::Modified),
             "archiveModified" => Ok(Self::ArchiveModified),
+            "fileName" => Ok(Self::FileName),
             _ => Err(Error::new(ErrorKind::InvalidFormat).with_message(format!("unknown timeline date source: {value}"))),
         }
     }
@@ -46,11 +49,24 @@ impl TimelineDate {
     /// 索引と API で使う形。年が 4 桁の範囲では、文字列の順と日時の順が一致する。
     pub const FORMAT: &'static str = "%Y-%m-%dT%H:%M:%S";
 
-    /// 中身から読んだ値、Entry の更新日時、Entry を含む archive の更新日時の順に、最初に得られた値を使う。
-    pub fn choose(zone: &TimelineZone, content: Option<Self>, modified: Option<DateTime<Utc>>, archive_modified: Option<DateTime<Utc>>) -> Option<Self> {
-        content
+    /// Use the first value out of the file name, the contents, the Entry's modification time, and the containing archive's modification time.
+    pub fn choose(zone: &TimelineZone, file_name: Option<Self>, content: Option<Self>, modified: Option<DateTime<Utc>>, archive_modified: Option<DateTime<Utc>>) -> Option<Self> {
+        file_name
+            .or(content)
             .or_else(|| modified.and_then(|time| Self::from_instant(zone, time, TimelineDateSource::Modified)))
             .or_else(|| archive_modified.and_then(|time| Self::from_instant(zone, time, TimelineDateSource::ArchiveModified)))
+    }
+
+    /// A value read by a file name rule. A rule time zone makes the value an instant in that zone.
+    pub fn from_file_name(display: &TimelineZone, rule_zone: Option<&TimelineZone>, value: NaiveDateTime) -> Option<Self> {
+        match rule_zone {
+            Some(rule_zone) => rule_zone.to_utc(value).and_then(|time| Self::from_instant(display, time, TimelineDateSource::FileName)),
+            None => Self::in_range(value).then_some(Self {
+                value,
+                source: TimelineDateSource::FileName,
+                instant: None,
+            }),
+        }
     }
 
     /// Exif の撮影日時（`YYYY-MM-DDTHH:MM:SS`）から作る。読めない値と、4 桁に収まらない年は `None` にする。
@@ -142,6 +158,22 @@ impl TimelineZone {
             .and_then(|date| date.and_hms_opt(local.hour() as u32, local.minute() as u32, local.second() as u32))
             .unwrap_or_else(|| time.naive_utc())
     }
+
+    /// Turn a naive time in this zone into a UTC instant. A nonexistent or ambiguous time is resolved by jiff's default.
+    pub fn to_utc(&self, value: NaiveDateTime) -> Option<DateTime<Utc>> {
+        let civil = jiff::civil::DateTime::new(
+            i16::try_from(value.year()).ok()?,
+            i8::try_from(value.month()).ok()?,
+            i8::try_from(value.day()).ok()?,
+            i8::try_from(value.hour()).ok()?,
+            i8::try_from(value.minute()).ok()?,
+            i8::try_from(value.second()).ok()?,
+            i32::try_from(value.nanosecond()).ok()?,
+        )
+        .ok()?;
+        let timestamp = self.zone.to_zoned(civil).ok()?.timestamp();
+        DateTime::from_timestamp(timestamp.as_second(), u32::try_from(timestamp.subsec_nanosecond()).ok()?)
+    }
 }
 
 #[cfg(test)]
@@ -159,13 +191,17 @@ mod tests {
         let modified = Some(utc("2025-01-02T03:04:05Z"));
         let archive = Some(utc("2026-01-01T00:00:00Z"));
 
-        let chosen = TimelineDate::choose(&zone, exif, modified, archive).unwrap();
+        let chosen = TimelineDate::choose(&zone, exif, None, modified, archive).unwrap();
         assert_eq!((chosen.text(), chosen.source), ("2024-05-01T12:34:56".to_string(), TimelineDateSource::Exif));
-        let chosen = TimelineDate::choose(&zone, None, modified, archive).unwrap();
+        let chosen = TimelineDate::choose(&zone, None, None, modified, archive).unwrap();
         assert_eq!((chosen.text(), chosen.source), ("2025-01-02T03:04:05".to_string(), TimelineDateSource::Modified));
-        let chosen = TimelineDate::choose(&zone, None, None, archive).unwrap();
+        let chosen = TimelineDate::choose(&zone, None, None, None, archive).unwrap();
         assert_eq!((chosen.text(), chosen.source), ("2026-01-01T00:00:00".to_string(), TimelineDateSource::ArchiveModified));
-        assert_eq!(TimelineDate::choose(&zone, None, None, None), None);
+        assert_eq!(TimelineDate::choose(&zone, None, None, None, None), None);
+
+        let file_name = TimelineDate::from_file_name(&zone, None, NaiveDate::from_ymd_opt(2024, 4, 3).unwrap().and_hms_opt(2, 1, 0).unwrap()).unwrap();
+        let chosen = TimelineDate::choose(&zone, Some(file_name), exif, modified, archive).unwrap();
+        assert_eq!((chosen.text(), chosen.source), ("2024-04-03T02:01:00".to_string(), TimelineDateSource::FileName));
         Ok(())
     }
 

@@ -80,15 +80,26 @@ For each Entry, the first value obtained in the order of the following table fro
 
 | Order | Image | Video |
 | --- | --- | --- |
-| 1 | Exif shooting date and time | The container's `creation_time` that ffprobe returns |
-| 2 | The Entry's modification time | The Entry's modification time |
-| 3 | The modification time of the archive that contains the Entry | The modification time of the archive that contains the Entry |
+| 1 | The file name parsed by a matching date rule | The file name parsed by a matching date rule |
+| 2 | Exif shooting date and time | The container's `creation_time` that ffprobe returns |
+| 3 | The Entry's modification time | The Entry's modification time |
+| 4 | The modification time of the archive that contains the Entry | The modification time of the archive that contains the Entry |
 
-The third applies only to Entries inside archives, and for nested archives, they are looked at in order from the inner archive.
+The date rules in the first row are `[[timeline.date_rules]]` (§8).
+A rule applies when its optional `library`, its `path` glob, and its `name` regular expression all match, and the captured text in its `format` parses as a date and time.
+Rules are tried in the order they are written, and the first rule that succeeds is used.
+A rule whose path and name match but whose captured text does not parse is treated as not having matched, and the next rule is tried.
+When no rule succeeds, the values from the second row onward are used.
+The name is matched against the file name including its extension, and the path is matched as a glob against the Library-relative path without its leading `/`.
+Entries inside archives are matched against the path that joins the archive and the inner paths, `/a.7z/dir/IMG-1.jpg` for example, and their file names are read in the same way even when the archive block cannot be extracted.
+
+The fourth row applies only to Entries inside archives, and for nested archives, they are looked at in order from the inner archive.
 Entries inside archives also have their shooting date and time read from their contents, as outside.
-For an Entry whose extraction exceeded the limit or deadline, and an Entry whose contents could not be read, the values from the second onward are used.
+For an Entry whose extraction exceeded the limit or deadline, and an Entry whose contents could not be read, the value in the second row is skipped and the values from the third onward are used; the file name rule in the first row still applies.
 
 The Exif shooting date and time is used as is, as a value without a time zone.
+A date rule without `time_zone` keeps the value as it is, in the same way as Exif.
+A date rule with `time_zone` regards the value as a local time in that zone and converts it to an instant, which is then shown in the time zone of `[timeline] time_zone`.
 The modification time and `creation_time` are instants in UTC, so they are converted to a date and time in the time zone of `[timeline] time_zone` (§8).
 When `creation_time` is the origin value that appears in files that did not write a time (exactly 0:00 on January 1, 1904 and January 1, 1970), it is treated as not having a `creation_time`.
 
@@ -96,6 +107,7 @@ The boundaries of dates and months are decided by the date part of the timeline 
 Because the server decides the boundaries, the same Entry is listed on the same day and month from any device.
 
 Which value the timeline date was obtained from is held per Entry as the timeline date source.
+The source is one of `exif`, `creationTime`, `fileName`, `modified`, and `archiveModified`.
 For a timeline date obtained from a UTC instant, the original instant is also held.
 The index records the time zone into which the timeline dates were converted.
 At daemon startup, if the recorded time zone differs from the configured time zone, all timeline dates that have an original instant are converted again in the new time zone and the record is rewritten.
@@ -235,10 +247,26 @@ The timeline configuration goes in the top-level `[timeline]` and is validated a
 | `[timeline] scan_interval_secs` | 86400 | Time from the last aggregation's end until the next. 0 means no periodic aggregation |
 | `[timeline] max_concurrent_extractions` | 1 | Concurrent archive extractions in aggregation |
 | `[timeline] max_concurrent_probes` | 1 | Concurrent ffprobe runs in aggregation |
+| `[[timeline.date_rules]]` | none | Ordered rules that read a timeline date from the file name (§4) |
 
 When `time_zone` is omitted, the time zone is obtained from the environment variable `TZ` or the OS setting, and if it cannot be obtained from either, it is UTC.
 A Docker container is UTC by default, so set `time_zone` or `TZ` when listing alongside photos taken in other time zones.
 Concurrency allows only positive values.
+
+Each date rule has the following keys.
+
+| key | Required | Meaning |
+| --- | --- | --- |
+| `library` | no | The id of the Library to apply the rule to. Omit to apply it to every Library |
+| `path` | yes | A glob matched against the Library-relative path without its leading `/`. `**` matches any number of path components |
+| `name` | yes | A regular expression partially matched against the file name including its extension. It must contain one named capture `(?P<date>...)` |
+| `format` | yes | A chrono strftime string that reads the captured text. A missing time becomes `00:00:00`, and a missing second becomes `00` |
+| `time_zone` | no | The IANA name of the zone the captured value is in. Omit to keep the value without a time zone, like Exif |
+
+A rule's `format` must not contain a time zone or offset; use `time_zone` instead.
+All rules are validated at daemon startup; an invalid glob, regular expression, capture, format, Library id, or time zone stops the daemon with a message naming the rule and the key.
+The rule list is recorded in the index, and when it differs from the recorded list at startup, all timeline rows are discarded and the startup aggregation reads them again.
+The same happens when no list has been recorded yet and rules are configured, so an index written before date rules existed is reread once they are enabled.
 
 ## 9. Design Decisions
 
@@ -347,6 +375,24 @@ The date boundaries would be decided by the device's time zone, so the per-month
 **Rejected alternative 2**
 A method with no configuration that regards the Exif shooting date and time as UTC and mixes them.
 The configuration does not grow, but Entries without Exif would be listed at positions shifted by the time difference and could cross dates, so we rejected it.
+
+#### Read Dates from File Names by Configurable Rules
+
+**Decision**
+The daemon tries `[[timeline.date_rules]]` before Exif and the modification time (§4).
+A rule matches a Library, a Library-relative path glob, and a file name regular expression, and reads the named `date` capture with its `format`.
+The first rule that produces a valid date wins, and a rule that matches but does not parse is skipped.
+A rule with `time_zone` holds the parsed value as an instant in that zone; without it, the value is kept without a time zone, like Exif.
+The rule list is recorded in the index, and a change discards the rows so that the startup aggregation reads them again.
+
+**Reason**
+Names such as the ones messaging apps and cameras produce carry the shooting date and time that Exif often lacks, and they are the only date available when an archive block cannot be extracted.
+The order keeps a rule's value authoritative when it matches, while the existing values still cover Entries whose names do not carry a date.
+Keeping the value without a time zone by default matches Exif and avoids guessing a zone for names that were not written with one in mind.
+
+**Rejected alternative**
+A fixed set of built-in patterns.
+It needs no configuration, but each app's naming convention would require a daemon release, and the time zone could not be chosen per convention.
 
 #### List the Chosen Libraries in One Timeline
 
@@ -578,6 +624,7 @@ TimelineScanner runs full and changed-range scans in the background, and uses th
 
 The timeline index, aggregation, and API are implemented.
 Timeline dates are decided by the daemon's `service/timeline`.
+`service/timeline/rules.rs` compiles `[[timeline.date_rules]]` at startup and reads matching file names before Exif, and `TimelineIndex::reset_for_date_rules` discards the index when the rule list changes.
 `TimelineScanner` scans the Library, and decides whether rereading is needed by size and modification time for local images and videos and by `ArchiveIdentity` for archives.
 For archives, `FileStorageArchive::block_groups` and `extract_group` extract each block exactly once without going through the extraction cache.
 `TimelineIndex` holds the SQLite index and the triggers that increase and decrease the per-month counts, and `TimelineService` handles periodic aggregation, manual aggregation, state, and the reflection of the daemon's own changes.

@@ -16,7 +16,7 @@ use omnius_pxna_engine::{
     service::{ArchiveIdentity, FileStorageArchive, ImageInspector, MediaKind, MediaTools, SourceFingerprint, StorageService, WorkClass, WorkKind},
 };
 
-use super::{TimelineBatch, TimelineDate, TimelineFileVersion, TimelineIndex, TimelineKind, TimelineRow, TimelineZone};
+use super::{DateRules, TimelineBatch, TimelineDate, TimelineFileVersion, TimelineIndex, TimelineKind, TimelineRow, TimelineZone};
 use crate::{config::LibraryConfig, prelude::*};
 
 /// 1 回の書き込みにまとめるファイルと行の数。
@@ -69,6 +69,7 @@ pub struct TimelineScanner {
     index: Arc<TimelineIndex>,
     tools: MediaTools,
     zone: TimelineZone,
+    rules: DateRules,
     extractions: Arc<Semaphore>,
     probes: Arc<Semaphore>,
     locks: Mutex<HashMap<String, Arc<TokioMutex<()>>>>,
@@ -76,12 +77,21 @@ pub struct TimelineScanner {
 }
 
 impl TimelineScanner {
-    pub fn new(storage: Arc<StorageService>, index: Arc<TimelineIndex>, tools: MediaTools, zone: TimelineZone, max_extractions: usize, max_probes: usize) -> Self {
+    pub fn new(
+        storage: Arc<StorageService>,
+        index: Arc<TimelineIndex>,
+        tools: MediaTools,
+        zone: TimelineZone,
+        rules: DateRules,
+        max_extractions: usize,
+        max_probes: usize,
+    ) -> Self {
         Self {
             storage,
             index,
             tools,
             zone,
+            rules,
             extractions: Arc::new(Semaphore::new(max_extractions)),
             probes: Arc::new(Semaphore::new(max_probes)),
             locks: Mutex::new(HashMap::new()),
@@ -220,7 +230,7 @@ impl TimelineScanner {
 
             let mut rows = Vec::with_capacity(media.len());
             for group in media.chunks(LOCAL_READS) {
-                rows.extend(futures::future::join_all(group.iter().map(|(candidate, kind, version)| self.read_media(candidate, *kind, version))).await);
+                rows.extend(futures::future::join_all(group.iter().map(|(candidate, kind, version)| self.read_media(target.library, candidate, *kind, version))).await);
             }
 
             let lock = self.lock(&target.library.id);
@@ -243,9 +253,20 @@ impl TimelineScanner {
     }
 
     /// local の画像か動画から並びの日時を読み、Entry の行を作る。
-    async fn read_media<'a>(&self, candidate: &'a Candidate, kind: MediaKind, version: &TimelineFileVersion) -> (&'a Candidate, TimelineFileVersion, Option<TimelineRow>) {
-        let content = self.content_date(kind, &candidate.local).await;
-        let row = TimelineDate::choose(&self.zone, content, candidate.modified, None).map(|date| TimelineRow {
+    async fn read_media<'a>(
+        &self,
+        library: &LibraryConfig,
+        candidate: &'a Candidate,
+        kind: MediaKind,
+        version: &TimelineFileVersion,
+    ) -> (&'a Candidate, TimelineFileVersion, Option<TimelineRow>) {
+        let file_name = self.rules.date(&self.zone, &library.id, &candidate.relative, Self::name(&candidate.relative));
+        // A file whose name decided the date is not inspected for Exif or creation_time.
+        let content = match file_name {
+            Some(_) => None,
+            None => self.content_date(kind, &candidate.local).await,
+        };
+        let row = TimelineDate::choose(&self.zone, file_name, content, candidate.modified, None).map(|date| TimelineRow {
             path: candidate.relative.clone(),
             file_path: candidate.relative.clone(),
             kind: Self::kind(kind),
@@ -319,11 +340,12 @@ impl TimelineScanner {
                     };
                     let relative = format!("{}/{}", open.prefix, entry.path);
                     if let Some(kind) = Self::archive_media(entry) {
-                        let content = match files.get(path) {
-                            Some(file) => self.content_date(kind, file.path()).await,
-                            None => None,
+                        let file_name = self.rules.date(&self.zone, &target.library.id, &relative, Self::name(&relative));
+                        let content = match (file_name, files.get(path)) {
+                            (Some(_), _) | (None, None) => None,
+                            (None, Some(file)) => self.content_date(kind, file.path()).await,
                         };
-                        if let Some(date) = TimelineDate::choose(&self.zone, content, entry.meta.modified, open.fallback) {
+                        if let Some(date) = TimelineDate::choose(&self.zone, file_name, content, entry.meta.modified, open.fallback) {
                             batch.rows.push(TimelineRow {
                                 path: relative,
                                 file_path: candidate.relative.clone(),
@@ -533,6 +555,7 @@ mod budget_tests {
                 std::time::Duration::from_secs(1),
             ),
             TimelineZone::new(Some("UTC"))?,
+            DateRules::new(&[], &[])?,
             1,
             1,
         );

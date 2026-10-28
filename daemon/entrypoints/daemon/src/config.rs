@@ -382,7 +382,7 @@ impl DaemonConfig {
         LibraryConfig::validate_unique_ids(&libraries)?;
 
         toml.listing.validate()?;
-        toml.timeline.validate()?;
+        toml.timeline.validate(&libraries)?;
         toml.video
             .validate()
             .map_err(|error| Error::from_error(error, ErrorKind::InvalidFormat).with_message("invalid [video] configuration"))?;
@@ -710,6 +710,24 @@ mod tests {
     async fn rejects_duplicated_library_id_test() -> TestResult {
         let toml = format!("{BASE_TOML}{}", library_toml("photos"));
         let error = load(&toml).await.expect_err("duplicated library id should be rejected");
+        assert_eq!(*error.kind(), ErrorKind::InvalidFormat);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn timeline_date_rules_are_parsed_and_validated_test() -> TestResult {
+        let toml = format!("{BASE_TOML}\n[[timeline.date_rules]]\npath = \"**\"\nname = 'IMG-(?P<date>\\d{{8}})'\nformat = \"%Y%m%d\"\n");
+        let config = load(&toml).await?;
+        assert_eq!(config.timeline.date_rules.len(), 1);
+        assert_eq!(config.timeline.date_rules[0].path, "**");
+
+        let unknown_library = format!("{BASE_TOML}\n[[timeline.date_rules]]\nlibrary = \"missing\"\npath = \"**\"\nname = 'IMG-(?P<date>\\d{{8}})'\nformat = \"%Y%m%d\"\n");
+        let error = load(&unknown_library).await.expect_err("unknown library");
+        assert_eq!(*error.kind(), ErrorKind::InvalidFormat);
+        assert!(error.message().unwrap_or_default().contains("library"));
+
+        let unnamed_capture = format!("{BASE_TOML}\n[[timeline.date_rules]]\npath = \"**\"\nname = 'IMG-(\\d{{8}})'\nformat = \"%Y%m%d\"\n");
+        let error = load(&unnamed_capture).await.expect_err("missing capture");
         assert_eq!(*error.kind(), ErrorKind::InvalidFormat);
         Ok(())
     }

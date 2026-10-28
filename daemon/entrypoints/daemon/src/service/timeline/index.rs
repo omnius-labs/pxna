@@ -681,6 +681,33 @@ ON CONFLICT (library_id, path) DO UPDATE SET
 
     // ---- タイムゾーン ----
 
+    /// When the date detection rules differ from the recorded ones, delete every Library's rows so the next aggregation rereads them.
+    ///
+    /// A missing record means the rows were indexed by a version without date rules. If rules are configured now,
+    /// those rows must be reread even though there is nothing to compare the new list against.
+    pub async fn reset_for_date_rules(&self, rules: &str, has_rules: bool) -> Result<()> {
+        let recorded: Option<String> = sqlx::query_scalar("SELECT value FROM timeline_settings WHERE key = 'date_rules'")
+            .fetch_optional(&self.db)
+            .await?;
+        if recorded.as_deref() == Some(rules) {
+            return Ok(());
+        }
+
+        let mut tx = self.write().await?;
+        if recorded.is_some() || has_rules {
+            sqlx::query("DELETE FROM timeline_entries").execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM timeline_files").execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM timeline_months").execute(&mut *tx).await?;
+            sqlx::query("UPDATE timeline_scans SET completed_at = NULL").execute(&mut *tx).await?;
+        }
+        sqlx::query("INSERT INTO timeline_settings (key, value) VALUES ('date_rules', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+            .bind(rules)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// 並びの日時を直したタイムゾーンが `zone` と違えば、元の瞬間を持つ並びの日時をすべて直し、記録を書き換える。
     pub async fn rezone(&self, zone: &TimelineZone) -> Result<()> {
         let recorded: Option<String> = sqlx::query_scalar("SELECT value FROM timeline_settings WHERE key = 'time_zone'")
@@ -1248,7 +1275,7 @@ mod tests {
         index.rezone(&utc).await?;
         let instant = DateTime::parse_from_rfc3339("2024-01-31T20:00:00Z")?.with_timezone(&Utc);
         let mut modified = row("/m.jpg", "/m.jpg", "2000-01-01T00:00:00");
-        modified.date = TimelineDate::choose(&utc, None, Some(instant), None).unwrap();
+        modified.date = TimelineDate::choose(&utc, None, None, Some(instant), None).unwrap();
         insert(&index, &[modified, row("/e.jpg", "/e.jpg", "2024-01-15T00:00:00")]).await?;
         assert_eq!(month_counts(&index).await?, [("2024-01".to_string(), 2)]);
 
@@ -1258,6 +1285,27 @@ mod tests {
         assert_eq!(page.rows[0].row.date.text(), "2024-02-01T05:00:00");
         assert_eq!(page.rows[1].row.date.text(), "2024-01-15T00:00:00", "Exif の値は直さない");
         assert_eq!(month_counts(&index).await?, [("2024-02".to_string(), 1), ("2024-01".to_string(), 1)]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reset_for_date_rules_clears_rows_when_the_record_is_missing_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = index(&dir).await?;
+        insert(&index, &[row("/a.jpg", "/a.jpg", "2024-01-01T00:00:00")]).await?;
+
+        index.reset_for_date_rules("[]", false).await?;
+        assert_eq!(
+            paths(&index.page(&lib(), &TimelineAnchor::Newest, 10).await?),
+            ["/a.jpg"],
+            "no rules and no record keeps the rows"
+        );
+
+        // An index written before date rules existed has no record at all.
+        sqlx::query("DELETE FROM timeline_settings WHERE key = 'date_rules'").execute(&index.db).await?;
+        index.reset_for_date_rules(r#"[{"path":"**"}]"#, true).await?;
+        assert!(paths(&index.page(&lib(), &TimelineAnchor::Newest, 10).await?).is_empty());
+        assert!(month_counts(&index).await?.is_empty());
         Ok(())
     }
 

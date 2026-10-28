@@ -18,10 +18,12 @@ use crate::{config::LibraryConfig, prelude::*};
 
 mod date;
 mod index;
+mod rules;
 mod scanner;
 
 pub use date::*;
 pub use index::*;
+pub use rules::*;
 pub use scanner::*;
 
 /// 定期の集計の時機を確かめる間隔。
@@ -37,6 +39,9 @@ pub struct TimelineConfig {
     pub scan_interval_secs: u64,
     pub max_concurrent_extractions: usize,
     pub max_concurrent_probes: usize,
+    /// Rules that read a timeline date from the file name. They are tried in order.
+    #[serde(default)]
+    pub date_rules: Vec<DateRuleConfig>,
 }
 
 impl Default for TimelineConfig {
@@ -46,16 +51,18 @@ impl Default for TimelineConfig {
             scan_interval_secs: 86_400,
             max_concurrent_extractions: 1,
             max_concurrent_probes: 1,
+            date_rules: Vec::new(),
         }
     }
 }
 
 impl TimelineConfig {
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self, libraries: &[LibraryConfig]) -> Result<()> {
         if self.max_concurrent_extractions == 0 || self.max_concurrent_probes == 0 {
             return Err(Error::new(ErrorKind::InvalidFormat).with_message("[timeline] concurrency must be positive"));
         }
         TimelineZone::new(self.time_zone.as_deref()).map_err(|error| Error::from_error(error, ErrorKind::InvalidFormat).with_message("invalid [timeline] time_zone"))?;
+        DateRules::new(&self.date_rules, libraries)?;
         Ok(())
     }
 }
@@ -90,13 +97,16 @@ impl TimelineService {
         clock: Arc<dyn Clock<Utc> + Send + Sync>,
     ) -> Result<Arc<Self>> {
         let zone = TimelineZone::new(config.time_zone.as_deref())?;
+        let rules = DateRules::new(&config.date_rules, libraries)?;
         let index = Arc::new(TimelineIndex::open(dir).await?);
+        index.reset_for_date_rules(rules.fingerprint(), !config.date_rules.is_empty()).await?;
         index.rezone(&zone).await?;
         let scanner = Arc::new(TimelineScanner::new(
             storage,
             index.clone(),
             tools,
             zone,
+            rules,
             config.max_concurrent_extractions,
             config.max_concurrent_probes,
         ));
@@ -384,12 +394,17 @@ mod tests {
         }
 
         async fn service(&self, zone: &str, interval_secs: u64) -> TestResult<Arc<TimelineService>> {
+            self.service_with_rules(zone, interval_secs, Vec::new()).await
+        }
+
+        async fn service_with_rules(&self, zone: &str, interval_secs: u64, date_rules: Vec<DateRuleConfig>) -> TestResult<Arc<TimelineService>> {
             let rng = ChaCha20Rng::try_from_rng(&mut rand::rngs::SysRng)?;
             let tsid = Arc::new(Mutex::new(TsidProviderImpl::new(omnius_core_base::clock::ClockUtc, rng, 16)));
             let storage = Arc::new(StorageService::new(Arc::new(LocalStorageDriver::new(tsid)), Arc::new(ArchiveRuntime::default())));
             let config = TimelineConfig {
                 time_zone: Some(zone.to_string()),
                 scan_interval_secs: interval_secs,
+                date_rules,
                 ..TimelineConfig::default()
             };
             Ok(TimelineService::open(
@@ -405,6 +420,15 @@ mod tests {
 
         fn path(&self, relative: &str) -> PathBuf {
             self.root.join(relative)
+        }
+
+        /// Simulate an index written before date rules existed.
+        async fn forget_date_rules(&self) -> TestResult {
+            let options = sqlx::sqlite::SqliteConnectOptions::new().filename(self.state.join("index.db"));
+            let pool = sqlx::SqlitePool::connect_with(options).await?;
+            sqlx::query("DELETE FROM timeline_settings WHERE key = 'date_rules'").execute(&pool).await?;
+            pool.close().await;
+            Ok(())
         }
     }
 
@@ -554,6 +578,123 @@ mod tests {
         );
         let total = service.page(&[LIBRARY.to_string()], &TimelineAnchor::Newest, 100).await?.rows.len() as u64;
         assert_eq!(months.iter().map(|(_, count)| count).sum::<u64>(), total);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn date_rules_read_names_before_exif_and_archives_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        std::fs::write(fixture.path("IMG-20240102_030405.jpg"), exif_jpeg("2024:05:01 12:34:56"))?;
+        write_7z(
+            &fixture.path("c.7z"),
+            &[("IMG-20200304_050607.jpg", exif_jpeg("2024:06:01 00:00:00")), ("x.jpg", exif_jpeg("2024:07:01 00:00:00"))],
+        )?;
+        let service = fixture
+            .service_with_rules(
+                "UTC",
+                0,
+                vec![DateRuleConfig {
+                    library: None,
+                    path: "**/IMG-*".to_string(),
+                    name: r"IMG-(?P<date>\d{8}_\d{6})".to_string(),
+                    format: "%Y%m%d_%H%M%S".to_string(),
+                    time_zone: None,
+                }],
+            )
+            .await?;
+        wait_scan(&service).await?;
+
+        assert_eq!(
+            listed(&service).await?,
+            [
+                ("/c.7z/x.jpg".to_string(), "2024-07-01T00:00:00".to_string(), TimelineDateSource::Exif),
+                ("/IMG-20240102_030405.jpg".to_string(), "2024-01-02T03:04:05".to_string(), TimelineDateSource::FileName),
+                ("/c.7z/IMG-20200304_050607.jpg".to_string(), "2020-03-04T05:06:07".to_string(), TimelineDateSource::FileName),
+            ]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn date_rule_time_zone_is_shifted_into_the_timeline_zone_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        std::fs::write(fixture.path("IMG-20240501120000.png"), plain_png())?;
+        let service = fixture
+            .service_with_rules(
+                "UTC",
+                0,
+                vec![DateRuleConfig {
+                    library: None,
+                    path: "**".to_string(),
+                    name: r"IMG-(?P<date>\d{14})".to_string(),
+                    format: "%Y%m%d%H%M%S".to_string(),
+                    time_zone: Some("Asia/Tokyo".to_string()),
+                }],
+            )
+            .await?;
+        wait_scan(&service).await?;
+
+        assert_eq!(
+            listed(&service).await?,
+            [("/IMG-20240501120000.png".to_string(), "2024-05-01T03:00:00".to_string(), TimelineDateSource::FileName)]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn changing_date_rules_rereads_dates_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        std::fs::write(fixture.path("IMG-20240102_030405.jpg"), exif_jpeg("2024:05:01 12:34:56"))?;
+        let rule = DateRuleConfig {
+            library: None,
+            path: "**".to_string(),
+            name: r"IMG-(?P<date>\d{8}_\d{6})".to_string(),
+            format: "%Y%m%d_%H%M%S".to_string(),
+            time_zone: None,
+        };
+        let service = fixture.service_with_rules("UTC", 0, vec![rule]).await?;
+        wait_scan(&service).await?;
+        assert_eq!(listed(&service).await?[0].2, TimelineDateSource::FileName);
+
+        let service = fixture.service_with_rules("UTC", 0, Vec::new()).await?;
+        wait_scan(&service).await?;
+        assert_eq!(
+            listed(&service).await?,
+            [("/IMG-20240102_030405.jpg".to_string(), "2024-05-01T12:34:56".to_string(), TimelineDateSource::Exif)],
+            "a rule change rereads even when the file version is the same"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn configuring_date_rules_for_an_old_index_rereads_dates_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        std::fs::write(fixture.path("IMG-20240102_030405.jpg"), exif_jpeg("2024:05:01 12:34:56"))?;
+
+        let service = fixture.service("UTC", 0).await?;
+        wait_scan(&service).await?;
+        assert_eq!(listed(&service).await?[0].2, TimelineDateSource::Exif);
+
+        fixture.forget_date_rules().await?;
+        let service = fixture
+            .service_with_rules(
+                "UTC",
+                0,
+                vec![DateRuleConfig {
+                    library: None,
+                    path: "**".to_string(),
+                    name: r"IMG-(?P<date>\d{8}_\d{6})".to_string(),
+                    format: "%Y%m%d_%H%M%S".to_string(),
+                    time_zone: None,
+                }],
+            )
+            .await?;
+        wait_scan(&service).await?;
+        assert_eq!(
+            listed(&service).await?,
+            [("/IMG-20240102_030405.jpg".to_string(), "2024-01-02T03:04:05".to_string(), TimelineDateSource::FileName)],
+            "an old index without a recorded rule list is reread once rules are configured"
+        );
         Ok(())
     }
 
