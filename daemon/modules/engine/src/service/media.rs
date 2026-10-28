@@ -9,7 +9,10 @@ use tokio::sync::Semaphore;
 
 use super::{ArchiveIdentity, ResolvedStoragePath, SourceFingerprint};
 use crate::{
-    core::media::{MediaKind, MediaOptions},
+    core::{
+        media::{MediaKind, MediaOptions},
+        work::{WorkBudget, WorkKind},
+    },
     prelude::*,
 };
 
@@ -21,6 +24,7 @@ pub struct MediaInfoService {
     cache: Mutex<VecDeque<(String, MediaInfo)>>,
     permits: Arc<Semaphore>,
     guards: Mutex<HashMap<String, Weak<TokioMutex<()>>>>,
+    budget: Arc<WorkBudget>,
     #[cfg(test)]
     probes: std::sync::atomic::AtomicUsize,
 }
@@ -32,9 +36,16 @@ impl MediaInfoService {
             cache: Mutex::new(VecDeque::new()),
             permits: Arc::new(Semaphore::new(2)),
             guards: Mutex::new(HashMap::new()),
+            budget: Arc::new(WorkBudget::default()),
             #[cfg(test)]
             probes: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// Runs the blocking image metadata reads under `budget`, so that they wait with the class of the caller.
+    pub fn with_budget(mut self, budget: Arc<WorkBudget>) -> Self {
+        self.budget = budget;
+        self
     }
 
     /// 動画の情報を得る。画像のときは `UnsupportedType` にする。
@@ -105,21 +116,21 @@ impl MediaInfoService {
         match MediaKind::of_name(name) {
             Some(MediaKind::Image) => {
                 let path = file.to_path_buf();
-                let (width, height, exif) = tokio::task::spawn_blocking(move || -> Result<_> {
-                    let (width, height) =
-                        ImageInspector::read_size(&path).map_err(|error| Error::from_error(error, ErrorKind::UnsupportedType).with_message("cannot read the image size"))?;
-                    Ok((width, height, ImageInspector::read_exif(&path)))
-                })
-                .await
-                .map_err(|error| Error::from_error(error, ErrorKind::TaskError))??;
+                let (width, height, exif) = self
+                    .budget
+                    .io()
+                    .run_blocking(WorkKind::Inspect, move || -> Result<_> {
+                        let (width, height) =
+                            ImageInspector::read_size(&path).map_err(|error| Error::from_error(error, ErrorKind::UnsupportedType).with_message("cannot read the image size"))?;
+                        Ok((width, height, ImageInspector::read_exif(&path)))
+                    })
+                    .await??;
                 Ok(to_info(image(width, height), 0, false, exif))
             }
             Some(MediaKind::FfmpegImage | MediaKind::HeifImage) => {
                 let (width, height, rotation, has_alpha) = self.tools.probe_image_size(file).await?;
                 let path = file.to_path_buf();
-                let exif = tokio::task::spawn_blocking(move || ImageInspector::read_exif(&path))
-                    .await
-                    .map_err(|error| Error::from_error(error, ErrorKind::TaskError))?;
+                let exif = self.budget.io().run_blocking(WorkKind::Inspect, move || ImageInspector::read_exif(&path)).await?;
                 Ok(to_info(image(width, height), rotation, has_alpha, exif))
             }
             Some(MediaKind::Video) | None => Ok(MediaInfo::Video(self.tools.probe_video_info(file).await?)),

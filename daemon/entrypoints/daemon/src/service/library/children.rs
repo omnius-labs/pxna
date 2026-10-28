@@ -110,11 +110,7 @@ impl LibraryBrowser {
         };
         let cancellation = CancellationToken::new();
         let _cancel_on_drop = cancellation.clone().drop_guard();
-        let job = tokio::task::spawn_blocking(move || {
-            let _worker = worker;
-            let _stream = stream;
-            task(deadline, cancellation)
-        });
+        let job = worker.run_blocking_with(stream, move || task(deadline, cancellation));
         let remaining = deadline.saturating_duration_since(Instant::now());
         match tokio::time::timeout(remaining, job).await {
             Ok(Ok(Some(response))) => response,

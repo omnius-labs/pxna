@@ -100,7 +100,7 @@ impl DaemonState {
         ));
         let operations = OperationService::new(mutation.clone(), tsid_provider.clone());
         let uploads = UploadService::new(mutation.clone(), tsid_provider.clone());
-        let media_info = Arc::new(MediaInfoService::new(conf.media.clone(), conf.thumbnail.video_timeout));
+        let media_info = Arc::new(MediaInfoService::new(conf.media.clone(), conf.thumbnail.video_timeout).with_budget(storage.work_budget().clone()));
         let thumbnails = ThumbnailGenerator::open_with_media(
             storage,
             &Self::thumbnail_cache_dir(&state_dir),
@@ -117,7 +117,7 @@ impl DaemonState {
             &state_dir.join("video"),
             conf.video.clone(),
             &conf.media,
-            pools.videos.clone(),
+            pools.process_video.clone(),
         )
         .await?;
 

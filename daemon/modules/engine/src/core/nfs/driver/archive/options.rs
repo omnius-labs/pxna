@@ -8,7 +8,7 @@ use tokio::{sync::Semaphore, time::Instant};
 
 use crate::{
     base::util::SingleFlight,
-    core::work::{WorkBudget, WorkKind},
+    core::work::{Scheduler, WorkBudget, WorkKind},
     prelude::*,
 };
 
@@ -197,15 +197,12 @@ impl ArchiveRuntime {
             .map_err(|_| Error::new(ErrorKind::Timeout).with_message("archive extraction timed out while waiting for a worker"))?
             .map_err(|_| Error::new(ErrorKind::Cancelled).with_message("archive extraction runtime is shutting down"))?;
 
-        let worker = tokio::task::spawn_blocking(move || {
-            let _background = background;
-            let _permit = permit;
-            task()
-        });
+        let worker = Scheduler::run_blocking_with((background, permit), task);
 
         tokio::time::timeout_at(deadline, worker)
             .await
-            .map_err(|_| Error::new(ErrorKind::Timeout).with_message("archive extraction timed out"))??
+            .map_err(|_| Error::new(ErrorKind::Timeout).with_message("archive extraction timed out"))?
+            .map_err(|error| error.with_message("join failed"))?
     }
 }
 

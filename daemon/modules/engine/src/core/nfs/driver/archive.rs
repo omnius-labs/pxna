@@ -8,7 +8,10 @@ use async_trait::async_trait;
 use tokio::{io::AsyncReadExt as _, sync::Semaphore};
 
 use crate::{
-    core::nfs::{FileStorageDriver, FsEntryStream, MaterializedFile, StagingFile},
+    core::{
+        nfs::{FileStorageDriver, FsEntryStream, MaterializedFile, StagingFile},
+        work::Scheduler,
+    },
     prelude::*,
 };
 
@@ -64,11 +67,9 @@ impl InspectedArchive {
                 })
             }
             ArchiveFormat::SevenZip => {
-                let (reader, index) = tokio::task::spawn_blocking(move || {
-                    let _background = background;
-                    sevenz::SevenZipArchive::inspect(&path, &options)
-                })
-                .await??;
+                let (reader, index) = Scheduler::run_blocking_with(background, move || sevenz::SevenZipArchive::inspect(&path, &options))
+                    .await
+                    .map_err(|error| error.with_message("join failed"))??;
                 Ok(Self {
                     reader: ArchiveReader::SevenZip(reader),
                     index,
@@ -121,13 +122,10 @@ impl ArchiveRuntime {
             let mut boundary = None;
             for end in 1..=rest.len() {
                 let prefix = rest[..end].join("/");
-                if let Some(entry) = inspected.index.get(&prefix) {
-                    if matches!(entry.fs_entry.detail, FsEntryDetail::File { archive: true }) {
-                        boundary = Some((prefix, end));
-                        break;
-                    }
-                } else {
-                    return None;
+                let entry = inspected.index.get(&prefix)?;
+                if matches!(entry.fs_entry.detail, FsEntryDetail::File { archive: true }) {
+                    boundary = Some((prefix, end));
+                    break;
                 }
             }
             let (prefix, end) = boundary?;

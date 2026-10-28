@@ -296,19 +296,22 @@ impl PersistenceState {
         let checksum: String = row.try_get("checksum")?;
         let expected_key = key.clone();
         let capacity = self.config.snapshot_capacity_entries;
-        let snapshot = tokio::task::spawn_blocking(move || {
-            if hex::encode(digest(&SHA256, &payload).as_ref()) != checksum {
-                return Err(Error::new(ErrorKind::InvalidFormat).with_message("summary index checksum mismatch"));
-            }
-            let snapshot: SummarySnapshot =
-                serde_json::from_slice(&payload).map_err(|error| Error::from_error(error, ErrorKind::InvalidFormat).with_message("invalid summary index payload"))?;
-            if snapshot.schema != 1 || snapshot.key != expected_key || !snapshot.data.valid_for(&expected_key) {
-                return Err(Error::new(ErrorKind::InvalidFormat).with_message("invalid summary index contents"));
-            }
-            Ok(snapshot)
-        })
-        .await
-        .map_err(|error| Error::from_error(error, ErrorKind::TaskError).with_message("cannot decode summary index"))??;
+        let snapshot = self
+            .budget
+            .io()
+            .run_blocking(WorkKind::Summary, move || -> Result<SummarySnapshot> {
+                if hex::encode(digest(&SHA256, &payload).as_ref()) != checksum {
+                    return Err(Error::new(ErrorKind::InvalidFormat).with_message("summary index checksum mismatch"));
+                }
+                let snapshot: SummarySnapshot =
+                    serde_json::from_slice(&payload).map_err(|error| Error::from_error(error, ErrorKind::InvalidFormat).with_message("invalid summary index payload"))?;
+                if snapshot.schema != 1 || snapshot.key != expected_key || !snapshot.data.valid_for(&expected_key) {
+                    return Err(Error::new(ErrorKind::InvalidFormat).with_message("invalid summary index contents"));
+                }
+                Ok(snapshot)
+            })
+            .await
+            .map_err(|error| error.with_message("cannot decode summary index"))??;
         if snapshot.data.entries.len().max(1) <= capacity && snapshot.fresh(version, now, &self.config) {
             Ok(Some(snapshot))
         } else {
@@ -406,17 +409,19 @@ impl PersistenceState {
             PendingWrite::Save { snapshot, .. } => {
                 let snapshot = snapshot.clone();
                 let limit = self.config.summary_index_capacity_bytes.min(MAX_PAYLOAD as u64) as usize;
-                let background = self.budget.acquire(WorkClass::Background, WorkKind::Summary).await?;
-                tokio::task::spawn_blocking(move || {
-                    let _background = background;
-                    let mut output = PayloadWriter {
-                        bytes: Vec::with_capacity(limit.min(32768)),
-                        limit,
-                    };
-                    serde_json::to_writer(&mut output, &*snapshot).ok().map(|()| output.bytes)
-                })
-                .await
-                .map_err(|error| Error::from_error(error, ErrorKind::TaskError).with_message("cannot encode summary index"))
+                let encoded = self
+                    .budget
+                    .io()
+                    .run_blocking_as(WorkClass::Background, WorkKind::Summary, move || {
+                        let mut output = PayloadWriter {
+                            bytes: Vec::with_capacity(limit.min(32768)),
+                            limit,
+                        };
+                        serde_json::to_writer(&mut output, &*snapshot).ok().map(|()| output.bytes)
+                    })
+                    .await
+                    .map_err(|error| error.with_message("cannot encode summary index"))?;
+                Ok(encoded)
             }
             PendingWrite::Touch { .. } => Ok(Some(Vec::new())),
             #[cfg(test)]

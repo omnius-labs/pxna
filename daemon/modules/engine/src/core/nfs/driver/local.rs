@@ -123,11 +123,10 @@ impl FileStorageDriver for FileStorageLocal {
         }
 
         let runtime = self.listing.clone();
-        let class = crate::core::work::WorkClass::current();
-        Ok(Box::pin(async_stream::try_stream! {
+        Ok(Box::pin(crate::core::work::WorkClass::current().bind_stream(async_stream::try_stream! {
             let cancellation = CancellationToken::new();
             let _cancel_on_drop = cancellation.clone().drop_guard();
-            let _scan_permit = class.scope(runtime.enter()).await?;
+            let _scan_permit = runtime.enter().await?;
             let span = perf_span!("local_listing", recursive, entry_count = Empty, enumeration_sec = Empty, metadata_sec = Empty);
             let mut enumeration_sec = 0.0;
             let mut metadata_sec = 0.0;
@@ -135,13 +134,13 @@ impl FileStorageDriver for FileStorageLocal {
             let mut stack = vec![root];
             while let Some(dir) = stack.pop() {
                 let enumeration_started = Instant::now();
-                let read_dir = class.scope(runtime.open_directory(dir, cancellation.clone())).await?;
+                let read_dir = runtime.open_directory(dir, cancellation.clone()).await?;
                 enumeration_sec += enumeration_started.elapsed().as_secs_f64();
                 loop {
                     let mut paths = Vec::with_capacity(LocalListingRuntime::BATCH_SIZE * LocalListingRuntime::PARALLEL_BATCHES);
                     let enumeration_started = Instant::now();
                     for _ in 0..LocalListingRuntime::PARALLEL_BATCHES {
-                        let batch = class.scope(runtime.read_paths(read_dir.clone(), cancellation.clone())).await?;
+                        let batch = runtime.read_paths(read_dir.clone(), cancellation.clone()).await?;
                         let count = batch.len();
                         paths.extend(batch);
                         if count < LocalListingRuntime::BATCH_SIZE { break; }
@@ -150,7 +149,7 @@ impl FileStorageDriver for FileStorageLocal {
                     if paths.is_empty() { break; }
                     let chunks: Vec<_> = paths.chunks(LocalListingRuntime::BATCH_SIZE).map(|chunk| chunk.to_vec()).collect();
                     let mut batches = futures::stream::iter(chunks)
-                        .map(|paths| class.scope(runtime.read_batch(paths, cancellation.clone())))
+                        .map(|paths| runtime.read_batch(paths, cancellation.clone()))
                         .buffered(LocalListingRuntime::PARALLEL_BATCHES);
                     while let Some(batch) = batches.next().await {
                         let batch = batch?;
@@ -167,7 +166,7 @@ impl FileStorageDriver for FileStorageLocal {
             }
             // metadata_sec は並列 worker の合計、span の時間は消費側の待ちも含む壁時計時間。
             span.record("entry_count", entry_count).record("enumeration_sec", enumeration_sec).record("metadata_sec", metadata_sec);
-        }))
+        })))
     }
 
     async fn get_listing_entry(&self, path: &str) -> Result<FsEntry> {
@@ -181,22 +180,21 @@ impl FileStorageDriver for FileStorageLocal {
             return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("not a directory: {path}")));
         }
         let runtime = self.listing.clone();
-        let class = crate::core::work::WorkClass::current();
-        Ok(Box::pin(async_stream::try_stream! {
+        Ok(Box::pin(crate::core::work::WorkClass::current().bind_stream(async_stream::try_stream! {
             let cancellation = CancellationToken::new();
             let _cancel_on_drop = cancellation.clone().drop_guard();
-            let _scan_permit = class.scope(runtime.enter()).await?;
+            let _scan_permit = runtime.enter().await?;
             let span = perf_span!("local_summary_listing", entry_count = Empty);
-            let directory = class.scope(runtime.open_directory(root, cancellation.clone())).await?;
+            let directory = runtime.open_directory(root, cancellation.clone()).await?;
             let mut entry_count = 0_u64;
             loop {
-                let batch = class.scope(runtime.read_summaries(directory.clone(), cancellation.clone())).await?;
+                let batch = runtime.read_summaries(directory.clone(), cancellation.clone()).await?;
                 if batch.is_empty() { break; }
                 entry_count += batch.len() as u64;
                 for entry in batch { yield entry; }
             }
             span.record("entry_count", entry_count);
-        }))
+        })))
     }
 
     async fn exists_file(&self, path: &str) -> Result<bool> {
