@@ -108,7 +108,7 @@ impl SummaryData {
     }
 
     async fn scan_traced(folder: &ResolvedStoragePath, root: &Path, include_hidden: bool, budget: &WorkBudget) -> Result<Self> {
-        let mut stream = folder.find_entry_summaries().await?;
+        let mut stream = folder.find_entry_summaries(WorkClass::Foreground).await?;
         let converter = EntryConverter::new(root);
         let mut entries = Vec::new();
         while let Some(entry) = stream.next().await {
@@ -123,7 +123,7 @@ impl SummaryData {
         }
         let data = budget
             .io()
-            .ticket(WorkClass::current())
+            .ticket(WorkClass::Foreground)
             .counted(WorkKind::Summary)
             .acquire()
             .await?

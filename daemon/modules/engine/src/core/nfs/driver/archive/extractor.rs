@@ -6,7 +6,10 @@ use std::{
 
 use tokio::sync::Semaphore;
 
-use crate::{core::nfs::MaterializedFile, prelude::*};
+use crate::{
+    core::{nfs::MaterializedFile, work::WorkClass},
+    prelude::*,
+};
 
 use super::{
     ArchiveError, ArchiveReader, InspectedArchive,
@@ -33,6 +36,7 @@ impl ArchiveExtractor {
         runtime: Arc<ArchiveRuntime>,
         inspected: Arc<InspectedArchive>,
         entry: ArchiveEntry,
+        class: WorkClass,
     ) -> Result<MaterializedFile> {
         let options = runtime.options();
         if entry.fs_entry.meta.len > options.max_materialized_file_size {
@@ -65,11 +69,8 @@ impl ArchiveExtractor {
             }
         }
 
-        let work = Self::extract_block(identity, source_path, source_check, runtime.clone(), inspected, block_id, target.clone());
-        let block = runtime
-            .block_flights()
-            .run((identity, block_id), crate::core::work::WorkClass::current().scope(work))
-            .await?;
+        let work = Self::extract_block(identity, source_path, source_check, runtime.clone(), inspected, block_id, target.clone(), class);
+        let block = runtime.block_flights().run((identity, block_id), work).await?;
         block
             .files
             .get(&target)
@@ -82,6 +83,8 @@ impl ArchiveExtractor {
     /// block を 1 回 decode し、検証した file を cache へ登録する。
     ///
     /// 容量が block 全体に足りない場合も要求された entry を確実に返せるよう、要求された entry を先に登録する。
+    // The archive coordinates and the requested entries are all needed to decode one block.
+    #[allow(clippy::too_many_arguments)]
     async fn extract_block(
         identity: ArchiveIdentity,
         source_path: PathBuf,
@@ -90,6 +93,7 @@ impl ArchiveExtractor {
         inspected: Arc<InspectedArchive>,
         block_id: ArchiveBlockId,
         requested: String,
+        class: WorkClass,
     ) -> Result<ExtractedBlock> {
         if let Some(fingerprint) = &source_check {
             fingerprint.ensure_unchanged(&source_path).await?;
@@ -101,7 +105,7 @@ impl ArchiveExtractor {
         let requested_len = inspected.index.get(&requested).map(|entry| entry.fs_entry.meta.len).unwrap_or(0);
         let requested_path = requested.clone();
         let outputs = runtime
-            .run_blocking(move || match (reader, block_id) {
+            .run_blocking(class, move || match (reader, block_id) {
                 (ArchiveReader::Zip(reader), ArchiveBlockId::Zip(index)) => {
                     let output = reader.extract(&source_path, index, requested_len, &staging_dir)?;
                     Ok(vec![(requested_path, output)])
@@ -154,6 +158,8 @@ impl ArchiveExtractor {
     ///
     /// タイムラインの集計が使う。extraction cache を引かず登録もせず、`permits` の上限で decoder を動かす。
     /// 1 つの file の上限を超える entry は返さない。
+    // The archive coordinates and the wanted entries are all needed to decode one block.
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn extract_uncached(
         source_path: PathBuf,
         source_check: Option<SourceFingerprint>,
@@ -162,6 +168,7 @@ impl ArchiveExtractor {
         block_id: Option<ArchiveBlockId>,
         wanted: &[String],
         permits: Arc<Semaphore>,
+        class: WorkClass,
     ) -> Result<HashMap<String, MaterializedFile>> {
         let options = runtime.options();
         let wanted = wanted
@@ -202,7 +209,7 @@ impl ArchiveExtractor {
         let check_path = source_path.clone();
         let reader = inspected.reader.clone();
         let outputs = runtime
-            .run_blocking_with(&permits, move || match (reader, block_id) {
+            .run_blocking_with(class, &permits, move || match (reader, block_id) {
                 (ArchiveReader::Zip(reader), ArchiveBlockId::Zip(index)) => {
                     let output = reader.extract(&source_path, index, block_size, &staging_dir)?;
                     Ok(vec![(first, output)])

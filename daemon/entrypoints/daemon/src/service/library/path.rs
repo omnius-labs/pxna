@@ -6,6 +6,7 @@ use omnius_pxna_engine::{
 };
 
 use crate::prelude::*;
+use omnius_pxna_engine::service::WorkClass;
 
 /// クライアントが送った Library 相対 path を検査し、segment に分けた値。
 ///
@@ -90,7 +91,7 @@ impl LibraryPathResolver {
         let mut full = library_root.to_path_buf();
         full.extend(relative.segments());
         match tokio::fs::symlink_metadata(&full).await {
-            Ok(_) => Ok(self.storage.resolve_entry(&Self::local(&full)?).await?),
+            Ok(_) => Ok(self.storage.resolve_entry(&Self::local(&full)?, WorkClass::Foreground).await?),
             Err(error) if Self::is_missing(&error) => self.resolve_entry(library_root, relative).await,
             Err(error) => Err(error.into()),
         }
@@ -102,7 +103,7 @@ impl LibraryPathResolver {
         full.extend(segments);
 
         match self.stat(&full).await {
-            Ok(_) => return Ok(self.storage.resolve_entry(&Self::local(&full)?).await?),
+            Ok(_) => return Ok(self.storage.resolve_entry(&Self::local(&full)?, WorkClass::Foreground).await?),
             Err(error) if Self::is_missing(&error) => {}
             Err(error) => return Err(error.into()),
         }
@@ -133,9 +134,9 @@ impl LibraryPathResolver {
 
             let mut root = outer.clone();
             root.push_archive_root().map_err(Self::path_error)?;
-            let namespace = self.storage.resolve_entry(&root).await?;
+            let namespace = self.storage.resolve_entry(&root, WorkClass::Foreground).await?;
             let candidate = namespace.at(&rest.join("/"))?;
-            match candidate.get_entry().await {
+            match candidate.get_entry(WorkClass::Foreground).await {
                 Ok(_) => return Ok(candidate),
                 Err(error) if error.kind() == &omnius_pxna_engine::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
@@ -145,7 +146,7 @@ impl LibraryPathResolver {
             for index in 0..rest.len() {
                 let prefix = rest[..=index].join("/");
                 let candidate = namespace.at(&prefix)?;
-                match candidate.get_entry().await {
+                match candidate.get_entry(WorkClass::Foreground).await {
                     Ok(entry) if entry.detail.kind() == omnius_pxna_engine::model::FsEntryKind::Dir => {}
                     Ok(_) => {
                         boundary = Some((candidate, index));

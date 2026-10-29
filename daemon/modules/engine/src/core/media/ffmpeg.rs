@@ -3,21 +3,22 @@ use std::path::Path;
 use tokio::process::Command;
 
 use super::process;
+use crate::core::work::WorkClass;
 use crate::prelude::*;
 
 impl super::MediaTools {
     /// ffprobe で動画の長さ（秒）を得る。長さを読めない file は `UnsupportedType` にする。
     #[cfg(test)]
-    pub async fn probe_duration_secs(&self, file: &Path) -> Result<f64> {
-        Ok(self.probe_video_info(file).await?.duration_secs)
+    pub async fn probe_duration_secs(&self, file: &Path, class: WorkClass) -> Result<f64> {
+        Ok(self.probe_video_info(file, class).await?.duration_secs)
     }
 
     /// 再生能力の判定とフレーム生成に必要な、動画の情報を一度に得る。
-    pub async fn probe_video_info(&self, file: &Path) -> Result<super::VideoInfo> {
+    pub async fn probe_video_info(&self, file: &Path, class: WorkClass) -> Result<super::VideoInfo> {
         let mut command = Command::new(&self.options.ffprobe_path);
         command.args(["-v", "error", "-show_format", "-show_streams", "-of", "json", "-i"]).arg(file);
 
-        let output = self.run(command).await?;
+        let output = self.run(command, class).await?;
         super::VideoInfo::parse(&output)
     }
 
@@ -25,7 +26,7 @@ impl super::MediaTools {
     ///
     /// タイルに分けて符号化された画像は、タイルの stream ではなく、それらを束ねる stream group の寸法を使う。
     /// stream group を出力できない ffprobe（確かめた範囲では 5.1 と 6.1）は、そのオプションを知らずに失敗するので、オプションを外してやり直す。
-    pub async fn probe_image_size(&self, file: &Path) -> Result<(u32, u32, u16, bool)> {
+    pub async fn probe_image_size(&self, file: &Path, class: WorkClass) -> Result<(u32, u32, u16, bool)> {
         let probe = |with_stream_groups: bool| {
             let mut command = Command::new(&self.options.ffprobe_path);
             command.args(["-v", "error", "-show_streams"]);
@@ -33,7 +34,7 @@ impl super::MediaTools {
                 command.arg("-show_stream_groups");
             }
             command.args(["-of", "json", "-i"]).arg(file);
-            self.run(command)
+            self.run(command, class)
         };
 
         let output = match probe(true).await {
@@ -45,13 +46,13 @@ impl super::MediaTools {
     }
 
     /// ffprobe で、コンテナか stream の `creation_time` を得る。書かれていなければ `None` にする。
-    pub async fn probe_creation_time(&self, file: &Path) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+    pub async fn probe_creation_time(&self, file: &Path, class: WorkClass) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
         let mut command = Command::new(&self.options.ffprobe_path);
         command
             .args(["-v", "error", "-show_entries", "format_tags=creation_time:stream_tags=creation_time", "-of", "json", "-i"])
             .arg(file);
 
-        let output = self.run(command).await?;
+        let output = self.run(command, class).await?;
         Ok(super::CreationTime::parse(&output))
     }
 
@@ -59,7 +60,7 @@ impl super::MediaTools {
     ///
     /// PPM は raw 画素に寸法のヘッダを付けるだけなので、PNG の圧縮より速い。stream を指定せず、ffmpeg の既定の選択に任せる。
     /// タイルの組み立てと `irot` の回転は ffmpeg が反映する（確かめた範囲では ffmpeg 9.0）。
-    pub async fn extract_image_pixels(&self, file: &Path) -> Result<Vec<u8>> {
+    pub async fn extract_image_pixels(&self, file: &Path, class: WorkClass) -> Result<Vec<u8>> {
         let mut command = Command::new(&self.options.ffmpeg_path);
         command.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"]).arg(file).args([
             "-frames:v",
@@ -74,13 +75,13 @@ impl super::MediaTools {
             "ppm",
             "-",
         ]);
-        self.run(command).await
+        self.run(command, class).await
     }
 
     /// ffmpeg で読む画像（HEIC、AVIF など）を、1 枚の PNG として取り出す。
     ///
     /// JXL のように、ffmpeg が主画像のアルファをそのまま返す形式で使う。stream を指定せず、ffmpeg の既定の選択に任せる。
-    pub async fn extract_image(&self, file: &Path) -> Result<Vec<u8>> {
+    pub async fn extract_image(&self, file: &Path, class: WorkClass) -> Result<Vec<u8>> {
         let output_dir = tempfile::tempdir()?;
         let output_path = output_dir.path().join("image.png");
 
@@ -90,7 +91,7 @@ impl super::MediaTools {
             .arg(file)
             .args(["-frames:v", "1", "-an", "-sn"])
             .arg(&output_path);
-        self.run(command).await?;
+        self.run(command, class).await?;
         process::read_output(&output_path, file).await
     }
 
@@ -98,7 +99,7 @@ impl super::MediaTools {
     ///
     /// 位置ごとに `-ss` を付けた入力を並べ、キーフレーム単位で移る。一覧で眺めるためのフレームに正確な時刻は要らず、デコードする量が少ないほど速い。
     /// 動画の終わりを超えた位置など、取り出せなかったフレームは結果から除く。
-    pub async fn extract_frames(&self, file: &Path, positions_secs: &[f64]) -> Result<Vec<Vec<u8>>> {
+    pub async fn extract_frames(&self, file: &Path, positions_secs: &[f64], class: WorkClass) -> Result<Vec<Vec<u8>>> {
         let output_dir = tempfile::tempdir()?;
         let frame_path = |index: usize| output_dir.path().join(format!("{index}.png"));
 
@@ -114,7 +115,7 @@ impl super::MediaTools {
                 .args(["-frames:v", "1", "-an", "-sn"])
                 .arg(frame_path(index));
         }
-        self.run(command).await?;
+        self.run(command, class).await?;
 
         let mut frames = Vec::new();
         for index in 0..positions_secs.len() {
@@ -206,13 +207,13 @@ mod tests {
             },
             Duration::from_secs(5),
         );
-        let error = tools.probe_duration_secs(Path::new("a.mp4")).await.unwrap_err();
+        let error = tools.probe_duration_secs(Path::new("a.mp4"), WorkClass::Foreground).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
-        let error = tools.extract_frames(Path::new("a.mp4"), &[1.0]).await.unwrap_err();
+        let error = tools.extract_frames(Path::new("a.mp4"), &[1.0], WorkClass::Foreground).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
-        let error = tools.extract_image_pixels(Path::new("a.avif")).await.unwrap_err();
+        let error = tools.extract_image_pixels(Path::new("a.avif"), WorkClass::Foreground).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
-        let error = tools.decode_heif(Path::new("a.heic")).await.unwrap_err();
+        let error = tools.decode_heif(Path::new("a.heic"), WorkClass::Foreground).await.unwrap_err();
         assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
     }
 }

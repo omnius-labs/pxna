@@ -3,6 +3,7 @@ use std::path::Path;
 use tokio::process::Command;
 
 use super::process;
+use crate::core::work::WorkClass;
 use crate::prelude::*;
 
 impl super::MediaTools {
@@ -13,13 +14,13 @@ impl super::MediaTools {
     /// image has it) but skips the PNG filtering pass. libheif 1.19 added TIFF output, but a build may omit libtiff, so
     /// an unsupported output falls back to a level-0 PNG. The PNG fallback needs libheif 1.17 or newer, which the daemon
     /// checks at startup.
-    pub async fn decode_heif(&self, file: &Path) -> Result<Vec<u8>> {
+    pub async fn decode_heif(&self, file: &Path, class: WorkClass) -> Result<Vec<u8>> {
         let output_dir = tempfile::tempdir()?;
         let tiff_path = output_dir.path().join("image.tiff");
 
         let mut command = Command::new(&self.options.heif_dec_path);
         command.arg(file).arg(&tiff_path);
-        match self.run(command).await {
+        match self.run(command, class).await {
             Ok(_) => return process::read_output(&tiff_path, file).await,
             Err(error) if Self::tiff_output_is_unsupported(&error) => {}
             Err(error) => return Err(error),
@@ -28,7 +29,7 @@ impl super::MediaTools {
         let png_path = output_dir.path().join("image.png");
         let mut command = Command::new(&self.options.heif_dec_path);
         command.args(["--png-compression-level", "0"]).arg(file).arg(&png_path);
-        self.run(command).await?;
+        self.run(command, class).await?;
         // A file with several top-level images gets numbered names from heif-dec, so this exact name is not created.
         process::read_output(&png_path, file).await
     }

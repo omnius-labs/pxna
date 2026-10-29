@@ -37,6 +37,12 @@ const MAX_PLACEMENTS: usize = 3;
 /// 動画から取り出すフレームの数と位置。設定ファイルからは指定できず、ここから渡す。
 const FRAME_SPEC: FrameSpec = FrameSpec::DEFAULT;
 
+/// 生成の中のストレージ読み取りと外部プロセスの段。要求が Interactive でも Foreground に置く。
+///
+/// 要求の段は生成の枠だけを決める。読み取りまで Interactive にすると、Interactive は同じ資源で
+/// Foreground を保留するので、画面の再検証が一覧の列挙を止めてしまう。
+const READ_CLASS: WorkClass = WorkClass::Foreground;
+
 /// サムネイルの生成とキャッシュの設定。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThumbnailOptions {
@@ -366,7 +372,7 @@ impl ThumbnailGenerator {
 
     /// file にはその file のサムネイルを返す。フォルダと archive には、直下の代表の file のサムネイルを返す。
     pub async fn generate(&self, path: &NestedPath, request: &ThumbnailRequest) -> Result<Thumbnail> {
-        self.generate_resolved(self.inner.fs.resolve_entry(path).await?, request).await
+        self.generate_resolved(self.inner.fs.resolve_entry(path, READ_CLASS).await?, request).await
     }
 
     /// daemon の境界探索で得た driver を、そのまま生成に使う。
@@ -440,7 +446,7 @@ impl Inner {
     async fn locate(&self, resolved: ResolvedStoragePath, request: &ThumbnailRequest) -> Result<Located> {
         let inner = self;
         let path = resolved.path().to_nested_path_buf();
-        let entry = resolved.get_entry().await?;
+        let entry = resolved.get_entry(READ_CLASS).await?;
         let (target, entry) = match entry.detail.clone() {
             FsEntryDetail::File { archive: false } => (resolved, entry),
             FsEntryDetail::Dir { .. } | FsEntryDetail::File { archive: true } => {
@@ -448,20 +454,20 @@ impl Inner {
                 if matches!(entry.detail, FsEntryDetail::File { .. }) {
                     folder.push_archive_root()?;
                 }
-                let folder = if folder == path { resolved } else { inner.fs.resolve_entry(&folder).await? };
-                let mut target = inner.selection.select(&folder).await?;
+                let folder = if folder == path { resolved } else { inner.fs.resolve_entry(&folder, READ_CLASS).await? };
+                let mut target = inner.selection.select(&folder, READ_CLASS).await?;
                 let entry = async {
-                    match target.get_listing_entry().await {
+                    match target.get_listing_entry(READ_CLASS).await {
                         Ok(entry) if matches!(entry.detail, FsEntryDetail::File { .. }) => Ok(entry),
                         Ok(_) => {
                             inner.selection.invalidate();
-                            target = inner.selection.select(&folder).await?;
-                            target.get_listing_entry().await
+                            target = inner.selection.select(&folder, READ_CLASS).await?;
+                            target.get_listing_entry(READ_CLASS).await
                         }
                         Err(error) if error.kind() == &ErrorKind::NotFound => {
                             inner.selection.invalidate();
-                            target = inner.selection.select(&folder).await?;
-                            target.get_listing_entry().await
+                            target = inner.selection.select(&folder, READ_CLASS).await?;
+                            target.get_listing_entry(READ_CLASS).await
                         }
                         Err(error) => Err(error),
                     }
@@ -686,7 +692,7 @@ impl Inner {
             self.probe.placements.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let created = placed.created.is_some();
             if let Some(created) = placed.created {
-                WorkClass::spawn(self.clone().run_job(context.clone(), source_key.clone(), created));
+                tokio::spawn(self.clone().run_job(context.clone(), source_key.clone(), created).in_current_span());
             }
             // The time to wait for a job of the source, which the item may have started itself or joined.
             let output = placed.handle.wait().instrument(perf_span!("thumbnail_job_wait", created)).await?;
@@ -788,7 +794,7 @@ impl Inner {
         #[cfg(test)]
         let _counted = self.probe.enter().await;
         // 変換が終わるまで、archive 内の file の lease を保つ。
-        let file = target.materialize_file().instrument(perf_span!("thumbnail_materialize")).await?;
+        let file = target.materialize_file(READ_CLASS).instrument(perf_span!("thumbnail_materialize")).await?;
         let results = async {
             Ok::<_, Error>(match kind {
                 MediaKind::Image => {
@@ -799,7 +805,7 @@ impl Inner {
                 }
                 MediaKind::FfmpegImage | MediaKind::HeifImage => {
                     let decode = perf_span!("thumbnail_external_decode", bytes = Empty);
-                    let input = self.decode_ffmpeg_image(target, file.path(), kind).instrument(decode.clone()).await?;
+                    let input = self.decode_ffmpeg_image(target, file.path(), kind, READ_CLASS).instrument(decode.clone()).await?;
                     decode.record("bytes", input.len());
                     self.convert_many(permit, input, specs.to_vec()).await?
                 }
@@ -873,12 +879,12 @@ impl Inner {
     ///
     /// Only the first frame is kept at full size, for the single images and the heads of the sprite sheets. The other frames are decoded, resized, and dropped one at a time.
     async fn produce_video(&self, permit: WorkPermit, file: &Path, source: &ResolvedStoragePath, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
-        let duration = self.media_info.probe_video(source).await?.duration_secs;
+        let duration = self.media_info.probe_video(source, READ_CLASS).await?.duration_secs;
         let mut positions = FRAME_SPEC.positions(duration);
         if !specs.iter().any(|spec| spec.shape == OutputShape::Sprite) {
             positions.truncate(1);
         }
-        let frames = self.extract_frames(file, &positions).await?;
+        let frames = self.extract_frames(file, &positions, READ_CLASS).await?;
 
         permit
             .run_blocking(move || -> Result<Vec<Result<CachedImage>>> {
@@ -945,27 +951,27 @@ impl Inner {
             .await?
     }
 
-    async fn extract_frames(&self, file: &Path, positions_secs: &[f64]) -> Result<Vec<Vec<u8>>> {
+    async fn extract_frames(&self, file: &Path, positions_secs: &[f64], class: WorkClass) -> Result<Vec<Vec<u8>>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.extract_frames(file, positions_secs).await
+        self.tools.extract_frames(file, positions_secs, class).await
     }
 
     /// ffmpeg で読む画像をデコードする。HEIC/HEIF/AVIF は PPM、それ以外（JXL、JP2）は PNG を使う。
     /// アルファ付きの HEIC/HEIF/AVIF は heif-dec に回し、ffmpeg が失敗したときも heif-dec で読み直す。
-    async fn decode_ffmpeg_image(&self, source: &ResolvedStoragePath, file: &Path, kind: MediaKind) -> Result<Vec<u8>> {
+    async fn decode_ffmpeg_image(&self, source: &ResolvedStoragePath, file: &Path, kind: MediaKind, class: WorkClass) -> Result<Vec<u8>> {
         let heif_decodable = kind == MediaKind::HeifImage || Self::is_avif(source);
         if !heif_decodable {
-            return self.extract_image(file).await;
+            return self.extract_image(file, class).await;
         }
-        if self.has_alpha(source).await? {
-            return self.decode_heif(file).await;
+        if self.has_alpha(source, class).await? {
+            return self.decode_heif(file, class).await;
         }
-        match self.extract_image_pixels(file).await {
+        match self.extract_image_pixels(file, class).await {
             Ok(image) => Ok(image),
             Err(error) => {
                 warn!(error = ?error, "ffmpeg failed to decode a HEIF or AVIF image, so heif-dec reads it instead");
-                self.decode_heif(file).await
+                self.decode_heif(file, class).await
             }
         }
     }
@@ -978,8 +984,8 @@ impl Inner {
     }
 
     /// 画像がアルファの補助画像を持つか。probe に失敗したときは、アルファを見落とさないよう heif-dec に回す。
-    async fn has_alpha(&self, source: &ResolvedStoragePath) -> Result<bool> {
-        match self.media_info.probe(source).await {
+    async fn has_alpha(&self, source: &ResolvedStoragePath, class: WorkClass) -> Result<bool> {
+        match self.media_info.probe(source, class).await {
             Ok(MediaInfo::Image(info)) => Ok(info.has_alpha),
             Ok(_) => Ok(false),
             Err(error) => {
@@ -989,23 +995,23 @@ impl Inner {
         }
     }
 
-    async fn extract_image(&self, file: &Path) -> Result<Vec<u8>> {
+    async fn extract_image(&self, file: &Path, class: WorkClass) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.extract_image(file).await
+        self.tools.extract_image(file, class).await
     }
 
-    async fn extract_image_pixels(&self, file: &Path) -> Result<Vec<u8>> {
+    async fn extract_image_pixels(&self, file: &Path, class: WorkClass) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.ffmpeg_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.extract_image_pixels(file).await
+        self.tools.extract_image_pixels(file, class).await
     }
 
     /// heif-dec で読む。アルファ付きの HEIC/HEIF/AVIF と、ffmpeg が読めなかったときのフォールバックに使う。
-    async fn decode_heif(&self, file: &Path) -> Result<Vec<u8>> {
+    async fn decode_heif(&self, file: &Path, class: WorkClass) -> Result<Vec<u8>> {
         #[cfg(test)]
         self.heif_dec_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.tools.decode_heif(file).await
+        self.tools.decode_heif(file, class).await
     }
 
     /// 拡張子が合っていても中身が読めない file は、`UnsupportedType` にする。
@@ -1286,7 +1292,7 @@ mod tests {
         let request = thumbnail_request(256, 256);
         let resolve = |path: std::path::PathBuf| {
             let fs = generator.inner.fs.clone();
-            async move { fs.resolve_entry(&nested(&path)).await }
+            async move { fs.resolve_entry(&nested(&path), WorkClass::Foreground).await }
         };
 
         let key = generator.current_key(resolve(file.clone()).await?, &request).await?.expect("a file has a key");
@@ -1638,22 +1644,22 @@ mod tests {
         let fixture = fixture(ThumbnailOptions::default()).await?;
         let video = fixture.dir.path().join("info.mp4");
         write_video(&video, 3, 160, 120)?;
-        let source = fixture.generator.inner.fs.resolve_entry(&nested(&video)).await?;
+        let source = fixture.generator.inner.fs.resolve_entry(&nested(&video), WorkClass::Foreground).await?;
         let media = &fixture.generator.inner.media_info;
-        let (a, b) = tokio::join!(media.probe_video(&source), media.probe_video(&source));
+        let (a, b) = tokio::join!(media.probe_video(&source, WorkClass::Foreground), media.probe_video(&source, WorkClass::Foreground));
         assert_eq!(a?.duration_secs, b?.duration_secs);
         assert_eq!(media.probe_count(), 1);
         fixture.generator.generate(&nested(&video), &thumbnail_request(128, 128)).await?;
         assert_eq!(media.probe_count(), 1, "thumbnail reuses the playback probe");
         write_video(&video, 4, 160, 120)?;
-        assert_eq!(media.probe_video(&source).await?.duration_secs, 4.0);
+        assert_eq!(media.probe_video(&source, WorkClass::Foreground).await?.duration_secs, 4.0);
         assert_eq!(media.probe_count(), 2);
         let archive = fixture.dir.path().join("info.7z");
         write_7z(&archive, &[("clip.mp4", &std::fs::read(&video)?)])?;
         let mut inside = nested(&archive);
         inside.push_str("clip.mp4")?;
-        let source = fixture.generator.inner.fs.resolve_entry(&inside).await?;
-        media.probe_video(&source).await?;
+        let source = fixture.generator.inner.fs.resolve_entry(&inside, WorkClass::Foreground).await?;
+        media.probe_video(&source, WorkClass::Foreground).await?;
         fixture.generator.generate(&inside, &thumbnail_request(128, 128)).await?;
         assert_eq!(media.probe_count(), 3, "archive media and thumbnail share the same entry key");
         Ok(())
@@ -1673,29 +1679,29 @@ mod tests {
         let media = &fixture.generator.inner.media_info;
         let png = fixture.dir.path().join("wide.PNG");
         write_png(&png, 40, 20)?;
-        let source = fixture.generator.inner.fs.resolve_entry(&nested(&png)).await?;
-        let MediaInfo::Image(info) = media.probe(&source).await? else {
+        let source = fixture.generator.inner.fs.resolve_entry(&nested(&png), WorkClass::Foreground).await?;
+        let MediaInfo::Image(info) = media.probe(&source, WorkClass::Foreground).await? else {
             return Err("an image should give image information".into());
         };
         assert_eq!((info.content_type.as_str(), info.width, info.height), ("image/png", 40, 20));
         assert_eq!(info.exif, ImageExif::default());
         assert_eq!(
-            *media.probe_video(&source).await.unwrap_err().kind(),
+            *media.probe_video(&source, WorkClass::Foreground).await.unwrap_err().kind(),
             ErrorKind::UnsupportedType,
             "画像は動画としては読めない"
         );
 
         let broken = fixture.dir.path().join("broken.png");
         std::fs::write(&broken, b"not an image")?;
-        let source = fixture.generator.inner.fs.resolve_entry(&nested(&broken)).await?;
-        assert_eq!(*media.probe(&source).await.unwrap_err().kind(), ErrorKind::UnsupportedType);
+        let source = fixture.generator.inner.fs.resolve_entry(&nested(&broken), WorkClass::Foreground).await?;
+        assert_eq!(*media.probe(&source, WorkClass::Foreground).await.unwrap_err().kind(), ErrorKind::UnsupportedType);
 
         let archive = fixture.dir.path().join("pics.7z");
         write_7z(&archive, &[("inner.png", &png_bytes(30, 10)?)])?;
         let mut inside = nested(&archive);
         inside.push_str("inner.png")?;
-        let source = fixture.generator.inner.fs.resolve_entry(&inside).await?;
-        let MediaInfo::Image(info) = media.probe(&source).await? else {
+        let source = fixture.generator.inner.fs.resolve_entry(&inside, WorkClass::Foreground).await?;
+        let MediaInfo::Image(info) = media.probe(&source, WorkClass::Foreground).await? else {
             return Err("an image in an archive should give image information".into());
         };
         assert_eq!((info.width, info.height), (30, 10));
@@ -1711,8 +1717,8 @@ mod tests {
         // ffprobe は拡張子ではなく中身で形式を決めるので、PNG の中身を HEIC の名前で置いて、ffprobe の経路を通す。
         let heic = fixture.dir.path().join("IMG_0001.HEIC");
         write_png(&heic, 64, 48)?;
-        let source = fixture.generator.inner.fs.resolve_entry(&nested(&heic)).await?;
-        let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source).await? else {
+        let source = fixture.generator.inner.fs.resolve_entry(&nested(&heic), WorkClass::Foreground).await?;
+        let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source, WorkClass::Foreground).await? else {
             return Err("an ffmpeg image should give image information".into());
         };
         assert_eq!((info.content_type.as_str(), info.width, info.height), ("image/heic", 64, 48));
@@ -1743,8 +1749,13 @@ mod tests {
         )?;
         let applies_irot = height > width;
         for (name, _, rotation) in rotated {
-            let source = fixture.generator.inner.fs.resolve_entry(&nested(&fixture.dir.path().join(name))).await?;
-            let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source).await? else {
+            let source = fixture
+                .generator
+                .inner
+                .fs
+                .resolve_entry(&nested(&fixture.dir.path().join(name)), WorkClass::Foreground)
+                .await?;
+            let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source, WorkClass::Foreground).await? else {
                 return Err("a rotated AVIF must be recognized as an image".into());
             };
             let expected = if applies_irot { rotation } else { 0 };
@@ -2043,8 +2054,8 @@ mod tests {
         let fixture = fixture(ThumbnailOptions::default()).await?;
         let expected = [(1280, 960, 0), (1280, 960, 90)];
         for ((file, _), expected) in write_tiled_heics(fixture.dir.path())?.into_iter().zip(expected) {
-            let source = fixture.generator.inner.fs.resolve_entry(&nested(&file)).await?;
-            let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source).await? else {
+            let source = fixture.generator.inner.fs.resolve_entry(&nested(&file), WorkClass::Foreground).await?;
+            let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source, WorkClass::Foreground).await? else {
                 return Err("a HEIC must be recognized as an image".into());
             };
             assert_eq!(
@@ -2076,8 +2087,8 @@ mod tests {
 
         let avif = fixture.dir.path().join("photo.avif");
         std::fs::write(&avif, include_bytes!("../../../tests/fixtures/blue.avif"))?;
-        let source = fixture.generator.inner.fs.resolve_entry(&nested(&avif)).await?;
-        let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source).await? else {
+        let source = fixture.generator.inner.fs.resolve_entry(&nested(&avif), WorkClass::Foreground).await?;
+        let MediaInfo::Image(info) = fixture.generator.inner.media_info.probe(&source, WorkClass::Foreground).await? else {
             return Err("AVIF must be recognized as an image".into());
         };
         assert_eq!((info.width, info.height, info.rotation), (64, 32, 0));
@@ -2163,8 +2174,8 @@ mod tests {
 
     async fn source_of(fixture: &Fixture, file: &Path) -> TestResult<SourceId> {
         let inner = &fixture.generator.inner;
-        let resolved = inner.fs.resolve_entry(&nested(file)).await?;
-        let entry = resolved.get_entry().await?;
+        let resolved = inner.fs.resolve_entry(&nested(file), WorkClass::Foreground).await?;
+        let entry = resolved.get_entry(WorkClass::Foreground).await?;
         Ok(inner.source_id(&resolved, &entry).ok_or("the file has no cache key")?)
     }
 
@@ -2731,7 +2742,7 @@ mod tests {
         let file = fixture.dir.path().join("a.png");
         write_png(&file, 1000, 500)?;
         let inner = &fixture.generator.inner;
-        let target = inner.fs.resolve_entry(&nested(&file)).await?;
+        let target = inner.fs.resolve_entry(&nested(&file), WorkClass::Foreground).await?;
         let plan = inner.plan(&webp(ThumbnailVariant::Thumbnail, 256, ImageResizeType::Crop))?;
 
         let image = inner.clone().generate_alone(&target, MediaKind::Image, &plan, WorkClass::Foreground).await?;

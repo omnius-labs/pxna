@@ -25,7 +25,8 @@ pub struct ThumbnailRequest {
     pub format: ImageFormatType,
     pub resize: ImageResizeType,
     pub anchor: ImageAnchorPositionType,
-    /// 生成の枠を待つ段。表示中の画像は Interactive、先読みとサムネイルは Foreground にする。
+    /// 生成の枠だけを決める段。表示中の画像は Interactive、先読みとサムネイルは Foreground にする。
+    /// 生成の中のストレージ読み取りと外部プロセスは、この段によらず Foreground で走る。
     pub class: WorkClass,
 }
 

@@ -1,3 +1,4 @@
+use omnius_pxna_engine::service::WorkClass;
 use std::{cmp::Ordering, path::Path, time::Instant};
 
 use futures::StreamExt as _;
@@ -303,7 +304,7 @@ impl ListingEntries {
         let mut entries = Vec::new();
         let mut folders = vec![folder.clone()];
         while let Some(folder) = folders.pop() {
-            let mut stream = folder.find_entries(false).await?;
+            let mut stream = folder.find_entries(false, WorkClass::Foreground).await?;
             while let Some(nested) = stream.next().await {
                 let nested = nested?;
                 let conversion_started = Instant::now();
@@ -571,7 +572,7 @@ pub(crate) mod tests {
         let storage = Arc::new(StorageService::new(Arc::new(LocalStorageDriver::new(provider)), runtime));
         let library_root = root.join("library");
         let nested = omnius_pxna_engine::model::NestedPathBuf::try_from(library_root.as_path()).map_err(|error| Error::from_error(error, ErrorKind::InvalidInput))?;
-        let folder = storage.resolve_entry(&nested).await?;
+        let folder = storage.resolve_entry(&nested, WorkClass::Foreground).await?;
         let scanned = ListingEntries::scan(&folder, &library_root, true, include_hidden, limit).await?;
         let mut q = query(None, None);
         q.recursive = Some(true);

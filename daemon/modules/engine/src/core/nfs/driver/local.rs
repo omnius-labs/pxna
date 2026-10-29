@@ -11,9 +11,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::field::Empty;
 
 use crate::{
-    core::nfs::{
-        ConflictPolicy, FileStorageDriver, FsEntryStream, FsEntrySummaryStream, LiveStagingSet, MaterializedFile, Publish, STAGING_MAX_AGE, StagingFile, StagingPublisher,
-        StagingSweeper,
+    core::{
+        nfs::{
+            ConflictPolicy, FileStorageDriver, FsEntryStream, FsEntrySummaryStream, LiveStagingSet, MaterializedFile, Publish, STAGING_MAX_AGE, StagingFile, StagingPublisher,
+            StagingSweeper,
+        },
+        work::WorkClass,
     },
     perf_span,
     prelude::*,
@@ -103,7 +106,7 @@ impl FileStorageLocal {
 
 #[async_trait]
 impl FileStorageDriver for FileStorageLocal {
-    async fn get_entry(&self, path: &str) -> Result<FsEntry> {
+    async fn get_entry(&self, path: &str, _class: WorkClass) -> Result<FsEntry> {
         // 操作対象として直接指名された path なので symlink を追跡する。
         let meta = tokio::fs::metadata(path).await.map_err(|e| Self::io_error(e, path))?;
 
@@ -114,7 +117,7 @@ impl FileStorageDriver for FileStorageLocal {
         })
     }
 
-    async fn find_entries(&self, path: &str, recursive: bool) -> Result<FsEntryStream> {
+    async fn find_entries(&self, path: &str, recursive: bool, class: WorkClass) -> Result<FsEntryStream> {
         let root = PathBuf::from(path);
 
         let meta = tokio::fs::metadata(&root).await.map_err(|e| Self::io_error(e, path))?;
@@ -123,10 +126,10 @@ impl FileStorageDriver for FileStorageLocal {
         }
 
         let runtime = self.listing.clone();
-        Ok(Box::pin(crate::core::work::WorkClass::current().bind_stream(async_stream::try_stream! {
+        Ok(Box::pin(async_stream::try_stream! {
             let cancellation = CancellationToken::new();
             let _cancel_on_drop = cancellation.clone().drop_guard();
-            let _scan_permit = runtime.enter().await?;
+            let _scan_permit = runtime.enter(class).await?;
             let span = perf_span!("local_listing", recursive, entry_count = Empty, enumeration_sec = Empty, metadata_sec = Empty);
             let mut enumeration_sec = 0.0;
             let mut metadata_sec = 0.0;
@@ -134,13 +137,13 @@ impl FileStorageDriver for FileStorageLocal {
             let mut stack = vec![root];
             while let Some(dir) = stack.pop() {
                 let enumeration_started = Instant::now();
-                let read_dir = runtime.open_directory(dir, cancellation.clone()).await?;
+                let read_dir = runtime.open_directory(dir, cancellation.clone(), class).await?;
                 enumeration_sec += enumeration_started.elapsed().as_secs_f64();
                 loop {
                     let mut paths = Vec::with_capacity(LocalListingRuntime::BATCH_SIZE * LocalListingRuntime::PARALLEL_BATCHES);
                     let enumeration_started = Instant::now();
                     for _ in 0..LocalListingRuntime::PARALLEL_BATCHES {
-                        let batch = runtime.read_paths(read_dir.clone(), cancellation.clone()).await?;
+                        let batch = runtime.read_paths(read_dir.clone(), cancellation.clone(), class).await?;
                         let count = batch.len();
                         paths.extend(batch);
                         if count < LocalListingRuntime::BATCH_SIZE { break; }
@@ -149,7 +152,7 @@ impl FileStorageDriver for FileStorageLocal {
                     if paths.is_empty() { break; }
                     let chunks: Vec<_> = paths.chunks(LocalListingRuntime::BATCH_SIZE).map(|chunk| chunk.to_vec()).collect();
                     let mut batches = futures::stream::iter(chunks)
-                        .map(|paths| runtime.read_batch(paths, cancellation.clone()))
+                        .map(|paths| runtime.read_batch(paths, cancellation.clone(), class))
                         .buffered(LocalListingRuntime::PARALLEL_BATCHES);
                     while let Some(batch) = batches.next().await {
                         let batch = batch?;
@@ -166,38 +169,38 @@ impl FileStorageDriver for FileStorageLocal {
             }
             // metadata_sec は並列 worker の合計、span の時間は消費側の待ちも含む壁時計時間。
             span.record("entry_count", entry_count).record("enumeration_sec", enumeration_sec).record("metadata_sec", metadata_sec);
-        })))
+        }))
     }
 
-    async fn get_listing_entry(&self, path: &str) -> Result<FsEntry> {
-        self.listing.read_entry(path).await
+    async fn get_listing_entry(&self, path: &str, class: WorkClass) -> Result<FsEntry> {
+        self.listing.read_entry(path, class).await
     }
 
-    async fn find_entry_summaries(&self, path: &str) -> Result<FsEntrySummaryStream> {
+    async fn find_entry_summaries(&self, path: &str, class: WorkClass) -> Result<FsEntrySummaryStream> {
         let root = PathBuf::from(path);
         let meta = tokio::fs::metadata(&root).await.map_err(|error| Self::io_error(error, path))?;
         if !meta.is_dir() {
             return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("not a directory: {path}")));
         }
         let runtime = self.listing.clone();
-        Ok(Box::pin(crate::core::work::WorkClass::current().bind_stream(async_stream::try_stream! {
+        Ok(Box::pin(async_stream::try_stream! {
             let cancellation = CancellationToken::new();
             let _cancel_on_drop = cancellation.clone().drop_guard();
-            let _scan_permit = runtime.enter().await?;
+            let _scan_permit = runtime.enter(class).await?;
             let span = perf_span!("local_summary_listing", entry_count = Empty);
-            let directory = runtime.open_directory(root, cancellation.clone()).await?;
+            let directory = runtime.open_directory(root, cancellation.clone(), class).await?;
             let mut entry_count = 0_u64;
             loop {
-                let batch = runtime.read_summaries(directory.clone(), cancellation.clone()).await?;
+                let batch = runtime.read_summaries(directory.clone(), cancellation.clone(), class).await?;
                 if batch.is_empty() { break; }
                 entry_count += batch.len() as u64;
                 for entry in batch { yield entry; }
             }
             span.record("entry_count", entry_count);
-        })))
+        }))
     }
 
-    async fn exists_file(&self, path: &str) -> Result<bool> {
+    async fn exists_file(&self, path: &str, _class: WorkClass) -> Result<bool> {
         match tokio::fs::metadata(path).await {
             Ok(meta) => Ok(meta.is_file()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -205,7 +208,7 @@ impl FileStorageDriver for FileStorageLocal {
         }
     }
 
-    async fn exists_dir(&self, path: &str) -> Result<bool> {
+    async fn exists_dir(&self, path: &str, _class: WorkClass) -> Result<bool> {
         match tokio::fs::metadata(path).await {
             Ok(meta) => Ok(meta.is_dir()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -213,7 +216,7 @@ impl FileStorageDriver for FileStorageLocal {
         }
     }
 
-    async fn materialize_file(&self, path: &str) -> Result<MaterializedFile> {
+    async fn materialize_file(&self, path: &str, _class: WorkClass) -> Result<MaterializedFile> {
         let meta = tokio::fs::metadata(path).await.map_err(|e| Self::io_error(e, path))?;
         if !meta.is_file() {
             return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("not a file: {path}")));
@@ -305,15 +308,15 @@ mod tests {
 
         let driver = driver();
 
-        let entry = driver.get_entry(&s(&file)).await?;
+        let entry = driver.get_entry(&s(&file), WorkClass::Foreground).await?;
         assert_eq!(entry.path, s(&file));
         assert_eq!(entry.meta.len, 5);
         assert_eq!(entry.detail, FsEntryDetail::File { archive: true });
 
-        let entry = driver.get_entry(&s(dir.path())).await?;
+        let entry = driver.get_entry(&s(dir.path()), WorkClass::Foreground).await?;
         assert_eq!(entry.detail, FsEntryDetail::Dir { has_children: None });
 
-        let e = driver.get_entry(&s(&dir.path().join("missing"))).await.unwrap_err();
+        let e = driver.get_entry(&s(&dir.path().join("missing")), WorkClass::Foreground).await.unwrap_err();
         assert_eq!(*e.kind(), ErrorKind::NotFound);
 
         Ok(())
@@ -327,11 +330,11 @@ mod tests {
 
         let driver = driver();
 
-        assert!(driver.exists_file(&s(&file)).await?);
-        assert!(!driver.exists_dir(&s(&file)).await?);
-        assert!(driver.exists_dir(&s(dir.path())).await?);
-        assert!(!driver.exists_file(&s(dir.path())).await?);
-        assert!(!driver.exists_file(&s(&dir.path().join("missing"))).await?);
+        assert!(driver.exists_file(&s(&file), WorkClass::Foreground).await?);
+        assert!(!driver.exists_dir(&s(&file), WorkClass::Foreground).await?);
+        assert!(driver.exists_dir(&s(dir.path()), WorkClass::Foreground).await?);
+        assert!(!driver.exists_file(&s(dir.path()), WorkClass::Foreground).await?);
+        assert!(!driver.exists_file(&s(&dir.path().join("missing")), WorkClass::Foreground).await?);
 
         Ok(())
     }
@@ -345,12 +348,12 @@ mod tests {
 
         let driver = driver();
 
-        let entries = collect(driver.find_entries(&s(dir.path()), false).await?).await?;
+        let entries = collect(driver.find_entries(&s(dir.path()), false, WorkClass::Foreground).await?).await?;
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].path, s(&dir.path().join("a.txt")));
         assert_eq!(entries[1].path, s(&dir.path().join("sub")));
 
-        let entries = collect(driver.find_entries(&s(dir.path()), true).await?).await?;
+        let entries = collect(driver.find_entries(&s(dir.path()), true, WorkClass::Foreground).await?).await?;
         assert_eq!(entries.len(), 3, "全 descendant を返す");
 
         Ok(())
@@ -365,13 +368,13 @@ mod tests {
         let driver = driver();
         let path = s(&file);
 
-        assert_eq!(&driver.read_file(&path, 0, 10).await?[..], b"0123456789");
-        assert_eq!(&driver.read_file(&path, 3, 4).await?[..], b"3456");
-        assert_eq!(&driver.read_file(&path, 8, 100).await?[..], b"89", "EOF で打ち切る");
-        assert!(driver.read_file(&path, 0, 0).await?.is_empty(), "limit = 0 は empty bytes");
-        assert!(driver.read_file(&path, 10, 5).await?.is_empty(), "offset >= EOF は empty bytes");
+        assert_eq!(&driver.read_file(&path, 0, 10, WorkClass::Foreground).await?[..], b"0123456789");
+        assert_eq!(&driver.read_file(&path, 3, 4, WorkClass::Foreground).await?[..], b"3456");
+        assert_eq!(&driver.read_file(&path, 8, 100, WorkClass::Foreground).await?[..], b"89", "EOF で打ち切る");
+        assert!(driver.read_file(&path, 0, 0, WorkClass::Foreground).await?.is_empty(), "limit = 0 は empty bytes");
+        assert!(driver.read_file(&path, 10, 5, WorkClass::Foreground).await?.is_empty(), "offset >= EOF は empty bytes");
 
-        let e = driver.read_file(&path, 0, MAX_READ_FILE_BYTES + 1).await.unwrap_err();
+        let e = driver.read_file(&path, 0, MAX_READ_FILE_BYTES + 1, WorkClass::Foreground).await.unwrap_err();
         assert_eq!(*e.kind(), ErrorKind::LimitExceeded);
 
         Ok(())
@@ -386,7 +389,7 @@ mod tests {
         std::os::unix::fs::symlink(dir.path().join("missing"), dir.path().join("link.zip"))?;
         let driver = driver();
         let summaries = driver
-            .find_entry_summaries(&s(dir.path()))
+            .find_entry_summaries(&s(dir.path()), WorkClass::Foreground)
             .await?
             .collect::<Vec<_>>()
             .await
@@ -397,9 +400,9 @@ mod tests {
         assert_eq!(link.kind, FsEntryKind::Link);
         assert!(!link.archive);
         assert!(summaries.iter().any(|entry| entry.path.ends_with("image.zip") && entry.archive));
-        let detail = driver.get_listing_entry(&link.path).await?;
+        let detail = driver.get_listing_entry(&link.path, WorkClass::Foreground).await?;
         assert!(matches!(detail.detail, FsEntryDetail::Link { target_kind: None, .. }));
-        assert!(driver.get_entry(&link.path).await.is_err());
+        assert!(driver.get_entry(&link.path, WorkClass::Foreground).await.is_err());
         Ok(())
     }
 
@@ -411,12 +414,12 @@ mod tests {
         let driver = driver();
         let name = std::ffi::OsString::from_vec(vec![0xff]);
         std::fs::write(dir.path().join(&name), b"")?;
-        let mut stream = driver.find_entry_summaries(&s(dir.path())).await?;
+        let mut stream = driver.find_entry_summaries(&s(dir.path()), WorkClass::Foreground).await?;
         assert!(stream.next().await.unwrap().is_err());
         drop(stream);
         std::fs::remove_file(dir.path().join(name))?;
         let socket = std::os::unix::net::UnixListener::bind(dir.path().join("socket"))?;
-        let mut stream = driver.find_entry_summaries(&s(dir.path())).await?;
+        let mut stream = driver.find_entry_summaries(&s(dir.path()), WorkClass::Foreground).await?;
         assert_eq!(stream.next().await.unwrap().unwrap_err().kind(), &ErrorKind::UnsupportedType);
         drop(socket);
         Ok(())
@@ -502,14 +505,14 @@ mod tests {
             let driver = driver();
 
             // 直接指名した symlink は target を見る。
-            let entry = driver.get_entry(&s(&link)).await?;
+            let entry = driver.get_entry(&s(&link), WorkClass::Foreground).await?;
             assert_eq!(entry.detail, FsEntryDetail::File { archive: false });
             assert_eq!(entry.meta.len, 5);
-            assert!(driver.exists_file(&s(&link)).await?);
-            assert_eq!(&driver.read_file(&s(&link), 0, 5).await?[..], b"hello");
+            assert!(driver.exists_file(&s(&link), WorkClass::Foreground).await?);
+            assert_eq!(&driver.read_file(&s(&link), 0, 5, WorkClass::Foreground).await?[..], b"hello");
 
             // 走査中に見つけた symlink は追跡せず link entry として返す。
-            let entries = collect(driver.find_entries(&s(dir.path()), false).await?).await?;
+            let entries = collect(driver.find_entries(&s(dir.path()), false, WorkClass::Foreground).await?).await?;
             let found = entries.iter().find(|n| n.path == s(&link)).unwrap();
             assert_eq!(
                 found.detail,
@@ -533,7 +536,7 @@ mod tests {
             std::os::unix::fs::symlink(&sub, &link)?;
 
             let driver = driver();
-            let entries = collect(driver.find_entries(&s(dir.path()), true).await?).await?;
+            let entries = collect(driver.find_entries(&s(dir.path()), true, WorkClass::Foreground).await?).await?;
 
             let paths: Vec<&str> = entries.iter().map(|n| n.path.as_str()).collect();
             assert!(paths.contains(&s(&link).as_str()));
@@ -550,11 +553,11 @@ mod tests {
 
             let driver = driver();
 
-            let entries = collect(driver.find_entries(&s(dir.path()), false).await?).await?;
+            let entries = collect(driver.find_entries(&s(dir.path()), false, WorkClass::Foreground).await?).await?;
             assert_eq!(entries.len(), 1, "壊れた symlink を黙って除外しない");
             assert!(matches!(entries[0].detail, FsEntryDetail::Link { target_kind: None, .. }));
 
-            assert!(!driver.exists_file(&s(&link)).await?);
+            assert!(!driver.exists_file(&s(&link), WorkClass::Foreground).await?);
 
             Ok(())
         }

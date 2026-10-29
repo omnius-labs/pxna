@@ -6,10 +6,13 @@ use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 use tokio_util::bytes::{Bytes, BytesMut};
 
 use crate::{
-    core::nfs::{
-        materialized::MaterializedFile,
-        materialized::OpenedFile,
-        staging::{ConflictPolicy, Publish, StagingFile},
+    core::{
+        nfs::{
+            materialized::MaterializedFile,
+            materialized::OpenedFile,
+            staging::{ConflictPolicy, Publish, StagingFile},
+        },
+        work::WorkClass,
     },
     prelude::*,
 };
@@ -32,37 +35,37 @@ pub const MAX_READ_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// 入れ子の解決は `StorageService` の責務である。
 #[async_trait]
 pub trait FileStorageDriver: Send + Sync {
-    async fn get_entry(&self, path: &str) -> Result<FsEntry>;
+    async fn get_entry(&self, path: &str, class: WorkClass) -> Result<FsEntry>;
 
     /// `recursive` が `false` なら直下だけ、`true` なら全 descendant を返す。
     /// 順序は contract に含めない。
-    async fn find_entries(&self, path: &str, recursive: bool) -> Result<FsEntryStream>;
+    async fn find_entries(&self, path: &str, recursive: bool, class: WorkClass) -> Result<FsEntryStream>;
 
     /// 一覧の leaf と同じく symlink を追わない詳細。archive は索引の Entry をそのまま返す。
-    async fn get_listing_entry(&self, path: &str) -> Result<FsEntry> {
-        self.get_entry(path).await
+    async fn get_listing_entry(&self, path: &str, class: WorkClass) -> Result<FsEntry> {
+        self.get_entry(path, class).await
     }
 
     /// 直下の名前と種別。属性が既にある namespace は既存の一覧から写せる。
-    async fn find_entry_summaries(&self, path: &str) -> Result<FsEntrySummaryStream> {
-        let entries = self.find_entries(path, false).await?;
+    async fn find_entry_summaries(&self, path: &str, class: WorkClass) -> Result<FsEntrySummaryStream> {
+        let entries = self.find_entries(path, false, class).await?;
         Ok(Box::pin(entries.map(|entry| entry.map(FsEntrySummary::from_entry))))
     }
 
-    async fn exists_file(&self, path: &str) -> Result<bool>;
-    async fn exists_dir(&self, path: &str) -> Result<bool>;
+    async fn exists_file(&self, path: &str, class: WorkClass) -> Result<bool>;
+    async fn exists_dir(&self, path: &str, class: WorkClass) -> Result<bool>;
 
     /// 対象 entry を物理 file として取り出す。driver が実装する中心操作である。
-    async fn materialize_file(&self, path: &str) -> Result<MaterializedFile>;
+    async fn materialize_file(&self, path: &str, class: WorkClass) -> Result<MaterializedFile>;
 
-    async fn open_file(&self, path: &str) -> Result<OpenedFile> {
-        self.materialize_file(path).await?.open().await
+    async fn open_file(&self, path: &str, class: WorkClass) -> Result<OpenedFile> {
+        self.materialize_file(path, class).await?.open().await
     }
 
     /// engine 内部の小さな読み取りのためにある。
     ///
     /// HTTP の content 応答はこれを経由せず、`open_file` を stream として消費する。
-    async fn read_file(&self, path: &str, offset: u64, limit: u64) -> Result<Bytes> {
+    async fn read_file(&self, path: &str, offset: u64, limit: u64, class: WorkClass) -> Result<Bytes> {
         if limit > MAX_READ_FILE_BYTES {
             return Err(Error::new(ErrorKind::LimitExceeded).with_message(format!("read_file limit {limit} exceeds {MAX_READ_FILE_BYTES}")));
         }
@@ -70,7 +73,7 @@ pub trait FileStorageDriver: Send + Sync {
             return Ok(Bytes::new());
         }
 
-        let mut opened = self.open_file(path).await?;
+        let mut opened = self.open_file(path, class).await?;
         let len = opened.len().await?;
         if offset >= len {
             return Ok(Bytes::new());

@@ -1,3 +1,4 @@
+use omnius_pxna_engine::service::WorkClass;
 use std::{collections::HashSet, sync::Arc};
 
 use futures::StreamExt as _;
@@ -129,7 +130,7 @@ impl LibraryBrowser {
                 let result = async {
                     let _permit = self.details.acquire().await.map_err(|_| Error::new(ErrorKind::Cancelled))?;
                     let resolved = self.resolver.resolve_listing_entry(&library.path, &relative).await?;
-                    let entry = resolved.get_listing_entry().await?;
+                    let entry = resolved.get_listing_entry(WorkClass::Foreground).await?;
                     EntryConverter::new(&library.path).convert(&entry)
                 }
                 .await;
@@ -164,7 +165,7 @@ impl LibraryBrowser {
         let library = self.library(library_id)?;
         let (nested, _) = self.resolve_file(library, path).await?;
 
-        let mut opened = nested.open_file().await?;
+        let mut opened = nested.open_file(WorkClass::Foreground).await?;
         let total_len = opened.len().await?;
         let (start, end_exclusive) = range.resolve(total_len)?;
 
@@ -212,7 +213,7 @@ impl LibraryBrowser {
     /// file 系の endpoint では、archive file を指す path を archive file 自体として解釈する。
     async fn resolve_file(&self, library: &LibraryConfig, path: &str) -> Result<(ResolvedStoragePath, NestedFsEntry)> {
         let nested = self.resolve(library, path).await?;
-        let entry = nested.get_entry().await?;
+        let entry = nested.get_entry(WorkClass::Foreground).await?;
         if !matches!(entry.detail, FsEntryDetail::File { .. }) {
             return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("not a file: {path}")));
         }
@@ -222,14 +223,14 @@ impl LibraryBrowser {
     /// folder 系の endpoint では、archive file を指す path を archive の root として解釈する。
     async fn resolve_folder(&self, library: &LibraryConfig, path: &str) -> Result<(ResolvedStoragePath, NestedFsEntry)> {
         let nested = self.resolve(library, path).await?;
-        let entry = nested.get_entry().await?;
+        let entry = nested.get_entry(WorkClass::Foreground).await?;
         match entry.detail {
             FsEntryDetail::Dir { .. } => Ok((nested, entry)),
             FsEntryDetail::File { archive: true } => {
                 let mut path = nested.path().to_nested_path_buf();
                 path.push_archive_root().map_err(|error| Error::from_error(error, ErrorKind::InvalidInput))?;
-                let nested = self.storage.resolve_entry(&path).await?;
-                let mut root = nested.get_entry().await?;
+                let nested = self.storage.resolve_entry(&path, WorkClass::Foreground).await?;
+                let mut root = nested.get_entry(WorkClass::Foreground).await?;
                 // archive の root は file 自体の path と名前で見せ、metadata だけを root のものにする。
                 root.path = entry.path;
                 Ok((nested, root))

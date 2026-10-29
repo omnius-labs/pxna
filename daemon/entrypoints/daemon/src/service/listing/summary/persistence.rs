@@ -300,7 +300,7 @@ impl PersistenceState {
         let snapshot = self
             .budget
             .io()
-            .ticket(WorkClass::current())
+            .ticket(WorkClass::Foreground)
             .counted(WorkKind::Summary)
             .acquire()
             .await?

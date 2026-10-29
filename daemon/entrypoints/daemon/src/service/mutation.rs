@@ -1,3 +1,4 @@
+use omnius_pxna_engine::service::WorkClass;
 use std::{io, path::Path, sync::Arc};
 
 use omnius_pxna_engine::{
@@ -154,14 +155,14 @@ impl LibraryMutation {
             }
             self.destination(id, path, false).await?;
         }
-        let entry = resolved.get_entry().await?;
+        let entry = resolved.get_entry(WorkClass::Foreground).await?;
         if folder && matches!(entry.detail, FsEntryDetail::File { archive: true }) {
             if writable {
                 return Err(Error::new(ErrorKind::ReadOnly).with_message("archive is readonly"));
             }
             let mut nested = resolved.path().to_nested_path_buf();
             nested.push_archive_root().map_err(|error| Error::from_error(error, ErrorKind::InvalidInput))?;
-            resolved = self.storage.resolve_entry(&nested).await?;
+            resolved = self.storage.resolve_entry(&nested, WorkClass::Foreground).await?;
         } else if folder != matches!(entry.detail, FsEntryDetail::Dir { .. }) {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("unexpected entry type"));
         }
@@ -214,7 +215,7 @@ impl LibraryMutation {
         let invalidation = ListingInvalidation::for_entry(id, path)?;
         let source = self.source(id, path, folder, true).await?;
         if folder {
-            let mut entries = source.find_entries(false).await?;
+            let mut entries = source.find_entries(false, WorkClass::Foreground).await?;
             use futures::StreamExt as _;
             if entries.next().await.is_some() {
                 return Err(Error::new(ErrorKind::InvalidInput).with_message("folder is not empty; recursive=true is required"));
@@ -229,7 +230,7 @@ impl LibraryMutation {
 
     pub async fn entry(&self, id: &str, path: &NestedPathBuf) -> Result<models::FileSystemEntry> {
         let library = self.library(id, false)?;
-        EntryConverter::new(&library.path).convert(&self.storage.get_entry(path).await?)
+        EntryConverter::new(&library.path).convert(&self.storage.get_entry(path, WorkClass::Foreground).await?)
     }
 
     pub fn relative(&self, id: &str, path: &NestedPathBuf) -> Result<String> {

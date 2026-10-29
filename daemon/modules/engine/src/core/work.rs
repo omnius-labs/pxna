@@ -24,23 +24,22 @@
 use std::{
     collections::VecDeque,
     future::Future,
-    pin::{Pin, pin},
+    pin::pin,
     sync::{
         Arc,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    task::{Context, Poll},
 };
 
-use futures::Stream;
-use tokio::{sync::Notify, task::JoinHandle};
+use tokio::sync::Notify;
 use tracing::{Instrument as _, Span};
 
 use crate::prelude::*;
 
-tokio::task_local! { static CLASS: WorkClass; }
-
 /// 処理の段。上の段ほど先に始まる（[`WorkScheduler`]）。
+///
+/// 段は処理を始める時点で、呼び出した側が明示的に渡す。暗黙に引き継ぐ値は持たないので、
+/// storage の読み取りや外部プロセスの起動はすべて `class` を引数に取る。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkClass {
     /// ユーザーが今まさに待っている 1 件。
@@ -53,54 +52,6 @@ pub enum WorkClass {
 impl WorkClass {
     /// 上の段から順に並べたすべての段。
     pub const ALL: [Self; 3] = [Self::Interactive, Self::Foreground, Self::Background];
-
-    pub fn current() -> Self {
-        CLASS.try_with(|class| *class).unwrap_or(Self::Foreground)
-    }
-    pub async fn scope<F: Future>(self, future: F) -> F::Output {
-        CLASS.scope(self, future).await
-    }
-
-    /// 今の段と Span を引き継いで task を起こす。`tokio::spawn` は task_local を引き継がないので、段を落とさないためにこれを使う。
-    pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        Self::current().spawn_as(future)
-    }
-
-    /// 作った時点の段を、`stream` の poll ごとに掛けて動かす。作った場所の外で poll される stream（一覧など）が、段を落とさないために使う。
-    pub fn bind_stream<S: Stream>(self, stream: S) -> WorkBoundStream<S> {
-        WorkBoundStream {
-            class: self,
-            inner: Box::pin(stream),
-        }
-    }
-
-    /// [`Self::spawn`] を、段を指定して行う。
-    pub fn spawn_as<F>(self, future: F) -> JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        tokio::spawn(CLASS.scope(self, future).in_current_span())
-    }
-}
-
-/// 段を決めて動かす stream（[`WorkClass::bind_stream`]）。
-pub struct WorkBoundStream<S> {
-    class: WorkClass,
-    inner: Pin<Box<S>>,
-}
-
-impl<S: Stream> Stream for WorkBoundStream<S> {
-    type Item = S::Item;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let class = self.class;
-        CLASS.sync_scope(class, || self.inner.as_mut().poll_next(cx))
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -175,10 +126,10 @@ impl WorkBudget {
     pub fn counts(&self, kind: WorkKind) -> (usize, usize) {
         self.io.counts(kind)
     }
-    /// Background の処理から呼ばれたときだけ、その処理の枠を取る。
-    pub async fn background(&self, kind: WorkKind) -> Result<Option<WorkPermit>> {
-        if WorkClass::current() == WorkClass::Background {
-            Ok(Some(self.io.ticket(WorkClass::Background).counted(kind).acquire().await?))
+    /// Background の処理として動くときだけ、その処理の枠を取る。
+    pub async fn background(&self, class: WorkClass, kind: WorkKind) -> Result<Option<WorkPermit>> {
+        if class == WorkClass::Background {
+            Ok(Some(self.io.ticket(class).counted(kind).acquire().await?))
         } else {
             Ok(None)
         }
@@ -405,11 +356,14 @@ impl WorkPermit {
         T: Send + 'static,
         F: Future<Output = T> + Send + 'static,
     {
-        WorkClass::spawn(async move {
-            let _permit = self;
-            let _guards = guards;
-            future.await
-        })
+        tokio::spawn(
+            async move {
+                let _permit = self;
+                let _guards = guards;
+                future.await
+            }
+            .in_current_span(),
+        )
         .await
         .map_err(|error| Error::from_error(error, ErrorKind::TaskError))
     }
@@ -894,26 +848,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_blocking_uses_the_permit_class_and_does_not_carry_it_into_the_thread_test() -> TestResult {
+    async fn a_ticket_keeps_the_class_it_was_issued_with_test() -> TestResult {
         let (pool, _) = pools();
-        let value = pool
-            .ticket(WorkClass::Background)
-            .counted(WorkKind::Summary)
-            .acquire()
-            .await?
-            .run_blocking(WorkClass::current)
-            .await?;
-        assert_eq!(value, WorkClass::Foreground, "blocking thread には段を引き継がない");
         let permit = pool.ticket(WorkClass::Background).counted(WorkKind::Summary).acquire().await?;
         assert_eq!(permit.class(), WorkClass::Background);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn spawn_carries_the_class_test() -> TestResult {
-        let class = WorkClass::Background.scope(async { WorkClass::spawn(async { WorkClass::current() }).await }).await?;
-        assert_eq!(class, WorkClass::Background);
-        assert_eq!(WorkClass::Interactive.spawn_as(async { WorkClass::current() }).await?, WorkClass::Interactive);
+        let value = permit.run_blocking(|| 7).await?;
+        assert_eq!(value, 7);
         Ok(())
     }
 
@@ -1016,11 +956,13 @@ mod tests {
         let (started, ready) = tokio::sync::oneshot::channel();
         let (release, wait) = tokio::sync::oneshot::channel::<()>();
         let permit = pool.ticket(WorkClass::Background).counted(WorkKind::Probe).acquire().await?;
+        let class = permit.class();
         let job = tokio::spawn(permit.run_with(guard.clone(), async move {
-            started.send(WorkClass::current()).unwrap();
+            started.send(()).unwrap();
             wait.await.unwrap();
         }));
-        assert_eq!(ready.await?, WorkClass::Foreground, "spawn した task の段は、呼んだ場所の段である");
+        ready.await?;
+        assert_eq!(class, WorkClass::Background);
         job.abort();
         let _ = job.await;
         assert_eq!(scheduler.counts(WorkKind::Probe), (1, 0), "呼んだ側を捨てても task は動いている");
@@ -1106,14 +1048,6 @@ mod tests {
         release.send(())?;
         let _finished = budget.io().ticket(WorkClass::Background).counted(WorkKind::Summary).acquire().await?;
         assert_eq!(budget.counts(WorkKind::Archive), (1, 1));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn class_is_explicitly_preserved_across_spawn_test() -> TestResult {
-        let future = WorkClass::Background.scope(async { WorkClass::current() });
-        assert_eq!(tokio::spawn(future).await?, WorkClass::Background);
-        assert_eq!(WorkClass::current(), WorkClass::Foreground);
         Ok(())
     }
 }
