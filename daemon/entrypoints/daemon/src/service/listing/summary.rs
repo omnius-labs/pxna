@@ -14,7 +14,7 @@ use futures::{
 use omnius_core_base::clock::Clock;
 use omnius_pxna_engine::{
     perf_span,
-    service::{ResolvedStoragePath, WorkBudget, WorkKind},
+    service::{ResolvedStoragePath, WorkBudget, WorkClass, WorkKind},
 };
 use omnius_pxna_interface::models;
 use serde::{Deserialize, Serialize};
@@ -123,7 +123,11 @@ impl SummaryData {
         }
         let data = budget
             .io()
-            .run_blocking(WorkKind::Summary, move || Self::new(entries))
+            .ticket(WorkClass::current())
+            .counted(WorkKind::Summary)
+            .acquire()
+            .await?
+            .run_blocking(move || Self::new(entries))
             .await
             .map_err(|error| error.with_message("cannot sort summary"))?;
         Span::current().record("entry_count", data.entries.len());

@@ -311,7 +311,7 @@ mod tests {
         // Hold every stream permit so that the scan stops after it starts and the flight stays in flight.
         let mut permits = Vec::new();
         for _ in 0..12 {
-            permits.push(fs.work_budget().enter(WorkClass::Foreground).await?);
+            permits.push(fs.work_budget().streams().ticket(WorkClass::Foreground).acquire().await?);
         }
         let first = {
             let (cache, folder) = (cache.clone(), folder.clone());
@@ -356,7 +356,7 @@ mod tests {
         let folder = folder(&fs, dir.path()).await?;
         let mut permits = Vec::new();
         for _ in 0..12 {
-            permits.push(fs.work_budget().enter(WorkClass::Foreground).await?);
+            permits.push(fs.work_budget().streams().ticket(WorkClass::Foreground).acquire().await?);
         }
         let mut first = Box::pin(cache.select(&folder));
         assert!(futures::poll!(&mut first).is_pending());

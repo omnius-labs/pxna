@@ -19,7 +19,7 @@ use crate::{
             request::{Thumbnail, ThumbnailRequest, ThumbnailVariant},
             source_job::{Created, Outcome, SourceJobs},
         },
-        work::{MediaPools, ScheduleOptions, SchedulePermit, Scheduler, WorkClass, WorkKind},
+        work::{WorkClass, WorkKind, WorkOptions, WorkPermit, WorkPools, WorkScheduler},
     },
     perf_span,
     prelude::*,
@@ -113,7 +113,7 @@ struct Inner {
     format: ImageFormatType,
     quality: u8,
     display_quality: u8,
-    pools: MediaPools,
+    pools: WorkPools,
     jobs: Jobs,
     #[cfg(test)]
     probe: ConversionProbe,
@@ -316,7 +316,7 @@ impl SourceId {
 impl ThumbnailGenerator {
     pub async fn open(fs: Arc<StorageService>, cache_dir: &Path, options: ThumbnailOptions, media: MediaOptions) -> Result<Self> {
         let media_info = Arc::new(MediaInfoService::new(media.clone(), options.video_timeout).with_budget(fs.work_budget().clone()));
-        let pools = MediaPools::new(&Arc::new(Scheduler::default()), &ScheduleOptions::default());
+        let pools = WorkPools::new(&Arc::new(WorkScheduler::default()), &WorkOptions::default());
         Self::open_with_media(fs, cache_dir, options, media, media_info, pools).await
     }
 
@@ -326,7 +326,7 @@ impl ThumbnailGenerator {
         options: ThumbnailOptions,
         media: MediaOptions,
         media_info: Arc<MediaInfoService>,
-        pools: MediaPools,
+        pools: WorkPools,
     ) -> Result<Self> {
         let (sizes, display_sizes) = options.steps()?;
         let cache = ThumbnailCache::open(
@@ -619,7 +619,7 @@ impl Inner {
     /// 画像の変換と、外部プロセスの ffmpeg と heif-dec は、別の資源として数える。
     /// The ffmpeg runs for videos are a third resource, apart from the image decodes of ffmpeg and heif-dec.
     /// 枠を待つ間に要求が drop されたら、何も始まらない。
-    fn pool_for(&self, kind: MediaKind) -> &crate::core::work::PriorityPool {
+    fn pool_for(&self, kind: MediaKind) -> &crate::core::work::WorkPriorityPool {
         match kind {
             MediaKind::Image => &self.pools.cpu,
             MediaKind::FfmpegImage | MediaKind::HeifImage => &self.pools.process_image,
@@ -729,7 +729,7 @@ impl Inner {
         let Some(class) = self.jobs.class_of(source_key, created.id) else {
             return Err(discarded());
         };
-        let ticket = pool.enqueue_counted(class, WorkKind::Convert);
+        let ticket = pool.ticket(class).counted(WorkKind::Convert);
         let handle = ticket.handle();
         // An item may have raised the job before the ticket existed, so the ticket takes the job's class when it is attached.
         let Some(class) = self.jobs.attach(source_key, created.id, handle.clone()) else {
@@ -753,7 +753,7 @@ impl Inner {
     }
 
     /// Makes the images of a job and puts them in the cache.
-    async fn produce(self: &Arc<Self>, context: &SourceContext, specs: Vec<OutputSpec>, permit: SchedulePermit) -> Result<JobOutput> {
+    async fn produce(self: &Arc<Self>, context: &SourceContext, specs: Vec<OutputSpec>, permit: WorkPermit) -> Result<JobOutput> {
         // The images that another job stored meanwhile are not made again. Their items read them from the cache.
         let specs = self.missing_outputs(specs).await;
         if specs.is_empty() {
@@ -767,7 +767,7 @@ impl Inner {
 
     /// Gets the image of a file that cannot be cached, for its request alone. If the request is dropped, the generation stops.
     async fn generate_alone(self: &Arc<Self>, target: &ResolvedStoragePath, kind: MediaKind, plan: &Plan, class: WorkClass) -> Result<CachedImage> {
-        let permit = self.pool_for(kind).acquire(class).instrument(perf_span!("thumbnail_permit_wait", class = ?class)).await;
+        let permit = self.pool_for(kind).ticket(class).acquire().await?;
         let specs = self.requested_specs(plan, kind, None);
         let results = self.convert_outputs(target, kind, &specs, permit).instrument(perf_span!("thumbnail_production")).await?;
         let wanted = if plan.variant == ThumbnailVariant::Sprite {
@@ -784,7 +784,7 @@ impl Inner {
 
     /// Decodes the file once and makes every image of `specs` from it. The results are aligned with `specs`.
     /// An error is a failure of the file, not of one image: the file could not be read or decoded.
-    async fn convert_outputs(&self, target: &ResolvedStoragePath, kind: MediaKind, specs: &[OutputSpec], permit: SchedulePermit) -> Result<Vec<Result<CachedImage>>> {
+    async fn convert_outputs(&self, target: &ResolvedStoragePath, kind: MediaKind, specs: &[OutputSpec], permit: WorkPermit) -> Result<Vec<Result<CachedImage>>> {
         #[cfg(test)]
         let _counted = self.probe.enter().await;
         // 変換が終わるまで、archive 内の file の lease を保つ。
@@ -844,7 +844,7 @@ impl Inner {
 
     /// Decodes the input once, then resizes and encodes every image of `specs` from that one decoded image.
     /// The results are aligned with `specs`. A decode failure fails the whole call.
-    async fn convert_many(&self, permit: SchedulePermit, input: Vec<u8>, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
+    async fn convert_many(&self, permit: WorkPermit, input: Vec<u8>, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
         permit
             .run_blocking(move || -> Result<Vec<Result<CachedImage>>> {
                 let image = ImageConverter::decode(&input).map_err(Self::decode_error)?;
@@ -872,7 +872,7 @@ impl Inner {
     /// スプライトシートがなければ、最初のフレームだけを取り出す。
     ///
     /// Only the first frame is kept at full size, for the single images and the heads of the sprite sheets. The other frames are decoded, resized, and dropped one at a time.
-    async fn produce_video(&self, permit: SchedulePermit, file: &Path, source: &ResolvedStoragePath, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
+    async fn produce_video(&self, permit: WorkPermit, file: &Path, source: &ResolvedStoragePath, specs: Vec<OutputSpec>) -> Result<Vec<Result<CachedImage>>> {
         let duration = self.media_info.probe_video(source).await?.duration_secs;
         let mut positions = FRAME_SPEC.positions(duration);
         if !specs.iter().any(|spec| spec.shape == OutputShape::Sprite) {
@@ -2196,7 +2196,7 @@ mod tests {
     async fn videos_and_images_use_separate_external_process_pools_test() -> TestResult {
         let fixture = fixture(ThumbnailOptions::default()).await?;
         let inner = &fixture.generator.inner;
-        let _held = inner.pools.process_video.acquire(WorkClass::Foreground).await;
+        let _held = inner.pools.process_video.ticket(WorkClass::Foreground).acquire().await;
         assert!(
             inner.pool_for(MediaKind::Video).try_acquire(WorkClass::Foreground).is_none(),
             "the video pool has one shared slot"
@@ -2404,7 +2404,7 @@ mod tests {
         };
         let mut specs = inner.requested_specs(&plan, MediaKind::Image, Some(&source));
         specs.extend(companions.into_iter().map(companion));
-        let permit = inner.pools.cpu.acquire(WorkClass::Foreground).await;
+        let permit = inner.pools.cpu.ticket(WorkClass::Foreground).acquire().await?;
         let results = inner.convert_many(permit, std::fs::read(&file)?, specs.clone()).await?;
         assert_eq!(results.len(), specs.len(), "the results are aligned with the specs");
         let primary = results[0].as_ref().expect("the primary is made");
@@ -2530,14 +2530,14 @@ mod tests {
 
     /// Takes every slot of a pool, so that the jobs that ask for it wait.
     /// The shared slots go first: Foreground does not start while Interactive runs, so it could not take them after the reserved slot.
-    async fn hold_all(pool: &crate::core::work::PriorityPool) -> Vec<SchedulePermit> {
+    async fn hold_all(pool: &crate::core::work::WorkPriorityPool) -> Vec<WorkPermit> {
         let limits = pool.limits();
         let mut held = Vec::new();
         for _ in 0..limits.shared {
-            held.push(pool.acquire(WorkClass::Foreground).await);
+            held.push(pool.ticket(WorkClass::Foreground).acquire().await.unwrap());
         }
         for _ in 0..limits.interactive {
-            held.push(pool.acquire(WorkClass::Interactive).await);
+            held.push(pool.ticket(WorkClass::Interactive).acquire().await.unwrap());
         }
         held
     }

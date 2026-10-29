@@ -3,7 +3,7 @@ use axum_extra::extract::CookieJar;
 use headers::Host;
 use http::Method;
 
-use omnius_pxna_engine::service::{MediaKind, MediaPools, PriorityPool, WorkClass};
+use omnius_pxna_engine::service::{MediaKind, WorkClass, WorkPools, WorkPriorityPool};
 use omnius_pxna_interface::{apis, models, types::ByteArray};
 
 use crate::{
@@ -184,7 +184,7 @@ impl From<ApiError> for apis::video::GetVideoSegmentResponse {
 
 /// A video, and a file with an unknown extension that ffprobe reads as a video, count in the video pool; an image counts in the image process pool.
 // omnius-lint:allow(free-fn) Pure pool choice for the media info handler, with no owning type
-fn media_info_pool<'a>(pools: &'a MediaPools, path: &str) -> &'a PriorityPool {
+fn media_info_pool<'a>(pools: &'a WorkPools, path: &str) -> &'a WorkPriorityPool {
     if uses_video_pool(MediaKind::of_name(path)) {
         &pools.process_video
     } else {

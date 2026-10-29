@@ -11,7 +11,7 @@ use super::{ArchiveIdentity, ResolvedStoragePath, SourceFingerprint};
 use crate::{
     core::{
         media::{MediaKind, MediaOptions},
-        work::{WorkBudget, WorkKind},
+        work::{WorkBudget, WorkClass, WorkKind},
     },
     prelude::*,
 };
@@ -119,7 +119,11 @@ impl MediaInfoService {
                 let (width, height, exif) = self
                     .budget
                     .io()
-                    .run_blocking(WorkKind::Inspect, move || -> Result<_> {
+                    .ticket(WorkClass::current())
+                    .counted(WorkKind::Inspect)
+                    .acquire()
+                    .await?
+                    .run_blocking(move || -> Result<_> {
                         let (width, height) =
                             ImageInspector::read_size(&path).map_err(|error| Error::from_error(error, ErrorKind::UnsupportedType).with_message("cannot read the image size"))?;
                         Ok((width, height, ImageInspector::read_exif(&path)))
@@ -130,7 +134,15 @@ impl MediaInfoService {
             Some(MediaKind::FfmpegImage | MediaKind::HeifImage) => {
                 let (width, height, rotation, has_alpha) = self.tools.probe_image_size(file).await?;
                 let path = file.to_path_buf();
-                let exif = self.budget.io().run_blocking(WorkKind::Inspect, move || ImageInspector::read_exif(&path)).await?;
+                let exif = self
+                    .budget
+                    .io()
+                    .ticket(WorkClass::current())
+                    .counted(WorkKind::Inspect)
+                    .acquire()
+                    .await?
+                    .run_blocking(move || ImageInspector::read_exif(&path))
+                    .await?;
                 Ok(to_info(image(width, height), rotation, has_alpha, exif))
             }
             Some(MediaKind::Video) | None => Ok(MediaInfo::Video(self.tools.probe_video_info(file).await?)),

@@ -16,7 +16,7 @@ use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest as _};
 use omnius_core_base::clock::ClockUtc;
 use omnius_pxna_engine::{
     model::ImageFormatType,
-    service::{ArchiveOptions, SchedulePermit, ThumbnailOptions, WorkClass},
+    service::{ArchiveOptions, ThumbnailOptions, WorkClass, WorkPermit},
 };
 
 use super::message::{FrameCodec, FrameHeader, ServerMessage};
@@ -118,7 +118,7 @@ impl Harness {
         }
     }
 
-    fn pool(&self) -> &omnius_pxna_engine::service::PriorityPool {
+    fn pool(&self) -> &omnius_pxna_engine::service::WorkPriorityPool {
         &self.state().pools.cpu
     }
 
@@ -155,14 +155,14 @@ impl Harness {
 
     /// Takes every slot of the image pool, so that the jobs that ask for it wait. The shared slots go first, because Foreground
     /// does not start while Interactive runs.
-    async fn hold_all(&self) -> Vec<SchedulePermit> {
+    async fn hold_all(&self) -> Vec<WorkPermit> {
         let limits = self.pool().limits();
         let mut held = Vec::new();
         for _ in 0..limits.shared {
-            held.push(self.pool().acquire(WorkClass::Foreground).await);
+            held.push(self.pool().ticket(WorkClass::Foreground).acquire().await.expect("the pool is empty"));
         }
         for _ in 0..limits.interactive {
-            held.push(self.pool().acquire(WorkClass::Interactive).await);
+            held.push(self.pool().ticket(WorkClass::Interactive).acquire().await.expect("the pool is empty"));
         }
         held
     }

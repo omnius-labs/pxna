@@ -405,13 +405,26 @@ impl TimelineScanner {
                     .storage
                     .work_budget()
                     .io()
-                    .run_blocking_as(WorkClass::Background, WorkKind::Exif, move || ImageInspector::read_exif(&path))
+                    .ticket(WorkClass::Background)
+                    .counted(WorkKind::Exif)
+                    .acquire()
+                    .await
+                    .ok()?
+                    .run_blocking(move || ImageInspector::read_exif(&path))
                     .await
                     .ok()?;
                 exif.taken_at.as_deref().and_then(TimelineDate::from_exif)
             }
             MediaKind::Video => {
-                let background = self.storage.work_budget().acquire(WorkClass::Background, WorkKind::Probe).await.ok()?;
+                let background = self
+                    .storage
+                    .work_budget()
+                    .io()
+                    .ticket(WorkClass::Background)
+                    .counted(WorkKind::Probe)
+                    .acquire()
+                    .await
+                    .ok()?;
                 let permit = self.probes.clone().acquire_owned().await.ok()?;
                 let tools = self.tools.clone();
                 let path = file.to_path_buf();
@@ -561,7 +574,7 @@ mod budget_tests {
         );
         let file = dir.path().join("image.jpg");
         std::fs::write(&file, b"invalid image")?;
-        let held = budget.acquire(WorkClass::Background, WorkKind::Summary).await?;
+        let held = budget.io().ticket(WorkClass::Background).counted(WorkKind::Summary).acquire().await?;
         let exif = scanner.content_date(MediaKind::Image, &file);
         tokio::pin!(exif);
         assert!(futures::poll!(&mut exif).is_pending());

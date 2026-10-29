@@ -10,7 +10,7 @@ use tokio::{io::AsyncReadExt as _, sync::Semaphore};
 use crate::{
     core::{
         nfs::{FileStorageDriver, FsEntryStream, MaterializedFile, StagingFile},
-        work::Scheduler,
+        work::WorkScheduler,
     },
     prelude::*,
 };
@@ -51,7 +51,7 @@ pub(super) struct InspectedArchive {
 
 impl InspectedArchive {
     async fn inspect(path: PathBuf, name: String, options: ArchiveOptions, budget: Arc<crate::core::work::WorkBudget>) -> Result<Self> {
-        let background = budget.background_if_needed(crate::core::work::WorkKind::Archive).await?;
+        let background = budget.background(crate::core::work::WorkKind::Archive).await?;
         let mut file = tokio::fs::File::open(&path).await?;
         let mut head = [0_u8; 6];
         let read = file.read(&mut head).await?;
@@ -67,7 +67,7 @@ impl InspectedArchive {
                 })
             }
             ArchiveFormat::SevenZip => {
-                let (reader, index) = Scheduler::run_blocking_with(background, move || sevenz::SevenZipArchive::inspect(&path, &options))
+                let (reader, index) = WorkScheduler::run_blocking_with(background, move || sevenz::SevenZipArchive::inspect(&path, &options))
                     .await
                     .map_err(|error| error.with_message("join failed"))??;
                 Ok(Self {

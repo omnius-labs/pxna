@@ -6,8 +6,8 @@ use omnius_core_base::{
     tsid::TsidProviderImpl,
 };
 use omnius_pxna_engine::service::{
-    ArchiveRuntime, AuthService, LocalStorageDriver, MediaInfoService, MediaPools, MediaTools, PreferencesService, RatingTagService, Scheduler, StorageService, ThumbnailGenerator,
-    WorkBudget,
+    ArchiveRuntime, AuthService, LocalStorageDriver, MediaInfoService, MediaTools, PreferencesService, RatingTagService, StorageService, ThumbnailGenerator, WorkBudget, WorkPools,
+    WorkScheduler,
 };
 use rand::{SeedableRng as _, rngs::ChaCha20Rng};
 
@@ -39,7 +39,7 @@ pub struct DaemonState {
     pub operations: Arc<OperationService>,
     pub media_info: Arc<MediaInfoService>,
     /// 画像の変換と外部プロセスの枠。一覧の枠と同じ scheduler に属する。
-    pub pools: MediaPools,
+    pub pools: WorkPools,
     pub videos: Arc<VideoService>,
     pub timeline: Arc<TimelineService>,
     /// The open image sockets, their limits, and the signal that closes them at shutdown.
@@ -60,9 +60,9 @@ impl DaemonState {
         // 書き込みの staging は公開先と同じディレクトリに取るため、プロセス共通の一時ディレクトリは持たない。
 
         // 一覧、背景処理、サムネイルの生成の枠は、1 つの scheduler で優先度をそろえる。
-        let scheduler = Arc::new(Scheduler::default());
+        let scheduler = Arc::new(WorkScheduler::default());
         let budget = Arc::new(WorkBudget::new(&scheduler));
-        let pools = MediaPools::new(&scheduler, &conf.scheduler);
+        let pools = WorkPools::new(&scheduler, &conf.scheduler);
 
         // HTTP サーバを開く前に extraction cache を開き、前回の残骸を回収しておく。
         let archive = Arc::new(

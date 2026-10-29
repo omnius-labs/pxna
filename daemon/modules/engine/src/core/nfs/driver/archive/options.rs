@@ -8,7 +8,7 @@ use tokio::{sync::Semaphore, time::Instant};
 
 use crate::{
     base::util::SingleFlight,
-    core::work::{Scheduler, WorkBudget, WorkKind},
+    core::work::{WorkBudget, WorkKind, WorkScheduler},
     prelude::*,
 };
 
@@ -189,7 +189,7 @@ impl ArchiveRuntime {
         F: FnOnce() -> Result<T> + Send + 'static,
     {
         let deadline = Instant::now() + self.options.extract_timeout;
-        let background = tokio::time::timeout_at(deadline, self.budget.background_if_needed(WorkKind::Archive))
+        let background = tokio::time::timeout_at(deadline, self.budget.background(WorkKind::Archive))
             .await
             .map_err(|_| Error::new(ErrorKind::Timeout))??;
         let permit = tokio::time::timeout_at(deadline, semaphore.clone().acquire_owned())
@@ -197,7 +197,7 @@ impl ArchiveRuntime {
             .map_err(|_| Error::new(ErrorKind::Timeout).with_message("archive extraction timed out while waiting for a worker"))?
             .map_err(|_| Error::new(ErrorKind::Cancelled).with_message("archive extraction runtime is shutting down"))?;
 
-        let worker = Scheduler::run_blocking_with((background, permit), task);
+        let worker = WorkScheduler::run_blocking_with((background, permit), task);
 
         tokio::time::timeout_at(deadline, worker)
             .await
@@ -295,7 +295,7 @@ mod tests {
             tokio::task::yield_now().await;
         }
         // A foreground slot remains usable while archive waits for its resource slot.
-        let foreground = budget.acquire(WorkClass::Foreground, WorkKind::Listing).await.unwrap();
+        let foreground = budget.io().ticket(WorkClass::Foreground).counted(WorkKind::Listing).acquire().await.unwrap();
         assert!(budget.try_probe().is_none());
         drop(foreground);
         drop(held);
@@ -304,7 +304,7 @@ mod tests {
         let _ = work.await;
         assert_eq!(budget.counts(WorkKind::Archive), (1, 0));
         release.send(()).unwrap();
-        let _next = budget.acquire(WorkClass::Background, WorkKind::Exif).await.unwrap();
+        let _next = budget.io().ticket(WorkClass::Background).counted(WorkKind::Exif).acquire().await.unwrap();
         assert_eq!(budget.counts(WorkKind::Archive), (1, 1));
     }
 

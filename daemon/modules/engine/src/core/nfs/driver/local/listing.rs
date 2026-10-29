@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use crate::core::work::{SchedulePermit, WorkBudget, WorkClass, WorkKind};
+use crate::core::work::{WorkBudget, WorkClass, WorkKind, WorkPermit};
 use tokio_util::sync::CancellationToken;
 
 use super::{ArchiveFormat, FileStorageLocal};
@@ -92,8 +92,8 @@ impl LocalListingRuntime {
         }
     }
 
-    pub async fn enter(&self) -> Result<SchedulePermit> {
-        self.budget.enter(WorkClass::current()).await
+    pub async fn enter(&self) -> Result<WorkPermit> {
+        self.budget.streams().ticket(WorkClass::current()).acquire().await
     }
 
     pub async fn read_entry(&self, path: &str) -> Result<FsEntry> {
@@ -110,7 +110,11 @@ impl LocalListingRuntime {
     pub async fn open_directory(&self, path: PathBuf, cancellation: CancellationToken) -> Result<LocalDirectory> {
         self.budget
             .io()
-            .run_blocking(WorkKind::Listing, move || {
+            .ticket(WorkClass::current())
+            .counted(WorkKind::Listing)
+            .acquire()
+            .await?
+            .run_blocking(move || {
                 if cancellation.is_cancelled() {
                     return Err(Error::new(ErrorKind::Cancelled));
                 }
@@ -123,7 +127,11 @@ impl LocalListingRuntime {
     pub async fn read_paths(&self, directory: LocalDirectory, cancellation: CancellationToken) -> Result<Vec<PathBuf>> {
         self.budget
             .io()
-            .run_blocking(WorkKind::Listing, move || {
+            .ticket(WorkClass::current())
+            .counted(WorkKind::Listing)
+            .acquire()
+            .await?
+            .run_blocking(move || {
                 let mut reader = directory.lock();
                 let mut paths = Vec::with_capacity(Self::BATCH_SIZE);
                 for _ in 0..Self::BATCH_SIZE {
@@ -143,7 +151,11 @@ impl LocalListingRuntime {
     pub async fn read_summaries(&self, directory: LocalDirectory, cancellation: CancellationToken) -> Result<Vec<FsEntrySummary>> {
         self.budget
             .io()
-            .run_blocking(WorkKind::Listing, move || {
+            .ticket(WorkClass::current())
+            .counted(WorkKind::Listing)
+            .acquire()
+            .await?
+            .run_blocking(move || {
                 let mut reader = directory.lock();
                 let mut entries = Vec::with_capacity(Self::BATCH_SIZE);
                 for _ in 0..Self::BATCH_SIZE {
@@ -182,7 +194,11 @@ impl LocalListingRuntime {
         let reader = self.reader.clone();
         self.budget
             .io()
-            .run_blocking(WorkKind::Listing, move || {
+            .ticket(WorkClass::current())
+            .counted(WorkKind::Listing)
+            .acquire()
+            .await?
+            .run_blocking(move || {
                 let mut entries = Vec::with_capacity(paths.len());
                 let mut metadata_sec = 0.0;
                 for path in paths {
@@ -314,7 +330,7 @@ mod tests {
         let tsid = Arc::new(Mutex::new(TsidProviderImpl::new(ClockUtc, ChaCha20Rng::seed_from_u64(0), 16)));
         let budget = Arc::new(WorkBudget::default());
         let driver = FileStorageLocal::with_budget(tsid, budget.clone());
-        let held = budget.acquire(WorkClass::Background, WorkKind::Exif).await?;
+        let held = budget.io().ticket(WorkClass::Background).counted(WorkKind::Exif).acquire().await?;
         let mut stream = WorkClass::Background.scope(driver.find_entries(dir.path().to_str().unwrap(), false)).await?;
         let item = stream.next();
         tokio::pin!(item);
@@ -450,7 +466,7 @@ mod tests {
         probe.release();
         let mut all_permits = Vec::new();
         for _ in 0..LocalListingRuntime::MAX_WORKERS {
-            all_permits.push(runtime.budget.io().acquire(WorkClass::Foreground).await);
+            all_permits.push(runtime.budget.io().ticket(WorkClass::Foreground).acquire().await);
         }
         assert!(probe.calls.load(Ordering::SeqCst) <= LocalListingRuntime::PARALLEL_BATCHES);
         assert_eq!(probe.active.load(Ordering::SeqCst), 0);

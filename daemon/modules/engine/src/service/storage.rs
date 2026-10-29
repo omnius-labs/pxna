@@ -17,7 +17,7 @@ pub use crate::core::nfs::{
     FileStorageLocal as LocalStorageDriver, MaterializedFile, OpenedFile, Publish, SourceFingerprint, StagingFile, ZipLegacyEncoding,
 };
 
-pub use crate::core::work::{MediaPools, Occupancy, PoolLimits, PriorityPool, ScheduleOptions, SchedulePermit, Scheduler, WorkBudget, WorkClass, WorkKind};
+pub use crate::core::work::{WorkBudget, WorkClass, WorkKind, WorkOccupancy, WorkOptions, WorkPermit, WorkPoolLimits, WorkPools, WorkPriorityPool, WorkProbe, WorkScheduler};
 
 const COPY_CHUNK_BYTES: usize = 64 * 1024;
 

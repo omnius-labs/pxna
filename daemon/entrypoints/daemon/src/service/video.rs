@@ -11,7 +11,7 @@ use std::{
 use omnius_core_base::tsid::TsidProvider;
 use omnius_pxna_engine::{
     perf_span,
-    service::{MaterializedFile, MediaInfoService, MediaOptions, PriorityPool, WorkClass},
+    service::{MaterializedFile, MediaInfoService, MediaOptions, WorkClass, WorkPriorityPool},
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -200,7 +200,7 @@ pub struct VideoService {
     root: PathBuf,
     sessions: TokioMutex<VecDeque<Arc<VideoSession>>>,
     /// セグメントを待たせている間、Interactive が動いているものとして数える外部プロセスの資源。
-    videos: PriorityPool,
+    videos: WorkPriorityPool,
 }
 
 impl VideoService {
@@ -211,7 +211,7 @@ impl VideoService {
         root: &Path,
         options: VideoOptions,
         tools: &MediaOptions,
-        videos: PriorityPool,
+        videos: WorkPriorityPool,
     ) -> Result<Arc<Self>> {
         options.validate()?;
         tokio::fs::create_dir_all(root).await?;

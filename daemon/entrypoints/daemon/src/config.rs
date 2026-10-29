@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use omnius_pxna_engine::{
     model::ImageFormatType,
-    service::{ArchiveOptions, MediaOptions, ScheduleOptions, ThumbnailOptions, ZipLegacyEncoding},
+    service::{ArchiveOptions, MediaOptions, ThumbnailOptions, WorkOptions, ZipLegacyEncoding},
 };
 
 use crate::{
@@ -24,7 +24,7 @@ struct DaemonConfigToml {
     #[serde(default)]
     pub thumbnail: ThumbnailConfigToml,
     #[serde(default)]
-    pub scheduler: SchedulerConfigToml,
+    pub scheduler: WorkOptionsToml,
     #[serde(default)]
     pub media: MediaConfigToml,
     #[serde(default)]
@@ -121,10 +121,10 @@ impl ArchiveConfigToml {
     }
 }
 
-/// 同時実行の枠の数。省略した key は `ScheduleOptions` の既定値を使う。
+/// 同時実行の枠の数。省略した key は `WorkOptions` の既定値を使う。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SchedulerConfigToml {
+struct WorkOptionsToml {
     pub image_slots: Option<usize>,
     pub image_interactive_slots: Option<usize>,
     pub process_slots: Option<usize>,
@@ -133,10 +133,10 @@ struct SchedulerConfigToml {
     pub video_interactive_slots: Option<usize>,
 }
 
-impl SchedulerConfigToml {
-    fn into_options(self) -> Result<ScheduleOptions> {
-        let defaults = ScheduleOptions::default();
-        let options = ScheduleOptions {
+impl WorkOptionsToml {
+    fn into_options(self) -> Result<WorkOptions> {
+        let defaults = WorkOptions::default();
+        let options = WorkOptions {
             image_slots: self.image_slots.unwrap_or(defaults.image_slots),
             image_interactive_slots: self.image_interactive_slots.unwrap_or(defaults.image_interactive_slots),
             process_slots: self.process_slots.unwrap_or(defaults.process_slots),
@@ -246,7 +246,7 @@ pub struct DaemonConfig {
     pub libraries: Vec<LibraryConfig>,
     pub storage: StorageConfig,
     pub thumbnail: ThumbnailOptions,
-    pub scheduler: ScheduleOptions,
+    pub scheduler: WorkOptions,
     pub media: MediaOptions,
     pub web: WebConfig,
     pub video: VideoOptions,
@@ -534,14 +534,14 @@ mod tests {
 
     #[tokio::test]
     async fn scheduler_defaults_overrides_and_moved_thumbnail_keys_test() -> TestResult {
-        assert_eq!(load(BASE_TOML).await?.scheduler, ScheduleOptions::default());
+        assert_eq!(load(BASE_TOML).await?.scheduler, WorkOptions::default());
         let config = load(&format!(
             "{BASE_TOML}\n[scheduler]\nimage_slots = 2\nprocess_interactive_slots = 0\nvideo_slots = 3\nvideo_interactive_slots = 2\n"
         ))
         .await?;
         assert_eq!(
             config.scheduler,
-            ScheduleOptions {
+            WorkOptions {
                 image_slots: 2,
                 process_interactive_slots: 0,
                 video_slots: 3,
