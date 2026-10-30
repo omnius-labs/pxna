@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG RUST_VERSION=1.96.0
+ARG RUST_VERSION=1.99.1
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS web
 WORKDIR /build/ui-web
 COPY ui-web/package.json ui-web/package-lock.json ./
