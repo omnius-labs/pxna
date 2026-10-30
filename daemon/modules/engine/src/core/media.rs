@@ -12,6 +12,7 @@ pub use kind::*;
 
 use std::{path::PathBuf, time::Duration};
 
+use crate::core::work::WorkClass;
 use crate::prelude::*;
 
 /// ffmpeg、ffprobe、libheif の heif-dec の実行ファイルの場所。`PATH` から探す名前か、絶対 path を指定する。
@@ -48,8 +49,8 @@ impl MediaTools {
     }
 
     /// 期限付きで実行し、標準出力を返す。失敗したときは、外部プロセスの標準エラーを message に残す。
-    /// Background の処理（[`crate::core::work::WorkClass`]）から呼んだときは、nice を上げて起動する。
-    async fn run(&self, command: tokio::process::Command) -> Result<Vec<u8>> {
-        process::run(command, self.timeout, crate::core::work::WorkClass::current()).await
+    /// Background の処理として呼ばれたときは、nice を上げて起動する。
+    async fn run(&self, command: tokio::process::Command, class: WorkClass) -> Result<Vec<u8>> {
+        process::run(command, self.timeout, class).await
     }
 }

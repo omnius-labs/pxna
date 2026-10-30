@@ -11,7 +11,7 @@ use std::{
 use omnius_core_base::tsid::TsidProvider;
 use omnius_pxna_engine::{
     perf_span,
-    service::{MaterializedFile, MediaInfoService, MediaOptions, PriorityPool, WorkClass},
+    service::{MaterializedFile, MediaInfoService, MediaOptions, WorkClass, WorkPriorityPool},
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -200,7 +200,7 @@ pub struct VideoService {
     root: PathBuf,
     sessions: TokioMutex<VecDeque<Arc<VideoSession>>>,
     /// セグメントを待たせている間、Interactive が動いているものとして数える外部プロセスの資源。
-    videos: PriorityPool,
+    videos: WorkPriorityPool,
 }
 
 impl VideoService {
@@ -211,7 +211,7 @@ impl VideoService {
         root: &Path,
         options: VideoOptions,
         tools: &MediaOptions,
-        videos: PriorityPool,
+        videos: WorkPriorityPool,
     ) -> Result<Arc<Self>> {
         options.validate()?;
         tokio::fs::create_dir_all(root).await?;
@@ -256,12 +256,12 @@ impl VideoService {
 
     async fn create_traced(&self, library: &str, path: &str) -> Result<VideoSessionInfo> {
         let source = self.mutation.source(library, path, false, false).await?;
-        let media = self.media.probe_video(&source).instrument(perf_span!("video_probe")).await?;
+        let media = self.media.probe_video(&source, WorkClass::Foreground).instrument(perf_span!("video_probe")).await?;
         let count = (media.duration_secs / f64::from(self.options.segment_secs)).ceil();
         if !(1.0..=100_000.0).contains(&count) || media.width < 2 || media.height < 2 {
             return Err(Error::new(ErrorKind::LimitExceeded).with_message("video has no playable segments or exceeds 100000 segments"));
         }
-        let file = source.materialize_file().instrument(perf_span!("video_materialize")).await?;
+        let file = source.materialize_file(WorkClass::Foreground).instrument(perf_span!("video_materialize")).await?;
         let id = format!("vid_{}", self.ids.lock().create());
         let info = VideoSessionInfo {
             playlist_url: format!("/api/v1/libraries/{library}/video/sessions/{id}/playlist.m3u8"),

@@ -220,6 +220,7 @@ Which item reaches generation when is decided by the wanted sets of the sockets:
 
 **The display image a viewer shows now is Interactive.**
 An `interactive` item is Interactive work, and `visible` and `prefetch` items are Foreground work.
+That class is what the generation asks for its conversion slot with; the storage reads and the external processes inside the generation run as Foreground, so an Interactive item does not hold the listing enumeration behind it.
 Image conversion, the ffmpeg and heif-dec runs for images, and the ffmpeg runs for videos are each one resource of the scheduler ([Storage Layer Design §9.1](./storage.md#listing-work-budget)).
 While an Interactive generation runs or waits in a resource, no new Foreground generation starts there, and no Background work starts anywhere.
 Interactive also has slots of its own besides the shared slots, so a display image does not wait for tile generations that already started.

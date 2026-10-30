@@ -1,3 +1,4 @@
+use omnius_pxna_engine::service::WorkClass;
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -330,7 +331,7 @@ impl OperationService {
                 changes.include_entry(&transfer.dst_library, &dst_relative)?;
             }
             self.mutation.destination(&transfer.dst_library, &dst_relative, false).await?;
-            let entry = source.get_entry().await?;
+            let entry = source.get_entry(WorkClass::Foreground).await?;
             if matches!(entry.detail, FsEntryDetail::Dir { .. }) {
                 let Some(destination) = self
                     .directory(&transfer.dst_library, &destination, transfer.conflict, progress.as_ref(), &transfer.changes)
@@ -361,7 +362,7 @@ impl OperationService {
                 }
                 if transfer.moving {
                     // skip や個別失敗で残ったソースは保持する。
-                    let mut remaining = source.find_entries(false).await?;
+                    let mut remaining = source.find_entries(false, WorkClass::Foreground).await?;
                     if remaining.next().await.is_none() {
                         self.mutation.storage.remove_dir(source.path()).await?;
                     }
@@ -505,7 +506,7 @@ impl OperationService {
                 children.push((relative, result));
             }
         } else {
-            let mut entries = source.find_entries(false).await?;
+            let mut entries = source.find_entries(false, WorkClass::Foreground).await?;
             while let Some(entry) = entries.next().await {
                 let entry = entry?;
                 let name = entry.path.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput))?;
@@ -533,7 +534,7 @@ impl OperationService {
             Self::check_cancel(Some(record))?;
             record.lock().changes.lock().include_entry(library, relative)?;
             self.mutation.destination(library, relative, false).await?;
-            let entry = source.get_entry().await?;
+            let entry = source.get_entry(WorkClass::Foreground).await?;
             if matches!(entry.detail, FsEntryDetail::Dir { .. }) {
                 let mut failed = false;
                 for (relative, child) in self.children(&source, relative).await? {

@@ -14,7 +14,7 @@ use futures::{
 use omnius_core_base::clock::Clock;
 use omnius_pxna_engine::{
     perf_span,
-    service::{ResolvedStoragePath, WorkBudget, WorkKind},
+    service::{ResolvedStoragePath, WorkBudget, WorkClass, WorkKind},
 };
 use omnius_pxna_interface::models;
 use serde::{Deserialize, Serialize};
@@ -108,7 +108,7 @@ impl SummaryData {
     }
 
     async fn scan_traced(folder: &ResolvedStoragePath, root: &Path, include_hidden: bool, budget: &WorkBudget) -> Result<Self> {
-        let mut stream = folder.find_entry_summaries().await?;
+        let mut stream = folder.find_entry_summaries(WorkClass::Foreground).await?;
         let converter = EntryConverter::new(root);
         let mut entries = Vec::new();
         while let Some(entry) = stream.next().await {
@@ -123,7 +123,11 @@ impl SummaryData {
         }
         let data = budget
             .io()
-            .run_blocking(WorkKind::Summary, move || Self::new(entries))
+            .ticket(WorkClass::Foreground)
+            .counted(WorkKind::Summary)
+            .acquire()
+            .await?
+            .run_blocking(move || Self::new(entries))
             .await
             .map_err(|error| error.with_message("cannot sort summary"))?;
         Span::current().record("entry_count", data.entries.len());

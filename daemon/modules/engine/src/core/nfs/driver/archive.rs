@@ -10,7 +10,7 @@ use tokio::{io::AsyncReadExt as _, sync::Semaphore};
 use crate::{
     core::{
         nfs::{FileStorageDriver, FsEntryStream, MaterializedFile, StagingFile},
-        work::Scheduler,
+        work::{WorkClass, WorkKind, WorkScheduler},
     },
     prelude::*,
 };
@@ -50,8 +50,8 @@ pub(super) struct InspectedArchive {
 }
 
 impl InspectedArchive {
-    async fn inspect(path: PathBuf, name: String, options: ArchiveOptions, budget: Arc<crate::core::work::WorkBudget>) -> Result<Self> {
-        let background = budget.background_if_needed(crate::core::work::WorkKind::Archive).await?;
+    async fn inspect(path: PathBuf, name: String, options: ArchiveOptions, budget: Arc<crate::core::work::WorkBudget>, class: WorkClass) -> Result<Self> {
+        let background = budget.background(class, WorkKind::Archive).await?;
         let mut file = tokio::fs::File::open(&path).await?;
         let mut head = [0_u8; 6];
         let read = file.read(&mut head).await?;
@@ -67,7 +67,7 @@ impl InspectedArchive {
                 })
             }
             ArchiveFormat::SevenZip => {
-                let (reader, index) = Scheduler::run_blocking_with(background, move || sevenz::SevenZipArchive::inspect(&path, &options))
+                let (reader, index) = WorkScheduler::run_blocking_with(background, move || sevenz::SevenZipArchive::inspect(&path, &options))
                     .await
                     .map_err(|error| error.with_message("join failed"))??;
                 Ok(Self {
@@ -179,15 +179,14 @@ impl FileStorageArchive {
     ///
     /// `name` は拡張子と signature の照合に使う論理 path である。
     /// 内側の archive の実体は extraction cache 上の拡張子のない file なので、`source` の path では照合できない。
-    pub async fn open(source: MaterializedFile, name: &str, identity: ArchiveIdentity, runtime: Arc<ArchiveRuntime>) -> Result<Self> {
+    pub async fn open(source: MaterializedFile, name: &str, identity: ArchiveIdentity, runtime: Arc<ArchiveRuntime>, class: WorkClass) -> Result<Self> {
         let path = source.path().to_path_buf();
         let name = name.to_string();
         let options = runtime.options().clone();
-        let class = crate::core::work::WorkClass::current();
         let budget = runtime.work_budget().clone();
         let inspected = runtime
             .index_cache()
-            .get_or_inspect(identity, move || class.scope(InspectedArchive::inspect(path, name, options, budget)))
+            .get_or_inspect(identity, move || InspectedArchive::inspect(path, name, options, budget, class))
             .await?;
 
         Ok(Self {
@@ -248,7 +247,7 @@ impl FileStorageArchive {
     /// 組の block を 1 回だけ展開し、組の file を一時 file として返す。
     ///
     /// extraction cache を引かず登録もせず、`permits` の上限で decoder を動かす。1 つの file の上限を超える file は返さない。
-    pub async fn extract_group(&self, group: &ArchiveBlockGroup, permits: Arc<Semaphore>) -> Result<HashMap<String, MaterializedFile>> {
+    pub async fn extract_group(&self, group: &ArchiveBlockGroup, permits: Arc<Semaphore>, class: WorkClass) -> Result<HashMap<String, MaterializedFile>> {
         ArchiveExtractor::extract_uncached(
             self.source.path().to_path_buf(),
             self.source_check,
@@ -257,13 +256,14 @@ impl FileStorageArchive {
             group.block_id,
             &group.paths,
             permits,
+            class,
         )
         .await
     }
 
     /// 中の `path` の archive を、取り出した `source` から開く。identity は自身の identity と `path` から導く。
-    pub async fn open_inner(&self, path: &str, source: MaterializedFile) -> Result<Self> {
-        Self::open(source, path, ArchiveIdentity::from_parent(&self.identity, path), self.runtime.clone()).await
+    pub async fn open_inner(&self, path: &str, source: MaterializedFile, class: WorkClass) -> Result<Self> {
+        Self::open(source, path, ArchiveIdentity::from_parent(&self.identity, path), self.runtime.clone(), class).await
     }
 
     fn not_found(path: &str) -> Error {
@@ -277,11 +277,11 @@ impl FileStorageArchive {
 
 #[async_trait]
 impl FileStorageDriver for FileStorageArchive {
-    async fn get_entry(&self, path: &str) -> Result<FsEntry> {
+    async fn get_entry(&self, path: &str, _class: WorkClass) -> Result<FsEntry> {
         self.inspected.index.get(path).map(|entry| entry.fs_entry.clone()).ok_or_else(|| Self::not_found(path))
     }
 
-    async fn find_entries(&self, path: &str, recursive: bool) -> Result<FsEntryStream> {
+    async fn find_entries(&self, path: &str, recursive: bool, _class: WorkClass) -> Result<FsEntryStream> {
         let entry = self.inspected.index.get(path).ok_or_else(|| Self::not_found(path))?;
         if !entry.fs_entry.is_dir() {
             return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("not a directory: {path}")));
@@ -290,15 +290,15 @@ impl FileStorageDriver for FileStorageArchive {
         Ok(Box::pin(futures::stream::iter(entries.into_iter().map(Ok))))
     }
 
-    async fn exists_file(&self, path: &str) -> Result<bool> {
+    async fn exists_file(&self, path: &str, _class: WorkClass) -> Result<bool> {
         Ok(self.inspected.index.get(path).is_some_and(|entry| entry.fs_entry.is_file()))
     }
 
-    async fn exists_dir(&self, path: &str) -> Result<bool> {
+    async fn exists_dir(&self, path: &str, _class: WorkClass) -> Result<bool> {
         Ok(self.inspected.index.get(path).is_some_and(|entry| entry.fs_entry.is_dir()))
     }
 
-    async fn materialize_file(&self, path: &str) -> Result<MaterializedFile> {
+    async fn materialize_file(&self, path: &str, class: WorkClass) -> Result<MaterializedFile> {
         let entry = self.inspected.index.get(path).ok_or_else(|| Self::not_found(path))?;
         if entry.fs_entry.is_symlink() {
             return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("archive symlink cannot be materialized: {path}")));
@@ -313,6 +313,7 @@ impl FileStorageDriver for FileStorageArchive {
             self.runtime.clone(),
             self.inspected.clone(),
             entry.clone(),
+            class,
         )
         .await
     }
@@ -436,7 +437,14 @@ mod tests {
 
     async fn open(path: &std::path::Path, options: ArchiveOptions) -> Result<FileStorageArchive> {
         let identity = identity(path).await?;
-        FileStorageArchive::open(MaterializedFile::borrowed(path), &path.to_string_lossy(), identity, Arc::new(ArchiveRuntime::new(options)?)).await
+        FileStorageArchive::open(
+            MaterializedFile::borrowed(path),
+            &path.to_string_lossy(),
+            identity,
+            Arc::new(ArchiveRuntime::new(options)?),
+            WorkClass::Foreground,
+        )
+        .await
     }
 
     fn patch_first_central_directory(path: &std::path::Path, field_offset: usize, patch: impl FnOnce(&mut [u8])) -> TestResult {
@@ -457,22 +465,22 @@ mod tests {
         write_zip(&path, vec![zip_file("a/b.txt", b"hello".to_vec()), zip_file("root.txt", b"root".to_vec())]).await?;
         let driver = open(&path, ArchiveOptions::default()).await?;
 
-        assert!(driver.exists_dir("").await?);
-        assert!(driver.exists_dir("a").await?);
-        assert!(driver.exists_file("a/b.txt").await?);
-        let root = driver.find_entries("", false).await?.try_collect::<Vec<_>>().await?;
+        assert!(driver.exists_dir("", WorkClass::Foreground).await?);
+        assert!(driver.exists_dir("a", WorkClass::Foreground).await?);
+        assert!(driver.exists_file("a/b.txt", WorkClass::Foreground).await?);
+        let root = driver.find_entries("", false, WorkClass::Foreground).await?.try_collect::<Vec<_>>().await?;
         assert_eq!(root.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), ["a", "root.txt"]);
-        let recursive = driver.find_entries("", true).await?.try_collect::<Vec<_>>().await?;
+        let recursive = driver.find_entries("", true, WorkClass::Foreground).await?.try_collect::<Vec<_>>().await?;
         assert_eq!(recursive.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), ["a", "a/b.txt", "root.txt"]);
 
-        let materialized = driver.materialize_file("a/b.txt").await?;
+        let materialized = driver.materialize_file("a/b.txt", WorkClass::Foreground).await?;
         let target_path = materialized.path().to_path_buf();
         assert_eq!(tokio::fs::read(&target_path).await?, b"hello");
         assert!(target_path.exists());
         drop(materialized);
         assert!(!target_path.exists());
 
-        assert_eq!(driver.get_entry("missing").await.unwrap_err().kind(), &ErrorKind::NotFound);
+        assert_eq!(driver.get_entry("missing", WorkClass::Foreground).await.unwrap_err().kind(), &ErrorKind::NotFound);
         assert_eq!(driver.create_staging("").await.err().unwrap().kind(), &ErrorKind::ReadOnly);
         assert_eq!(driver.make_dir("x").await.unwrap_err().kind(), &ErrorKind::ReadOnly);
         assert_eq!(driver.remove_file("x").await.unwrap_err().kind(), &ErrorKind::ReadOnly);
@@ -492,7 +500,7 @@ mod tests {
         write_zip(&path, vec![zip_file(ZipString::new(name.into_owned(), StringEncoding::Raw), b"cat".to_vec())]).await?;
 
         let driver = open(&path, ArchiveOptions::default()).await?;
-        assert!(driver.exists_file("画像/猫.txt").await?);
+        assert!(driver.exists_file("画像/猫.txt", WorkClass::Foreground).await?);
 
         let error = open(
             &path,
@@ -522,8 +530,14 @@ mod tests {
         )
         .await?;
         let driver = open(&path, ArchiveOptions::default()).await?;
-        assert_eq!(driver.get_entry("link").await?.detail, FsEntryDetail::Link { target: None, target_kind: None });
-        assert_eq!(driver.materialize_file("link").await.unwrap_err().kind(), &ErrorKind::UnsupportedType);
+        assert_eq!(
+            driver.get_entry("link", WorkClass::Foreground).await?.detail,
+            FsEntryDetail::Link { target: None, target_kind: None }
+        );
+        assert_eq!(
+            driver.materialize_file("link", WorkClass::Foreground).await.unwrap_err().kind(),
+            &ErrorKind::UnsupportedType
+        );
         Ok(())
     }
 
@@ -547,7 +561,7 @@ mod tests {
         write_zip(&corrupt, vec![zip_file("a.txt", b"alpha".to_vec())]).await?;
         patch_first_central_directory(&corrupt, 16, |bytes| bytes[..4].copy_from_slice(&0_u32.to_le_bytes()))?;
         let driver = open(&corrupt, ArchiveOptions::default()).await?;
-        assert_eq!(driver.materialize_file("a.txt").await.unwrap_err().kind(), &ErrorKind::InvalidFormat);
+        assert_eq!(driver.materialize_file("a.txt", WorkClass::Foreground).await.unwrap_err().kind(), &ErrorKind::InvalidFormat);
 
         let mismatch = temp.path().join("mismatch.7z");
         write_zip(&mismatch, vec![zip_file("a.txt", b"alpha".to_vec())]).await?;
@@ -589,7 +603,7 @@ mod tests {
             },
         )
         .await?;
-        assert_eq!(driver.materialize_file("a.txt").await.unwrap_err().kind(), &ErrorKind::LimitExceeded);
+        assert_eq!(driver.materialize_file("a.txt", WorkClass::Foreground).await.unwrap_err().kind(), &ErrorKind::LimitExceeded);
 
         let driver = open(
             &zip,
@@ -599,7 +613,7 @@ mod tests {
             },
         )
         .await?;
-        assert_eq!(driver.materialize_file("a.txt").await.unwrap_err().kind(), &ErrorKind::LimitExceeded);
+        assert_eq!(driver.materialize_file("a.txt", WorkClass::Foreground).await.unwrap_err().kind(), &ErrorKind::LimitExceeded);
         Ok(())
     }
 
@@ -612,7 +626,7 @@ mod tests {
         let a_block = driver.inspected.index.get("a.txt").unwrap().block_id;
         let b_block = driver.inspected.index.get("b.txt").unwrap().block_id;
         assert_eq!(a_block, b_block);
-        let materialized = driver.materialize_file("b.txt").await?;
+        let materialized = driver.materialize_file("b.txt", WorkClass::Foreground).await?;
         assert_eq!(std::fs::read(materialized.path())?, b"bravo");
         let decode_count = match &driver.inspected.reader {
             ArchiveReader::SevenZip(reader) => reader.decode_count(),
@@ -656,8 +670,14 @@ mod tests {
         writer.push_archive_entry(entry, Some(Cursor::new(b"target.txt".to_vec())))?;
         writer.finish()?;
         let driver = open(&symlink, ArchiveOptions::default()).await?;
-        assert_eq!(driver.get_entry("link").await?.detail, FsEntryDetail::Link { target: None, target_kind: None });
-        assert_eq!(driver.materialize_file("link").await.unwrap_err().kind(), &ErrorKind::UnsupportedType);
+        assert_eq!(
+            driver.get_entry("link", WorkClass::Foreground).await?.detail,
+            FsEntryDetail::Link { target: None, target_kind: None }
+        );
+        assert_eq!(
+            driver.materialize_file("link", WorkClass::Foreground).await.unwrap_err().kind(),
+            &ErrorKind::UnsupportedType
+        );
         Ok(())
     }
 
@@ -667,7 +687,14 @@ mod tests {
         let path = temp.path().join("leased.zip");
         write_zip(&path, vec![zip_file("a.txt", b"alpha".to_vec())]).await?;
         let source = MaterializedFile::owned_temp(&path);
-        let driver = FileStorageArchive::open(source.clone(), &path.to_string_lossy(), identity(&path).await?, Arc::new(ArchiveRuntime::default())).await?;
+        let driver = FileStorageArchive::open(
+            source.clone(),
+            &path.to_string_lossy(),
+            identity(&path).await?,
+            Arc::new(ArchiveRuntime::default()),
+            WorkClass::Foreground,
+        )
+        .await?;
         drop(source);
         assert!(path.exists());
         drop(driver);
@@ -696,7 +723,14 @@ mod tests {
     }
 
     async fn open_with(path: &std::path::Path, runtime: &Arc<ArchiveRuntime>) -> Result<FileStorageArchive> {
-        FileStorageArchive::open(MaterializedFile::borrowed(path), &path.to_string_lossy(), identity(path).await?, runtime.clone()).await
+        FileStorageArchive::open(
+            MaterializedFile::borrowed(path),
+            &path.to_string_lossy(),
+            identity(path).await?,
+            runtime.clone(),
+            WorkClass::Foreground,
+        )
+        .await
     }
 
     fn count_files(dir: &std::path::Path) -> std::io::Result<usize> {
@@ -730,7 +764,7 @@ mod tests {
 
         // 閲覧の枠を塞いでも、集計の展開は渡した枠で進む。
         let held = runtime.hold_all_permits().await;
-        let files = driver.extract_group(&groups[0], Arc::new(Semaphore::new(1))).await?;
+        let files = driver.extract_group(&groups[0], Arc::new(Semaphore::new(1)), WorkClass::Foreground).await?;
         drop(held);
         assert_eq!(files.len(), 3);
         assert_eq!(std::fs::read(files["b.jpg"].path())?, b"bravo");
@@ -752,7 +786,7 @@ mod tests {
         let groups = driver.block_groups(driver.files().into_iter().map(|entry| entry.path));
         assert_eq!(groups.iter().map(|group| group.paths().to_vec()).collect::<Vec<_>>(), [vec!["a.jpg"], vec!["dir/b.jpg"]]);
 
-        let files = driver.extract_group(&groups[1], Arc::new(Semaphore::new(1))).await?;
+        let files = driver.extract_group(&groups[1], Arc::new(Semaphore::new(1)), WorkClass::Foreground).await?;
         assert_eq!(files.len(), 1);
         assert_eq!(std::fs::read(files["dir/b.jpg"].path())?, b"bravo");
         Ok(())
@@ -766,8 +800,8 @@ mod tests {
         let runtime = cached_runtime(&temp.path().join("cache"), ArchiveOptions::default()).await?;
         let driver = open_with(&path, &runtime).await?;
 
-        drop(driver.materialize_file("a.txt").await?);
-        let second = driver.materialize_file("a.txt").await?;
+        drop(driver.materialize_file("a.txt", WorkClass::Foreground).await?);
+        let second = driver.materialize_file("a.txt", WorkClass::Foreground).await?;
         assert_eq!(std::fs::read(second.path())?, b"alpha");
         assert!(second.path().starts_with(temp.path().join("cache")));
         assert_eq!(runtime.decoded_blocks(), 1, "2 回目は decode しない");
@@ -783,12 +817,12 @@ mod tests {
         {
             let runtime = cached_runtime(&cache_dir, ArchiveOptions::default()).await?;
             let driver = open_with(&path, &runtime).await?;
-            drop(driver.materialize_file("a.txt").await?);
+            drop(driver.materialize_file("a.txt", WorkClass::Foreground).await?);
         }
 
         let runtime = cached_runtime(&cache_dir, ArchiveOptions::default()).await?;
         let driver = open_with(&path, &runtime).await?;
-        let materialized = driver.materialize_file("a.txt").await?;
+        let materialized = driver.materialize_file("a.txt", WorkClass::Foreground).await?;
         assert_eq!(std::fs::read(materialized.path())?, b"alpha");
         assert_eq!(runtime.decoded_blocks(), 0, "再起動前に展開した entry を再利用する");
         Ok(())
@@ -800,19 +834,19 @@ mod tests {
         let path = temp.path().join("sample.7z");
         write_7z_entries(&path, &[("a.txt", b"alpha")], false)?;
         let runtime = cached_runtime(&temp.path().join("cache"), ArchiveOptions::default()).await?;
-        drop(open_with(&path, &runtime).await?.materialize_file("a.txt").await?);
+        drop(open_with(&path, &runtime).await?.materialize_file("a.txt", WorkClass::Foreground).await?);
         assert_eq!(runtime.decoded_blocks(), 1);
 
         // 更新時刻だけを変える。
         let modified = std::fs::metadata(&path)?.modified()? + std::time::Duration::from_secs(3600);
         std::fs::File::options().write(true).open(&path)?.set_modified(modified)?;
-        drop(open_with(&path, &runtime).await?.materialize_file("a.txt").await?);
+        drop(open_with(&path, &runtime).await?.materialize_file("a.txt", WorkClass::Foreground).await?);
         assert_eq!(runtime.decoded_blocks(), 2, "更新時刻が変われば decode し直す");
 
         // size だけを変える。
         write_7z_entries(&path, &[("a.txt", b"alpha-2")], false)?;
         std::fs::File::options().write(true).open(&path)?.set_modified(modified)?;
-        let materialized = open_with(&path, &runtime).await?.materialize_file("a.txt").await?;
+        let materialized = open_with(&path, &runtime).await?.materialize_file("a.txt", WorkClass::Foreground).await?;
         assert_eq!(std::fs::read(materialized.path())?, b"alpha-2");
         assert_eq!(runtime.decoded_blocks(), 3, "size が変われば decode し直す");
         Ok(())
@@ -834,7 +868,7 @@ mod tests {
         .await?;
         let driver = open_with(&path, &runtime).await?;
 
-        let materialized = driver.materialize_file("a.txt").await?;
+        let materialized = driver.materialize_file("a.txt", WorkClass::Foreground).await?;
         assert_eq!(std::fs::read(materialized.path())?, b"alpha");
         assert_eq!(count_files(&cache_dir.join("files"))?, 0, "容量を超える entry は登録しない");
         Ok(())
@@ -848,7 +882,10 @@ mod tests {
         let runtime = cached_runtime(&temp.path().join("cache"), ArchiveOptions::default()).await?;
         let driver = open_with(&path, &runtime).await?;
 
-        let (a, b) = tokio::join!(driver.materialize_file("a.txt"), driver.materialize_file("b.txt"));
+        let (a, b) = tokio::join!(
+            driver.materialize_file("a.txt", WorkClass::Foreground),
+            driver.materialize_file("b.txt", WorkClass::Foreground)
+        );
         assert_eq!(std::fs::read(a?.path())?, b"alpha");
         assert_eq!(std::fs::read(b?.path())?, b"bravo");
         assert_eq!(runtime.decoded_blocks(), 1);
@@ -869,7 +906,7 @@ mod tests {
         let runtime = cached_runtime(&temp.path().join("cache"), ArchiveOptions::default()).await?;
         let driver = open_with(&path, &runtime).await?;
         for (name, content) in &entries {
-            let materialized = driver.materialize_file(name).await?;
+            let materialized = driver.materialize_file(name, WorkClass::Foreground).await?;
             assert_eq!(&std::fs::read(materialized.path())?, content);
         }
 
@@ -895,7 +932,7 @@ mod tests {
         let modified = std::fs::metadata(&path)?.modified()? + std::time::Duration::from_secs(3600);
         std::fs::File::options().write(true).open(&path)?.set_modified(modified)?;
 
-        let error = driver.materialize_file("a.txt").await.unwrap_err();
+        let error = driver.materialize_file("a.txt", WorkClass::Foreground).await.unwrap_err();
         assert_eq!(error.kind(), &ErrorKind::SourceChanged);
         assert_eq!(count_files(&cache_dir.join("staging"))?, 0, "staging を残さない");
         assert_eq!(count_files(&cache_dir.join("files"))?, 0, "変更前の source の結果を登録しない");

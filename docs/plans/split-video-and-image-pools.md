@@ -17,9 +17,9 @@ Created 2026-10-26 / Target commit `d4030c6` with the uncommitted work
 
 ## 2. Purpose and Completion Conditions
 
-1. `ScheduleOptions` has `video_slots` and `video_interactive_slots`, defaulting to 1 and 1; `process_slots` (2) and `process_interactive_slots` (1) are for images; `video_slots` must be positive
-2. `MediaPools::videos` is a separate pool; a held video permit does not take a slot of `processes` or `images`
-3. `Video` generation and `VideoService` use `videos`; `FfmpegImage` and `HeifImage` use `processes`; `Image` uses `images`
+1. `WorkOptions` has `video_slots` and `video_interactive_slots`, defaulting to 1 and 1; `process_slots` (2) and `process_interactive_slots` (1) are for images; `video_slots` must be positive
+2. `WorkPools::process_video` is a separate pool; a held video permit does not take a slot of `process_image` or `cpu`
+3. `Video` generation and `VideoService` use `process_video`; `FfmpegImage` and `HeifImage` use `process_image`; `Image` uses `cpu`
 4. `[scheduler]` accepts the two new keys, and the example configurations list them
 5. Lint, the engine tests, and the daemon tests pass
 

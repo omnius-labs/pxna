@@ -8,7 +8,7 @@ use tokio::{sync::Semaphore, time::Instant};
 
 use crate::{
     base::util::SingleFlight,
-    core::work::{Scheduler, WorkBudget, WorkKind},
+    core::work::{WorkBudget, WorkClass, WorkKind, WorkScheduler},
     prelude::*,
 };
 
@@ -174,22 +174,22 @@ impl ArchiveRuntime {
         self.semaphore.clone().acquire_many_owned(count).await.expect("semaphore is open")
     }
 
-    pub(super) async fn run_blocking<T, F>(&self, task: F) -> Result<T>
+    pub(super) async fn run_blocking<T, F>(&self, class: WorkClass, task: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce() -> Result<T> + Send + 'static,
     {
-        self.run_blocking_with(&self.semaphore, task).await
+        self.run_blocking_with(class, &self.semaphore, task).await
     }
 
     /// `semaphore` の permit を持って decoder を動かす。期限は閲覧と同じ `extract_timeout` である。
-    pub(super) async fn run_blocking_with<T, F>(&self, semaphore: &Arc<Semaphore>, task: F) -> Result<T>
+    pub(super) async fn run_blocking_with<T, F>(&self, class: WorkClass, semaphore: &Arc<Semaphore>, task: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce() -> Result<T> + Send + 'static,
     {
         let deadline = Instant::now() + self.options.extract_timeout;
-        let background = tokio::time::timeout_at(deadline, self.budget.background_if_needed(WorkKind::Archive))
+        let background = tokio::time::timeout_at(deadline, self.budget.background(class, WorkKind::Archive))
             .await
             .map_err(|_| Error::new(ErrorKind::Timeout))??;
         let permit = tokio::time::timeout_at(deadline, semaphore.clone().acquire_owned())
@@ -197,7 +197,7 @@ impl ArchiveRuntime {
             .map_err(|_| Error::new(ErrorKind::Timeout).with_message("archive extraction timed out while waiting for a worker"))?
             .map_err(|_| Error::new(ErrorKind::Cancelled).with_message("archive extraction runtime is shutting down"))?;
 
-        let worker = Scheduler::run_blocking_with((background, permit), task);
+        let worker = WorkScheduler::run_blocking_with((background, permit), task);
 
         tokio::time::timeout_at(deadline, worker)
             .await
@@ -275,27 +275,26 @@ mod tests {
 
     #[tokio::test]
     async fn background_extraction_reserves_before_resource_lock_and_keeps_real_worker_test() {
-        use crate::core::work::WorkClass;
         let budget = Arc::new(WorkBudget::default());
         let runtime = Arc::new(ArchiveRuntime::default().with_budget(budget.clone()));
         let held = runtime.hold_all_permits().await;
         let (started, ready) = tokio::sync::oneshot::channel();
         let (release, wait) = std::sync::mpsc::channel();
         let work_runtime = runtime.clone();
-        let work = tokio::spawn(WorkClass::Background.scope(async move {
+        let work = tokio::spawn(async move {
             work_runtime
-                .run_blocking(move || {
+                .run_blocking(WorkClass::Background, move || {
                     started.send(()).unwrap();
                     wait.recv().unwrap();
                     Ok(())
                 })
                 .await
-        }));
+        });
         while budget.counts(WorkKind::Archive).0 == 0 {
             tokio::task::yield_now().await;
         }
         // A foreground slot remains usable while archive waits for its resource slot.
-        let foreground = budget.acquire(WorkClass::Foreground, WorkKind::Listing).await.unwrap();
+        let foreground = budget.io().ticket(WorkClass::Foreground).counted(WorkKind::Listing).acquire().await.unwrap();
         assert!(budget.try_probe().is_none());
         drop(foreground);
         drop(held);
@@ -304,7 +303,7 @@ mod tests {
         let _ = work.await;
         assert_eq!(budget.counts(WorkKind::Archive), (1, 0));
         release.send(()).unwrap();
-        let _next = budget.acquire(WorkClass::Background, WorkKind::Exif).await.unwrap();
+        let _next = budget.io().ticket(WorkClass::Background).counted(WorkKind::Exif).acquire().await.unwrap();
         assert_eq!(budget.counts(WorkKind::Archive), (1, 1));
     }
 
@@ -323,7 +322,7 @@ mod tests {
         let first_runtime = runtime.clone();
         let first = tokio::spawn(async move {
             first_runtime
-                .run_blocking(move || {
+                .run_blocking(WorkClass::Background, move || {
                     let _ = started.send(());
                     held.recv().map_err(|error| Error::from_error(error, ErrorKind::TaskError))?;
                     Ok(())
@@ -337,7 +336,7 @@ mod tests {
         let second_started = Arc::new(AtomicBool::new(false));
         let second_started_in_worker = second_started.clone();
         let error = runtime
-            .run_blocking(move || {
+            .run_blocking(WorkClass::Background, move || {
                 second_started_in_worker.store(true, Ordering::SeqCst);
                 Ok(())
             })
@@ -365,7 +364,7 @@ mod tests {
         let worker_path = path.clone();
 
         let error = runtime
-            .run_blocking(move || {
+            .run_blocking(WorkClass::Background, move || {
                 std::thread::sleep(Duration::from_millis(60));
                 Ok(crate::core::nfs::MaterializedFile::owned_temp(worker_path))
             })
@@ -403,7 +402,7 @@ mod tests {
             let maximum = maximum.clone();
             tasks.push(tokio::spawn(async move {
                 runtime
-                    .run_blocking(move || {
+                    .run_blocking(WorkClass::Foreground, move || {
                         let now = active.fetch_add(1, Ordering::SeqCst) + 1;
                         maximum.fetch_max(now, Ordering::SeqCst);
                         std::thread::sleep(Duration::from_millis(40));

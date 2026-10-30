@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use crate::core::work::{SchedulePermit, WorkBudget, WorkClass, WorkKind};
+use crate::core::work::{WorkBudget, WorkClass, WorkKind, WorkPermit};
 use tokio_util::sync::CancellationToken;
 
 use super::{ArchiveFormat, FileStorageLocal};
@@ -92,14 +92,15 @@ impl LocalListingRuntime {
         }
     }
 
-    pub async fn enter(&self) -> Result<SchedulePermit> {
-        self.budget.enter(WorkClass::current()).await
+    /// 一覧の stream の受付枠を、`class` として取る。
+    pub async fn enter(&self, class: WorkClass) -> Result<WorkPermit> {
+        self.budget.streams().ticket(class).acquire().await
     }
 
-    pub async fn read_entry(&self, path: &str) -> Result<FsEntry> {
+    pub async fn read_entry(&self, path: &str, class: WorkClass) -> Result<FsEntry> {
         let cancellation = CancellationToken::new();
         let _cancel_on_drop = cancellation.clone().drop_guard();
-        let batch = self.read_batch(vec![PathBuf::from(path)], cancellation).await?;
+        let batch = self.read_batch(vec![PathBuf::from(path)], cancellation, class).await?;
         batch
             .entries
             .into_iter()
@@ -107,10 +108,14 @@ impl LocalListingRuntime {
             .ok_or_else(|| Error::new(ErrorKind::UnexpectedError).with_message("empty metadata batch"))
     }
 
-    pub async fn open_directory(&self, path: PathBuf, cancellation: CancellationToken) -> Result<LocalDirectory> {
+    pub async fn open_directory(&self, path: PathBuf, cancellation: CancellationToken, class: WorkClass) -> Result<LocalDirectory> {
         self.budget
             .io()
-            .run_blocking(WorkKind::Listing, move || {
+            .ticket(class)
+            .counted(WorkKind::Listing)
+            .acquire()
+            .await?
+            .run_blocking(move || {
                 if cancellation.is_cancelled() {
                     return Err(Error::new(ErrorKind::Cancelled));
                 }
@@ -120,10 +125,14 @@ impl LocalListingRuntime {
             .await?
     }
 
-    pub async fn read_paths(&self, directory: LocalDirectory, cancellation: CancellationToken) -> Result<Vec<PathBuf>> {
+    pub async fn read_paths(&self, directory: LocalDirectory, cancellation: CancellationToken, class: WorkClass) -> Result<Vec<PathBuf>> {
         self.budget
             .io()
-            .run_blocking(WorkKind::Listing, move || {
+            .ticket(class)
+            .counted(WorkKind::Listing)
+            .acquire()
+            .await?
+            .run_blocking(move || {
                 let mut reader = directory.lock();
                 let mut paths = Vec::with_capacity(Self::BATCH_SIZE);
                 for _ in 0..Self::BATCH_SIZE {
@@ -140,10 +149,14 @@ impl LocalListingRuntime {
             .await?
     }
 
-    pub async fn read_summaries(&self, directory: LocalDirectory, cancellation: CancellationToken) -> Result<Vec<FsEntrySummary>> {
+    pub async fn read_summaries(&self, directory: LocalDirectory, cancellation: CancellationToken, class: WorkClass) -> Result<Vec<FsEntrySummary>> {
         self.budget
             .io()
-            .run_blocking(WorkKind::Listing, move || {
+            .ticket(class)
+            .counted(WorkKind::Listing)
+            .acquire()
+            .await?
+            .run_blocking(move || {
                 let mut reader = directory.lock();
                 let mut entries = Vec::with_capacity(Self::BATCH_SIZE);
                 for _ in 0..Self::BATCH_SIZE {
@@ -178,11 +191,15 @@ impl LocalListingRuntime {
             .await?
     }
 
-    pub async fn read_batch(&self, paths: Vec<PathBuf>, cancellation: CancellationToken) -> Result<LocalListingBatch> {
+    pub async fn read_batch(&self, paths: Vec<PathBuf>, cancellation: CancellationToken, class: WorkClass) -> Result<LocalListingBatch> {
         let reader = self.reader.clone();
         self.budget
             .io()
-            .run_blocking(WorkKind::Listing, move || {
+            .ticket(class)
+            .counted(WorkKind::Listing)
+            .acquire()
+            .await?
+            .run_blocking(move || {
                 let mut entries = Vec::with_capacity(paths.len());
                 let mut metadata_sec = 0.0;
                 for path in paths {
@@ -288,12 +305,12 @@ mod tests {
         let mut jobs = Vec::new();
         for class in [WorkClass::Foreground, WorkClass::Foreground, WorkClass::Foreground, WorkClass::Background] {
             let runtime = runtime.clone();
-            jobs.push(tokio::spawn(class.scope(async move { runtime.read_entry("/one").await })));
+            jobs.push(tokio::spawn(async move { runtime.read_entry("/one", class).await }));
         }
         for _ in 0..3 {
             entered.recv().await.unwrap();
         }
-        let waiting = runtime.read_entry("/next");
+        let waiting = runtime.read_entry("/next", WorkClass::Foreground);
         tokio::pin!(waiting);
         assert!(futures::poll!(&mut waiting).is_pending());
         assert_eq!(runtime.budget.io().running(WorkClass::Background), 0, "Foreground の間は Background を始めない");
@@ -309,13 +326,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn listing_stream_preserves_background_class_after_creation_scope_test() -> TestResult {
+    async fn listing_stream_takes_the_class_it_was_created_with_test() -> TestResult {
         let dir = tempfile::tempdir()?;
         let tsid = Arc::new(Mutex::new(TsidProviderImpl::new(ClockUtc, ChaCha20Rng::seed_from_u64(0), 16)));
         let budget = Arc::new(WorkBudget::default());
         let driver = FileStorageLocal::with_budget(tsid, budget.clone());
-        let held = budget.acquire(WorkClass::Background, WorkKind::Exif).await?;
-        let mut stream = WorkClass::Background.scope(driver.find_entries(dir.path().to_str().unwrap(), false)).await?;
+        let held = budget.io().ticket(WorkClass::Background).counted(WorkKind::Exif).acquire().await?;
+        let mut stream = driver.find_entries(dir.path().to_str().unwrap(), false, WorkClass::Background).await?;
         let item = stream.next();
         tokio::pin!(item);
         assert!(futures::poll!(&mut item).is_pending());
@@ -331,7 +348,7 @@ mod tests {
         let (probe, _) = Probe::new(true);
         let runtime = runtime(probe.clone());
         let paths: Vec<_> = (0..LocalListingRuntime::BATCH_SIZE).map(|i| PathBuf::from(format!("/entry-{i}"))).collect();
-        let batch = runtime.read_batch(paths.clone(), CancellationToken::new()).await?;
+        let batch = runtime.read_batch(paths.clone(), CancellationToken::new(), WorkClass::Foreground).await?;
         assert_eq!(probe.calls.load(Ordering::SeqCst), paths.len());
         assert_eq!(batch.entries.iter().map(|entry| PathBuf::from(&entry.path)).collect::<Vec<_>>(), paths);
         assert!(batch.entries.iter().all(|entry| entry.meta.len == 7));
@@ -347,7 +364,9 @@ mod tests {
         for i in 0..LocalListingRuntime::MAX_WORKERS + 1 {
             let runtime = runtime.clone();
             jobs.push(tokio::spawn(async move {
-                runtime.read_batch(vec![PathBuf::from(format!("/{i}"))], CancellationToken::new()).await
+                runtime
+                    .read_batch(vec![PathBuf::from(format!("/{i}"))], CancellationToken::new(), WorkClass::Foreground)
+                    .await
             }));
         }
         for _ in 0..LocalListingRuntime::MAX_WORKERS {
@@ -371,16 +390,16 @@ mod tests {
         let (probe, mut entered) = Probe::new(false);
         let _release = ReleaseOnDrop(probe.clone());
         let runtime = runtime(probe.clone());
-        let directory = runtime.open_directory(dir.path().to_path_buf(), CancellationToken::new()).await?;
+        let directory = runtime.open_directory(dir.path().to_path_buf(), CancellationToken::new(), WorkClass::Foreground).await?;
         let mut jobs = Vec::new();
         for i in 0..LocalListingRuntime::MAX_WORKERS {
             let runtime = runtime.clone();
-            jobs.push(tokio::spawn(async move { runtime.read_entry(&format!("/{i}")).await }));
+            jobs.push(tokio::spawn(async move { runtime.read_entry(&format!("/{i}"), WorkClass::Foreground).await }));
         }
         for _ in 0..LocalListingRuntime::MAX_WORKERS {
             entered.recv().await.unwrap();
         }
-        let summaries = runtime.read_summaries(directory, CancellationToken::new());
+        let summaries = runtime.read_summaries(directory, CancellationToken::new(), WorkClass::Foreground);
         tokio::pin!(summaries);
         assert!(futures::poll!(&mut summaries).is_pending());
         assert_eq!(runtime.budget.io().running(WorkClass::Foreground), LocalListingRuntime::MAX_WORKERS);
@@ -402,9 +421,9 @@ mod tests {
         let runtime = LocalListingRuntime::new();
         let mut permits = Vec::new();
         for _ in 0..LocalListingRuntime::MAX_SCANS {
-            permits.push(runtime.enter().await?);
+            permits.push(runtime.enter(WorkClass::Foreground).await?);
         }
-        let next = runtime.enter();
+        let next = runtime.enter(WorkClass::Foreground);
         tokio::pin!(next);
         assert!(futures::poll!(&mut next).is_pending());
         permits.pop();
@@ -419,7 +438,11 @@ mod tests {
         let runtime = runtime(probe.clone());
         let cancellation = CancellationToken::new();
         let task_cancellation = cancellation.clone();
-        let job = tokio::spawn(async move { runtime.read_batch((0..64).map(|i| PathBuf::from(format!("/{i}"))).collect(), task_cancellation).await });
+        let job = tokio::spawn(async move {
+            runtime
+                .read_batch((0..64).map(|i| PathBuf::from(format!("/{i}"))).collect(), task_cancellation, WorkClass::Foreground)
+                .await
+        });
         entered.recv().await.unwrap();
         cancellation.cancel();
         probe.release();
@@ -441,7 +464,7 @@ mod tests {
         let tsid = Arc::new(Mutex::new(TsidProviderImpl::new(ClockUtc, ChaCha20Rng::seed_from_u64(0), 16)));
         let mut driver = FileStorageLocal::new(tsid);
         driver.listing = runtime.clone();
-        let mut stream = driver.find_entries(dir.path().to_str().unwrap(), false).await?;
+        let mut stream = driver.find_entries(dir.path().to_str().unwrap(), false, WorkClass::Foreground).await?;
         tokio::select! {
             result = stream.next() => panic!("metadata returned before release: {}", result.is_some()),
             _ = entered.recv() => {}
@@ -450,7 +473,7 @@ mod tests {
         probe.release();
         let mut all_permits = Vec::new();
         for _ in 0..LocalListingRuntime::MAX_WORKERS {
-            all_permits.push(runtime.budget.io().acquire(WorkClass::Foreground).await);
+            all_permits.push(runtime.budget.io().ticket(WorkClass::Foreground).acquire().await.expect("the pool is empty"));
         }
         assert!(probe.calls.load(Ordering::SeqCst) <= LocalListingRuntime::PARALLEL_BATCHES);
         assert_eq!(probe.active.load(Ordering::SeqCst), 0);

@@ -6,7 +6,7 @@ use std::{
 
 use tokio_util::sync::CancellationToken;
 
-use omnius_pxna_engine::service::ChildProbeVersion;
+use omnius_pxna_engine::service::{ChildProbeVersion, WorkProbe};
 use omnius_pxna_interface::{models, types::Nullable};
 
 use super::{LibraryBrowser, LibraryRelativePath};
@@ -114,9 +114,10 @@ impl LibraryBrowser {
     {
         let unknown = || models::FolderChildrenProbe::new(0, Nullable::Null);
         let deadline = Instant::now() + Duration::from_millis(50);
-        let Some((worker, stream)) = self.storage.work_budget().try_probe() else {
+        let Some(probe) = self.storage.work_budget().try_probe() else {
             return unknown();
         };
+        let WorkProbe { worker, stream } = probe;
         let cancellation = CancellationToken::new();
         let _cancel_on_drop = cancellation.clone().drop_guard();
         let job = worker.run_blocking_with(stream, move || task(deadline, cancellation));
@@ -243,11 +244,11 @@ mod tests {
         tokio::select! { _ = ready => {}, _ = &mut probe => panic!("worker must start") }
         assert_eq!(probe.await.has_children, Nullable::Null);
         assert!(budget.try_probe().is_none());
-        let foreground = budget.acquire(WorkClass::Foreground, WorkKind::Listing).await?;
+        let foreground = budget.io().ticket(WorkClass::Foreground).counted(WorkKind::Listing).acquire().await?;
         release.send(())?;
         ended.await?;
         drop(foreground);
-        let _finished = budget.acquire(WorkClass::Background, WorkKind::Exif).await?;
+        let _finished = budget.io().ticket(WorkClass::Background).counted(WorkKind::Exif).acquire().await?;
         assert_eq!(budget.counts(WorkKind::ChildProbe), (1, 1));
         Ok(())
     }

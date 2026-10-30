@@ -1,3 +1,4 @@
+use omnius_pxna_engine::service::WorkClass;
 use std::sync::Arc;
 
 use axum::{
@@ -51,10 +52,10 @@ impl FileContentRoute {
             query.validate().map_err(|error| Error::new(ErrorKind::InvalidInput).with_message(error.to_string()))?;
             let range = ReadRange::parse(headers.get(RANGE).and_then(|value| value.to_str().ok()), query.offset, query.limit)?;
             let source = state.library.thumbnail_source(&library_id, &query.path).await?;
-            if !matches!(source.get_entry().await?.detail, FsEntryDetail::File { .. }) {
+            if !matches!(source.get_entry(WorkClass::Foreground).await?.detail, FsEntryDetail::File { .. }) {
                 return Err(Error::new(ErrorKind::InvalidInput).with_message("not a file"));
             }
-            let mut file = source.open_file().await?;
+            let mut file = source.open_file(WorkClass::Foreground).await?;
             let fingerprint = file.fingerprint().await?;
             let len = fingerprint.size;
             let (start, end) = match range.resolve(len) {

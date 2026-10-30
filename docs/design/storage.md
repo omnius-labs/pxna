@@ -103,15 +103,15 @@ sequenceDiagram
     participant F as FileStorageArchive::open
     participant A as Archive driver
 
-    S->>L: materialize_file("/data/outer.zip")
+    S->>L: materialize_file("/data/outer.zip", class)
     L-->>S: MaterializedFile
-    S->>F: open(source, name, identity)
+    S->>F: open(source, name, identity, class)
     F-->>S: outer archive driver
-    S->>A: materialize_file("inner.7z")
+    S->>A: materialize_file("inner.7z", class)
     A-->>S: leased cached file
-    S->>F: open(source, name, identity)
+    S->>F: open(source, name, identity, class)
     F-->>S: inner archive driver
-    S->>A: final operation("image.jpg")
+    S->>A: final operation("image.jpg", class)
 ```
 
 The next driver holds the intermediate archive's `MaterializedFile`, so entries being resolved or in use are not deleted by LRU eviction.
@@ -225,7 +225,8 @@ Whether it can actually be opened is decided when it is opened (§6.1).
 | `open_file` | Common default implementation | Common default implementation |
 | `read_file` | Common default implementation | Common default implementation |
 
-`find_entries(path, false)` returns only direct children, and `find_entries(path, true)` returns all descendants.
+`find_entries(path, false, class)` returns only direct children, and `find_entries(path, true, class)` returns all descendants.
+Every read operation takes the class the work runs as (§9.1), after its path arguments.
 Order is not part of the contract, and sorting is done by the display layer above the service.
 
 `exists_file` and `exists_dir` return `false` only for non-existence, kind mismatch, and special entries.
@@ -233,7 +234,7 @@ Permission errors, I/O errors, archive anomalies, and source changes are returne
 
 ### 5.2 Default Implementations Centered on materialize
 
-The central operation a driver implements is `materialize_file(&str) -> MaterializedFile`.
+The central operation a driver implements is `materialize_file(&str, WorkClass) -> MaterializedFile`.
 The trait's `open_file` opens the physical file after materialization to make an `OpenedFile`, and `read_file` seeks the `OpenedFile` and reads in pieces.
 
 `read_file` exists for small reads inside the engine.
@@ -340,7 +341,7 @@ The hint is a clue for display, not a contract.
 
 ### 6.2 The Eager Archive Driver
 
-`FileStorageArchive::open(source, name, identity, runtime)` looks up `ArchiveRuntime`'s index cache by identity, and merges the inspect on a cache miss and concurrent requests into a single-flight.
+`FileStorageArchive::open(source, name, identity, runtime, class)` looks up `ArchiveRuntime`'s index cache by identity, and merges the inspect on a cache miss and concurrent requests into a single-flight.
 The driver it returns holds the validated `ArchiveIndex` and the source lease.
 `name` is the logical path used to check the extension and signature, and for an inner archive, the inner path is passed, not the extensionless file in the extraction cache.
 
@@ -824,6 +825,7 @@ A method that creates tasks for all Entries first. It increases unfinished work 
 
 **Decision**
 Work belongs to one of three classes: Interactive (the one item the user waits for now, such as the display image shown in the viewer), Foreground (listings, search, and grid thumbnails), and Background (the timeline and child probes).
+The class is passed explicitly by the caller: the scheduler keeps no task-local state. Every storage read that takes a slot, and every external process call, takes the class it runs as, and a stream keeps the class it was created with.
 Each resource is one pool of a single scheduler. A pool has shared slots for Interactive and Foreground, slots only Interactive uses, and slots only Background uses.
 Foreground does not start while Interactive runs or waits in the same pool. Background does not start while Interactive or Foreground runs or waits in any pool. Work that started is not stopped, and within a class work starts in arrival order.
 Interactive and Foreground never wait for a Background slot, so Background work that holds one pool while it waits for another does not stall them.
@@ -914,7 +916,7 @@ When memory pressure on the daemon from the number of active archives is observe
 
 ### 10.1 Current Code
 
-The priority rule is owned by [work.rs](../../daemon/modules/engine/src/core/work.rs). `WorkBudget` holds the listing worker pool with 3 shared and 1 Background slot, and the stream pool with 12 shared and 4 Background slots. When the daemon is constructed, the same budget is passed to the local driver, the archive runtime, the timeline, and the browse index. Name enumeration and attribute fetching acquire slots 64 items at a time and hold them until the blocking worker actually finishes. Child probes try both slots only when neither the normal background workers nor streams have waiters.
+The priority rule is owned by [work.rs](../../daemon/modules/engine/src/core/work.rs). Work waits through a ticket: `ticket(class)` queues it, `counted(kind)` attaches the kind, and `acquire()` waits. `WorkBudget` holds the listing worker pool with 3 shared and 1 Background slot, and the stream pool with 12 shared and 4 Background slots. The class of a read or of an external process is an explicit argument, not task-local state. When the daemon is constructed, the same budget is passed to the local driver, the archive runtime, the timeline, and the browse index. Name enumeration and attribute fetching acquire slots 64 items at a time and hold them until the blocking worker actually finishes. Child probes try both slots only when neither the normal background workers nor streams have waiters.
 
 The driver contract has the shape of §5.
 `FileStorageDriver` receives a `&str` within the bound namespace in all methods, and `FsEntry.path` is a `String`.

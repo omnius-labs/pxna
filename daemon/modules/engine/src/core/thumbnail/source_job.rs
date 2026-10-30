@@ -14,7 +14,7 @@ use std::{
 use tokio::sync::watch;
 
 use crate::{
-    core::work::{RaiseHandle, WorkClass},
+    core::work::{WorkClass, WorkRaiseHandle},
     prelude::*,
 };
 
@@ -66,7 +66,7 @@ struct Waiting<P, O> {
     /// The items that wait for this job and have not been dropped. A job with none is discarded.
     handles: usize,
     /// Where the job waits for its slot, once the driver has queued it. Raising or discarding the job goes through it.
-    ticket: Option<RaiseHandle>,
+    ticket: Option<WorkRaiseHandle>,
     done: Arc<Done<O>>,
 }
 
@@ -237,7 +237,7 @@ where
     /// Hands the waiting job the ticket it was queued with, so that a later Interactive item raises it and the last dropped item discards it.
     /// Returns the class the job has now, which the caller raises its ticket to: an item may have raised the job before the ticket existed.
     /// `None` if the job was discarded or has started; the caller then drops its ticket.
-    pub(super) fn attach(&self, source: &S, id: u64, ticket: RaiseHandle) -> Option<WorkClass> {
+    pub(super) fn attach(&self, source: &S, id: u64, ticket: WorkRaiseHandle) -> Option<WorkClass> {
         let mut entries = self.table.entries.lock();
         let waiting = entries.get_mut(source)?.waiting.as_mut()?;
         if waiting.id != id {
@@ -320,7 +320,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::core::work::{PoolLimits, PriorityPool, SchedulePermit, Scheduler};
+    use crate::core::work::{WorkPermit, WorkPoolLimits, WorkPriorityPool, WorkScheduler};
 
     type Jobs = SourceJobs<u32, u32, u32, String>;
 
@@ -389,13 +389,13 @@ mod tests {
     }
 
     /// A pool whose only shared slot is taken, so that a ticket queued in it waits.
-    async fn full_pool() -> (PriorityPool, SchedulePermit) {
-        let pool = Arc::new(Scheduler::default()).pool(PoolLimits {
+    async fn full_pool() -> (WorkPriorityPool, WorkPermit) {
+        let pool = Arc::new(WorkScheduler::default()).pool(WorkPoolLimits {
             shared: 1,
             interactive: 0,
             background: 1,
         });
-        let held = pool.acquire(WorkClass::Foreground).await;
+        let held = pool.ticket(WorkClass::Foreground).acquire().await.expect("the test pool is empty");
         (pool, held)
     }
 
@@ -406,7 +406,7 @@ mod tests {
         let first = jobs.place(&1, &10, 10, WorkClass::Foreground);
         let created = first.created.as_ref().unwrap();
         assert_eq!(jobs.class_of(&1, created.id), Some(WorkClass::Foreground));
-        let ticket = pool.enqueue(WorkClass::Foreground);
+        let ticket = pool.ticket(WorkClass::Foreground);
         assert_eq!(jobs.attach(&1, created.id, ticket.handle()), Some(WorkClass::Foreground));
 
         let _second = jobs.place(&1, &20, 20, WorkClass::Interactive);
@@ -429,7 +429,7 @@ mod tests {
         let (pool, _held) = full_pool().await;
         let first = jobs.place(&1, &10, 10, WorkClass::Foreground);
         let created = first.created.as_ref().unwrap();
-        let ticket = pool.enqueue(WorkClass::Foreground);
+        let ticket = pool.ticket(WorkClass::Foreground);
         let _second = jobs.place(&1, &20, 20, WorkClass::Interactive);
         assert_eq!(pool.waiting(WorkClass::Foreground), 1, "the ticket does not exist for the job yet, so nothing is raised");
 
@@ -446,7 +446,7 @@ mod tests {
         let first = jobs.place(&1, &10, 10, WorkClass::Foreground);
         let id = first.created.as_ref().unwrap().id;
         let second = jobs.place(&1, &20, 20, WorkClass::Foreground);
-        let ticket = pool.enqueue(WorkClass::Foreground);
+        let ticket = pool.ticket(WorkClass::Foreground);
         assert!(jobs.attach(&1, id, ticket.handle()).is_some());
         let waiting = tokio::spawn(ticket.acquire());
 
@@ -475,7 +475,7 @@ mod tests {
         let id = first.created.as_ref().unwrap().id;
         drop(first);
         assert_eq!(jobs.class_of(&1, id), None);
-        let ticket = pool.enqueue(WorkClass::Foreground);
+        let ticket = pool.ticket(WorkClass::Foreground);
         assert_eq!(jobs.attach(&1, id, ticket.handle()), None, "the driver sees that the job is gone");
         drop(ticket);
         assert_eq!(pool.waiting(WorkClass::Foreground), 0);

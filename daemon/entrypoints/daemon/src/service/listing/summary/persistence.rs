@@ -300,7 +300,11 @@ impl PersistenceState {
         let snapshot = self
             .budget
             .io()
-            .run_blocking(WorkKind::Summary, move || -> Result<SummarySnapshot> {
+            .ticket(WorkClass::Foreground)
+            .counted(WorkKind::Summary)
+            .acquire()
+            .await?
+            .run_blocking(move || -> Result<SummarySnapshot> {
                 if hex::encode(digest(&SHA256, &payload).as_ref()) != checksum {
                     return Err(Error::new(ErrorKind::InvalidFormat).with_message("summary index checksum mismatch"));
                 }
@@ -341,7 +345,7 @@ impl PersistenceState {
         let Some(payload) = self.encode(&job).await? else {
             return Ok(());
         };
-        let _background = self.budget.acquire(WorkClass::Background, WorkKind::Summary).await?;
+        let _background = self.budget.io().ticket(WorkClass::Background).counted(WorkKind::Summary).acquire().await?;
         let _gate = self.gate.lock().await;
         if !self.usable.load(Ordering::Acquire) || self.epochs.current(&key.library) != epoch {
             return Ok(());
@@ -413,7 +417,11 @@ impl PersistenceState {
                 let encoded = self
                     .budget
                     .io()
-                    .run_blocking_as(WorkClass::Background, WorkKind::Summary, move || {
+                    .ticket(WorkClass::Background)
+                    .counted(WorkKind::Summary)
+                    .acquire()
+                    .await?
+                    .run_blocking(move || {
                         let mut output = PayloadWriter {
                             bytes: Vec::with_capacity(limit.min(32768)),
                             limit,
@@ -482,7 +490,7 @@ mod tests {
         }
         assert_eq!(budget.counts(WorkKind::Summary), (2, 1));
         assert!(budget.try_probe().is_none());
-        let _foreground = budget.acquire(WorkClass::Foreground, WorkKind::Listing).await?;
+        let _foreground = budget.io().ticket(WorkClass::Foreground).counted(WorkKind::Listing).acquire().await?;
         drop(gate);
         persistence.flush().await;
         assert_eq!(budget.counts(WorkKind::Summary), (2, 2));

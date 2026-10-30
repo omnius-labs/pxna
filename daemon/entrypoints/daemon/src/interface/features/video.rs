@@ -3,7 +3,7 @@ use axum_extra::extract::CookieJar;
 use headers::Host;
 use http::Method;
 
-use omnius_pxna_engine::service::{MediaKind, MediaPools, PriorityPool, WorkClass};
+use omnius_pxna_engine::service::{MediaKind, WorkClass, WorkPools, WorkPriorityPool};
 use omnius_pxna_interface::{apis, models, types::ByteArray};
 
 use crate::{
@@ -65,10 +65,11 @@ impl apis::video::Video for ApiServer {
         query_params: &models::GetMediaInfoQueryParams,
     ) -> std::result::Result<apis::video::GetMediaInfoResponse, ()> {
         // 再生と情報パネルが開いた 1 件の情報なので、ユーザーが待っているものとして数える。
+        // occupy は枠を使わずに下位の段を保留するだけで、probe 自体は従来どおり Foreground の枠で走る。
         let _waiting = media_info_pool(&self.state.pools, &query_params.path).occupy(WorkClass::Interactive);
         let result = async {
             let source = self.state.mutation.source(&path_params.library_id, &query_params.path, false, false).await?;
-            Ok::<_, Error>(MediaInfoModel::from(self.state.media_info.probe(&source).await?))
+            Ok::<_, Error>(MediaInfoModel::from(self.state.media_info.probe(&source, WorkClass::Foreground).await?))
         }
         .await;
         Ok(match result {
@@ -184,7 +185,7 @@ impl From<ApiError> for apis::video::GetVideoSegmentResponse {
 
 /// A video, and a file with an unknown extension that ffprobe reads as a video, count in the video pool; an image counts in the image process pool.
 // omnius-lint:allow(free-fn) Pure pool choice for the media info handler, with no owning type
-fn media_info_pool<'a>(pools: &'a MediaPools, path: &str) -> &'a PriorityPool {
+fn media_info_pool<'a>(pools: &'a WorkPools, path: &str) -> &'a WorkPriorityPool {
     if uses_video_pool(MediaKind::of_name(path)) {
         &pools.process_video
     } else {

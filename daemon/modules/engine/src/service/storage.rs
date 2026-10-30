@@ -17,7 +17,7 @@ pub use crate::core::nfs::{
     FileStorageLocal as LocalStorageDriver, MaterializedFile, OpenedFile, Publish, SourceFingerprint, StagingFile, ZipLegacyEncoding,
 };
 
-pub use crate::core::work::{MediaPools, Occupancy, PoolLimits, PriorityPool, ScheduleOptions, SchedulePermit, Scheduler, WorkBudget, WorkClass, WorkKind};
+pub use crate::core::work::{WorkBudget, WorkClass, WorkKind, WorkOccupancy, WorkOptions, WorkPermit, WorkPoolLimits, WorkPools, WorkPriorityPool, WorkProbe, WorkScheduler};
 
 const COPY_CHUNK_BYTES: usize = 64 * 1024;
 
@@ -56,8 +56,8 @@ impl ResolvedStoragePath {
         self.archive_identity.map(|identity| EntryCacheKey::new(&identity, &self.inner))
     }
 
-    pub async fn get_entry(&self) -> Result<NestedFsEntry> {
-        let entry = self.driver.get_entry(&self.inner).await?;
+    pub async fn get_entry(&self, class: WorkClass) -> Result<NestedFsEntry> {
+        let entry = self.driver.get_entry(&self.inner, class).await?;
         Ok(NestedFsEntry {
             path: NestedPathBuf::compose(&self.path.outer_segments(), &entry.path)?,
             meta: entry.meta,
@@ -65,8 +65,8 @@ impl ResolvedStoragePath {
         })
     }
 
-    pub async fn get_listing_entry(&self) -> Result<NestedFsEntry> {
-        let entry = self.driver.get_listing_entry(&self.inner).await?;
+    pub async fn get_listing_entry(&self, class: WorkClass) -> Result<NestedFsEntry> {
+        let entry = self.driver.get_listing_entry(&self.inner, class).await?;
         Ok(NestedFsEntry {
             path: NestedPathBuf::compose(&self.path.outer_segments(), &entry.path)?,
             meta: entry.meta,
@@ -74,9 +74,9 @@ impl ResolvedStoragePath {
         })
     }
 
-    pub async fn find_entry_summaries(&self) -> Result<NestedFsEntrySummaryStream> {
+    pub async fn find_entry_summaries(&self, class: WorkClass) -> Result<NestedFsEntrySummaryStream> {
         let outer = self.path.outer_segments();
-        let stream = self.driver.find_entry_summaries(&self.inner).await?;
+        let stream = self.driver.find_entry_summaries(&self.inner, class).await?;
         Ok(Box::pin(stream.map(move |entry| {
             let entry = entry?;
             Ok(NestedFsEntrySummary {
@@ -87,9 +87,9 @@ impl ResolvedStoragePath {
         })))
     }
 
-    pub async fn find_entries(&self, recursive: bool) -> Result<NestedFsEntryStream> {
+    pub async fn find_entries(&self, recursive: bool, class: WorkClass) -> Result<NestedFsEntryStream> {
         let outer = self.path.outer_segments();
-        let stream = self.driver.find_entries(&self.inner, recursive).await?;
+        let stream = self.driver.find_entries(&self.inner, recursive, class).await?;
         Ok(Box::pin(stream.map(move |entry| {
             let entry = entry?;
             Ok(NestedFsEntry {
@@ -100,11 +100,11 @@ impl ResolvedStoragePath {
         })))
     }
 
-    pub async fn materialize_file(&self) -> Result<MaterializedFile> {
-        self.driver.materialize_file(&self.inner).await
+    pub async fn materialize_file(&self, class: WorkClass) -> Result<MaterializedFile> {
+        self.driver.materialize_file(&self.inner, class).await
     }
-    pub async fn open_file(&self) -> Result<OpenedFile> {
-        self.driver.open_file(&self.inner).await
+    pub async fn open_file(&self, class: WorkClass) -> Result<OpenedFile> {
+        self.driver.open_file(&self.inner, class).await
     }
 }
 
@@ -165,22 +165,22 @@ impl StorageService {
 
     // ---- 読み取り ----
 
-    pub async fn get_entry(&self, path: &NestedPath) -> Result<NestedFsEntry> {
-        self.resolve_entry(path).await?.get_entry().await
+    pub async fn get_entry(&self, path: &NestedPath, class: WorkClass) -> Result<NestedFsEntry> {
+        self.resolve_entry(path, class).await?.get_entry(class).await
     }
 
-    pub async fn find_entries(&self, path: &NestedPath, recursive: bool) -> Result<NestedFsEntryStream> {
-        self.resolve_entry(path).await?.find_entries(recursive).await
+    pub async fn find_entries(&self, path: &NestedPath, recursive: bool, class: WorkClass) -> Result<NestedFsEntryStream> {
+        self.resolve_entry(path, class).await?.find_entries(recursive, class).await
     }
 
-    pub async fn exists_file(&self, path: &NestedPath) -> Result<bool> {
-        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path).await?;
-        driver.exists_file(&inner).await
+    pub async fn exists_file(&self, path: &NestedPath, class: WorkClass) -> Result<bool> {
+        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path, class).await?;
+        driver.exists_file(&inner, class).await
     }
 
-    pub async fn exists_dir(&self, path: &NestedPath) -> Result<bool> {
-        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path).await?;
-        driver.exists_dir(&inner).await
+    pub async fn exists_dir(&self, path: &NestedPath, class: WorkClass) -> Result<bool> {
+        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path, class).await?;
+        driver.exists_dir(&inner, class).await
     }
 
     /// archive 内の entry を指す `EntryCacheKey` を返す。archive を含まない local の path には `None` を返す。
@@ -204,19 +204,19 @@ impl StorageService {
         Ok(Some(EntryCacheKey::new(&identity, last)))
     }
 
-    pub async fn materialize_file(&self, path: &NestedPath) -> Result<MaterializedFile> {
-        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path).await?;
-        driver.materialize_file(&inner).await
+    pub async fn materialize_file(&self, path: &NestedPath, class: WorkClass) -> Result<MaterializedFile> {
+        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path, class).await?;
+        driver.materialize_file(&inner, class).await
     }
 
-    pub async fn open_file(&self, path: &NestedPath) -> Result<OpenedFile> {
-        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path).await?;
-        driver.open_file(&inner).await
+    pub async fn open_file(&self, path: &NestedPath, class: WorkClass) -> Result<OpenedFile> {
+        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path, class).await?;
+        driver.open_file(&inner, class).await
     }
 
-    pub async fn read_file(&self, path: &NestedPath, offset: u64, limit: u64) -> Result<Bytes> {
-        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path).await?;
-        driver.read_file(&inner, offset, limit).await
+    pub async fn read_file(&self, path: &NestedPath, offset: u64, limit: u64, class: WorkClass) -> Result<Bytes> {
+        let ResolvedStoragePath { driver, inner, .. } = self.resolve_entry(path, class).await?;
+        driver.read_file(&inner, offset, limit, class).await
     }
 
     // ---- 書き込み ----
@@ -266,14 +266,14 @@ impl StorageService {
             driver: src_driver,
             inner: src_inner,
             ..
-        } = self.resolve_entry(src).await?;
+        } = self.resolve_entry(src, WorkClass::Foreground).await?;
         let (dst_driver, dst_inner) = self.resolve_writable(dst)?;
         let dst_dir = dst
             .parent()
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput).with_message(format!("destination has no parent directory: {dst}")))?;
 
-        let modified = src_driver.get_entry(&src_inner).await?.meta.modified;
-        let mut opened = src_driver.open_file(&src_inner).await?;
+        let modified = src_driver.get_entry(&src_inner, WorkClass::Foreground).await?.meta.modified;
+        let mut opened = src_driver.open_file(&src_inner, WorkClass::Foreground).await?;
 
         let mut staging = dst_driver.create_staging(&dst_dir).await?;
         let mut buf = vec![0u8; COPY_CHUNK_BYTES];
@@ -325,7 +325,7 @@ impl StorageService {
     /// 外側の segment から順に archive を開く。最外の identity は local file の path と fingerprint から、
     /// 内側の identity は親の identity と内側 path から導く。中間 archive の `MaterializedFile` は
     /// 次の driver が保持するため、利用中に消えない。
-    pub async fn resolve_entry(&self, path: &NestedPath) -> Result<ResolvedStoragePath> {
+    pub async fn resolve_entry(&self, path: &NestedPath, class: WorkClass) -> Result<ResolvedStoragePath> {
         let segments = path.iter().collect::<Vec<_>>();
         let Some((last, outer)) = segments.split_last() else {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("empty nested path"));
@@ -344,12 +344,12 @@ impl StorageService {
             return Err(Error::new(ErrorKind::LimitExceeded).with_message(format!("archive nesting exceeds {max_nested_depth}: {path}")));
         }
 
-        let mut driver = self.open_archive(local_path).await?;
+        let mut driver = self.open_archive(local_path, class).await?;
         let mut identity = driver.identity();
         for inner in inner_archives {
-            let source = driver.materialize_file(inner).await?;
+            let source = driver.materialize_file(inner, class).await?;
             identity = ArchiveIdentity::from_parent(&identity, inner);
-            driver = FileStorageArchive::open(source, inner, identity, self.archive.clone())
+            driver = FileStorageArchive::open(source, inner, identity, self.archive.clone(), class)
                 .await
                 .map_err(|error| Self::archive_open_error(error, inner))?;
         }
@@ -363,15 +363,15 @@ impl StorageService {
     }
 
     /// 最外の local の archive を開く。返す driver は、extract の前に source の fingerprint を照合する。
-    pub async fn open_archive(&self, local_path: &str) -> Result<FileStorageArchive> {
-        let source_entry = self.local.get_entry(local_path).await?;
+    pub async fn open_archive(&self, local_path: &str, class: WorkClass) -> Result<FileStorageArchive> {
+        let source_entry = self.local.get_entry(local_path, class).await?;
         if !source_entry.is_file() {
             return Err(Error::new(ErrorKind::UnsupportedType).with_message(format!("not an archive file: {local_path}")));
         }
         let fingerprint = SourceFingerprint::read(Path::new(local_path)).await?;
         let identity = ArchiveIdentity::from_local(local_path, &fingerprint);
-        let source = self.local.materialize_file(local_path).await?;
-        Ok(FileStorageArchive::open(source, local_path, identity, self.archive.clone())
+        let source = self.local.materialize_file(local_path, class).await?;
+        Ok(FileStorageArchive::open(source, local_path, identity, self.archive.clone(), class)
             .await
             .map_err(|error| Self::archive_open_error(error, local_path))?
             .verify_source(fingerprint))
@@ -424,7 +424,7 @@ mod tests {
         tokio::fs::write(&file, b"hello").await?;
 
         let service = service();
-        let entry = service.get_entry(&nested(&file)).await?;
+        let entry = service.get_entry(&nested(&file), WorkClass::Foreground).await?;
         assert_eq!(entry.path, nested(&file));
         assert_eq!(entry.meta.len, 5);
 
@@ -504,7 +504,7 @@ mod tests {
 
         let service = service();
 
-        let e = service.get_entry(&path).await.unwrap_err();
+        let e = service.get_entry(&path, WorkClass::Foreground).await.unwrap_err();
         assert_eq!(*e.kind(), ErrorKind::NotFound, "存在しない archive の内側は NotFound");
 
         let e = service.make_dir(&path).await.unwrap_err();
@@ -536,19 +536,19 @@ mod tests {
         let service = service();
         let mut root = nested(&archive);
         root.push_archive_root()?;
-        let namespace = service.resolve_entry(&root).await?;
+        let namespace = service.resolve_entry(&root, WorkClass::Foreground).await?;
         let x = namespace.at("x.txt")?;
         let y = namespace.at("dir/y.txt")?;
         assert!(Arc::ptr_eq(&x.driver, &y.driver));
-        let x_entry = x.get_entry().await?;
+        let x_entry = x.get_entry(WorkClass::Foreground).await?;
         assert_eq!(x_entry.path, x.path);
         assert_eq!(x.entry_cache_key(), service.entry_cache_key(x.path()).await?);
         assert_ne!(x.entry_cache_key(), y.entry_cache_key());
-        let mut file = y.open_file().await?;
+        let mut file = y.open_file(WorkClass::Foreground).await?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes).await?;
         assert_eq!(bytes, b"two");
-        let mut entries = namespace.find_entries(true).await?;
+        let mut entries = namespace.find_entries(true, WorkClass::Foreground).await?;
         while let Some(entry) = entries.next().await {
             assert_eq!(entry?.path.outer_segments(), root.outer_segments());
         }
@@ -570,7 +570,7 @@ mod tests {
         path.push_str("inner.7z")?;
         path.push_str("x.png")?;
 
-        let materialized = service.materialize_file(&path).await?;
+        let materialized = service.materialize_file(&path, WorkClass::Foreground).await?;
         assert_eq!(std::fs::read(materialized.path())?, b"pixel");
         assert_eq!(runtime.decoded_blocks(), 2);
         drop(materialized);
@@ -581,7 +581,7 @@ mod tests {
         let key = EntryCacheKey::new(&outer_identity, "inner.7z").to_hex();
         std::fs::remove_file(cache_dir.join("files").join(&key[..2]).join(&key))?;
 
-        let materialized = service.materialize_file(&path).await?;
+        let materialized = service.materialize_file(&path, WorkClass::Foreground).await?;
         assert_eq!(std::fs::read(materialized.path())?, b"pixel");
         assert_eq!(runtime.decoded_blocks(), 3, "inner.7z だけを取り出し直し、x.png は cache から返す");
         Ok(())
@@ -596,12 +596,41 @@ mod tests {
 
         let mut root = nested(&archive);
         root.push_archive_root()?;
-        let entries = service.find_entries(&root, false).await?.collect::<Vec<_>>().await;
+        let entries = service.find_entries(&root, false, WorkClass::Foreground).await?.collect::<Vec<_>>().await;
         let paths = entries
             .into_iter()
             .map(|entry| entry.map(|entry| entry.path.iter().last().unwrap_or_default().to_string()))
             .collect::<Result<Vec<_>>>()?;
         assert_eq!(paths, ["dir", "y.txt"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn archive_extraction_takes_the_class_of_the_caller_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let archive = dir.path().join("a.7z");
+        write_7z(&archive, &[("x.txt", b"x")])?;
+        let budget = Arc::new(WorkBudget::default());
+        let tsid_provider: Arc<Mutex<dyn TsidProvider + Send + Sync>> = Arc::new(Mutex::new(TsidProviderImpl::new(ClockUtc, ChaCha20Rng::seed_from_u64(0), 16)));
+        let runtime = Arc::new(ArchiveRuntime::default().with_budget(budget.clone()));
+        let service = StorageService::new(Arc::new(FileStorageLocal::with_budget(tsid_provider, budget.clone())), runtime);
+        let mut entry = nested(&archive);
+        entry.push_str("x.txt")?;
+        let resolved = service.resolve_entry(&entry, WorkClass::Background).await?;
+        let before = budget.counts(WorkKind::Archive);
+
+        let held = budget.io().ticket(WorkClass::Background).counted(WorkKind::Summary).acquire().await?;
+        let extraction = resolved.materialize_file(WorkClass::Background);
+        tokio::pin!(extraction);
+        assert!(futures::poll!(&mut extraction).is_pending(), "Background の抽出は Background の枠を待つ");
+        drop(held);
+        extraction.await?;
+        assert_eq!(budget.counts(WorkKind::Archive), (before.0 + 1, before.1 + 1), "抽出は Archive の処理として数える");
+
+        // この runtime は extraction cache を持たないので、Foreground は block をもう一度展開する。それでも Background の枠は取らない。
+        let before_foreground = budget.counts(WorkKind::Archive);
+        assert!(resolved.materialize_file(WorkClass::Foreground).await?.path().exists());
+        assert_eq!(budget.counts(WorkKind::Archive), before_foreground, "Foreground の抽出は Background の枠を取らない");
         Ok(())
     }
 
@@ -613,7 +642,7 @@ mod tests {
         for _ in 0..=ArchiveOptions::default().max_nested_depth {
             path.push_str("inner.7z")?;
         }
-        let e = service.get_entry(&path).await.unwrap_err();
+        let e = service.get_entry(&path, WorkClass::Foreground).await.unwrap_err();
         assert_eq!(*e.kind(), ErrorKind::LimitExceeded);
         Ok(())
     }
@@ -627,7 +656,7 @@ mod tests {
 
         let mut path = nested(&file);
         path.push_str("x")?;
-        let e = service.get_entry(&path).await.unwrap_err();
+        let e = service.get_entry(&path, WorkClass::Foreground).await.unwrap_err();
         assert_eq!(*e.kind(), ErrorKind::UnsupportedType);
         assert!(e.message().unwrap_or_default().contains("notes.txt"), "開けなかった segment を message に含める");
         Ok(())

@@ -11,7 +11,7 @@ use super::{ArchiveIdentity, ResolvedStoragePath, SourceFingerprint};
 use crate::{
     core::{
         media::{MediaKind, MediaOptions},
-        work::{WorkBudget, WorkKind},
+        work::{WorkBudget, WorkClass, WorkKind},
     },
     prelude::*,
 };
@@ -42,19 +42,19 @@ impl MediaInfoService {
         }
     }
 
-    /// Runs the blocking image metadata reads under `budget`, so that they wait with the class of the caller.
+    /// Runs the blocking image metadata reads under `budget`, so that they wait with the class the caller passes.
     pub fn with_budget(mut self, budget: Arc<WorkBudget>) -> Self {
         self.budget = budget;
         self
     }
 
     /// 動画の情報を得る。画像のときは `UnsupportedType` にする。
-    pub async fn probe_video(&self, source: &ResolvedStoragePath) -> Result<VideoInfo> {
-        Ok(self.probe(source).await?.video()?.clone())
+    pub async fn probe_video(&self, source: &ResolvedStoragePath, class: WorkClass) -> Result<VideoInfo> {
+        Ok(self.probe(source, class).await?.video()?.clone())
     }
 
     /// 拡張子で画像か動画かを決めて、メディア情報を得る。拡張子が表にない file は、動画として ffprobe に渡す。
-    pub async fn probe(&self, source: &ResolvedStoragePath) -> Result<MediaInfo> {
+    pub async fn probe(&self, source: &ResolvedStoragePath, class: WorkClass) -> Result<MediaInfo> {
         let (key, fingerprint) = match source.entry_cache_key() {
             Some(key) => (key.to_hex(), None),
             None => {
@@ -80,9 +80,9 @@ impl MediaInfoService {
         if let Some(info) = self.cached(&key) {
             return Ok(info);
         }
-        let file = source.materialize_file().await?;
+        let file = source.materialize_file(class).await?;
         let name = Self::file_name(source);
-        let info = self.inspect(file.path(), name).await.map_err(|error| {
+        let info = self.inspect(file.path(), name, class).await.map_err(|error| {
             let kind = error.kind().clone();
             Error::from_error(error, kind).with_message("cannot inspect media")
         })?;
@@ -98,7 +98,7 @@ impl MediaInfoService {
         Ok(info)
     }
 
-    async fn inspect(&self, file: &Path, name: &str) -> Result<MediaInfo> {
+    async fn inspect(&self, file: &Path, name: &str, class: WorkClass) -> Result<MediaInfo> {
         let image = |width, height| {
             let content_type = MediaKind::content_type(name).unwrap_or("application/octet-stream").to_string();
             (content_type, width, height)
@@ -119,7 +119,11 @@ impl MediaInfoService {
                 let (width, height, exif) = self
                     .budget
                     .io()
-                    .run_blocking(WorkKind::Inspect, move || -> Result<_> {
+                    .ticket(class)
+                    .counted(WorkKind::Inspect)
+                    .acquire()
+                    .await?
+                    .run_blocking(move || -> Result<_> {
                         let (width, height) =
                             ImageInspector::read_size(&path).map_err(|error| Error::from_error(error, ErrorKind::UnsupportedType).with_message("cannot read the image size"))?;
                         Ok((width, height, ImageInspector::read_exif(&path)))
@@ -128,12 +132,20 @@ impl MediaInfoService {
                 Ok(to_info(image(width, height), 0, false, exif))
             }
             Some(MediaKind::FfmpegImage | MediaKind::HeifImage) => {
-                let (width, height, rotation, has_alpha) = self.tools.probe_image_size(file).await?;
+                let (width, height, rotation, has_alpha) = self.tools.probe_image_size(file, class).await?;
                 let path = file.to_path_buf();
-                let exif = self.budget.io().run_blocking(WorkKind::Inspect, move || ImageInspector::read_exif(&path)).await?;
+                let exif = self
+                    .budget
+                    .io()
+                    .ticket(class)
+                    .counted(WorkKind::Inspect)
+                    .acquire()
+                    .await?
+                    .run_blocking(move || ImageInspector::read_exif(&path))
+                    .await?;
                 Ok(to_info(image(width, height), rotation, has_alpha, exif))
             }
-            Some(MediaKind::Video) | None => Ok(MediaInfo::Video(self.tools.probe_video_info(file).await?)),
+            Some(MediaKind::Video) | None => Ok(MediaInfo::Video(self.tools.probe_video_info(file, class).await?)),
         }
     }
 

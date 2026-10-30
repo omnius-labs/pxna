@@ -110,7 +110,7 @@ impl TimelineScanner {
     }
 
     pub async fn scan(&self, target: &TimelineScan<'_>) -> Result<()> {
-        WorkClass::Background.scope(self.scan_background(target)).await
+        self.scan_background(target).await
     }
 
     async fn scan_background(&self, target: &TimelineScan<'_>) -> Result<()> {
@@ -169,7 +169,7 @@ impl TimelineScanner {
     /// local のフォルダの直下。storage の local driver を通し、走査中の symlink を追跡しない規則にそろえる。
     async fn entries(&self, folder: &Path) -> Result<Vec<FsEntry>> {
         let nested = Self::nested(folder)?;
-        let entries = self.storage.find_entries(&nested, false).await?.try_collect::<Vec<_>>().await?;
+        let entries = self.storage.find_entries(&nested, false, WorkClass::Background).await?.try_collect::<Vec<_>>().await?;
         Ok(entries
             .into_iter()
             .map(|entry| FsEntry {
@@ -284,7 +284,7 @@ impl TimelineScanner {
     async fn read_archive(&self, target: &TimelineScan<'_>, candidate: &Candidate, identity: String) -> Result<()> {
         let file = (candidate.relative.clone(), TimelineFileVersion::Archive(identity.clone()));
         let local = candidate.local.to_string_lossy().into_owned();
-        let archive = match self.storage.open_archive(&local).await {
+        let archive = match self.storage.open_archive(&local, WorkClass::Background).await {
             Ok(archive) => archive,
             Err(error) => {
                 debug!(archive = %local, ?error, "timeline: cannot open archive");
@@ -323,7 +323,7 @@ impl TimelineScanner {
                 .map(|entry| entry.path.clone())
                 .collect::<Vec<_>>();
             for group in open.archive.block_groups(wanted) {
-                let files = match open.archive.extract_group(&group, self.extractions.clone()).await {
+                let files = match open.archive.extract_group(&group, self.extractions.clone(), WorkClass::Background).await {
                     Ok(files) => files,
                     Err(error) if *error.kind() == omnius_pxna_engine::ErrorKind::SourceChanged => {
                         debug!(archive = %local, "timeline: archive changed while reading");
@@ -358,7 +358,7 @@ impl TimelineScanner {
                         }
                         target.progress.fetch_add(1, Ordering::Relaxed);
                     } else if let Some(source) = files.get(path) {
-                        match open.archive.open_inner(path, source.clone()).await {
+                        match open.archive.open_inner(path, source.clone(), WorkClass::Background).await {
                             Ok(inner) => stack.push(OpenArchive {
                                 archive: inner,
                                 prefix: relative,
@@ -405,17 +405,33 @@ impl TimelineScanner {
                     .storage
                     .work_budget()
                     .io()
-                    .run_blocking_as(WorkClass::Background, WorkKind::Exif, move || ImageInspector::read_exif(&path))
+                    .ticket(WorkClass::Background)
+                    .counted(WorkKind::Exif)
+                    .acquire()
+                    .await
+                    .ok()?
+                    .run_blocking(move || ImageInspector::read_exif(&path))
                     .await
                     .ok()?;
                 exif.taken_at.as_deref().and_then(TimelineDate::from_exif)
             }
             MediaKind::Video => {
-                let background = self.storage.work_budget().acquire(WorkClass::Background, WorkKind::Probe).await.ok()?;
+                let background = self
+                    .storage
+                    .work_budget()
+                    .io()
+                    .ticket(WorkClass::Background)
+                    .counted(WorkKind::Probe)
+                    .acquire()
+                    .await
+                    .ok()?;
                 let permit = self.probes.clone().acquire_owned().await.ok()?;
                 let tools = self.tools.clone();
                 let path = file.to_path_buf();
-                let result = background.run_with(permit, async move { tools.probe_creation_time(&path).await }).await.ok()?;
+                let result = background
+                    .run_with(permit, async move { tools.probe_creation_time(&path, WorkClass::Background).await })
+                    .await
+                    .ok()?;
                 match result {
                     Ok(time) => time.and_then(|time| TimelineDate::from_creation_time(&self.zone, time)),
                     Err(error) => {
@@ -561,7 +577,7 @@ mod budget_tests {
         );
         let file = dir.path().join("image.jpg");
         std::fs::write(&file, b"invalid image")?;
-        let held = budget.acquire(WorkClass::Background, WorkKind::Summary).await?;
+        let held = budget.io().ticket(WorkClass::Background).counted(WorkKind::Summary).acquire().await?;
         let exif = scanner.content_date(MediaKind::Image, &file);
         tokio::pin!(exif);
         assert!(futures::poll!(&mut exif).is_pending());
@@ -578,6 +594,50 @@ mod budget_tests {
         drop(probe_slot);
         assert!(probe.await.is_none());
         assert_eq!(budget.counts(WorkKind::Probe), (1, 1));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn local_enumeration_runs_on_the_background_budget_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let folder = dir.path().join("photos");
+        std::fs::create_dir(&folder)?;
+        std::fs::write(folder.join("a.jpg"), b"")?;
+        let budget = Arc::new(WorkBudget::default());
+        let tsid = Arc::new(Mutex::new(TsidProviderImpl::new(ClockUtc, ChaCha20Rng::seed_from_u64(0), 16)));
+        let storage = Arc::new(StorageService::new(
+            Arc::new(LocalStorageDriver::with_budget(tsid, budget.clone())),
+            Arc::new(ArchiveRuntime::default().with_budget(budget.clone())),
+        ));
+        let index = Arc::new(TimelineIndex::open(&dir.path().join("timeline")).await?);
+        let scanner = TimelineScanner::new(
+            storage,
+            index,
+            MediaTools::new(MediaOptions::default(), std::time::Duration::from_secs(1)),
+            TimelineZone::new(Some("UTC"))?,
+            DateRules::new(&[], &[])?,
+            1,
+            1,
+        );
+
+        let held = budget.io().ticket(WorkClass::Background).counted(WorkKind::Summary).acquire().await?;
+        let entries = scanner.entries(&folder);
+        tokio::pin!(entries);
+        // metadata の取得を越えさせ、io の枠を待つところまで進める。Foreground なら枠は空いているので、ここで Ready になる。
+        let mut queued = false;
+        for _ in 0..200 {
+            assert!(futures::poll!(&mut entries).is_pending(), "枠を保持している間は列挙を終えない");
+            if budget.io().waiting(WorkClass::Background) == 1 {
+                queued = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(queued, "列挙は Background の枠を Background として待つ");
+        assert_eq!(budget.io().counts(WorkKind::Listing), (0, 0), "枠を得るまで数えない");
+        drop(held);
+        let entries = entries.await?;
+        assert!(entries.iter().any(|entry| entry.path.ends_with("a.jpg")), "列挙は Background の枠を得てから終わる");
         Ok(())
     }
 }
