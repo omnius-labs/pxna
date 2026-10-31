@@ -160,7 +160,7 @@ mod tests {
     }
     pub(super) fn aged(path: &Path) {
         let modified = SystemTime::now() - Duration::from_secs(10);
-        std::fs::File::open(path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        filetime::set_file_mtime(path, filetime::FileTime::from_system_time(modified)).unwrap();
     }
     async fn value(browser: &LibraryBrowser, path: &str, hidden: bool) -> Nullable<bool> {
         browser.probe_folder_children("test", path, hidden).await.unwrap().has_children

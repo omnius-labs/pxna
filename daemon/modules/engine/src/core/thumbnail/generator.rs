@@ -1505,13 +1505,12 @@ mod tests {
 
     #[tokio::test]
     async fn cached_representative_disappearance_and_replaced_symlink_reselect_once_test() -> TestResult {
-        use std::time::UNIX_EPOCH;
         let fixture = fixture(ThumbnailOptions::default()).await?;
         let album = fixture.dir.path().join("album");
         std::fs::create_dir(&album)?;
         write_png(&album.join("1.png"), 100, 200)?;
         write_png(&album.join("2.png"), 200, 100)?;
-        let set_old = || std::fs::File::open(&album)?.set_times(std::fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(100)));
+        let set_old = || filetime::set_file_mtime(&album, filetime::FileTime::from_unix_time(100, 0));
         set_old()?;
         let request = thumbnail_request(128, 128);
         fixture.generator.generate(&nested(&album), &request).await?;
@@ -1599,6 +1598,22 @@ mod tests {
             eprintln!("skipped: ffmpeg or ffprobe is not available on PATH");
         }
         !available
+    }
+
+    /// Some ffmpeg builds leave a decoder out. The Homebrew build used on macOS CI has no JPEG XL decoder.
+    fn skip_without_ffmpeg_decoder(decoder: &str) -> bool {
+        if skip_without_ffmpeg() {
+            return true;
+        }
+        let listed = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-decoders"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).to_ascii_lowercase().contains(&decoder.to_ascii_lowercase()))
+            .unwrap_or(false);
+        if !listed {
+            eprintln!("skipped: this ffmpeg build has no {decoder} decoder");
+        }
+        !listed
     }
 
     fn write_video(path: &Path, seconds: u32, width: u32, height: u32) -> TestResult {
@@ -2013,7 +2028,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_jxl_with_alpha_keeps_it_on_the_ffmpeg_png_path_test() -> TestResult {
-        if skip_without_ffmpeg() {
+        if skip_without_ffmpeg_decoder("jpegxl") {
             return Ok(());
         }
         let fixture = fixture(ThumbnailOptions::default()).await?;

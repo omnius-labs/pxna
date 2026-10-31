@@ -751,7 +751,26 @@ mod tests {
         assert_eq!(std::fs::read(root.join("destination/000-done.txt"))?, b"done");
         assert!(!root.join("destination/999-large.bin").exists());
         assert!(root.join("source/999-large.bin").exists());
-        assert_eq!(std::fs::read_dir(root.join("destination"))?.count(), 1);
+        // Cancellation drops the staging file of the partial copy, and that removal is best effort, so it
+        // may trail the Cancelled status on a loaded machine. Wait for the destination to settle.
+        let mut names: Vec<String> = Vec::new();
+        let settled = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                names = std::fs::read_dir(root.join("destination"))?
+                    .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+                    .collect::<std::io::Result<Vec<_>>>()?;
+                names.sort();
+                if names == ["000-done.txt"] {
+                    return Ok::<_, Error>(());
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        match settled {
+            Ok(result) => result?,
+            Err(_) => panic!("destination kept more than the published entry: {names:?}"),
+        }
         Ok(())
     }
 

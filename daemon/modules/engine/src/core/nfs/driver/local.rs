@@ -406,9 +406,10 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(unix)]
+    /// APFS rejects a name that is not valid UTF-8 with `EILSEQ`, so only Linux and the BSDs can hold one.
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[tokio::test]
-    async fn summary_rejects_non_utf8_and_special_entries_test() -> TestResult {
+    async fn summary_rejects_non_utf8_entries_test() -> TestResult {
         use std::os::unix::ffi::OsStringExt as _;
         let dir = tempfile::tempdir()?;
         let driver = driver();
@@ -418,6 +419,14 @@ mod tests {
         assert!(stream.next().await.unwrap().is_err());
         drop(stream);
         std::fs::remove_file(dir.path().join(name))?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn summary_rejects_special_entries_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let driver = driver();
         let socket = std::os::unix::net::UnixListener::bind(dir.path().join("socket"))?;
         let mut stream = driver.find_entry_summaries(&s(dir.path()), WorkClass::Foreground).await?;
         assert_eq!(stream.next().await.unwrap().unwrap_err().kind(), &ErrorKind::UnsupportedType);
