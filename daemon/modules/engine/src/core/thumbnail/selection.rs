@@ -210,12 +210,7 @@ mod tests {
         tsid::{TsidProvider, TsidProviderImpl},
     };
     use rand::{SeedableRng as _, rngs::ChaCha20Rng};
-    use std::{
-        path::Path,
-        str::FromStr,
-        sync::atomic::Ordering,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::{path::Path, str::FromStr, sync::atomic::Ordering, time::SystemTime};
     use testresult::TestResult;
 
     fn service() -> Arc<StorageService> {
@@ -223,7 +218,7 @@ mod tests {
         Arc::new(StorageService::new(Arc::new(FileStorageLocal::new(ids)), Arc::new(ArchiveRuntime::default())))
     }
     fn old(path: &Path, seconds: u64) -> TestResult {
-        std::fs::File::open(path)?.set_times(std::fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(seconds)))?;
+        filetime::set_file_mtime(path, filetime::FileTime::from_unix_time(seconds as i64, 0))?;
         Ok(())
     }
     async fn folder(fs: &StorageService, path: &Path) -> TestResult<ResolvedStoragePath> {
@@ -291,7 +286,7 @@ mod tests {
         fs.invalidate_browse_caches();
         cache.select(&folder, WorkClass::Foreground).await?;
         assert_eq!(cache.scans.load(Ordering::SeqCst), 3);
-        std::fs::File::open(dir.path())?.set_times(std::fs::FileTimes::new().set_modified(SystemTime::now() + Duration::from_secs(60)))?;
+        filetime::set_file_mtime(dir.path(), filetime::FileTime::from_system_time(SystemTime::now() + Duration::from_secs(60)))?;
         cache.select(&folder, WorkClass::Foreground).await?;
         cache.select(&folder, WorkClass::Foreground).await?;
         assert_eq!(cache.scans.load(Ordering::SeqCst), 5, "未来/直近の版は保持しない");

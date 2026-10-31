@@ -374,7 +374,7 @@ mod tests {
         let modified = std::fs::metadata(root)?.modified()?;
         std::fs::write(root.join("new.txt"), b"new")?;
         // 更新時刻の精度に依存せず、外部で版が変わった状態を作る。
-        std::fs::File::open(root)?.set_modified(modified + Duration::from_secs(3))?;
+        filetime::set_file_mtime(root, filetime::FileTime::from_system_time(modified + Duration::from_secs(3)))?;
         let second = state.library.list_folder_entries("test", "/", &options).await?;
         assert_ne!(first.snapshot, second.snapshot);
         assert_eq!(second.entries[0].name, "new.txt");

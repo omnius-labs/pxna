@@ -1505,13 +1505,12 @@ mod tests {
 
     #[tokio::test]
     async fn cached_representative_disappearance_and_replaced_symlink_reselect_once_test() -> TestResult {
-        use std::time::UNIX_EPOCH;
         let fixture = fixture(ThumbnailOptions::default()).await?;
         let album = fixture.dir.path().join("album");
         std::fs::create_dir(&album)?;
         write_png(&album.join("1.png"), 100, 200)?;
         write_png(&album.join("2.png"), 200, 100)?;
-        let set_old = || std::fs::File::open(&album)?.set_times(std::fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(100)));
+        let set_old = || filetime::set_file_mtime(&album, filetime::FileTime::from_unix_time(100, 0));
         set_old()?;
         let request = thumbnail_request(128, 128);
         fixture.generator.generate(&nested(&album), &request).await?;
