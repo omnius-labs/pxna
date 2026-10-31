@@ -115,7 +115,7 @@ libwebp-sys = "0.14.4"
 fast_image_resize = { version = "6.1.0", features = ["image"] }
 kamadak-exif = "0.6.1"
 async_zip = { version = "0.0.19", features = ["full"] }
-sevenz-rust2 = "0.22.0"
+sevenz-rust2 = "0.24.1"
 encoding_rs = "0.8.35"
 mockall = "0.14.0"
 syn = { version = "2.0.117", features = ["full"] }
