@@ -1600,6 +1600,22 @@ mod tests {
         !available
     }
 
+    /// Some ffmpeg builds leave a decoder out. The Homebrew build used on macOS CI has no JPEG XL decoder.
+    fn skip_without_ffmpeg_decoder(decoder: &str) -> bool {
+        if skip_without_ffmpeg() {
+            return true;
+        }
+        let listed = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-decoders"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).to_ascii_lowercase().contains(&decoder.to_ascii_lowercase()))
+            .unwrap_or(false);
+        if !listed {
+            eprintln!("skipped: this ffmpeg build has no {decoder} decoder");
+        }
+        !listed
+    }
+
     fn write_video(path: &Path, seconds: u32, width: u32, height: u32) -> TestResult {
         let source = format!("testsrc=duration={seconds}:size={width}x{height}:rate=10");
         let status = std::process::Command::new("ffmpeg")
@@ -2012,7 +2028,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_jxl_with_alpha_keeps_it_on_the_ffmpeg_png_path_test() -> TestResult {
-        if skip_without_ffmpeg() {
+        if skip_without_ffmpeg_decoder("jpegxl") {
             return Ok(());
         }
         let fixture = fixture(ThumbnailOptions::default()).await?;
