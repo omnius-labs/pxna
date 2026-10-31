@@ -280,7 +280,8 @@ mod tests {
         std::fs::write(dir.path().join("2.png"), b"x")?;
         old(dir.path(), 101)?;
         for _ in 0..2 {
-            assert!(cache.select(&folder, WorkClass::Foreground).await?.path().to_string().ends_with("/2.png"));
+            let selected = cache.select(&folder, WorkClass::Foreground).await?;
+            assert_eq!(selected.path().as_str().rsplit(['/', '\\']).next(), Some("2.png"));
         }
         assert_eq!(cache.scans.load(Ordering::SeqCst), 2);
         fs.invalidate_browse_caches();
@@ -317,7 +318,7 @@ mod tests {
         permits.clear();
 
         let selected = first.await??;
-        assert!(selected.path().to_string().ends_with("/a.png"));
+        assert_eq!(selected.path().as_str().rsplit(['/', '\\']).next(), Some("a.png"));
         assert!(
             cache.state.lock().entries.is_empty(),
             "a flight started before the invalidation must not publish its result"
