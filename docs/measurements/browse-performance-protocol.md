@@ -37,7 +37,7 @@ Boundaries such as symlinks, special Entries, and permission errors are verified
 
 Start the daemon with a dedicated port, dedicated configuration, and dedicated state, and make the Library read-only. Do not reuse a production daemon or state.
 The web client serves a production build of the same source, and record the Rust toolchain, build profile, commit and diff identifiers, browser version, and viewport.
-Use Rust 1.96.0 as specified by the repository, and do not change the profile or instrumentation during the comparison.
+Use the Rust toolchain pinned by `daemon/rust-toolchain.toml`, and do not change the profile or instrumentation during the comparison.
 
 Measure the first API call only once, immediately after restarting the daemon, with the in-process snapshot empty.
 Do not delete the OS and VirtioFS caches. Do not call a state cold merely because of a restart or a new path; record the state as unknown.
