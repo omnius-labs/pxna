@@ -105,12 +105,12 @@ A `DisplaySet` saved by the previous build has no `filmstripSize`, so `GET /pref
 | [3](#s-3) | Size the filmstrip from `filmstripSize` | 1 | Done |
 | [4](#s-4) | Add the decode-once helpers to the size steps, the image converter, and the cache | - | Done |
 | [5](#s-5) | Build and deduplicate the companion plans | 4 | Done |
-| [6](#s-6) | Fan out images and ffmpeg images from one decode | 5 | Done (ffmpeg path unverified) |
-| [7](#s-7) | Fan out videos from the first frame and the frames already extracted | 5 | Done (unverified: needs ffmpeg) |
+| [6](#s-6) | Fan out images and ffmpeg images from one decode | 5 | Done |
+| [7](#s-7) | Fan out videos from the first frame and the frames already extracted | 5 | Done |
 | [8](#s-8) | Store companions best-effort, in the right order, and skip cache hits | 6, 7 | Done |
-| [9](#s-9) | Add engine and web client tests | 2, 3, 8 | Done (ffmpeg tests skipped here) |
+| [9](#s-9) | Add engine and web client tests | 2, 3, 8 | Done |
 | [10](#s-10) | Update the design documents and measure the fan-out cost | 9 | Done |
-| [11](#s-11) | Run the full verification | 10 | In progress (the 3 postgres tests fail because the sandbox cannot reach Docker's published ports) |
+| [11](#s-11) | Run the full verification | 10 | Done |
 
 <a id="s-1"></a>
 ### Step 1. Add `filmstripSize` to the Preferences Contract, Models, and Client Defaults
@@ -283,3 +283,16 @@ After the final `openapi.yaml` edit, run `daemon/entrypoints/gen-interface.sh` a
 
 **Completion condition**
 Every command passes, and the generated files have no uncommitted diff beyond the intended field.
+
+**Result (2026-11-02)**
+
+| Command | Result |
+| --- | --- |
+| `cd daemon && RUSTC_WRAPPER= cargo make lint` | Passes |
+| `cd daemon && RUSTC_WRAPPER= cargo nextest run --all-features -j 4` with `PXNA_REQUIRE_FFMPEG=1` and `PXNA_REQUIRE_HEIF_DEC=1` | 624 passed, 6 skipped |
+| `cd ui-web && npm run lint && npm run typecheck && npm test` | Passes; 78 files and 687 tests |
+| `daemon/entrypoints/gen-interface.sh` and `cd ui-web && npm run gen:api` | No diff |
+
+The run supplied ffmpeg and ffprobe from the pinned 9.0 build the Dockerfile uses, and libheif 1.23.6 with its libde265 and dav1d plugins, on `PATH` from a temporary directory, with `PXNA_REQUIRE_FFMPEG=1` and `PXNA_REQUIRE_HEIF_DEC=1`. The video, ffmpeg-image, and HEIC tests therefore ran instead of skipping, which closes the unverified parts of Steps 6, 7, and 9. The 6 skipped tests are in `omnius-core-base` and `omnius-core-omnikit` and do not involve media.
+
+`cargo make test` uses the machine's parallelism. On this 9-core host the three postgres tests then exceeded the testcontainer start timeout and failed, while the daemon and the postgres binary passed alone. The suite was therefore run with `cargo nextest run --all-features -j 4`, which passes. The postgres tests need a reachable Docker daemon; the earlier failure of this step was that the sandbox could not reach it.
