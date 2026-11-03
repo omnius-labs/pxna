@@ -40,6 +40,7 @@ For items whose source is `Literature only`, reread the primary sources every 3 
 | [libheif's heif-dec and heif-convert assemble a HEIC tile grid, apply irot, and write TIFF from 1.19 when built with libtiff](./knowledge/libheif-heif-dec.md) | libheif 1.15.1, 1.17.6, 1.19.7, 1.21.2, 1.23.6 | Verified | 2026-10-26 |
 | [ffprobe 9.0 shows the alpha and the other auxiliary images of a HEIC as gray video streams, told apart only by grouping and size](./knowledge/ffprobe-heic-auxiliary-images.md) | ffmpeg 9.0.2, libheif 1.23.6 | Verified | 2026-10-26 |
 | [SQLite's FTS5 trigram tokenizer matches only substrings of 3 or more characters through the index](./knowledge/sqlite-fts5-trigram.md) | SQLite FTS5 documentation, libsqlite3-sys 0.30.1 (SQLite 3.46.0) | Literature only | 2026-10-23 |
+| [ffprobe 9.0.2 reports -99 as the level of VP8 and VP9 streams](./knowledge/ffprobe-stream-level.md) | ffmpeg 9.0.2 | Verified | 2026-11-04 |
 
 The first 2 items, the WebP size item, and the webp crate item are the premises of the decision to output thumbnails as lossy WebP.
 The first 2 items hold as a pair, and if image gains a lossy WebP encoder, there is no longer a reason to depend on libwebp-sys.
@@ -53,3 +54,4 @@ The ffprobe rotation item and the ffmpeg tile grid item are about the same ffmpe
 The libheif item is the premise of decoding HEIC with heif-dec and of using TIFF when the build has it. It shares the test images with the ffmpeg tile grid item, and if heif-dec stops assembling grids, HEIC falls back to the behavior that item describes.
 The ffprobe auxiliary image item decides which HEIC and AVIF go to heif-dec, and so how often the libheif item's intermediate-file cost is paid. It is about the same ffprobe 9.0 as the tile grid item, and if a later ffprobe groups alpha tiles or marks the kind of auxiliary image, the alpha rule has to be checked again.
 The Chromium modal item and the Radix item are the premises of the viewer's full-screen display and of the confirmation dialogs and menus shown inside it, and they hold as a pair. The former describes the reason for drawing into the outer frame element, and the latter describes the processing the key operations inside the outer frame need.
+The ffprobe stream level item is the premise of treating a negative `level` as absent in media info. It is about the same ffprobe 9.0 as the rotation and tile grid items, but it does not depend on them.

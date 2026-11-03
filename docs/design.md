@@ -302,10 +302,11 @@ The individual definitions and the authoritative responses are in `daemon/openap
 | `RangeNotSatisfiable` | 416    | `Range` is out of range                                                                                                                |
 | `InsufficientStorage` | 507    | Insufficient capacity at the write destination                                                                                         |
 | `Timeout`             | 504    | Exceeding the deadline for extracting an archive or generating a thumbnail with ffmpeg                                                 |
-| `InternalServerError` | 500    | Anything else                                                                                                                          |
+| `InternalServerError` | 500    | Anything else, including an ffprobe output the daemon cannot parse                                                                     |
 
 The reasons for making `UnsupportedType`, `LimitExceeded`, and `PasswordRequired` independent kinds, and for returning `Timeout` as 504, are recorded in §11.1.
 The engine's `Cancelled` is not in the table and falls to `InternalServerError`.
+A successful ffprobe whose output the daemon cannot deserialize is also `InternalServerError`, because the failure is in the daemon rather than a fact about the file.
 
 ## 5. Storage Layer
 

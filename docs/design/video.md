@@ -276,6 +276,21 @@ It is straightforward as a contract, but we have not confirmed the generated typ
 A method that leaves the video items in their current position and adds `image`.
 It would not break video clients, but the video items would lose meaning for images while remaining required, which goes against the policy of splitting the shape of the response, so we rejected it.
 
+#### Treat a Negative ffprobe Level as Absent
+
+**Decision**
+The server reads the `level` of a video stream as a signed integer and treats a negative value as absent.
+For H.264 the codec string then uses the existing fallback of 31; for every other codec the value is not used.
+
+**Reason**
+ffprobe reports -99 for the level of VP8 and VP9 streams, and the daemon previously read the field as `u32`, so the whole probe output failed to deserialize and the file became `UnsupportedType` ([ffprobe stream levels](../knowledge/ffprobe-stream-level.md)).
+The level is only used for the H.264 codec string, and the fallback for a missing level is already 31. A level is a non-negative number, so a negative value carries no level and should be treated the same as a missing one.
+The same rule covers any other codec for which ffprobe reports a negative level.
+
+**Rejected alternative**
+A method that lists the codecs whose level may be negative.
+It would work for the checked codecs, but it would reject the next codec that reports a negative level until the list is updated, so we rejected it.
+
 #### Deliver Transcoding with HLS and Restart ffmpeg on Seeks
 
 **Decision**
