@@ -29,8 +29,9 @@ Line numbers change, so recheck the relevant location when filing and when fixin
 | [The owner SPA can be framed by a same-site origin](./issues/owner-spa-can-be-framed.md) | Medium | 2026-10-25 | - |
 | [Malformed archives are reported as internal server errors](./issues/malformed-archives-are-reported-as-internal-errors.md) | Low | 2026-10-25 | - |
 | [Representative thumbnails are not reflected on screen after their contents are deleted](./issues/representative-thumbnail-stale.md) | Medium | 2026-10-23 | - |
+| [VP8 and VP9 videos are rejected as unsupported because ffprobe reports their level as -99](./issues/vp8-vp9-videos-are-rejected-as-unsupported.md) | High | 2026-11-04 | - |
 
-The six items at the top come from the security audit of 2026-10-24; the representative-thumbnail item is unrelated to them.
+The six items at the top come from the security audit of 2026-10-24; the representative-thumbnail item and the VP8 and VP9 item are unrelated to them and to each other.
 The stack overflow, the media caps and the pre-auth hashing all spend the daemon's memory or availability, so they are best fixed as one group.
 The TOCTOU and the framing header are boundary and defence issues with their own fixes, and the archive error classification stands alone.
 
