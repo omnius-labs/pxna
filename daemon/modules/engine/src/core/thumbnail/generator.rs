@@ -1626,6 +1626,31 @@ mod tests {
         Ok(())
     }
 
+    fn skip_without_ffmpeg_encoder(encoder: &str) -> bool {
+        if skip_without_ffmpeg() {
+            return true;
+        }
+        let listed = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).lines().any(|line| line.split_whitespace().nth(1) == Some(encoder)))
+            .unwrap_or(false);
+        if !listed {
+            eprintln!("skipped: this ffmpeg build has no {encoder} encoder");
+        }
+        !listed
+    }
+
+    fn write_video_with_encoder(path: &Path, seconds: u32, width: u32, height: u32, encoder: &str) -> TestResult {
+        let source = format!("testsrc=duration={seconds}:size={width}x{height}:rate=10");
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", &source, "-c:v", encoder, "-b:v", "200k"])
+            .arg(path)
+            .status()?;
+        assert!(status.success(), "ffmpeg failed to create a {encoder} video");
+        Ok(())
+    }
+
     fn sprite_request(width: u32, height: u32) -> ThumbnailRequest {
         request(ThumbnailVariant::Sprite, Some(width), Some(height), ImageFormatType::Jpeg, ImageResizeType::Fit)
     }
@@ -1648,6 +1673,19 @@ mod tests {
         assert_eq!(size(&thumbnail)?, (128, 96));
         assert_eq!(fixture.generator.ffmpeg_runs(), 1, "スプライトシートを作ったときに、サムネイルも入っている");
         assert_ne!(sprite.key, thumbnail.key);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_vp9_webm_produces_a_thumbnail_test() -> TestResult {
+        if skip_without_ffmpeg_encoder("libvpx-vp9") {
+            return Ok(());
+        }
+        let fixture = fixture(ThumbnailOptions::default()).await?;
+        let video = fixture.dir.path().join("clip.webm");
+        write_video_with_encoder(&video, 2, 320, 240, "libvpx-vp9")?;
+        let thumbnail = fixture.generator.generate(&nested(&video), &thumbnail_request(128, 128)).await?;
+        assert_eq!(size(&thumbnail)?, (128, 96));
         Ok(())
     }
 

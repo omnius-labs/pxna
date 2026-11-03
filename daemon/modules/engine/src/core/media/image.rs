@@ -253,7 +253,7 @@ impl ImageInfo {
     /// Tile Grid があればその寸法を、なければ最初の映像 stream の寸法を使う。
     pub fn parse_probe_size(bytes: &[u8]) -> Result<(u32, u32, u16, bool)> {
         let probe: ProbeImageOutput =
-            serde_json::from_slice(bytes).map_err(|error| Error::from_error(error, ErrorKind::UnsupportedType).with_message("invalid image information"))?;
+            serde_json::from_slice(bytes).map_err(|error| Error::from_error(error, ErrorKind::UnexpectedError).with_message("invalid image information"))?;
         let (width, height, rotation) = probe
             .tile_grid_size()
             .or_else(|| probe.first_video_stream_size())
@@ -460,6 +460,12 @@ mod tests {
         assert!(ImageInfo::parse_probe_size(br#"{"streams":[]}"#).is_err());
         assert!(ImageInfo::parse_probe_size(br#"{"streams":[{"codec_type":"video","width":0,"height":0}]}"#).is_err());
         Ok(())
+    }
+
+    #[test]
+    fn an_unreadable_image_probe_output_is_a_server_error_test() {
+        let error = ImageInfo::parse_probe_size(b"not json").unwrap_err();
+        assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
     }
 
     /// 回転の値は、ffprobe の Display Matrix が返す、符号つきの度数である。

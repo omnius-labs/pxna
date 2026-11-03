@@ -32,8 +32,7 @@ During implementation, advance the state of the child and of this document, and 
 | [name-index-store](./plans/name-index-store.md) | Every non-hidden Entry of a Library is held in a name index that follows our own changes | Not started | - |
 | [search-condition-panel](./plans/search-condition-panel.md) | Every Library, or chosen ones, can be searched by name, rating, and several tags with the conditions in the left area | Done | - |
 | [name-index-search](./plans/name-index-search.md) | A search from the root of a 10-million-Entry Library returns its first page within a second | Not started | name-index-store, search-condition-panel |
-| [media-probe-level-and-errors](./plans/media-probe-level-and-errors.md) | VP8 and VP9 WebM work through media info, video sessions, and thumbnails, and an unparseable probe output becomes a 500 | In progress | - |
 
 The thumbnail and image socket plans form a chain: `thumbnail-store-batching` and `source-jobs` follow `thumbnail-fanout-and-viewer-settings`, and `image-socket-server` follows `source-jobs`.
 The two name index plans run in order, and `name-index-search` also follows `search-condition-panel`, whose search API it answers.
-The `lan-plaintext-exposure`, `viewer-touch-gestures`, and `restore-last-folder` plans are independent of each other and of them. The `media-probe-level-and-errors` plan is independent of all of them.
+The `lan-plaintext-exposure`, `viewer-touch-gestures`, and `restore-last-folder` plans are independent of each other and of them.
