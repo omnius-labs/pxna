@@ -52,16 +52,23 @@ struct ProbeStream {
     codec_type: Option<String>,
     codec_name: Option<String>,
     profile: Option<String>,
-    level: Option<u32>,
+    level: Option<i32>,
     width: Option<u32>,
     height: Option<u32>,
     avg_frame_rate: Option<String>,
     duration: Option<String>,
 }
 
+impl ProbeStream {
+    /// A level is non-negative, so a negative probe value means absent.
+    fn level(&self) -> Option<u32> {
+        self.level.and_then(|level| u32::try_from(level).ok())
+    }
+}
+
 impl VideoInfo {
     pub fn parse(bytes: &[u8]) -> Result<Self> {
-        let probe: ProbeOutput = serde_json::from_slice(bytes).map_err(|error| Error::from_error(error, ErrorKind::UnsupportedType).with_message("invalid media information"))?;
+        let probe: ProbeOutput = serde_json::from_slice(bytes).map_err(|error| Error::from_error(error, ErrorKind::UnexpectedError).with_message("invalid media information"))?;
         let video = probe
             .streams
             .iter()
@@ -90,7 +97,7 @@ impl VideoInfo {
                 if profile.is_empty() {
                     "unknown".to_string()
                 } else {
-                    format!("avc1.{profile}{:02X}", video.level.unwrap_or(31))
+                    format!("avc1.{profile}{:02X}", video.level().unwrap_or(31))
                 }
             }
             "vp8" => "vp8".to_string(),
@@ -193,6 +200,24 @@ mod tests {
         assert_eq!(info.audio_codec.as_deref(), Some("aac"));
         assert!(VideoInfo::parse(br#"{"format":{"format_name":"matroska","duration":"NaN"},"streams":[]}"#).is_err());
         Ok(())
+    }
+
+    #[test]
+    fn a_negative_video_level_is_treated_as_absent_test() -> testresult::TestResult {
+        let vp9 = br#"{"format":{"format_name":"matroska,webm","duration":"2.0"},"streams":[{"codec_type":"video","codec_name":"vp9","level":-99,"width":320,"height":240,"avg_frame_rate":"30/1"}]}"#;
+        let info = VideoInfo::parse(vp9)?;
+        assert_eq!((info.video_codec.as_str(), info.duration_secs), ("vp9", 2.0));
+        assert_eq!(info.content_type, "video/webm; codecs=\"vp9\"");
+        let h264 = br#"{"format":{"format_name":"mov,mp4,m4a","duration":"2.0"},"streams":[{"codec_type":"video","codec_name":"h264","profile":"High","level":-99,"width":320,"height":240,"avg_frame_rate":"30/1"}]}"#;
+        let info = VideoInfo::parse(h264)?;
+        assert_eq!(info.content_type, "video/mp4; codecs=\"avc1.64001F\"");
+        Ok(())
+    }
+
+    #[test]
+    fn an_unreadable_video_probe_output_is_a_server_error_test() {
+        let error = VideoInfo::parse(b"not json").unwrap_err();
+        assert_eq!(*error.kind(), ErrorKind::UnexpectedError);
     }
 
     #[test]

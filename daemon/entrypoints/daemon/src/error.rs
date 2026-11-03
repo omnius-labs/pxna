@@ -394,6 +394,11 @@ mod tests {
             (omnius_pxna_engine::ErrorKind::Unauthenticated, ApiStatus::Unauthorized, ApiErrorKind::Unauthorized),
             (omnius_pxna_engine::ErrorKind::Timeout, ApiStatus::GatewayTimeout, ApiErrorKind::Timeout),
             (omnius_pxna_engine::ErrorKind::Cancelled, ApiStatus::InternalServerError, ApiErrorKind::InternalServerError),
+            (
+                omnius_pxna_engine::ErrorKind::UnexpectedError,
+                ApiStatus::InternalServerError,
+                ApiErrorKind::InternalServerError,
+            ),
         ];
         for (engine_kind, status, api_kind) in cases {
             let error: Error = omnius_pxna_engine::Error::new(engine_kind.clone()).with_message("detail").into();

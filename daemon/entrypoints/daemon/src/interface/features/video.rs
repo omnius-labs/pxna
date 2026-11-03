@@ -216,6 +216,35 @@ mod tests {
         assert!(!uses_video_pool(MediaKind::of_name("a/photo.png")));
     }
 
+    fn ffmpeg_has_encoder(encoder: &str) -> bool {
+        std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).lines().any(|line| line.split_whitespace().nth(1) == Some(encoder)))
+            .unwrap_or(false)
+    }
+
+    fn write_webm(path: &std::path::Path, encoder: &str) -> TestResult {
+        let status = std::process::Command::new("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=160x90:rate=10",
+                "-c:v",
+                encoder,
+                "-b:v",
+                "200k",
+            ])
+            .arg(path)
+            .status()?;
+        assert!(status.success(), "ffmpeg failed to create a {encoder} video");
+        Ok(())
+    }
+
     #[tokio::test]
     async fn media_info_of_an_image_has_the_image_kind_and_no_video_test() -> TestResult {
         let fixture = fixture(ArchiveOptions::default()).await?;
@@ -310,6 +339,59 @@ mod tests {
         let close_url = format!("/api/v1/libraries/photos/video/sessions/{id}");
         assert_eq!(send(&router, Method::DELETE, &close_url, headers, None).await?.status, StatusCode::NO_CONTENT);
         assert_eq!(send(&router, Method::GET, url, headers, None).await?.status, StatusCode::NOT_FOUND);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn vp8_and_vp9_webm_are_accepted_and_vp9_starts_a_session_test() -> TestResult {
+        let available = ["ffmpeg", "ffprobe"]
+            .iter()
+            .all(|program| std::process::Command::new(program).arg("-version").output().is_ok_and(|output| output.status.success()));
+        if !available {
+            assert!(std::env::var_os("PXNA_REQUIRE_FFMPEG").is_none());
+            return Ok(());
+        }
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let root = &fixture.server.state.conf.libraries[0].path;
+        let router = router(&fixture);
+        let setup = send(&router, Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "bearer")).await?;
+        let bearer = bearer(&setup)?;
+        let headers = &[("authorization", bearer.as_str())];
+        for (encoder, codec) in [("libvpx-vp9", "vp9"), ("libvpx", "vp8")] {
+            if !ffmpeg_has_encoder(encoder) {
+                eprintln!("skipped: this ffmpeg build has no {encoder} encoder");
+                continue;
+            }
+            let name = format!("{codec}.webm");
+            write_webm(&root.join(&name), encoder)?;
+            let info = send(&router, Method::GET, &format!("/api/v1/libraries/photos/media-info?path=/{name}"), headers, None).await?;
+            assert_eq!(info.status, StatusCode::OK, "{codec}");
+            assert_eq!(info.body["mediaInfo"]["video"]["videoCodec"], codec);
+            assert_eq!(info.body["mediaInfo"]["video"]["durationSecs"].as_f64(), Some(2.0), "{codec}");
+            if codec != "vp9" {
+                continue;
+            }
+            let created = send(
+                &router,
+                Method::POST,
+                "/api/v1/libraries/photos/video/sessions",
+                headers,
+                Some(json!({"path": "/vp9.webm"})),
+            )
+            .await?;
+            assert_eq!(created.status, StatusCode::CREATED);
+            let id = created.body["session"]["id"].as_str().ok_or("no id")?;
+            let url = created.body["session"]["playlistUrl"].as_str().ok_or("no playlist")?;
+            let playlist = send(&router, Method::GET, url, headers, None).await?;
+            assert_eq!(playlist.status, StatusCode::OK);
+            assert!(playlist.bytes.starts_with(b"#EXTM3U"));
+            let segment_url = format!("/api/v1/libraries/photos/video/sessions/{id}/segments/0.ts");
+            let segment = send(&router, Method::GET, &segment_url, headers, None).await?;
+            assert_eq!(segment.status, StatusCode::OK);
+            assert_eq!(segment.bytes[0], 0x47);
+            let close_url = format!("/api/v1/libraries/photos/video/sessions/{id}");
+            assert_eq!(send(&router, Method::DELETE, &close_url, headers, None).await?.status, StatusCode::NO_CONTENT);
+        }
         Ok(())
     }
 }
