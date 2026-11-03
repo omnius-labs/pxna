@@ -21,7 +21,7 @@ During implementation, advance the state of the child and of this document, and 
 
 | Plan | Purpose | State | Predecessor |
 | --- | --- | --- | --- |
-| [thumbnail-fanout-and-viewer-settings](./plans/thumbnail-fanout-and-viewer-settings.md) | One decode warms the listing's, filmstrip's, and both-shape thumbnails, and the viewer gets its own settings panel | In progress | - |
+| [thumbnail-fanout-and-viewer-settings](./plans/thumbnail-fanout-and-viewer-settings.md) | One decode warms the listing's, filmstrip's, and both-shape thumbnails, and the viewer gets its own settings panel | Done | - |
 | [thumbnail-store-batching](./plans/thumbnail-store-batching.md) | A generation stores its thumbnails in one batch and frees its slot first | Done | thumbnail-fanout-and-viewer-settings |
 | [source-jobs](./plans/source-jobs.md) | While several requests for different sizes or kinds of one image arrive, the daemon decodes it once at a time | Done | thumbnail-fanout-and-viewer-settings |
 | [image-socket-server](./plans/image-socket-server.md) | A client can want images over one WebSocket and receive them in priority order, with held images answered by `unchanged` | Done | source-jobs |
