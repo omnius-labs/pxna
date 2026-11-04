@@ -59,6 +59,28 @@ export async function neighbor(
     return undefined;
 }
 
+/// Finds the image or video nearest a position, looking outward on both sides and reading pages as it goes.
+/// At equal distances, the one after the position wins.
+export async function viewableNear(
+    listing: Listing,
+    index: number,
+    signal: AbortSignal,
+): Promise<IndexedEntry | undefined> {
+    const snapshot = listing.snapshot;
+    const first = listing.firstIndex ?? 0;
+    const end = listing.totalCount ?? 0;
+    for (let distance = 0; index + distance < end || index - distance >= first; distance += 1) {
+        for (const position of distance === 0 ? [index] : [index + distance, index - distance]) {
+            if (position < first || position >= end) continue;
+            await readIndex(listing, position, signal, snapshot);
+            const entry = listing.entryAt(position);
+            if (entry && isViewable(entry)) return { index: position, entry };
+        }
+    }
+    signal.throwIfAborted();
+    return undefined;
+}
+
 /// 先読みで一覧の未読のページを増やさない。未読なら移動の操作を待ち、端まで画像も動画もなければボタンを無効にする。
 export function loadedNeighbor(listing: Listing, index: number, step: -1 | 1): IndexedEntry | "unread" | undefined {
     for (let next = index + step; next >= (listing.firstIndex ?? 0) && next < (listing.totalCount ?? 0); next += step) {

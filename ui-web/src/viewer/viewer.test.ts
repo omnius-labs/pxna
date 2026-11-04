@@ -13,6 +13,7 @@ import {
     needsOriginal,
     neighbor,
     originalTiming,
+    viewableNear,
     zoomAfterWheel,
     zoomView,
 } from "./viewer";
@@ -230,4 +231,40 @@ it("別のフォルダにある同名の画像を相対パスで探す", async (
         entry: { path: "/a/right/same.png" },
     });
     expect(await findEntry(h.value, "/a", "same.png", signal())).toBeUndefined();
+});
+
+describe("viewableNear", () => {
+    const signal = () => new AbortController().signal;
+    const image = (name: string) => entry(name, "image/png");
+    const other = (name: string) => entry(name);
+
+    it("takes the position itself when it can be opened", async () => {
+        const h = listing([image("a"), image("b"), image("c")]);
+        expect(await viewableNear(h.value, 1, signal())).toMatchObject({ index: 1 });
+    });
+
+    it("takes the nearer one, even when it is before the position", async () => {
+        const h = listing([image("a"), image("b"), other("c"), other("d"), other("e"), other("f"), image("g")]);
+        expect(await viewableNear(h.value, 3, signal())).toMatchObject({ index: 1 });
+    });
+
+    it("takes the one after the position at equal distances", async () => {
+        const h = listing([image("a"), other("b"), image("c")]);
+        expect(await viewableNear(h.value, 1, signal())).toMatchObject({ index: 2 });
+    });
+
+    it("reads an unread page on the way, and finds nothing when nothing can be opened", async () => {
+        const entries = Array.from({ length: PAGE_SIZE + 1 }, (_, index) =>
+            index === PAGE_SIZE ? image("last") : other(`other-${index}`),
+        );
+        const h = listing(entries);
+        expect(await viewableNear(h.value, PAGE_SIZE - 1, signal())).toMatchObject({ index: PAGE_SIZE });
+        expect(await viewableNear(listing([other("a")]).value, 0, signal())).toBeUndefined();
+    });
+
+    it("stops when the signal is aborted", async () => {
+        const controller = new AbortController();
+        controller.abort();
+        await expect(viewableNear(listing([image("a")]).value, 0, controller.signal)).rejects.toThrow();
+    });
 });

@@ -301,6 +301,10 @@ export const en = {
         enterRateMode: "Rate mode (R): → Good, ← Bad, ↓ Unrated, ↑ Undo",
         more: "More",
         imageFailed: "Could not load the image.",
+        displayMode: "Display mode",
+        modeStandard: "Standard",
+        modeGallery: "Gallery",
+        modeFocus: "Focus",
     },
     appShell: {
         libraryAndMonth: "Libraries and months",
@@ -334,6 +338,13 @@ export const en = {
     },
     filmstrip: {
         label: "Filmstrip",
+    },
+    gallery: {
+        label: "Gallery",
+    },
+    positionMeter: {
+        label: "Position",
+        seek: "Go to {{percent}}%",
     },
     info: {
         collapse: "Collapse the info panel",

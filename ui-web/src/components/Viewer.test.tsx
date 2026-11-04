@@ -8,6 +8,7 @@ import type { Want } from "../images/spec";
 import type { Entry, FolderListing } from "../library/entries";
 import { FakeImageSource } from "../testing/images";
 import { stubMatchMedia, stubResizeObserver } from "../testing/preferences";
+import { VIEWER_MODE_KEY } from "../viewer/displayMode";
 import { Viewer } from "./Viewer";
 
 const { get, range, remove, rate, displayLoads } = vi.hoisted(() => ({
@@ -97,9 +98,11 @@ class DisplaySource extends FakeImageSource {
         }
     }
 }
+let images: DisplaySource;
 let uninstallImages: () => void;
 beforeEach(() => {
-    uninstallImages = new DisplaySource().install();
+    images = new DisplaySource();
+    uninstallImages = images.install();
 });
 afterEach(() => {
     uninstallImages();
@@ -1530,6 +1533,204 @@ describe("Viewer settings", () => {
             // 閉じた後は、矢印キーで移る。
             await press(window, "ArrowRight");
             await wait(() => expect(h.onChange).toHaveBeenCalledExactlyOnceWith("other.png"));
+        } finally {
+            await h.dispose();
+        }
+    });
+});
+
+describe("Display modes", () => {
+    const page = () => Promise.resolve(response(Array.from({ length: 200 }, (_, index) => entry(index))));
+    const control = (h: { host: HTMLElement }, name: string) => h.host.querySelector(`button[aria-label='${name}']`);
+    const modeButton = (h: { host: HTMLElement }, name: string) =>
+        [...h.host.querySelectorAll<HTMLButtonElement>("[aria-label='Display mode'] button")].find(
+            (button) => button.textContent === name,
+        );
+    const gallery = (h: { host: HTMLElement }) => h.host.querySelector("section[aria-label='Gallery']");
+    const filmstrip = (h: { host: HTMLElement }) => h.host.querySelector("section[aria-label='Filmstrip']");
+    const meter = (h: { host: HTMLElement }) => h.host.querySelector("nav[aria-label='Position']");
+
+    afterEach(() => {
+        window.localStorage.clear();
+        displayLoads.length = 0;
+    });
+
+    it("offers the switch only on a wide screen, and a narrow screen ignores the saved mode", async () => {
+        get.mockImplementation(page);
+        window.localStorage.setItem(VIEWER_MODE_KEY, "gallery");
+        const narrow = await harness("1.png", "/", "onZoom", undefined, true);
+        try {
+            await wait(() => expect(narrow.host.querySelector("img")?.alt).toBe("1.png"));
+            expect(narrow.host.querySelector("[aria-label='Display mode']")).toBeNull();
+            expect(gallery(narrow)).toBeNull();
+            expect(window.localStorage.getItem(VIEWER_MODE_KEY)).toBe("gallery");
+        } finally {
+            await narrow.dispose();
+        }
+    });
+
+    it("opens in standard mode with the filmstrip when nothing is saved", async () => {
+        get.mockImplementation(page);
+        const h = await harness("1.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(filmstrip(h)).not.toBeNull());
+            expect(modeButton(h, "Standard")?.getAttribute("aria-pressed")).toBe("true");
+            expect(meter(h)).toBeNull();
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("saves the chosen mode and restores it on the next opening", async () => {
+        get.mockImplementation(page);
+        const first = await harness("1.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(modeButton(first, "Focus")).toBeDefined());
+            await act(async () => modeButton(first, "Focus")?.click());
+            expect(window.localStorage.getItem(VIEWER_MODE_KEY)).toBe("focus");
+            expect(filmstrip(first)).toBeNull();
+            expect(meter(first)).not.toBeNull();
+        } finally {
+            await first.dispose();
+        }
+        const second = await harness("1.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(modeButton(second, "Focus")?.getAttribute("aria-pressed")).toBe("true"));
+        } finally {
+            await second.dispose();
+        }
+    });
+
+    it("wants no display images in gallery mode and has only viewing controls", async () => {
+        get.mockImplementation(page);
+        window.localStorage.setItem(VIEWER_MODE_KEY, "gallery");
+        const h = await harness("1.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(gallery(h)).not.toBeNull());
+            expect(displayLoads).toEqual([]);
+            expect(meter(h)).not.toBeNull();
+            expect(filmstrip(h)).toBeNull();
+            expect(control(h, "Slideshow")).toBeNull();
+            expect(control(h, "Rate mode")).toBeNull();
+            expect(control(h, "Viewer settings")).toBeNull();
+            expect(control(h, "Delete")).not.toBeNull();
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("wants the gallery's fit thumbnails at the longer side of the window", async () => {
+        get.mockImplementation(page);
+        window.localStorage.setItem(VIEWER_MODE_KEY, "gallery");
+        // jsdom has no pixel density, and a browser always has one.
+        Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true });
+        const h = await harness("1.png", "/", "onZoom", { width: 1000, height: 600 }, false);
+        try {
+            await wait(() => expect(images.wanted().length).toBeGreaterThan(0));
+            const side = Math.max(window.innerWidth, window.innerHeight) * 2;
+            for (const want of images.wanted()) {
+                expect(want.spec).toMatchObject({ kind: "thumbnail", shape: "fit", width: side, height: side });
+            }
+        } finally {
+            Reflect.deleteProperty(window, "devicePixelRatio");
+            await h.dispose();
+        }
+    });
+
+    it("stops rate mode when moving to gallery mode", async () => {
+        get.mockImplementation(page);
+        const h = await harness("1.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(control(h, "Rate mode")).not.toBeNull());
+            await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "r" })));
+            expect(control(h, "Rate mode")?.getAttribute("aria-pressed")).toBe("true");
+            await act(async () => modeButton(h, "Gallery")?.click());
+            await act(async () => modeButton(h, "Focus")?.click());
+            expect(control(h, "Rate mode")?.getAttribute("aria-pressed")).toBe("false");
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("moves to focus mode and rate mode on r in gallery mode", async () => {
+        get.mockImplementation(page);
+        window.localStorage.setItem(VIEWER_MODE_KEY, "gallery");
+        const h = await harness("1.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(gallery(h)).not.toBeNull());
+            await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "r" })));
+            expect(gallery(h)).toBeNull();
+            expect(modeButton(h, "Focus")?.getAttribute("aria-pressed")).toBe("true");
+            expect(control(h, "Rate mode")?.getAttribute("aria-pressed")).toBe("true");
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("keeps the slideshow, the image, and the settings in focus mode", async () => {
+        get.mockImplementation(page);
+        window.localStorage.setItem(VIEWER_MODE_KEY, "focus");
+        const h = await harness("1.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(h.host.querySelector("img")?.alt).toBe("1.png"));
+            expect(control(h, "Slideshow")).not.toBeNull();
+            expect(control(h, "Rate mode")).not.toBeNull();
+            expect(control(h, "Viewer settings")).not.toBeNull();
+            expect(h.host.querySelector("[aria-label='Display mode']")).not.toBeNull();
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("plays a video in focus mode and only shows its thumbnail in gallery mode", async () => {
+        const clip: Entry = {
+            name: "clip.mp4",
+            path: "/clip.mp4",
+            kind: "file",
+            metadata: { size: 1, readonly: false, contentType: "video/mp4" },
+            file: { archive: false },
+        };
+        get.mockImplementation(() =>
+            Promise.resolve({
+                data: { entries: [clip], totalCount: 1, snapshot: "one", truncated: false },
+                response: new Response(),
+            }),
+        );
+        window.localStorage.setItem(VIEWER_MODE_KEY, "gallery");
+        const h = await harness("clip.mp4", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(gallery(h)).not.toBeNull());
+            expect(h.host.querySelector("video")).toBeNull();
+            await act(async () => modeButton(h, "Focus")?.click());
+            await wait(() => expect(h.host.querySelector("video")).not.toBeNull());
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("moves to the viewable Entry nearest a bar of the position meter, reading its page first", async () => {
+        const folder = (index: number): Entry => ({
+            name: `sub-${index}`,
+            path: `/sub-${index}`,
+            kind: "folder",
+            metadata: { size: 0, readonly: false },
+        });
+        // The last bar's middle position is 198. Folders surround it, and the next nearest image is on the next page.
+        get.mockImplementation((_, options) =>
+            Promise.resolve(
+                options.params.query.offset === 0
+                    ? response(Array.from({ length: 200 }, (_, index) => (index < 196 ? entry(index) : folder(index))))
+                    : response([entry(200)]),
+            ),
+        );
+        window.localStorage.setItem(VIEWER_MODE_KEY, "focus");
+        const h = await harness("1.png", "/", "onZoom", undefined, false);
+        try {
+            await wait(() => expect(meter(h)).not.toBeNull());
+            const bars = meter(h)?.querySelectorAll("button") as NodeListOf<HTMLButtonElement>;
+            expect(bars).toHaveLength(48);
+            await act(async () => bars[47]?.click());
+            await wait(() => expect(h.onChange).toHaveBeenCalledWith("200.png"));
         } finally {
             await h.dispose();
         }
