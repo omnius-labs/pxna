@@ -1310,6 +1310,7 @@ M7 is a retired number and is not used.
 | M21 | Make the address the compose port is published on configurable with `PXNA_BIND` (default `127.0.0.1`) and enable `insecure_cookie` in the bundled configuration (§11.1) | M9 | Not started |
 | M22 | Implement the search API across Libraries of the [Listing and Search Design](./design/listing.md#53-searching-across-libraries), and the web client's search mode with its conditions in the left area and the three-choice mode switch | M12, M17, M18 | Done |
 | M23 | Merge every want for a source into one source job, carry thumbnails, sprite sheets, and display images over the [image socket](./design/image-socket.md), switch the web client to it with its own image cache, and remove the thumbnail HTTP route | M4, M12, M14 | Done |
+| M24 | Implement `locate` of the [Listing and Search Design](./design/listing.md#45-locating-an-entry) in the three listing APIs, and have the web client's directly opened viewer URL and "Show in folder" use it | M22 | Not started |
 
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
