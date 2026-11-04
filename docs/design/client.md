@@ -203,7 +203,23 @@ When the destination is already known from back and forth movement, the filmstri
 Opening the viewer pushes onto the URL history, and moving back and forth and closing do not.
 The browser's back operation also closes the viewer, and even when a URL is opened directly with the viewer open, the same image appears.
 
-The wide-screen image and video viewer has a filmstrip at the bottom edge.
+The wide-screen viewer has three display modes, chosen with a switch of three choices in the header: "標準" (Standard), "横連続" (Gallery), and "1 枚" (Focus). Standard is the viewer as described in the rest of this section. Narrow screens show no switch and always use standard mode.
+The mode is saved per device in the browser's `localStorage` under `pxna.viewerMode` each time it is changed, and is restored the next time the viewer opens. When nothing is saved, or the value cannot be read, the viewer opens in standard mode.
+
+Focus mode shows the same single image or video as standard mode with wider margins around it, and shows a position meter in place of the filmstrip. Zoom, the swap to the original image, the slideshow, rate mode, and video playback work as in standard mode.
+
+Gallery mode lays out the images and videos of the current listing horizontally in the same order as the listing, with their own aspect ratios and the same height, and shows a position meter in place of the filmstrip. Entries that are neither images nor videos take no space.
+The height is 75% of the display area's height, and the items are centered vertically, so that the neighbors of the open Entry stay on screen with margins around them. An extremely wide item is limited to 90% of the display area's width and fits inside that box preserving its aspect ratio.
+Items are `fit` thumbnails requested at the longer side of the window at opening times the pixel density, under the same rules as the listing (§4), and the server's largest thumbnail size step limits their resolution. Display images and original images are not requested in this mode. An item takes its aspect ratio from the loaded thumbnail, and until then it is laid out as a square.
+When sizes change, the open Entry stays at the center until the user scrolls. After the user scrolls, the position at the center of the display area stays in place instead.
+Only a window of 250 positions on each side of the viewed place is laid out. It moves along when the display area comes within 50 positions of an end of the window, and when a move lands outside it. Scrolling has no scrollbar, so a position far away is reached with the position meter.
+The wheel and the arrow keys scroll horizontally and move to the previous or next image or video respectively. When scrolling stops for 150 ms, the viewable item nearest the center becomes the open Entry, and the URL's `view` is replaced without pushing onto history. If the center is at an unread position, this waits until its page arrives.
+Clicking an item brings it to the center and opens it, and double-clicking opens it in focus mode. A video shows its thumbnail with a mark, and flipbook playback runs while the mouse is over it (§3.3), so scrolling does not start a transcode.
+Gallery mode has no zoom, slideshow, or rate mode. Switching to it stops a running slideshow and rate mode, and pressing `r` moves to focus mode and enters rate mode. Download, delete, full-screen display, and the close operations stay as in standard mode.
+
+The position meter is a row of up to 48 thin bars at the bottom edge, which represent proportions of the current listing rather than one Entry each. The timeline has no overall count, so it represents the range read. The bars grow near the open Entry's position, and clicking a bar moves to the image or video nearest that position, reading pages outward from it on both sides. At equal distances, the one after the position wins. Tab stops only at the open position's bar.
+
+The filmstrip is at the bottom edge of the wide-screen viewer in standard mode.
 The filmstrip assigns the same width to every Entry of the current listing (including search results), and lays them out horizontally in the same order as the listing.
 The side of one position is chosen from 5 levels by the display preferences' filmstrip size: 40, 48, 56, 72, and 96 CSS px, and the section is 8 CSS px taller than the side. The default is level 3 (56 CSS px).
 Changing the level measures the positions again and scrolls until the open Entry is at the center again.
@@ -216,8 +232,8 @@ Thumbnails use the crop shape and are wanted under the same rules as the listing
 Tab stops only at the open position, and distant positions are moved to by clicking.
 
 The viewer has its own settings panel, a popover opened from a gear button in the header and drawn inside the outer frame element of `Modal`.
-It holds the settings that only the viewer uses: the filmstrip size, on a wide screen only, and the swapping to the original image, for images only.
-The gear is shown only when the panel would have a control: on a wide screen for an image or a video, and on a narrow screen for an image. A narrow video has neither setting, so it has no gear.
+It holds the settings that only the viewer uses: the filmstrip size, in wide-screen standard mode only, and the swapping to the original image, for images outside gallery mode only.
+The gear is shown only when the panel would have a control: in wide-screen standard mode for an image or a video, in focus mode and on a narrow screen for an image. A video in focus mode or on a narrow screen, and every Entry in gallery mode, have neither setting, so they have no gear.
 On a narrow screen the gear is next to the "その他" (More) menu, and on a wide screen it is with the other header buttons.
 While the panel is open, the viewer's moving back and forth and closing with Esc are not accepted, so Esc closes only the panel and the slider's arrow keys change only the slider. The panel's Tab is left to the popover's own focus scope, and `Modal` does not move the focus ([Radix's nested layers](../knowledge/radix-nested-layer-events.md)).
 
@@ -1070,6 +1086,65 @@ Behavior would be the same regardless of format, but the display image never bec
 **Rejected alternative 4**
 A method that switches to the original image with a viewer button.
 The user could decide the transfer volume, but an operation would be needed every time a photo is flipped, so we rejected it.
+
+#### Give the Wide-Screen Viewer Three Display Modes
+
+**Decision**
+The wide-screen viewer switches between standard, gallery, and focus modes with a switch of three choices in its header, and the mode is saved per device (§3.4). The listing's grid keeps its square tiles.
+
+**Reason**
+Opening a file is already where the user chooses to look at contents instead of managing them, so the presentation that shows works large belongs in the viewer, and the listing's management skeleton stays intact. Every entrance shares the viewer, so folder view, the timeline, and search mode get the modes without separate work.
+The header stays visible in every mode, so the way back and the current mode are always on screen, at the cost of some margin. The switch matches the shape of the toolbar's switch of three choices.
+The mode follows how a device is used and carries no meaning for the Library, as with the info panel's open/closed state, so saving it per device needs no change to the daemon or the API.
+Narrow screens have no filmstrip or rate mode, and their touch operations are not settled yet, so the modes wait for them.
+
+**Rejected alternative 1**
+A presentation mode of the listing that hides the tree, the info panel, and the status bar.
+It needs no viewer change, but tiles stay square and the management skeleton has to be restored for every operation, so we rejected it.
+
+**Rejected alternative 2**
+Entering a gallery with a button and `g`, with a small toggle at the bottom right and no header.
+It gives the most margin, but the way back is hidden and there are two levels of switching, so we rejected it.
+
+**Rejected alternative 3**
+Choosing the display mode in the viewer settings panel.
+It adds no buttons, but it takes too many operations to compare modes while viewing, so we rejected it.
+
+#### Lay Out Gallery Mode from Loaded Thumbnails
+
+**Decision**
+Gallery mode uses `fit` thumbnails, takes each aspect ratio from the loaded thumbnail, and lays out unread items as squares (§3.4).
+
+**Reason**
+The listing API does not return dimensions, and adding them would require reading every file's header at every listing ([Make Tiles Square and Switch Between Crop and Whole Display](#make-tiles-square-and-switch-between-crop-and-whole-display)). Only the items near the viewed position need an aspect ratio, and the thumbnail that is requested for display anyway has it, so no API changes.
+Thumbnails are also much lighter than display images when several are visible at once. Their limit of 1024 pixels can look soft on a high-density screen, and focus mode is one double click away for looking closely.
+Sizes change as thumbnails arrive, so the layout is kept by a position rather than by the first value it had (§3.4).
+Each change recalculates the layout, and Chromium limits an element's width to 33,554,428 CSS px ([Chromium's width limit](../knowledge/chromium-scrollable-width.md)), which about 54,000 items of 600 CSS px with their gaps reach. So only a window around the viewed place is laid out, which keeps the cost of a recalculation fixed however long the listing is, and the position meter reaches the rest.
+
+**Rejected alternative 1**
+Adding dimensions to the listing response.
+The layout would not move at all, but the cost is the one that kept justified tiles out, so we rejected it.
+
+**Rejected alternative 2**
+Requesting media info for the items near the viewed position.
+No listing API changes, but each image needs another request that reads Exif, and a video needs ffprobe, only to place it, so we rejected it.
+
+**Rejected alternative 3**
+Laying out every position of the listing, as the filmstrip does.
+A scrollbar could then jump anywhere, but its cost grows with the listing at every thumbnail, and positions past the browser's limit could not be reached, so we rejected it.
+
+#### Keep Gallery Mode for Viewing, and Keep Video Playback Out of It
+
+**Decision**
+Gallery mode has no zoom, slideshow, rate mode, or inline video playback. Focus mode has all of them (§3.4).
+
+**Reason**
+Rate mode's arrow keys and the wheel's zoom would collide with moving and scrolling through items, and resolving them for several visible images would change what those operations mean. Focus mode already has them, one key or double click away.
+Playing a video when it reaches the center would start a transcode just by scrolling past, so a video stays a thumbnail with flipbook playback until it is opened.
+
+**Rejected alternative**
+Every operation in gallery mode.
+It is the most flexible, but it needs a target for zoom and a key scheme of its own, and the viewing itself gains little, so we rejected it.
 
 #### Gather Every Image Want of a Tab in One Image Socket Client
 
