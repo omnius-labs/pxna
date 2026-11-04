@@ -299,6 +299,10 @@ export const ja = {
         enterRateMode: "レートモード（R）: → 良い、← 悪い、↓ 未評価、↑ 元に戻す",
         more: "その他",
         imageFailed: "画像を読めませんでした。",
+        displayMode: "表示形式",
+        modeStandard: "標準",
+        modeGallery: "横連続",
+        modeFocus: "1 枚",
     },
     appShell: {
         libraryAndMonth: "Library と年月",
@@ -332,6 +336,13 @@ export const ja = {
     },
     filmstrip: {
         label: "フィルムストリップ",
+    },
+    gallery: {
+        label: "横連続",
+    },
+    positionMeter: {
+        label: "位置",
+        seek: "{{percent}}% の位置へ移る",
     },
     info: {
         collapse: "情報パネルを畳む",

@@ -4,10 +4,13 @@ import {
     CircleSlash,
     Download,
     Ellipsis,
+    Frame,
+    GalleryHorizontal,
     Maximize,
     Minimize,
     Pause,
     Play,
+    Square,
     ThumbsDown,
     ThumbsUp,
     Trash2,
@@ -27,6 +30,7 @@ import { putRating, RATING_LABELS, type Rating, ratingQuery } from "../library/r
 import { keepRange, reachablePages, useTimelineStore } from "../library/timeline";
 import { type BrowseLocation, CROSS_LIBRARY_SCOPE, entryAddress, relativePath, viewKey } from "../location";
 import { DisplayImages } from "../viewer/displayImages";
+import { useViewerDisplayMode, type ViewerDisplayMode } from "../viewer/displayMode";
 import { filmstripItemSide } from "../viewer/filmstrip";
 import { displayImageSpec, fileContentUrl, originalImageUrl } from "../viewer/urls";
 import { useFullscreen } from "../viewer/useFullscreen";
@@ -46,11 +50,14 @@ import {
     type OriginalTiming,
     originalTiming,
     type ViewTransform,
+    viewableNear,
     zoomView,
 } from "../viewer/viewer";
 import { DeleteDialog } from "./DeleteDialog";
 import { Filmstrip } from "./Filmstrip";
+import { GalleryStrip } from "./GalleryStrip";
 import { Modal } from "./Modal";
+import { PositionMeter } from "./PositionMeter";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Toaster } from "./ui/sonner";
 import { VideoPlayer } from "./VideoPlayer";
@@ -174,6 +181,10 @@ function ViewerView({
     onChange,
 }: ViewerViewProps) {
     const name = location.view;
+    // A narrow screen always uses standard mode, and its visit does not change the saved mode.
+    const [savedMode, setSavedMode] = useViewerDisplayMode();
+    const mode: ViewerDisplayMode = narrow ? "standard" : savedMode;
+    const gallery = mode === "gallery";
     const identity = JSON.stringify([location.libraryId, location.path, ...scope, name, listing.snapshot]);
     const [found, setFound] = useState<{ identity: string; index?: number; done: boolean; error?: string }>({
         identity,
@@ -262,6 +273,11 @@ function ViewerView({
     useEffect(() => () => displayImages.dispose(), [displayImages]);
     useEffect(() => {
         const kept: ImageSpec[] = [];
+        // Gallery mode shows thumbnails, so it wants no display images.
+        if (gallery) {
+            displayImages.retain(kept);
+            return;
+        }
         if (current !== undefined && entryKind(current) === "image") {
             kept.push(displayImageSpec(location.libraryId, current.path, sizeOf(current)));
         }
@@ -278,7 +294,7 @@ function ViewerView({
             kept.push(spec);
         }
         displayImages.retain(kept);
-    }, [current, previous, next, location.libraryId, sizeOf, displayImages]);
+    }, [gallery, current, previous, next, location.libraryId, sizeOf, displayImages]);
 
     // スライドショーの自動の移動。停止したときに、読み込み中のものも取り消す。
     const autoMovement = useRef<AbortController | undefined>(undefined);
@@ -306,6 +322,22 @@ function ViewerView({
     };
     const stepForward = () => step(1);
     const stepBackward = () => step(-1);
+    /// Moves to the image or video at or nearest a position of the position meter, reading its page first.
+    const seek = async (target: number) => {
+        if (moving || preparingDeletion || deletion) return;
+        const controller = new AbortController();
+        movement.current?.abort();
+        movement.current = controller;
+        setMoving(true);
+        try {
+            const entry = await viewableNear(listing, target, controller.signal);
+            if (!controller.signal.aborted && entry) moveTo(entry);
+        } catch {
+            if (!controller.signal.aborted) setFound((value) => ({ ...value, error: t("viewer.nextFailed") }));
+        } finally {
+            if (movement.current === controller) setMoving(false);
+        }
+    };
 
     // レートモード。入っている間、←・→・↑ は評価と次の Entry への移動に使う。スライドショーとは同時に使わない。
     const client = useQueryClient();
@@ -363,8 +395,8 @@ function ViewerView({
     // The viewer settings panel is a popover drawn inside the outer frame. It is closed whenever the gear is not shown.
     const [settingsOpen, setSettingsOpen] = useState(false);
     const isVideo = current !== undefined && entryKind(current) === "video";
-    const settingsShowsFilmstrip = !narrow && (isImage || isVideo);
-    const settingsShowsOriginalImage = isImage;
+    const settingsShowsFilmstrip = !narrow && mode === "standard" && (isImage || isVideo);
+    const settingsShowsOriginalImage = isImage && !gallery;
     const settingsVisible = settingsOpen && (settingsShowsFilmstrip || settingsShowsOriginalImage);
     const nestedOpen = menuVisible || settingsVisible || deletion !== undefined;
     /// 閉じる操作。全画面の間は全画面だけを終え、ビューアを開いたままにする。
@@ -454,6 +486,14 @@ function ViewerView({
         if (!rateMode) stopSlideshow();
         setRateMode(!rateMode);
     };
+    /// Changes the display mode. Gallery mode has neither the slideshow nor rate mode, so entering it stops them.
+    const changeMode = (next: ViewerDisplayMode) => {
+        if (next === "gallery") {
+            stopSlideshow();
+            setRateMode(false);
+        }
+        setSavedMode(next);
+    };
 
     // キー操作は、フォーカスがどこにあっても効くよう、window で受ける。無効にしたボタンでフォーカスを失っても、効き続ける。
     // ブラウザの戻る操作のショートカットなど、修飾キーつきの操作は奪わない。
@@ -472,6 +512,8 @@ function ViewerView({
                 requestClose();
             } else if (event.key === "r" && !narrow && ratable) {
                 event.preventDefault();
+                // Rate mode needs one image at a time, so gallery mode gives way to focus mode.
+                if (gallery) changeMode("focus");
                 toggleRateMode();
             } else if (rateMode && ratable && event.key === "ArrowUp") {
                 event.preventDefault();
@@ -491,6 +533,10 @@ function ViewerView({
         return () => window.removeEventListener("keydown", keyDown);
     });
 
+    // Keeps the bottom part and the gallery while the open Entry is searched for again, so they are not rebuilt.
+    const stripShown = !narrow && stripIndex !== undefined && (current === undefined || isViewable(current));
+    const galleryShown = gallery && stripShown && (current !== undefined || !found.done);
+
     return (
         <Modal label={name} onClose={requestClose} outerRef={setOuter}>
             <div className="flex items-center justify-between px-4 py-2 text-sm">
@@ -499,8 +545,10 @@ function ViewerView({
                     {rateMode && ratable && <RatingBadge rating={rating.data} />}
                 </span>
                 <HeaderActions
-                    rate={!narrow && ratable ? { active: rateMode, toggle: toggleRateMode } : undefined}
+                    displayMode={!narrow ? { mode, onChange: changeMode } : undefined}
+                    rate={!narrow && !gallery && ratable ? { active: rateMode, toggle: toggleRateMode } : undefined}
                     image={showsSlideshow}
+                    slideshowAvailable={!gallery}
                     narrow={narrow}
                     slideshow={{ running: slideshow.running, start: startSlideshow, stop: stopSlideshow }}
                     fullscreen={fullscreen}
@@ -531,29 +579,46 @@ function ViewerView({
                 />
             </div>
             <div className="relative min-h-0 flex-1">
-                {current === undefined ? (
-                    <p className="p-6 text-neutral-300">
-                        {found.error ?? (found.done && !deletion ? t("viewer.notFound") : t("common.loading"))}
-                    </p>
-                ) : entryKind(current) === "video" ? (
-                    <VideoPlayer
-                        key={current.path}
+                {galleryShown && stripIndex !== undefined ? (
+                    <GalleryStrip
+                        listing={listing}
                         libraryId={location.libraryId}
-                        path={current.path}
-                        onDone={videoDone}
+                        index={stripIndex}
+                        side={Math.max(screen.width, screen.height)}
+                        onSelect={moveTo}
+                        onFocus={(target) => {
+                            changeMode("focus");
+                            if (target.entry.path !== current?.path) moveTo(target);
+                        }}
+                        onPages={changeWantedPages}
                     />
-                ) : entryKind(current) !== "image" ? (
-                    <p className="p-6 text-neutral-300">{t("viewer.unsupported")}</p>
                 ) : (
-                    <ViewerImage
-                        key={current.path}
-                        images={displayImages}
-                        libraryId={location.libraryId}
-                        entry={current}
-                        size={sizeOf(current)}
-                        timing={originalTiming(current, originalImage)}
-                        onSettled={() => setSettledPath(current.path)}
-                    />
+                    <div className={mode === "focus" ? "absolute inset-x-[10%] inset-y-6" : "absolute inset-0"}>
+                        {current === undefined ? (
+                            <p className="p-6 text-neutral-300">
+                                {found.error ?? (found.done && !deletion ? t("viewer.notFound") : t("common.loading"))}
+                            </p>
+                        ) : entryKind(current) === "video" ? (
+                            <VideoPlayer
+                                key={current.path}
+                                libraryId={location.libraryId}
+                                path={current.path}
+                                onDone={videoDone}
+                            />
+                        ) : entryKind(current) !== "image" ? (
+                            <p className="p-6 text-neutral-300">{t("viewer.unsupported")}</p>
+                        ) : (
+                            <ViewerImage
+                                key={current.path}
+                                images={displayImages}
+                                libraryId={location.libraryId}
+                                entry={current}
+                                size={sizeOf(current)}
+                                timing={originalTiming(current, originalImage)}
+                                onSettled={() => setSettledPath(current.path)}
+                            />
+                        )}
+                    </div>
                 )}
                 {current && found.error && (
                     <p role="alert" className="absolute bottom-2 left-2 text-sm text-neutral-300">
@@ -612,16 +677,24 @@ function ViewerView({
                 onDeleted={() => onChange(deletion?.destination)}
             />
             <Toaster id={VIEWER_TOASTER} position="top-center" />
-            {!narrow && stripIndex !== undefined && (current === undefined || isViewable(current)) && (
-                <Filmstrip
-                    listing={listing}
-                    index={stripIndex}
-                    side={filmstripSide}
-                    wants={filmstripWants}
-                    onSelect={moveTo}
-                    onPages={changeWantedPages}
-                />
-            )}
+            {stripShown &&
+                (mode === "standard" ? (
+                    <Filmstrip
+                        listing={listing}
+                        index={stripIndex}
+                        side={filmstripSide}
+                        wants={filmstripWants}
+                        onSelect={moveTo}
+                        onPages={changeWantedPages}
+                    />
+                ) : (
+                    <PositionMeter
+                        first={listing.loadedFrom ?? 0}
+                        count={(listing.totalCount ?? 0) - (listing.loadedFrom ?? 0)}
+                        index={stripIndex}
+                        onSeek={(target) => void seek(target)}
+                    />
+                ))}
         </Modal>
     );
 }
@@ -712,10 +785,14 @@ function RatingBadge({ rating }: { rating: Rating | undefined }) {
 }
 
 interface HeaderActionsProps {
+    /// The switch of display modes. Only a wide screen has it.
+    displayMode: { mode: ViewerDisplayMode; onChange: (mode: ViewerDisplayMode) => void } | undefined;
     /// レートモードの入口。広い画面の画像と動画にだけ置く。
     rate: { active: boolean; toggle: () => void } | undefined;
     /// 開いている Entry が画像か。スライドショーと全画面表示は、画像のビューアにだけ置く。
     image: boolean;
+    /// Whether the slideshow button is shown. Gallery mode has no slideshow.
+    slideshowAvailable: boolean;
     narrow: boolean;
     slideshow: { running: boolean; start: () => void; stop: () => void };
     fullscreen: { supported: boolean; active: boolean; toggle: () => Promise<void> };
@@ -735,8 +812,10 @@ interface HeaderActionsProps {
 
 /// ビューアのヘッダーの操作。広い画面はボタンを並べ、狭い画面は「その他」のメニューにまとめる。
 function HeaderActions({
+    displayMode,
     rate,
     image,
+    slideshowAvailable,
     narrow,
     slideshow,
     fullscreen,
@@ -755,6 +834,7 @@ function HeaderActions({
     const buttonClass = "rounded p-1.5 hover:bg-white/10";
     return (
         <div className="flex items-center gap-1">
+            {displayMode && <DisplayModeSwitch {...displayMode} />}
             {rate && (
                 <button
                     type="button"
@@ -792,15 +872,17 @@ function HeaderActions({
             )}
             {image && !narrow && (
                 <>
-                    <button
-                        type="button"
-                        aria-label={slideshowLabel}
-                        title={slideshowLabel}
-                        className={buttonClass}
-                        onClick={toggleSlideshow}
-                    >
-                        {slideshow.running ? <Pause className="size-4" /> : <Play className="size-4" />}
-                    </button>
+                    {slideshowAvailable && (
+                        <button
+                            type="button"
+                            aria-label={slideshowLabel}
+                            title={slideshowLabel}
+                            className={buttonClass}
+                            onClick={toggleSlideshow}
+                        >
+                            {slideshow.running ? <Pause className="size-4" /> : <Play className="size-4" />}
+                        </button>
+                    )}
                     {fullscreen.supported && (
                         <button
                             type="button"
@@ -844,6 +926,42 @@ function HeaderActions({
             >
                 ×
             </button>
+        </div>
+    );
+}
+
+/// The switch of three choices between the viewer's display modes, in the header of a wide screen.
+function DisplayModeSwitch({
+    mode,
+    onChange,
+}: {
+    mode: ViewerDisplayMode;
+    onChange: (mode: ViewerDisplayMode) => void;
+}) {
+    const items = [
+        { mode: "standard", label: t("viewer.modeStandard"), icon: <Square className="size-3.5" /> },
+        { mode: "gallery", label: t("viewer.modeGallery"), icon: <GalleryHorizontal className="size-3.5" /> },
+        { mode: "focus", label: t("viewer.modeFocus"), icon: <Frame className="size-3.5" /> },
+    ] as const;
+    return (
+        // biome-ignore lint/a11y/useSemanticElements: fieldset has a legend and a browser frame that the header does not want
+        <div
+            role="group"
+            aria-label={t("viewer.displayMode")}
+            className="mr-1 flex items-center rounded-md border border-white/20 p-0.5"
+        >
+            {items.map((item) => (
+                <button
+                    key={item.mode}
+                    type="button"
+                    aria-pressed={item.mode === mode}
+                    className={`flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-white/10 ${item.mode === mode ? "bg-white/20" : ""}`}
+                    onClick={() => onChange(item.mode)}
+                >
+                    {item.icon}
+                    {item.label}
+                </button>
+            ))}
         </div>
     );
 }

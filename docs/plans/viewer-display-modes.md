@@ -72,11 +72,11 @@ The new `localStorage` key `pxna.viewerMode` and the names in [terms.md](../term
 
 | No. | Content | Dependencies | State |
 | --- | --- | --- | --- |
-| [1](#s-1) | Save the display mode | - | Not started |
-| [2](#s-2) | Calculate the position meter and the gallery layout | - | Not started |
-| [3](#s-3) | Build the position meter and the gallery | 2 | Not started |
-| [4](#s-4) | Connect the modes to the viewer | 1, 3 | Not started |
-| [5](#s-5) | Confirm in a browser and update the current state | 4 | Not started |
+| [1](#s-1) | Save the display mode | - | Done |
+| [2](#s-2) | Calculate the position meter and the gallery layout | - | Done |
+| [3](#s-3) | Build the position meter and the gallery | 2 | Done |
+| [4](#s-4) | Connect the modes to the viewer | 1, 3 | Done |
+| [5](#s-5) | Confirm in a browser and update the current state | 4 | Done |
 
 <a id="s-1"></a>
 ### Step 1. Save the Display Mode
