@@ -30,8 +30,9 @@ Line numbers change, so recheck the relevant location when filing and when fixin
 | [Malformed archives are reported as internal server errors](./issues/malformed-archives-are-reported-as-internal-errors.md) | Low | 2026-10-25 | - |
 | [Representative thumbnails are not reflected on screen after their contents are deleted](./issues/representative-thumbnail-stale.md) | Medium | 2026-10-23 | - |
 | [Engine error messages are dropped when the daemon converts them for API responses](./issues/engine-error-messages-are-dropped.md) | Low | 2026-11-04 | - |
+| [Opening the viewer by URL on an Entry beyond the first page shows "Not found"](./issues/viewer-url-beyond-first-page-not-found.md) | Medium | 2026-11-04 | - |
 
-The six items at the top come from the security audit of 2026-10-24; the representative-thumbnail item and the engine-message item are unrelated to them and to each other.
+The six items at the top come from the security audit of 2026-10-24; the representative-thumbnail item, the engine-message item, and the viewer-URL item are unrelated to them and to each other.
 The stack overflow, the media caps and the pre-auth hashing all spend the daemon's memory or availability, so they are best fixed as one group.
 The TOCTOU and the framing header are boundary and defence issues with their own fixes, and the archive error classification stands alone.
 
