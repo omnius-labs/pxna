@@ -38,6 +38,7 @@ A recursive listing with conditions is answered from the name index without walk
 
 The client jumps to any position by the scrollbar even for a large folder, and reads only the page at that position ([Client Design §3.5](./client.md#35-loading-listings)).
 For that reason, the server does not rescan every time a page is requested, and has a form in which a page at any position can be returned at the same cost.
+To open an Entry the client knows only by path, the server also returns the page that holds a named Entry (§4.5).
 
 The boundaries with other concerns are as follows.
 
@@ -105,7 +106,7 @@ If all the requests waiting for a scan disconnect, the scan is stopped and the s
 A page is specified by `offset` and `limit`, and cut out from the sequence after sorting and filtering are applied.
 If `offset` exceeds the count, an empty page is returned.
 
-The response has the page's Entries, `totalCount`, the snapshot's id, and whether the recursion was cut off (`truncated`, §6).
+The response has the page's Entries, the `offset` the page was cut at, `totalCount`, the snapshot's id, and whether the recursion was cut off (`truncated`, §6).
 The snapshot's id is a value newly assigned each time a snapshot is built, and it changes if rebuilt even when the version is the same.
 
 The client learns that the listing has changed by comparing the id of each page.
@@ -152,6 +153,25 @@ That target is rescanned at every page request.
 
 Detail listing snapshots are placed only in the process's memory. Summary listings are also reused from the browse index ([Design decisions](#persistent-summary-index)).
 They disappear when the daemon is restarted and are rebuilt at the next request.
+
+### 4.5 Locating an Entry
+
+A page request can name an Entry with `locate` in place of `offset`.
+The server finds the Entry's position in the sequence a page is cut from (§4.2), and returns the page that holds it.
+The page starts at the largest multiple of `limit` that is not greater than the position, so a page found by `locate` is the page that the same `limit` and an `offset` would return, and the two kinds of page can be joined.
+Every response of these APIs carries the `offset` it was cut at, which is how the client learns which page it received.
+
+`locate` is the path of the Entry relative to the start of the listing.
+For `listFolderEntries` and `listFolderSummaries` the start is the listed folder, so a direct child is its name, and a descendant in a `recursive` listing is its path below the folder.
+For `listSearchEntries` the start is the start of the search (§5.3), so with several Libraries it is the root of the Library, and `locate` and `locateLibraryId` are given together: `locateLibraryId` names the Library of the Entry, because the same path can be in several Libraries, and must be one of `libraryIds`.
+`locate` together with `offset`, `locateLibraryId` without `locate`, `locate` without `locateLibraryId` in a search, and a `locateLibraryId` that is not in `libraryIds` are `InvalidInput`.
+
+The position is the Entry's place after `foldersOnly`, `includeHidden`, `query`, and the rating and tag conditions are applied, so an Entry that these leave out is not in the sequence.
+A path that names no Entry of the sequence is `NotFound`.
+In a search, the position is the number of Entries that precede the Entry in the merged order (§5.3), counted from the per-Library listings without cutting the pages before it. The merged sequence is not a snapshot of its own, so the page is the one that the same `offset` returns over the same per-Library snapshots, conditions, and order, and its id is the joined id of §5.3.
+The cost is one pass over the matching Entries, as for a page at the end of the listing.
+
+A `locate` request checks freshness as any request does (§4.3), so it may be answered from a rebuilt snapshot, and the client sees that from the id (§4.2).
 
 ## 5. Name Search
 
@@ -235,6 +255,7 @@ The start is given by `path` only when `libraryIds` names one Library.
 With several Libraries, the root of each Library is the start, and a `path` other than `/` is `InvalidInput`.
 Hidden Entries are always excluded, and `includeHidden` and `foldersOnly` are not accepted.
 An id that names no Library is `NotFound`.
+`locate` and `locateLibraryId`, given together, find an Entry's page in the merged sequence (§4.5).
 
 The merged sequence is not kept as a snapshot of its own.
 Each Library's listing comes from the snapshot of §4.1 for that combination, which is shared with folder listings of the same target, and each page request merges the per-Library orders again from the head.
@@ -334,6 +355,28 @@ The per-page scan also remains.
 **Rejected alternative 3**
 A method that holds a snapshot and reads the continuation with a cursor.
 The per-page scan goes away, but as with rejected alternative 2, one cannot jump to an arbitrary position, so we rejected it.
+
+#### Locate an Entry from Its Position in the Snapshot
+
+**Decision**
+A page request can name an Entry with `locate` in place of `offset`. The server returns the page of the same snapshot that holds it, with the `offset` the page was cut at (§4.5). `listFolderEntries`, `listFolderSummaries`, and `listSearchEntries` accept it, and every response of these APIs carries `offset`.
+
+**Reason**
+The position of an Entry is a property of the snapshot's sequence, which only the server holds, so asking for it costs one request however far down the Entry is.
+Returning the page rather than only the position gives the client the position, the page, `totalCount`, and the snapshot's id from one snapshot in one response, so they cannot disagree. The page starts at a multiple of `limit`, so it is one of the pages the client already reads by `offset`.
+A viewer URL that names an Entry deep in a large folder and the web client's "Show in folder" both need this lookup, and they share it.
+
+**Rejected alternative 1**
+A method in which the client reads pages in order until it finds the Entry.
+It needs no API change, but it costs one request per 200 Entries before the Entry, so a viewer URL deep in a folder of 100,000 items would wait for hundreds of requests, and every page may meet a rebuilt snapshot on the way, so we rejected it.
+
+**Rejected alternative 2**
+A method in which the client reads several pages at once.
+It is faster, but the number of requests still grows with the position, and requests that lose the race have to be canceled, so we rejected it.
+
+**Rejected alternative 3**
+A separate API that returns only the position, `totalCount`, and the snapshot's id.
+The listing responses would not change, but the client needs a second request for the page, which can come from a rebuilt snapshot in between, and every listing parameter (sorting, filters, Libraries) would have to be defined twice, so we rejected it.
 
 #### Check Snapshot Freshness by the Target's Version and Our Own Changes
 
@@ -587,6 +630,17 @@ Whether the modification time and the elapsed-time limit are enough cannot be kn
 **Conditions for deciding**
 When situations where a stale listing is displayed because of changes the modification time and the elapsed-time limit cannot catch arise repeatedly in real operation.
 
+#### Whether to Index Entry Positions
+
+**Current state**
+The server finds the position of the Entry named by `locate` with one pass over the matching Entries (§4.5). No index from path to position is held.
+
+**Why not decide now**
+An index would hold memory as large as the listing in each snapshot and would have to be rebuilt with it. The cost of the pass in the folders and searches in use cannot be known until it is measured.
+
+**Conditions for deciding**
+When `locate` requests on a Library in real operation repeatedly take long enough to be noticed on screen, for example when opening a viewer URL waits visibly.
+
 ## 9. Current State and Remaining Work
 
 ### 9.1 Current Code
@@ -602,6 +656,8 @@ The `[listing]` configuration, checking freshness by the target's version and el
 
 `listSearchEntries` is implemented by [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) and `LibraryBrowser::search_entries`: each Library's listing comes from the same snapshots as `listFolderEntries`, and `SearchResults` merges their sorted, filtered orders on every page (§5.3). `listFolderEntries` accepts only the name condition; rating and tag conditions are accepted only by the search API.
 
+`locate` and the response's `offset` of §4.5 are not implemented yet.
+
 The name index of §5.1 and §5.2 is not implemented. Recursive listings with conditions, including the search API's, always walk the file system and are cut off by the number of walked Entries for each Library.
 
 ### 9.2 Roadmap
@@ -612,7 +668,8 @@ Only the dependencies must be respected.
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
 | L1 | Implement the name index, its update by aggregation and by the daemon's own changes, and answering recursive listings with name, rating, and tag conditions from it (§5.1, §5.2) | None | Not started |
+| L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Not started |
 
-L1 corresponds to M19 of [design.md §12.2](../design.md#122-roadmap).
+L1 corresponds to M19 and L2 to M24 of [design.md §12.2](../design.md#122-roadmap).
 
 For confirmed defects, see [issues.md](../issues.md).

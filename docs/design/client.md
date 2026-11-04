@@ -201,7 +201,7 @@ The original images before and after are not requested in advance.
 The targets of moving back and forth are the images and videos in the current listing, and Entries that are neither are skipped. Arrow keys pressed while focus is on the video player are left to the player.
 When the destination is already known from back and forth movement, the filmstrip, or undo in rate mode, the viewer opens it at that position without waiting for the listing to be searched again, so neither "読み込み中…" (Loading…) nor a rebuilt filmstrip appears between Entries.
 Opening the viewer pushes onto the URL history, and moving back and forth and closing do not.
-The browser's back operation also closes the viewer, and even when a URL is opened directly with the viewer open, the same image appears.
+The browser's back operation also closes the viewer, and even when a URL is opened directly with the viewer open, the same image appears. In folder view and search mode, the position of that Entry is found by asking the server with `locate` (§3.5), so an Entry on any page can be opened.
 
 The wide-screen viewer has three display modes, chosen with a switch of three choices in the header: "標準" (Standard), "横連続" (Gallery), and "1 枚" (Focus). Standard is the viewer as described in the rest of this section. Narrow screens show no switch and always use standard mode.
 The mode is saved per device in the browser's `localStorage` under `pxna.viewerMode` each time it is changed, and is restored the next time the viewer opens. When nothing is saved, or the value cannot be read, the viewer opens in standard mode.
@@ -285,6 +285,11 @@ Requests for pages that have left the screen and also left the prefetch margin a
 A page's response carries the snapshot's id ([Listing and Search Design §4.2](./listing.md#42-extracting-a-page)).
 When a page arrives whose id differs from the pages already loaded, the listing is regarded as changed, the other pages are discarded, and the pages in the visible range are read again.
 At this time the scroll position is kept, and the overall height changes by the amount `totalCount` changed.
+
+When the client needs the position of an Entry whose page it has not read, it asks the server with `locate` in place of `offset` ([Listing and Search Design §4.5](./listing.md#45-locating-an-entry)). This is the case for the Entry named by the viewer's `view` when a URL is opened directly in folder view or search mode, and for the Entry that "Show in folder" names with `reveal`.
+The client sends the Entry's path relative to the start of the listing: the listed folder in folder view, and in search mode the start of the search (the root of the Library when several Libraries are searched) together with the Entry's Library id. A viewer URL's `view` and the Entry paths the client holds include the folder or the Library, so the client converts them first.
+The page it receives is kept as the page at its `offset`, so the grid and the viewer use it without another request, and the Entry's position is that offset plus its place in the page. The snapshot's id is compared as for any page.
+An answer of `NotFound` means the Entry is not in the listing under its present sort and filters, so the viewer shows "Not found." and "Show in folder" reports that the Entry was not found. The timeline does not use `locate` and reads the range around the Entry (§3.10).
 
 When sorting, filtering, or the search terms are changed, the display returns to starting from the top of the listing.
 The selection is held by Entry path. When a range selection (Shift-click and arrow keys, Ctrl or ⌘ plus A) spans pages not yet read, those pages are read first and the selection is made after reading finishes.
@@ -758,6 +763,23 @@ The Entry would be decided as one, but the form of the URLs of direct Entries wo
 **Rejected alternative 2**
 A method that carries only the name and takes the first of Entries with the same name.
 The implementation is minimal, but it would open the wrong one of images of the same name in different folders (such as `IMG_0001.jpg`), so we rejected it.
+
+#### Ask the Server Where an Entry Opened by URL Is
+
+**Decision**
+When a viewer URL names an Entry in folder view or search mode, and when "Show in folder" names one, the client asks the server for the Entry's page with `locate` and keeps the returned page as the page at its `offset` (§3.5).
+
+**Reason**
+The client reads only the pages it needs, so an Entry named by a URL may be on a page it has not read. The server holds the sequence the pages are cut from, so it finds the position with one request, and the page it returns is one of the pages the grid reads by `offset`, so it is shared without a request.
+The viewer opened by a reloaded or shared URL then works the same wherever the Entry is in a large folder ([Locate an Entry from Its Position in the Snapshot](./listing.md#locate-an-entry-from-its-position-in-the-snapshot)).
+
+**Rejected alternative 1**
+Reading pages in order until the Entry is found.
+It needs no API change, but the number of requests grows with the position, so we rejected it for the reasons of the server-side decision.
+
+**Rejected alternative 2**
+Putting the position in the URL as well as the name.
+It needs no request, but an Entry added or removed before it changes the position, so the URL would open another Entry or none, and the server's snapshot is the only place that knows the current position, so we rejected it.
 
 #### Search on Narrow Screens Puts Only the Terms Field Under the Header
 
@@ -1724,7 +1746,7 @@ Range selection reads unread pages first, shows progress in the status bar, and 
 Search is handled by search mode in [SearchPage.tsx](../../ui-web/src/pages/SearchPage.tsx), which spans Libraries like the timeline: its Entries carry `/{libraryId}{Library-relative path}` as their path, and it shares the grid, list, viewer, selection, info panel, and Entry operations with the timeline's rules (§3.6). The conditions are in the left area ([SearchPanel.tsx](../../ui-web/src/components/SearchPanel.tsx)) in place of the tree: the search terms field, a checkbox per Library, the start (a popover holding the picking mode of [Tree.tsx](../../ui-web/src/components/Tree.tsx), only while one Library is checked), "サブフォルダを含めない", the rating, and a checkbox per tag word. Terms are put in the URL when input stops for 300 ms ([useDebouncedParam.ts](../../ui-web/src/library/useDebouncedParam.ts)), and the other conditions immediately, replacing the URL. On a narrow screen only the terms field stays under the header and the rest is in the drawer, whose button shows the number of narrowing conditions. The last conditions are kept for the tab by [searchReturn.ts](../../ui-web/src/library/searchReturn.ts) for the switch's "検索". The old `/search/{libraryId}` and the `/browse` with `q` and `deep=1` are replaced with a `/search` URL.
 The paged listing store in [listing.ts](../../ui-web/src/library/listing.ts) reads either a folder or a search (`ListingSource`), and a search is requested with `listSearchEntries` through `fetchSearchPage` in [entries.ts](../../ui-web/src/library/entries.ts), which turns each Entry's path into the keyed path. Grid, List, and the viewer take the source; the viewer moves among the search results. For subtree results, the parent folder is shown below the name in the grid, in the "場所" (Location) column in a wide screen's list, and at the start of the second line in a narrow screen's list; direct children of the start are shown as ".". During a subtree search, "検索中…" (Searching…) is displayed, and if the search results are 0, "一致する項目がありません。" (No matching items.) is displayed, and on truncation of any Library it guides narrowing the Libraries or moving the start down and searching again. Opening a folder or archive result moves to that position in folder view and ends the search.
 The tree reads folder-like Entries in order by `offset` and shows children after fetching all pages. When the snapshot's id changes, it rereads from the start.
-The image and video viewer also uses the same listing data, and reads pages in order until the Entry of the relative path that `view` of a directly opened URL points to is found. Moving to the previous and next Entries stops at images and videos and skips the rest, and moves in one operation after finishing reading unread pages too. When the destination is known, it is opened at that position without waiting for the search. In standard and focus modes, the display images of the image before and after in the loaded range are prefetched; gallery mode wants no display images, only `fit` thumbnails and, while the mouse is over a video, that video's sprite sheet. The original image is fetched at a timing decided from the format, size, and the display preferences' value for swapping to the original image, and the size of the display image request is also decided by the same result ([viewer.ts](../../ui-web/src/viewer/viewer.ts)). Zoom is done only with the wheel.
+The image and video viewer also uses the same listing data, and finds the Entry of the relative path that `view` of a directly opened URL points to only among the pages already read, which on a direct open is the first page, so an Entry beyond it is not found ([issues.md](../issues.md)). Moving to the previous and next Entries stops at images and videos and skips the rest, and moves in one operation after finishing reading unread pages too. When the destination is known, it is opened at that position without waiting for the search. In standard and focus modes, the display images of the image before and after in the loaded range are prefetched; gallery mode wants no display images, only `fit` thumbnails and, while the mouse is over a video, that video's sprite sheet. The original image is fetched at a timing decided from the format, size, and the display preferences' value for swapping to the original image, and the size of the display image request is also decided by the same result ([viewer.ts](../../ui-web/src/viewer/viewer.ts)). Zoom is done only with the wheel.
 The wide-screen viewer's header switches between standard, gallery, and focus modes ([displayMode.ts](../../ui-web/src/viewer/displayMode.ts)), with the gallery in [GalleryStrip.tsx](../../ui-web/src/components/GalleryStrip.tsx) and [gallery.ts](../../ui-web/src/viewer/gallery.ts), and the position meter in [PositionMeter.tsx](../../ui-web/src/components/PositionMeter.tsx) and [positionMeter.ts](../../ui-web/src/viewer/positionMeter.ts).
 In standard mode the wide-screen image and video viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), whose item side follows the filmstrip size, and the image viewer has the header's slideshow, full-screen, download, and delete buttons. The header's gear opens the viewer settings panel ([ViewerSettings.tsx](../../ui-web/src/components/ViewerSettings.tsx)) with the filmstrip size and the swapping to the original image. Rate mode's buttons and undo history are in [Viewer.tsx](../../ui-web/src/components/Viewer.tsx). On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, the gear of an image has only the swapping to the original image, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1).
 Parts are built with Tailwind, the shadcn/ui parts in `ui-web/src/components/ui`, and in-house code.
@@ -1764,8 +1786,9 @@ Only the dependencies must be respected.
 | C10 | Implement back-and-forth movement by left and right flicks in the viewer, zoom by pinch and double tap, and closing by a downward swipe | None |
 | C11 | Discard the states of folder and archive tiles and want them again when the listing is reread after the daemon's own change (§4) | None |
 | C12 | Display the notice of §3.6 when a subtree search from a folder outside archives is not answered from the name index | L1 of [Listing and Search Design §9.2](./listing.md#92-roadmap) |
+| C13 | Find the Entry of a directly opened viewer URL, and the Entry of "Show in folder", with `locate` (§3.5) | L2 of [Listing and Search Design §9.2](./listing.md#92-roadmap) |
 
-C10 corresponds to M15, C11 to part of M20, and C12 to part of M19 of [design.md §12.2](../design.md#122-roadmap).
+C10 corresponds to M15, C11 to part of M20, C12 to part of M19, and C13 to part of M24 of [design.md §12.2](../design.md#122-roadmap).
 M13, which corresponds to C8b, M14, which corresponds to C9a and C9b, and M17, which corresponds to the timeline screen, are complete.
 With the narrow-screen default of "only on zoom" as is, the state in which the original image cannot be shown by touch operation alone continues until C10.
 
