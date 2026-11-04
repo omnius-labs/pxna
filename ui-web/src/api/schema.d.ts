@@ -1385,6 +1385,11 @@ export interface components {
              * @description Total count after filtering the snapshot.
              */
             totalCount: number;
+            /**
+             * Format: int64
+             * @description Offset of this page in the sorted and filtered listing.
+             */
+            offset: number;
             /** @description Opaque identifier of the listing snapshot. */
             snapshot: string;
             /** @description True when recursive traversal reached its entry limit. */
@@ -1401,6 +1406,11 @@ export interface components {
              * @description Sum of the per-Library counts after filtering.
              */
             totalCount: number;
+            /**
+             * Format: int64
+             * @description Offset of this page in the merged sequence.
+             */
+            offset: number;
             /**
              * @description Opaque identifier of the merged listing. It changes when
              *     the listing of any searched Library is rebuilt.
@@ -1473,6 +1483,11 @@ export interface components {
             entries: components["schemas"]["FileSystemEntrySummary"][];
             /** Format: int64 */
             totalCount: number;
+            /**
+             * Format: int64
+             * @description Offset of this page in the sorted and filtered listing.
+             */
+            offset: number;
             /** @description Identifier of the names and kinds, not of later detail metadata. */
             snapshot: string;
             /** @description Always false for a complete direct-child summary listing. */
@@ -1950,6 +1965,18 @@ export interface components {
         RecursiveQuery: boolean;
         /** @description Offset in the sorted and filtered listing. */
         ListOffsetQuery: number;
+        /**
+         * @description Path of the Entry relative to the start of the listing, in place
+         *     of `offset`. The server returns the page that holds the Entry,
+         *     with the `offset` it was cut at.
+         */
+        LocateQuery: string;
+        /**
+         * @description The Library of the Entry named by `locate`. Required with
+         *     `locate` in a search, because the same path can be in several
+         *     Libraries.
+         */
+        LocateLibraryIdQuery: components["schemas"]["LibraryId"];
         /**
          * @description Whitespace-separated terms that must all occur in an entry name.
          *     Names and terms are normalized with NFKC and converted to lowercase.
@@ -2501,6 +2528,12 @@ export interface operations {
                 /** @description Offset in the sorted and filtered listing. */
                 offset?: components["parameters"]["ListOffsetQuery"];
                 /**
+                 * @description Path of the Entry relative to the start of the listing, in place
+                 *     of `offset`. The server returns the page that holds the Entry,
+                 *     with the `offset` it was cut at.
+                 */
+                locate?: components["parameters"]["LocateQuery"];
+                /**
                  * @description Whitespace-separated terms that must all occur in an entry name.
                  *     Names and terms are normalized with NFKC and converted to lowercase.
                  */
@@ -2595,6 +2628,18 @@ export interface operations {
                 foldersFirst?: components["parameters"]["FoldersFirstQuery"];
                 /** @description Offset in the sorted and filtered listing. */
                 offset?: components["parameters"]["ListOffsetQuery"];
+                /**
+                 * @description Path of the Entry relative to the start of the listing, in place
+                 *     of `offset`. The server returns the page that holds the Entry,
+                 *     with the `offset` it was cut at.
+                 */
+                locate?: components["parameters"]["LocateQuery"];
+                /**
+                 * @description The Library of the Entry named by `locate`. Required with
+                 *     `locate` in a search, because the same path can be in several
+                 *     Libraries.
+                 */
+                locateLibraryId?: components["parameters"]["LocateLibraryIdQuery"];
                 /** @description Maximum number of entries to return. */
                 limit?: components["parameters"]["ListLimitQuery"];
             };
@@ -2678,6 +2723,12 @@ export interface operations {
                 path: components["parameters"]["PathQuery"];
                 /** @description Offset in the sorted and filtered listing. */
                 offset?: components["parameters"]["ListOffsetQuery"];
+                /**
+                 * @description Path of the Entry relative to the start of the listing, in place
+                 *     of `offset`. The server returns the page that holds the Entry,
+                 *     with the `offset` it was cut at.
+                 */
+                locate?: components["parameters"]["LocateQuery"];
                 /**
                  * @description Whitespace-separated terms that must all occur in an entry name.
                  *     Names and terms are normalized with NFKC and converted to lowercase.

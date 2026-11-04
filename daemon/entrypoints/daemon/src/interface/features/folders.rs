@@ -279,6 +279,7 @@ mod tests {
             path: path.to_string(),
             recursive: None,
             offset: None,
+            locate: None,
             query: None,
             limit: None,
             sort: None,

@@ -80,7 +80,7 @@ impl SearchResults {
             .filter(|source| source.snapshot.entries().truncated)
             .map(|source| models::LibraryId(source.library_id.clone()))
             .collect();
-        models::SearchListing::new(entries, total, snapshot, truncated)
+        models::SearchListing::new(entries, total, options.offset, snapshot, truncated)
     }
 }
 
@@ -104,6 +104,8 @@ mod tests {
             order: None,
             folders_first: None,
             offset: Some(offset),
+            locate: None,
+            locate_library_id: None,
             limit: Some(limit),
         };
         ListOptions::from_search(&query).unwrap()
@@ -166,5 +168,13 @@ mod tests {
         let (results, _) = results(true).await;
         let page = results.page(&options(0, 1));
         assert_eq!(page.truncated_library_ids, [models::LibraryId("b".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn offset_in_response_search_listing_test() {
+        let (results, _) = results(false).await;
+        assert_eq!(results.page(&options(0, 2)).offset, 0);
+        assert_eq!(results.page(&options(2, 2)).offset, 2);
+        assert_eq!(results.page(&options(50, 2)).offset, 50);
     }
 }

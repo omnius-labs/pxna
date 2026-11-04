@@ -120,7 +120,7 @@ const entry = (index: number): Entry => ({
     file: { archive: false },
 });
 const response = (entries: Entry[]) => ({
-    data: { entries, totalCount: 201, snapshot: "one", truncated: false } satisfies FolderListing,
+    data: { entries, totalCount: 201, offset: 0, snapshot: "one", truncated: false } satisfies FolderListing,
     response: new Response(),
 });
 
@@ -241,7 +241,7 @@ it("cancels pending navigation when the viewer closes", async () => {
 it("同名の画像を相対パスで開き、前後への移動でも区別する", async () => {
     const entries = ["a", "b"].map((folder) => ({ ...entry(0), name: "same.png", path: `/pair/${folder}/same.png` }));
     get.mockResolvedValue({
-        data: { entries, totalCount: 2, snapshot: "pair", truncated: false } satisfies FolderListing,
+        data: { entries, totalCount: 2, offset: 0, snapshot: "pair", truncated: false } satisfies FolderListing,
         response: new Response(),
     });
     const h = await harness("b/same.png", "/pair");
@@ -263,7 +263,13 @@ const image = (name: string, contentType: string, size: number): import("../libr
 });
 const listed = (entries: Entry[]) =>
     get.mockResolvedValue({
-        data: { entries, totalCount: entries.length, snapshot: "one", truncated: false } satisfies FolderListing,
+        data: {
+            entries,
+            totalCount: entries.length,
+            offset: 0,
+            snapshot: "one",
+            truncated: false,
+        } satisfies FolderListing,
         response: new Response(),
     });
 const findDisplayImage = (h: { host: HTMLElement }) =>
@@ -376,6 +382,7 @@ describe("Filmstrip", () => {
                 data: {
                     entries: page(options.params.query.offset),
                     totalCount: 1000,
+                    offset: options.params.query.offset,
                     snapshot: "one",
                     truncated: false,
                 } satisfies FolderListing,
@@ -412,6 +419,7 @@ describe("Filmstrip", () => {
                     },
                 ],
                 totalCount: 1,
+                offset: 0,
                 snapshot: "one",
                 truncated: false,
             } satisfies FolderListing,

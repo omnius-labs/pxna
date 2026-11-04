@@ -120,7 +120,7 @@ impl ListOptions {
             }
             total += 1;
         }
-        models::FolderListing::new(page, total, self.selection.snapshot_id(snapshot), entries.truncated)
+        models::FolderListing::new(page, total, self.offset, self.selection.snapshot_id(snapshot), entries.truncated)
     }
 
     /// 並べ方の順の位置のうち、絞り込みの条件に合うものだけを、順を保って返す。
@@ -500,6 +500,7 @@ pub(crate) mod tests {
             path: "/".to_string(),
             recursive: None,
             offset,
+            locate: None,
             query: None,
             limit,
             sort: None,
@@ -524,6 +525,14 @@ pub(crate) mod tests {
         assert_eq!(first.total_count, 3);
         assert_eq!(names(&list(&query(Some(2), Some(2)), entries())?), ["c"]);
         assert!(list(&query(Some(u64::MAX), None), entries())?.entries.is_empty());
+        Ok(())
+    }
+    #[test]
+    fn offset_in_response_folder_listing_test() -> testresult::TestResult {
+        let entries = || vec![entry("c"), entry("a"), entry("b")];
+        assert_eq!(list(&query(None, Some(2)), entries())?.offset, 0);
+        assert_eq!(list(&query(Some(2), Some(2)), entries())?.offset, 2);
+        assert_eq!(list(&query(Some(50), Some(2)), entries())?.offset, 50);
         Ok(())
     }
     #[test]

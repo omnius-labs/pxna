@@ -79,7 +79,7 @@ A revert removes `locate` and `offset`, so a client that started using either st
 
 | No. | Content | Dependencies | State |
 | --- | --- | --- | --- |
-| [1](#s-1) | Add the contract and regenerate the types | - | Not started |
+| [1](#s-1) | Add the contract and regenerate the types | - | Done |
 | [2](#s-2) | Return the page of an Entry from a detail snapshot | 1 | Not started |
 | [3](#s-3) | Return the page of an Entry from the summary index | 1 | Not started |
 | [4](#s-4) | Return the page of an Entry from a search | 1, 2 | Not started |

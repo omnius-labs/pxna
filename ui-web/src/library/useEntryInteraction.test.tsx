@@ -32,6 +32,7 @@ const page = (offset: number, snapshot = "one"): FolderListing => ({
         metadata: { size: offset + i + 1, readonly: false },
     })),
     totalCount: 401,
+    offset,
     snapshot,
     truncated: false,
 });

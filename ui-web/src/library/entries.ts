@@ -149,6 +149,7 @@ export async function fetchSearchPage(
     return {
         entries: page.entries.map(({ libraryId, entry }) => ({ ...entry, path: scopedKey(libraryId, entry.path) })),
         totalCount: page.totalCount,
+        offset: page.offset,
         snapshot: page.snapshot,
         truncated: page.truncatedLibraryIds.length > 0,
     };

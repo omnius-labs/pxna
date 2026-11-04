@@ -33,7 +33,7 @@ During implementation, advance the state of the child and of this document, and 
 | [search-condition-panel](./plans/search-condition-panel.md) | Every Library, or chosen ones, can be searched by name, rating, and several tags with the conditions in the left area | Done | - |
 | [name-index-search](./plans/name-index-search.md) | A search from the root of a 10-million-Entry Library returns its first page within a second | Not started | name-index-store, search-condition-panel |
 | [viewer-display-modes](./plans/viewer-display-modes.md) | A work can be viewed in the wide-screen viewer's gallery and focus modes, and the mode returns on the next opening | Done | - |
-| [locate-listing-entry](./plans/locate-listing-entry.md) | An Entry on any page of a listing or a search can be opened by a viewer URL and by "Show in folder", because the server returns the page that holds it | Not started | viewer-display-modes |
+| [locate-listing-entry](./plans/locate-listing-entry.md) | An Entry on any page of a listing or a search can be opened by a viewer URL and by "Show in folder", because the server returns the page that holds it | In progress | viewer-display-modes |
 
 The thumbnail and image socket plans form a chain: `thumbnail-store-batching` and `source-jobs` follow `thumbnail-fanout-and-viewer-settings`, and `image-socket-server` follows `source-jobs`.
 The two name index plans run in order, and `name-index-search` also follows `search-condition-panel`, whose search API it answers.

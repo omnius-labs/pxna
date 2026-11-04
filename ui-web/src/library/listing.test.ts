@@ -33,6 +33,7 @@ afterEach(() => get.mockReset());
 const page = (snapshot = "one", count = 1000): FolderListing => ({
     entries: [{ name: "a", path: "/a", kind: "folder", metadata: { size: 1, readonly: false } }],
     totalCount: count,
+    offset: 0,
     snapshot,
     truncated: false,
 });

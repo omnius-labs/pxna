@@ -241,7 +241,7 @@ impl SummaryData {
                 total += 1;
             }
         }
-        models::FolderSummaryListing::new(page, total, id.to_string(), false)
+        models::FolderSummaryListing::new(page, total, options.offset, id.to_string(), false)
     }
 }
 
@@ -504,6 +504,22 @@ mod tests {
             entry: models::FileSystemEntrySummary::new("/a".into(), "a".into(), models::FileSystemEntryKind::File, false),
             normalized: "a".into(),
         }])
+    }
+
+    #[test]
+    fn offset_in_response_summary_listing_test() -> testresult::TestResult {
+        let entries = ["c", "a", "b"]
+            .into_iter()
+            .map(|name| SummaryEntry {
+                entry: models::FileSystemEntrySummary::new(format!("/{name}").into(), name.into(), models::FileSystemEntryKind::File, false),
+                normalized: name.into(),
+            })
+            .collect();
+        let data = SummaryData::new(entries);
+        assert_eq!(data.page(&options(serde_json::json!({"path": "/"})), "snapshot").offset, 0);
+        assert_eq!(data.page(&options(serde_json::json!({"path": "/", "offset": 2, "limit": 2})), "snapshot").offset, 2);
+        assert_eq!(data.page(&options(serde_json::json!({"path": "/", "offset": 50, "limit": 2})), "snapshot").offset, 50);
+        Ok(())
     }
 
     #[tokio::test]

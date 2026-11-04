@@ -574,6 +574,7 @@ paths:
                 - $ref: "#/components/parameters/PathQuery"
                 - $ref: "#/components/parameters/RecursiveQuery"
                 - $ref: "#/components/parameters/ListOffsetQuery"
+                - $ref: "#/components/parameters/LocateQuery"
                 - $ref: "#/components/parameters/NameFilterQuery"
                 - $ref: "#/components/parameters/ListLimitQuery"
                 - $ref: "#/components/parameters/SortQuery"
@@ -646,6 +647,8 @@ paths:
                 - $ref: "#/components/parameters/OrderQuery"
                 - $ref: "#/components/parameters/FoldersFirstQuery"
                 - $ref: "#/components/parameters/ListOffsetQuery"
+                - $ref: "#/components/parameters/LocateQuery"
+                - $ref: "#/components/parameters/LocateLibraryIdQuery"
                 - $ref: "#/components/parameters/ListLimitQuery"
             responses:
                 "200":
@@ -732,6 +735,7 @@ paths:
                 - $ref: "#/components/parameters/LibraryIdPath"
                 - $ref: "#/components/parameters/PathQuery"
                 - $ref: "#/components/parameters/ListOffsetQuery"
+                - $ref: "#/components/parameters/LocateQuery"
                 - $ref: "#/components/parameters/NameFilterQuery"
                 - $ref: "#/components/parameters/ListLimitQuery"
                 - name: sort
@@ -1934,6 +1938,30 @@ components:
                 minimum: 0
                 default: 0
 
+        LocateQuery:
+            name: locate
+            in: query
+            required: false
+            description: |
+                Path of the Entry relative to the start of the listing, in place
+                of `offset`. The server returns the page that holds the Entry,
+                with the `offset` it was cut at.
+            schema:
+                type: string
+                minLength: 1
+                maxLength: 4096
+
+        LocateLibraryIdQuery:
+            name: locateLibraryId
+            in: query
+            required: false
+            description: |
+                The Library of the Entry named by `locate`. Required with
+                `locate` in a search, because the same path can be in several
+                Libraries.
+            schema:
+                $ref: "#/components/schemas/LibraryId"
+
         NameFilterQuery:
             name: query
             in: query
@@ -2886,6 +2914,7 @@ components:
             required:
                 - entries
                 - totalCount
+                - offset
                 - snapshot
                 - truncated
             properties:
@@ -2898,6 +2927,11 @@ components:
                     format: int64
                     minimum: 0
                     description: Total count after filtering the snapshot.
+                offset:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Offset of this page in the sorted and filtered listing.
                 snapshot:
                     type: string
                     description: Opaque identifier of the listing snapshot.
@@ -2921,6 +2955,7 @@ components:
             required:
                 - entries
                 - totalCount
+                - offset
                 - snapshot
                 - truncatedLibraryIds
             properties:
@@ -2933,6 +2968,11 @@ components:
                     format: int64
                     minimum: 0
                     description: Sum of the per-Library counts after filtering.
+                offset:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Offset of this page in the merged sequence.
                 snapshot:
                     type: string
                     description: |
@@ -3054,7 +3094,7 @@ components:
 
         FolderSummaryListing:
             type: object
-            required: [entries, totalCount, snapshot, truncated]
+            required: [entries, totalCount, offset, snapshot, truncated]
             properties:
                 entries:
                     type: array
@@ -3064,6 +3104,11 @@ components:
                     type: integer
                     format: int64
                     minimum: 0
+                offset:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Offset of this page in the sorted and filtered listing.
                 snapshot:
                     type: string
                     description: Identifier of the names and kinds, not of later detail metadata.
