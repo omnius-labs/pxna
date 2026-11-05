@@ -41,6 +41,7 @@ const listPage = (): FolderListing => ({
         metadata: { size: 123, readonly: false, modifiedAt: "2026-10-05T01:02:03Z" },
     })),
     totalCount: 2500,
+    offset: 0,
     snapshot: "one",
     truncated: false,
 });
@@ -54,6 +55,7 @@ const placeUnder = (entry: Entry) =>
 const searchPage = (page: FolderListing) => ({
     entries: page.entries.map((entry) => ({ libraryId: "search", entry })),
     totalCount: page.totalCount,
+    offset: page.offset,
     snapshot: page.snapshot,
     truncatedLibraryIds: page.truncated ? ["search"] : [],
 });
@@ -201,7 +203,7 @@ it.each([false, true])("リストは検索の 0 件と打ち切りを示す %s",
     const h = await harness(
         false,
         searchSource(true, "missing"),
-        searchPage({ entries: [], totalCount: 0, snapshot: "empty", truncated }),
+        searchPage({ entries: [], totalCount: 0, offset: 0, snapshot: "empty", truncated }),
         placeUnder,
     );
     try {
@@ -227,7 +229,7 @@ it("リストは 0 件の通常の一覧を空のフォルダと示す", async (
     const h = await harness(
         false,
         { kind: "folder", libraryId: "search", path: "/base" },
-        { entries: [], totalCount: 0, snapshot: "empty", truncated: false },
+        { entries: [], totalCount: 0, offset: 0, snapshot: "empty", truncated: false },
     );
     try {
         expect(h.host.textContent).toContain("This folder is empty.");
@@ -247,6 +249,7 @@ it("only schedules visible folders but retains prefetched images and videos", as
             { name: "offscreen", path: "/offscreen", kind: "folder" },
         ],
         totalCount: 5,
+        offset: 0,
         snapshot: "thumb-visible",
         truncated: false,
     };

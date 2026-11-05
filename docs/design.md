@@ -1310,7 +1310,7 @@ M7 is a retired number and is not used.
 | M21 | Make the address the compose port is published on configurable with `PXNA_BIND` (default `127.0.0.1`) and enable `insecure_cookie` in the bundled configuration (§11.1) | M9 | Not started |
 | M22 | Implement the search API across Libraries of the [Listing and Search Design](./design/listing.md#53-searching-across-libraries), and the web client's search mode with its conditions in the left area and the three-choice mode switch | M12, M17, M18 | Done |
 | M23 | Merge every want for a source into one source job, carry thumbnails, sprite sheets, and display images over the [image socket](./design/image-socket.md), switch the web client to it with its own image cache, and remove the thumbnail HTTP route | M4, M12, M14 | Done |
-| M24 | Implement `locate` of the [Listing and Search Design](./design/listing.md#45-locating-an-entry) in the three listing APIs, and have the web client's directly opened viewer URL and "Show in folder" use it | M22 | Not started |
+| M24 | Implement `locate` of the [Listing and Search Design](./design/listing.md#45-locating-an-entry) in the three listing APIs, and have the web client's directly opened viewer URL and "Show in folder" use it | M22 | Done |
 
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
@@ -1319,7 +1319,7 @@ The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-ro
 The server side of M14 is V5 of the same §8.2.
 The current state of the completed M13 and M14, and the client-side remaining work of M15, are in [Client Design §6](./design/client.md#6-current-state-and-remaining-work).
 The breakdown of M19 is L1 of [Listing and Search Design §9.2](./design/listing.md#92-roadmap) and C12 of [Client Design §6.2](./design/client.md#62-roadmap), and of M20 is T1 of [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap) and C11 of the same Client Design §6.2.
-The breakdown of M23 is IC1 to IC3 of [Image Socket Design §10.2](./design/image-socket.md#102-roadmap), and C13 of Client Design §6.2; M20 follows M23, because its revalidation comes with the image socket.
+The breakdown of M23 is IC1 to IC3 of [Image Socket Design §10.2](./design/image-socket.md#102-roadmap); M20 follows M23, because its revalidation comes with the image socket.
 M16, M17, and M18 have no remaining work. The current state of M16 is in [Timeline Design §10](./design/timeline.md#10-current-state-and-remaining-work), of M17 in [Client Design §6.1](./design/client.md#61-current-code), and of M18 in [Rating and Tag Design §9](./design/rating-tags.md#9-current-state-and-remaining-work).
 
 For confirmed defects, see [issues.md](./issues.md).

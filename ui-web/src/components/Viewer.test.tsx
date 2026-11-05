@@ -4,6 +4,7 @@ import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../api/client";
 import type { Want } from "../images/spec";
 import type { Entry, FolderListing } from "../library/entries";
 import { FakeImageSource } from "../testing/images";
@@ -120,7 +121,7 @@ const entry = (index: number): Entry => ({
     file: { archive: false },
 });
 const response = (entries: Entry[]) => ({
-    data: { entries, totalCount: 201, snapshot: "one", truncated: false } satisfies FolderListing,
+    data: { entries, totalCount: 201, offset: 0, snapshot: "one", truncated: false } satisfies FolderListing,
     response: new Response(),
 });
 
@@ -222,6 +223,53 @@ it("keeps the current image while reading and moves after one arrow press", asyn
         await h.dispose();
     }
 });
+it("opens an Entry on the second page with one locate request", async () => {
+    get.mockImplementation((_, options) => {
+        const query = options.params.query;
+        if (query.locate !== undefined)
+            return Promise.resolve({
+                data: {
+                    entries: [entry(250)],
+                    totalCount: 300,
+                    offset: 200,
+                    snapshot: "one",
+                    truncated: false,
+                } satisfies FolderListing,
+                response: new Response(),
+            });
+        return Promise.resolve({
+            data: {
+                entries: Array.from({ length: 200 }, (_, index) => entry(index)),
+                totalCount: 300,
+                offset: 0,
+                snapshot: "one",
+                truncated: false,
+            } satisfies FolderListing,
+            response: new Response(),
+        });
+    });
+    const h = await harness("250.png");
+    try {
+        await wait(() => expect(h.host.querySelector("img")?.alt).toBe("250.png"));
+        expect(get.mock.calls.filter(([, options]) => options.params.query.locate !== undefined)).toHaveLength(1);
+        expect(get.mock.calls.some(([, options]) => options.params.query.offset === 200)).toBe(false);
+    } finally {
+        await h.dispose();
+    }
+});
+it("shows Not found for an Entry the server does not know", async () => {
+    get.mockImplementation((_, options) =>
+        options.params.query.locate !== undefined
+            ? Promise.reject(new ApiError(404, undefined, "not found"))
+            : Promise.resolve(response(Array.from({ length: 200 }, (_, index) => entry(index)))),
+    );
+    const h = await harness("299.png");
+    try {
+        await wait(() => expect(h.host.textContent).toContain("Not found."));
+    } finally {
+        await h.dispose();
+    }
+});
 it("cancels pending navigation when the viewer closes", async () => {
     get.mockImplementation((_, options) =>
         options.params.query.offset === 0
@@ -241,7 +289,7 @@ it("cancels pending navigation when the viewer closes", async () => {
 it("同名の画像を相対パスで開き、前後への移動でも区別する", async () => {
     const entries = ["a", "b"].map((folder) => ({ ...entry(0), name: "same.png", path: `/pair/${folder}/same.png` }));
     get.mockResolvedValue({
-        data: { entries, totalCount: 2, snapshot: "pair", truncated: false } satisfies FolderListing,
+        data: { entries, totalCount: 2, offset: 0, snapshot: "pair", truncated: false } satisfies FolderListing,
         response: new Response(),
     });
     const h = await harness("b/same.png", "/pair");
@@ -263,7 +311,13 @@ const image = (name: string, contentType: string, size: number): import("../libr
 });
 const listed = (entries: Entry[]) =>
     get.mockResolvedValue({
-        data: { entries, totalCount: entries.length, snapshot: "one", truncated: false } satisfies FolderListing,
+        data: {
+            entries,
+            totalCount: entries.length,
+            offset: 0,
+            snapshot: "one",
+            truncated: false,
+        } satisfies FolderListing,
         response: new Response(),
     });
 const findDisplayImage = (h: { host: HTMLElement }) =>
@@ -376,6 +430,7 @@ describe("Filmstrip", () => {
                 data: {
                     entries: page(options.params.query.offset),
                     totalCount: 1000,
+                    offset: options.params.query.offset,
                     snapshot: "one",
                     truncated: false,
                 } satisfies FolderListing,
@@ -412,6 +467,7 @@ describe("Filmstrip", () => {
                     },
                 ],
                 totalCount: 1,
+                offset: 0,
                 snapshot: "one",
                 truncated: false,
             } satisfies FolderListing,

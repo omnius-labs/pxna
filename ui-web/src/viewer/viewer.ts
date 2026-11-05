@@ -1,37 +1,36 @@
 import { type Entry, entryKind } from "../library/entries";
 import { type Listing, ListingSnapshotChanged, PAGE_SIZE } from "../library/listing";
 import type { DisplaySet } from "../library/preferences";
-import { joinPath, pathSegments, relativePath } from "../location";
+import { joinPath, pathSegments } from "../location";
 
 export interface IndexedEntry {
     index: number;
     entry: Entry;
 }
 
-/// 相対パスを持つ URL から開けるよう、未読のページだけを先頭から探す。
+/// 相対パスを持つ URL から開けるよう、Entry の位置をサーバーに聞く。
 export async function findEntry(
     listing: Listing,
     base: string,
     view: string,
     signal: AbortSignal,
 ): Promise<IndexedEntry | undefined> {
-    // 読み込み済みの範囲から探す一覧は、先頭のページから順に読まない。
-    if (listing.locate) {
-        if (listing.totalCount === undefined) await listing.loadPages([], signal);
+    const path = joinPath([...pathSegments(base), ...pathSegments(view)]);
+    signal.throwIfAborted();
+    // Answer from the loaded range when it holds the Entry.
+    if (listing.totalCount === undefined) await listing.loadPages(listing.locateRemote ? [0] : [], signal);
+    signal.throwIfAborted();
+    const loaded = listing.locate?.(path);
+    if (loaded !== undefined) {
+        const entry = listing.entryAt(loaded);
+        if (entry !== undefined) return { index: loaded, entry };
+    }
+    // An Entry on an unread page is found by asking the server for its page.
+    if (listing.locateRemote) {
+        const index = await listing.locateRemote(path, signal);
         signal.throwIfAborted();
-        const index = listing.locate(joinPath([...pathSegments(base), ...pathSegments(view)]));
         const entry = index === undefined ? undefined : listing.entryAt(index);
         return index === undefined || entry === undefined ? undefined : { index, entry };
-    }
-    await readPage(listing, 0, signal);
-    const snapshot = listing.snapshot;
-    for (let page = 0; page * PAGE_SIZE < (listing.totalCount ?? 0); page += 1) {
-        await readPage(listing, page, signal, snapshot);
-        const end = Math.min((page + 1) * PAGE_SIZE, listing.totalCount ?? 0);
-        for (let index = page * PAGE_SIZE; index < end; index += 1) {
-            const entry = listing.entryAt(index);
-            if (entry && relativePath(base, entry.path) === view) return { index, entry };
-        }
     }
     return undefined;
 }

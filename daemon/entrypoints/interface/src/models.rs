@@ -314,6 +314,11 @@ pub struct ListFolderEntriesQueryParams {
     #[validate(range(min = 0u64))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u64>,
+    /// Path of the Entry relative to the start of the listing, in place of `offset`. The server returns the page that holds the Entry, with the `offset` it was cut at.
+    #[serde(rename = "locate")]
+    #[validate(length(min = 1, max = 4096))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locate: Option<String>,
     /// Whitespace-separated terms that must all occur in an entry name. Names and terms are normalized with NFKC and converted to lowercase.
     #[serde(rename = "query")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -374,6 +379,11 @@ pub struct ListFolderSummariesQueryParams {
     #[validate(range(min = 0u64))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u64>,
+    /// Path of the Entry relative to the start of the listing, in place of `offset`. The server returns the page that holds the Entry, with the `offset` it was cut at.
+    #[serde(rename = "locate")]
+    #[validate(length(min = 1, max = 4096))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locate: Option<String>,
     /// Whitespace-separated terms that must all occur in an entry name. Names and terms are normalized with NFKC and converted to lowercase.
     #[serde(rename = "query")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -568,11 +578,28 @@ pub struct ListSearchEntriesQueryParams {
     #[validate(range(min = 0u64))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u64>,
+    /// Path of the Entry relative to the start of the listing, in place of `offset`. The server returns the page that holds the Entry, with the `offset` it was cut at.
+    #[serde(rename = "locate")]
+    #[validate(length(min = 1, max = 4096))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locate: Option<String>,
+    /// The Library of the Entry named by `locate`. Required with `locate` in a search, because the same path can be in several Libraries.
+    #[serde(rename = "locateLibraryId")]
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_LISTSEARCHENTRIESQUERYPARAMS_LOCATE_LIBRARY_ID),
+              )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locate_library_id: Option<String>,
     /// Maximum number of entries to return.
     #[serde(rename = "limit")]
     #[validate(range(min = 1u32, max = 1000u32))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_LISTSEARCHENTRIESQUERYPARAMS_LOCATE_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -4604,6 +4631,11 @@ pub struct FolderListing {
     #[validate(range(min = 0u64))]
     pub total_count: u64,
 
+    /// Offset of this page in the sorted and filtered listing.
+    #[serde(rename = "offset")]
+    #[validate(range(min = 0u64))]
+    pub offset: u64,
+
     /// Opaque identifier of the listing snapshot.
     #[serde(rename = "snapshot")]
     #[validate(custom(function = "check_xss_string"))]
@@ -4616,10 +4648,11 @@ pub struct FolderListing {
 
 impl FolderListing {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(entries: Vec<models::FileSystemEntry>, total_count: u64, snapshot: String, truncated: bool) -> FolderListing {
+    pub fn new(entries: Vec<models::FileSystemEntry>, total_count: u64, offset: u64, snapshot: String, truncated: bool) -> FolderListing {
         FolderListing {
             entries,
             total_count,
+            offset,
             snapshot,
             truncated,
         }
@@ -4635,6 +4668,8 @@ impl std::fmt::Display for FolderListing {
             // Skipping entries in query parameter serialization
             Some("totalCount".to_string()),
             Some(self.total_count.to_string()),
+            Some("offset".to_string()),
+            Some(self.offset.to_string()),
             Some("snapshot".to_string()),
             Some(self.snapshot.to_string()),
             Some("truncated".to_string()),
@@ -4658,6 +4693,7 @@ impl std::str::FromStr for FolderListing {
         struct IntermediateRep {
             pub entries: Vec<Vec<models::FileSystemEntry>>,
             pub total_count: Vec<u64>,
+            pub offset: Vec<u64>,
             pub snapshot: Vec<String>,
             pub truncated: Vec<bool>,
         }
@@ -4681,6 +4717,8 @@ impl std::str::FromStr for FolderListing {
                     #[allow(clippy::redundant_clone)]
                     "totalCount" => intermediate_rep.total_count.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
+                    "offset" => intermediate_rep.offset.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
                     "snapshot" => intermediate_rep.snapshot.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "truncated" => intermediate_rep.truncated.push(<bool as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
@@ -4700,6 +4738,7 @@ impl std::str::FromStr for FolderListing {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "totalCount missing in FolderListing".to_string())?,
+            offset: intermediate_rep.offset.into_iter().next().ok_or_else(|| "offset missing in FolderListing".to_string())?,
             snapshot: intermediate_rep
                 .snapshot
                 .into_iter()
@@ -4862,6 +4901,11 @@ pub struct FolderSummaryListing {
     #[validate(range(min = 0u64))]
     pub total_count: u64,
 
+    /// Offset of this page in the sorted and filtered listing.
+    #[serde(rename = "offset")]
+    #[validate(range(min = 0u64))]
+    pub offset: u64,
+
     /// Identifier of the names and kinds, not of later detail metadata.
     #[serde(rename = "snapshot")]
     #[validate(custom(function = "check_xss_string"))]
@@ -4874,10 +4918,11 @@ pub struct FolderSummaryListing {
 
 impl FolderSummaryListing {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(entries: Vec<models::FileSystemEntrySummary>, total_count: u64, snapshot: String, truncated: bool) -> FolderSummaryListing {
+    pub fn new(entries: Vec<models::FileSystemEntrySummary>, total_count: u64, offset: u64, snapshot: String, truncated: bool) -> FolderSummaryListing {
         FolderSummaryListing {
             entries,
             total_count,
+            offset,
             snapshot,
             truncated,
         }
@@ -4893,6 +4938,8 @@ impl std::fmt::Display for FolderSummaryListing {
             // Skipping entries in query parameter serialization
             Some("totalCount".to_string()),
             Some(self.total_count.to_string()),
+            Some("offset".to_string()),
+            Some(self.offset.to_string()),
             Some("snapshot".to_string()),
             Some(self.snapshot.to_string()),
             Some("truncated".to_string()),
@@ -4916,6 +4963,7 @@ impl std::str::FromStr for FolderSummaryListing {
         struct IntermediateRep {
             pub entries: Vec<Vec<models::FileSystemEntrySummary>>,
             pub total_count: Vec<u64>,
+            pub offset: Vec<u64>,
             pub snapshot: Vec<String>,
             pub truncated: Vec<bool>,
         }
@@ -4938,6 +4986,8 @@ impl std::str::FromStr for FolderSummaryListing {
                     "entries" => return std::result::Result::Err("Parsing a container in this style is not supported in FolderSummaryListing".to_string()),
                     #[allow(clippy::redundant_clone)]
                     "totalCount" => intermediate_rep.total_count.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "offset" => intermediate_rep.offset.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "snapshot" => intermediate_rep.snapshot.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
@@ -4962,6 +5012,11 @@ impl std::str::FromStr for FolderSummaryListing {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "totalCount missing in FolderSummaryListing".to_string())?,
+            offset: intermediate_rep
+                .offset
+                .into_iter()
+                .next()
+                .ok_or_else(|| "offset missing in FolderSummaryListing".to_string())?,
             snapshot: intermediate_rep
                 .snapshot
                 .into_iter()
@@ -7893,6 +7948,11 @@ pub struct SearchListing {
     #[validate(range(min = 0u64))]
     pub total_count: u64,
 
+    /// Offset of this page in the merged sequence.
+    #[serde(rename = "offset")]
+    #[validate(range(min = 0u64))]
+    pub offset: u64,
+
     /// Opaque identifier of the merged listing. It changes when the listing of any searched Library is rebuilt.
     #[serde(rename = "snapshot")]
     #[validate(custom(function = "check_xss_string"))]
@@ -7906,10 +7966,11 @@ pub struct SearchListing {
 
 impl SearchListing {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(entries: Vec<models::SearchEntry>, total_count: u64, snapshot: String, truncated_library_ids: Vec<models::LibraryId>) -> SearchListing {
+    pub fn new(entries: Vec<models::SearchEntry>, total_count: u64, offset: u64, snapshot: String, truncated_library_ids: Vec<models::LibraryId>) -> SearchListing {
         SearchListing {
             entries,
             total_count,
+            offset,
             snapshot,
             truncated_library_ids,
         }
@@ -7925,6 +7986,8 @@ impl std::fmt::Display for SearchListing {
             // Skipping entries in query parameter serialization
             Some("totalCount".to_string()),
             Some(self.total_count.to_string()),
+            Some("offset".to_string()),
+            Some(self.offset.to_string()),
             Some("snapshot".to_string()),
             Some(self.snapshot.to_string()),
             Some("truncatedLibraryIds".to_string()),
@@ -7948,6 +8011,7 @@ impl std::str::FromStr for SearchListing {
         struct IntermediateRep {
             pub entries: Vec<Vec<models::SearchEntry>>,
             pub total_count: Vec<u64>,
+            pub offset: Vec<u64>,
             pub snapshot: Vec<String>,
             pub truncated_library_ids: Vec<Vec<models::LibraryId>>,
         }
@@ -7971,6 +8035,8 @@ impl std::str::FromStr for SearchListing {
                     #[allow(clippy::redundant_clone)]
                     "totalCount" => intermediate_rep.total_count.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
+                    "offset" => intermediate_rep.offset.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
                     "snapshot" => intermediate_rep.snapshot.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     "truncatedLibraryIds" => return std::result::Result::Err("Parsing a container in this style is not supported in SearchListing".to_string()),
                     _ => return std::result::Result::Err("Unexpected key while parsing SearchListing".to_string()),
@@ -7989,6 +8055,7 @@ impl std::str::FromStr for SearchListing {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "totalCount missing in SearchListing".to_string())?,
+            offset: intermediate_rep.offset.into_iter().next().ok_or_else(|| "offset missing in SearchListing".to_string())?,
             snapshot: intermediate_rep
                 .snapshot
                 .into_iter()

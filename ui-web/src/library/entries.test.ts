@@ -24,8 +24,8 @@ afterEach(() => get.mockReset());
 describe("tree listing pages", () => {
     it("reads every tree page with the accumulated offset", async () => {
         const get = mockPages([
-            { entries: [entry("a")], totalCount: 3, snapshot: "one", truncated: false },
-            { entries: [entry("b"), entry("c")], totalCount: 3, snapshot: "one", truncated: false },
+            { entries: [entry("a")], totalCount: 3, offset: 0, snapshot: "one", truncated: false },
+            { entries: [entry("b"), entry("c")], totalCount: 3, offset: 1, snapshot: "one", truncated: false },
         ]);
         const client = new QueryClient();
         const result = await client.fetchQuery(childFoldersQuery("photos", "/"));
@@ -36,10 +36,10 @@ describe("tree listing pages", () => {
 
     it("restarts tree traversal when a later page has a different snapshot", async () => {
         const get = mockPages([
-            { entries: [entry("old-a")], totalCount: 2, snapshot: "old", truncated: false },
-            { entries: [entry("new-b")], totalCount: 2, snapshot: "new", truncated: false },
-            { entries: [entry("new-a")], totalCount: 2, snapshot: "new", truncated: false },
-            { entries: [entry("new-b")], totalCount: 2, snapshot: "new", truncated: false },
+            { entries: [entry("old-a")], totalCount: 2, offset: 0, snapshot: "old", truncated: false },
+            { entries: [entry("new-b")], totalCount: 2, offset: 1, snapshot: "new", truncated: false },
+            { entries: [entry("new-a")], totalCount: 2, offset: 0, snapshot: "new", truncated: false },
+            { entries: [entry("new-b")], totalCount: 2, offset: 1, snapshot: "new", truncated: false },
         ]);
         const client = new QueryClient();
         const result = await client.fetchQuery(childFoldersQuery("photos", "/"));
@@ -62,7 +62,7 @@ it("変更後は表示中のツリーだけを再取得する", async () => {
     const client = new QueryClient();
     const options = childFoldersQuery("photos", "/");
     get.mockResolvedValue({
-        data: { entries: [entry("old")], totalCount: 1, snapshot: "one", truncated: false },
+        data: { entries: [entry("old")], totalCount: 1, offset: 0, snapshot: "one", truncated: false },
         response: new Response(),
     });
     const observer = new QueryObserver(client, options);
@@ -71,7 +71,7 @@ it("変更後は表示中のツリーだけを再取得する", async () => {
         await observer.refetch();
         client.setQueryData(childFoldersQuery("other", "/").queryKey, [entry("other")]);
         get.mockResolvedValue({
-            data: { entries: [entry("new")], totalCount: 1, snapshot: "two", truncated: false },
+            data: { entries: [entry("new")], totalCount: 1, offset: 0, snapshot: "two", truncated: false },
             response: new Response(),
         });
         await refreshLibrary(client, "photos");

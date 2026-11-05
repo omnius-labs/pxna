@@ -121,6 +121,10 @@ impl ListingSnapshot {
         options.page(&self.entries, &self.order(options.sort()), self.id.clone())
     }
 
+    pub fn locate(&self, options: &ListOptions, path: &str) -> Option<models::FolderListing> {
+        options.locate(&self.entries, &self.order(options.sort()), path, self.id.clone())
+    }
+
     /// 条件に合う Entry の位置を、並べ方の順で返す。
     pub fn matching(&self, options: &ListOptions) -> Vec<usize> {
         options.matching(&self.entries, &self.order(options.sort()))

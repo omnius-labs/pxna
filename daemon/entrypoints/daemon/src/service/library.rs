@@ -17,6 +17,7 @@ use crate::{
     prelude::*,
     service::listing::{
         ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, SearchResults, SearchSource, SnapshotKey, SnapshotVersion, SummaryData, SummaryKey, SummaryOptions,
+        SummarySnapshot,
     },
 };
 
@@ -70,9 +71,36 @@ impl LibraryBrowser {
         Ok(self.snapshot(library_id, path, options).await?.page(options))
     }
 
+    /// `entry` is relative to the start of the listing; returns the page that holds it.
+    pub async fn list_folder_entries_located(&self, library_id: &str, path: &str, options: &ListOptions, entry: &str) -> Result<models::FolderListing> {
+        self.snapshot(library_id, path, options)
+            .await?
+            .locate(options, entry)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message(format!("entry not found in the listing: {entry}")))
+    }
+
     /// Library ごとの一覧を並べ方の順にまとめる。`libraries` は要求の順の Library の id と、その Library の評価とタグで引いた条件の組である。
     /// 起点の `path` は Library が 1 つのときだけ指定でき、複数のときは各 Library のルートから探す。
     pub async fn search_entries(&self, libraries: Vec<(String, ListOptions)>, path: &str, options: &ListOptions) -> Result<models::SearchListing> {
+        Ok(self.search_results(libraries, path).await?.page(options))
+    }
+
+    /// `entry` is relative to the start of the listing; returns the page that holds the Entry of `library_id`.
+    pub async fn search_entries_located(
+        &self,
+        libraries: Vec<(String, ListOptions)>,
+        path: &str,
+        options: &ListOptions,
+        library_id: &str,
+        entry: &str,
+    ) -> Result<models::SearchListing> {
+        self.search_results(libraries, path)
+            .await?
+            .locate(options, library_id, entry)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message(format!("entry not found in the listing: {entry}")))
+    }
+
+    async fn search_results(&self, libraries: Vec<(String, ListOptions)>, path: &str) -> Result<SearchResults> {
         let mut seen = HashSet::new();
         for (library_id, _) in &libraries {
             self.library(library_id)?;
@@ -89,10 +117,22 @@ impl LibraryBrowser {
             .zip(snapshots)
             .map(|((library_id, options), snapshot)| SearchSource::new(&library_id, snapshot, options))
             .collect();
-        Ok(SearchResults::new(sources).page(options))
+        Ok(SearchResults::new(sources))
     }
 
     pub async fn list_folder_summaries(&self, library_id: &str, path: &str, options: &SummaryOptions) -> Result<models::FolderSummaryListing> {
+        Ok(self.summary_snapshot(library_id, path, options).await?.page(options))
+    }
+
+    /// `entry` is relative to the start of the listing; returns the page that holds it.
+    pub async fn list_folder_summaries_located(&self, library_id: &str, path: &str, options: &SummaryOptions, entry: &str) -> Result<models::FolderSummaryListing> {
+        self.summary_snapshot(library_id, path, options)
+            .await?
+            .locate(options, entry)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message(format!("entry not found in the listing: {entry}")))
+    }
+
+    async fn summary_snapshot(&self, library_id: &str, path: &str, options: &SummaryOptions) -> Result<Arc<SummarySnapshot>> {
         let library = self.library(library_id)?;
         let (folder, entry) = self.resolve_folder(library, path).await?;
         let key = SummaryKey::new(library_id, &library.path, path, options)?;
@@ -100,12 +140,10 @@ impl LibraryBrowser {
         let root = library.path.clone();
         let include_hidden = options.include_hidden();
         let budget = self.storage.work_budget().clone();
-        let snapshot = self
-            .snapshots
+        self.snapshots
             .summaries()
             .get_or_scan(key, version, move || async move { SummaryData::scan(&folder, &root, include_hidden, &budget).await })
-            .await?;
-        Ok(snapshot.page(options))
+            .await
     }
 
     pub async fn entry_details(&self, library_id: &str, paths: &[String]) -> Result<models::EntryDetailsResponse> {

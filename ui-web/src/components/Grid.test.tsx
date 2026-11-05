@@ -126,6 +126,7 @@ const placeUnder = (entry: Entry) =>
 const searchPage = (entries: Entry[], totalCount: number, snapshot: string, truncated: boolean) => ({
     entries: entries.map((entry) => ({ libraryId: "search", entry })),
     totalCount,
+    offset: 0,
     snapshot,
     truncatedLibraryIds: truncated ? ["search"] : [],
 });
@@ -223,7 +224,7 @@ it.each([false, true])("グリッドは検索の 0 件と打ち切りを示す %
 it("グリッドは 0 件の通常の一覧を空のフォルダと示す", async () => {
     const h = await searchHarness(
         { kind: "folder", libraryId: "search", path: "/base" },
-        { entries: [], totalCount: 0, snapshot: "empty", truncated: false },
+        { entries: [], totalCount: 0, offset: 0, snapshot: "empty", truncated: false },
     );
     try {
         expect(h.host.textContent).toBe("This folder is empty.");
@@ -250,6 +251,7 @@ it("only wants visible folder/archive thumbnails while retaining image/video pre
             file: i % 4 === 1 ? { archive: true } : undefined,
         })),
         totalCount: 60,
+        offset: 0,
         snapshot: "visible-thumbnails",
         truncated: false,
     };

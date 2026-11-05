@@ -27,6 +27,10 @@ function fakeListing(): Listing {
         pageError: () => null,
         loadPages: async () => {},
         retry: () => {},
+        locateRemote: async (path) => {
+            const index = names.findIndex((name) => `/dir/${name}` === path);
+            return index < 0 ? undefined : index;
+        },
     };
 }
 

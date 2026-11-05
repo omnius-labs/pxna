@@ -96,6 +96,24 @@ export function isThumbnailable(entry: Entry): boolean {
     return entryKind(entry) !== "other";
 }
 
+/// A position that names an Entry with `locate`, sent in place of `offset`.
+export interface LocatePosition {
+    locate: string;
+    locateLibraryId?: string;
+}
+
+/// A page position: an `offset`, or a `locate` that names an Entry.
+export type PagePosition = number | LocatePosition;
+
+/// Turns a position into query parameters. A `locate` sends no `offset`.
+export function positionQuery(position: PagePosition) {
+    if (typeof position === "number") return { offset: position };
+    return {
+        locate: position.locate,
+        ...(position.locateLibraryId === undefined ? {} : { locateLibraryId: position.locateLibraryId }),
+    };
+}
+
 interface ListOptions {
     includeHidden?: boolean;
     query?: string;
@@ -109,11 +127,11 @@ interface ListOptions {
 export async function fetchFolderPage(
     libraryId: string,
     path: string,
-    offset: number,
+    position: PagePosition,
     options: ListOptions,
     signal?: AbortSignal,
 ): Promise<FolderListing> {
-    const query = { path, limit: PAGE_SIZE, offset, ...options };
+    const query = { path, limit: PAGE_SIZE, ...positionQuery(position), ...options };
     return unwrap(
         await api.GET("/libraries/{libraryId}/folders/entries", { params: { path: { libraryId }, query }, signal }),
     );
@@ -122,7 +140,7 @@ export async function fetchFolderPage(
 /// Library を横断する検索のページ。Entry の path は、Library を含む鍵（`scopedKey`）に置き換える。
 export async function fetchSearchPage(
     criteria: SearchCriteria,
-    offset: number,
+    position: PagePosition,
     order: { sort: SortPreference["key"]; order: SortPreference["order"] },
     signal: AbortSignal,
 ): Promise<FolderListing> {
@@ -139,7 +157,7 @@ export async function fetchSearchPage(
                     ...(criteria.tags.length === 0 ? {} : { tag: [...criteria.tags] }),
                     ...order,
                     foldersFirst: true,
-                    offset,
+                    ...positionQuery(position),
                     limit: PAGE_SIZE,
                 },
             },
@@ -149,6 +167,7 @@ export async function fetchSearchPage(
     return {
         entries: page.entries.map(({ libraryId, entry }) => ({ ...entry, path: scopedKey(libraryId, entry.path) })),
         totalCount: page.totalCount,
+        offset: page.offset,
         snapshot: page.snapshot,
         truncated: page.truncatedLibraryIds.length > 0,
     };
@@ -188,17 +207,17 @@ export async function fetchListingPage(
     client: QueryClient,
     libraryId: string,
     path: string,
-    offset: number,
+    position: PagePosition,
     options: ListOptions,
     signal: AbortSignal,
 ): Promise<FolderListing> {
     if (options.recursive || (options.sort !== undefined && options.sort !== "name" && options.sort !== "kind")) {
-        return fetchFolderPage(libraryId, path, offset, options, signal);
+        return fetchFolderPage(libraryId, path, position, options, signal);
     }
     const capabilities = await client.fetchQuery(capabilitiesQuery);
     signal.throwIfAborted();
     if (!capabilities.summaryListing || !capabilities.entryDetails)
-        return fetchFolderPage(libraryId, path, offset, options, signal);
+        return fetchFolderPage(libraryId, path, position, options, signal);
     const summaryOptions = { ...options };
     delete summaryOptions.recursive;
     const page = unwrap(
@@ -207,7 +226,7 @@ export async function fetchListingPage(
                 path: { libraryId },
                 query: {
                     path,
-                    offset,
+                    ...positionQuery(position),
                     limit: PAGE_SIZE,
                     ...summaryOptions,
                     sort: options.sort === "kind" ? "kind" : "name",

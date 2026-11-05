@@ -5,10 +5,12 @@ use http::Method;
 
 use omnius_pxna_interface::{apis, models};
 
+use omnius_core_base::error::OmniError as _;
+
 use crate::{
-    error::{ApiError, ApiStatus},
+    error::{ApiError, ApiStatus, Error, ErrorKind},
     interface::{ApiServer, session::Claims},
-    service::listing::ListOptions,
+    service::{library::LibraryRelativePath, listing::ListOptions},
 };
 
 #[allow(unused_variables)]
@@ -26,13 +28,32 @@ impl apis::search::Search for ApiServer {
     ) -> std::result::Result<apis::search::ListSearchEntriesResponse, ()> {
         let listing = async {
             let options = ListOptions::from_search(query_params)?;
+            let path = query_params.path.as_deref().unwrap_or("/");
+            let located = match (&query_params.locate, &query_params.locate_library_id) {
+                (Some(locate), Some(library_id)) => Some((locate, library_id)),
+                (None, None) => None,
+                _ => return Err(Error::new(ErrorKind::InvalidInput).with_message("locate and locateLibraryId must be given together")),
+            };
+            if let Some((_, library_id)) = located {
+                if query_params.offset.is_some() {
+                    return Err(Error::new(ErrorKind::InvalidInput).with_message("locate and offset cannot be given together"));
+                }
+                if !query_params.library_ids.iter().any(|id| &id.0 == library_id) {
+                    return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("locateLibraryId is not in libraryIds: {library_id}")));
+                }
+            }
             let mut libraries = Vec::new();
             for library_id in &query_params.library_ids {
                 let selection = options.marks().select(&self.state.rating_tags, &claims.user.id, &library_id.0).await?;
                 libraries.push((library_id.0.clone(), options.clone().with_selection(selection)));
             }
-            let path = query_params.path.as_deref().unwrap_or("/");
-            self.state.library.search_entries(libraries, path, &options).await
+            match located {
+                Some((locate, library_id)) => {
+                    let entry = LibraryRelativePath::join(path, locate)?.absolute();
+                    self.state.library.search_entries_located(libraries, path, &options, library_id, &entry).await
+                }
+                None => self.state.library.search_entries(libraries, path, &options).await,
+            }
         }
         .await;
         Ok(match listing {
@@ -128,6 +149,70 @@ mod tests {
         assert_eq!(mixed.status, StatusCode::BAD_REQUEST);
         let unknown = send(&router, http::Method::GET, &format!("{SEARCH}?libraryIds=photos&libraryIds=missing&query=a"), headers, None).await?;
         assert_eq!(unknown.status, StatusCode::NOT_FOUND);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn locate_search_returns_the_page_of_the_entry_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let dir = fixture._dir.path();
+        std::fs::write(dir.join("library/photos/b-sun.png"), b"x")?;
+        std::fs::write(dir.join("videos/a-sun.mp4"), b"x")?;
+        std::fs::write(dir.join("videos/c-sun.mp4"), b"x")?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        let headers = &[("authorization", token.as_str())];
+
+        let uri = format!("{SEARCH}?libraryIds=photos&libraryIds=videos&query=sun&recursive=true&sort=name&limit=1");
+        let located = send(&router, http::Method::GET, &format!("{uri}&locate=photos/b-sun.png&locateLibraryId=photos"), headers, None).await?;
+        assert_eq!(located.status, StatusCode::OK, "{}", located.body);
+        assert_eq!(located.body["offset"], 1);
+        assert_eq!(located.body["entries"][0]["libraryId"], "photos");
+        assert_eq!(located.body["entries"][0]["entry"]["path"], "/photos/b-sun.png");
+
+        let same = send(&router, http::Method::GET, &format!("{uri}&offset=1"), headers, None).await?;
+        assert_eq!(located.body["entries"], same.body["entries"]);
+        assert_eq!(located.body["totalCount"], same.body["totalCount"]);
+
+        let started = send(
+            &router,
+            http::Method::GET,
+            &format!("{SEARCH}?libraryIds=photos&path=/photos&query=sun&recursive=true&locate=b-sun.png&locateLibraryId=photos"),
+            headers,
+            None,
+        )
+        .await?;
+        assert_eq!(started.status, StatusCode::OK, "{}", started.body);
+        assert_eq!(started.body["entries"][0]["entry"]["path"], "/photos/b-sun.png");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn locate_errors_of_the_search_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        std::fs::write(fixture._dir.path().join("library/photos/b-sun.png"), b"x")?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        let headers = &[("authorization", token.as_str())];
+
+        for uri in [
+            format!("{SEARCH}?libraryIds=photos&query=sun&locate=b-sun.png"),
+            format!("{SEARCH}?libraryIds=photos&query=sun&locateLibraryId=photos"),
+            format!("{SEARCH}?libraryIds=photos&query=sun&locate=b-sun.png&locateLibraryId=videos"),
+            format!("{SEARCH}?libraryIds=photos&query=sun&locate=b-sun.png&locateLibraryId=photos&offset=0"),
+        ] {
+            let response = send(&router, http::Method::GET, &uri, headers, None).await?;
+            assert_eq!(response.status, StatusCode::BAD_REQUEST, "{uri}");
+        }
+        let missing = send(
+            &router,
+            http::Method::GET,
+            &format!("{SEARCH}?libraryIds=photos&query=sun&recursive=true&locate=missing.png&locateLibraryId=photos"),
+            headers,
+            None,
+        )
+        .await?;
+        assert_eq!(missing.status, StatusCode::NOT_FOUND);
         Ok(())
     }
 }
