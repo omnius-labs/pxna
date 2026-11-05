@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
 import type { FolderListing } from "./entries";
 import {
     folderPageKey,
@@ -95,6 +96,142 @@ it("requests only zero and wanted pages, with offsets from page indexes", async 
         await h.dispose();
     }
 });
+/// 最後に送った `locate` の要求を取り出す。
+function locateCall() {
+    const call = get.mock.calls.find(([, options]) => options.params.query.locate !== undefined);
+    if (!call) throw new Error("the listing must have sent a locate request");
+    return call;
+}
+
+/// 実際の一覧と同じく、Entry をサーバーに聞く関数を取り出す。
+function locateRemote(h: { current: { listing?: Listing } }) {
+    const locate = h.current.listing?.locateRemote;
+    if (!locate) throw new Error("the listing must locate an Entry remotely");
+    return locate;
+}
+
+const locatedPage = (offset: number, snapshot = "one"): FolderListing => ({
+    entries: [{ name: "a", path: "/a", kind: "folder", metadata: { size: 1, readonly: false } }],
+    totalCount: 1000,
+    offset,
+    snapshot,
+    truncated: false,
+});
+
+it("locates the page of an Entry, files it at its offset, and returns the position", async () => {
+    get.mockImplementation((_, options) =>
+        options.params.query.locate === undefined
+            ? Promise.resolve(response(page()))
+            : Promise.resolve(response(locatedPage(400))),
+    );
+    const h = await harness();
+    try {
+        await wait(() => expect(h.current.listing).toBeDefined());
+        const index = await locateRemote(h)("/a", new AbortController().signal);
+        expect(index).toBe(400);
+        expect(h.current.listing?.entryAt(400)?.path).toBe("/a");
+        const [, options] = locateCall();
+        expect(options.params.query).toMatchObject({ path: "/", locate: "a", limit: 200 });
+        expect(options.params.query).not.toHaveProperty("offset");
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("converts a search Entry's path to the start of the search", async () => {
+    get.mockImplementation((_, options) =>
+        options.params.query.locate === undefined
+            ? Promise.resolve(searchResponse())
+            : Promise.resolve({
+                  data: {
+                      entries: [{ libraryId: "b", entry: { name: "x.png", path: "/dir/x.png", kind: "file" } }],
+                      totalCount: 1000,
+                      offset: 200,
+                      snapshot: "one",
+                      truncatedLibraryIds: [],
+                  },
+                  response: new Response(),
+              }),
+    );
+    const h = await harness([0], false, searchSource());
+    try {
+        await wait(() => expect(h.current.listing?.pageStatus(0)).toBe("loaded"));
+        const index = await locateRemote(h)("/b/dir/x.png", new AbortController().signal);
+        expect(index).toBe(200);
+        expect(h.current.listing?.entryAt(200)?.path).toBe("/b/dir/x.png");
+        const [, options] = locateCall();
+        expect(options.params.query).toMatchObject({ locate: "dir/x.png", locateLibraryId: "b" });
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("converts a search Entry's path below a start that is not the Library root", async () => {
+    get.mockImplementation((_, options) =>
+        options.params.query.locate === undefined
+            ? Promise.resolve(searchResponse())
+            : Promise.resolve({
+                  data: {
+                      entries: [{ libraryId: "a", entry: { name: "x.png", path: "/photos/sub/x.png", kind: "file" } }],
+                      totalCount: 1,
+                      offset: 0,
+                      snapshot: "one",
+                      truncatedLibraryIds: [],
+                  },
+                  response: new Response(),
+              }),
+    );
+    const h = await harness([0], false, searchSource({ libraryIds: ["a"], path: "/photos", query: "x" }));
+    try {
+        await wait(() => expect(h.current.listing?.pageStatus(0)).toBe("loaded"));
+        const index = await locateRemote(h)("/a/photos/sub/x.png", new AbortController().signal);
+        expect(index).toBe(0);
+        const [, options] = locateCall();
+        expect(options.params.query).toMatchObject({ locate: "sub/x.png", locateLibraryId: "a", path: "/photos" });
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("returns no position for a NotFound answer", async () => {
+    get.mockImplementation((_, options) =>
+        options.params.query.locate === undefined
+            ? Promise.resolve(response(page()))
+            : Promise.reject(new ApiError(404, undefined, "not found")),
+    );
+    const h = await harness();
+    try {
+        await wait(() => expect(h.current.listing).toBeDefined());
+        await expect(locateRemote(h)("/missing", new AbortController().signal)).resolves.toBeUndefined();
+    } finally {
+        await h.dispose();
+    }
+});
+
+it("discards other pages when a located page has another snapshot", async () => {
+    let snapshot = "old";
+    get.mockImplementation((_, options) => {
+        if (options.params.query.locate !== undefined) {
+            snapshot = "new";
+            return Promise.resolve(response(locatedPage(400, "new")));
+        }
+        if (options.params.query.offset === 200 && snapshot === "new") return new Promise(() => {});
+        return Promise.resolve(response(page(snapshot)));
+    });
+    const h = await harness([1]);
+    try {
+        await wait(() => expect(h.current.listing?.pageStatus(1)).toBe("loaded"));
+        expect(h.current.listing?.entryAt(200)?.path).toBe("/a");
+        const index = await locateRemote(h)("/a", new AbortController().signal);
+        expect(index).toBe(400);
+        expect(h.current.listing?.snapshot).toBe("new");
+        expect(h.current.listing?.entryAt(200)).toBeUndefined();
+        expect(h.current.listing?.entryAt(400)?.path).toBe("/a");
+    } finally {
+        await h.dispose();
+    }
+});
+
 const searchSource = (patch: Partial<SearchCriteria> = {}): ListingSource => ({
     kind: "search",
     criteria: { libraryIds: ["a", "b"], path: "/", recursive: true, query: "", tags: [], ...patch },

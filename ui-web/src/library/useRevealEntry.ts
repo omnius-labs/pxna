@@ -5,7 +5,7 @@ import { describeError } from "../i18n/errors";
 
 import { joinPath, pathSegments } from "../location";
 import type { Entry } from "./entries";
-import { type Listing, ListingSnapshotChanged, PAGE_SIZE } from "./listing";
+import type { Listing } from "./listing";
 
 /// 開いたフォルダの直下の Entry を、名前から探して選び、見える位置までスクロールする。見つけても見つけられなくても、終わったら `onDone` を呼ぶ。
 /// タイムラインの「フォルダで表示」が、フォルダ表示の URL の `reveal` に載せた名前で使う。
@@ -62,25 +62,14 @@ export async function findIndex(listing: Listing, path: string, signal: AbortSig
     signal.throwIfAborted();
     if (listing.totalCount === undefined) await listing.loadPages([0], signal);
     signal.throwIfAborted();
-    const scan = (page: number) => {
-        const end = Math.min((page + 1) * PAGE_SIZE, listing.totalCount ?? 0);
-        for (let index = page * PAGE_SIZE; index < end; index++)
-            if (listing.entryAt(index)?.path === path) return index;
-    };
-    // 取得済みの選択なら、手前の未読ページを余分に取りに行かない。
-    for (let page = 0; page * PAGE_SIZE < (listing.totalCount ?? 0); page++) {
-        if (listing.pageStatus(page) === "loaded") {
-            const index = scan(page);
-            if (index !== undefined) return index;
-        }
-    }
-    const snapshot = listing.snapshot;
-    for (let page = 0; page * PAGE_SIZE < (listing.totalCount ?? 0); page++) {
+    // 読み込み済みの範囲にあれば、そこから返す。
+    const loaded = listing.locate?.(path);
+    if (loaded !== undefined) return loaded;
+    // 未読のページにある Entry は、サーバーにページを聞く。
+    if (listing.locateRemote) {
+        const index = await listing.locateRemote(path, signal);
         signal.throwIfAborted();
-        if (listing.pageStatus(page) !== "loaded") await listing.loadPages([page], signal);
-        signal.throwIfAborted();
-        if (listing.snapshot !== snapshot) throw new ListingSnapshotChanged();
-        const index = scan(page);
-        if (index !== undefined) return index;
+        return index;
     }
+    return undefined;
 }

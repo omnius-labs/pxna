@@ -84,8 +84,8 @@ A revert removes `locate` and `offset`, so a client that started using either st
 | [3](#s-3) | Return the page of an Entry from the summary index | 1 | Done |
 | [4](#s-4) | Return the page of an Entry from a search | 1, 2 | Done |
 | [5](#s-5) | Wire `locate` into the routes | 2, 3, 4 | Done |
-| [6](#s-6) | Request the page in the client store | 5 | Not started |
-| [7](#s-7) | Switch the viewer and "Show in folder" | 6 | Not started |
+| [6](#s-6) | Request the page in the client store | 5 | Done |
+| [7](#s-7) | Switch the viewer and "Show in folder" | 6 | Done |
 | [8](#s-8) | Confirm in a browser and update the documents | 7 | Not started |
 
 <a id="s-1"></a>

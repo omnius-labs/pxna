@@ -1,8 +1,9 @@
 import { type QueryClient, QueryObserver, type QueryObserverResult, useQueryClient } from "@tanstack/react-query";
 import { t } from "i18next";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { ApiError } from "../api/client";
 import { describeError } from "../i18n/errors";
-import { CROSS_LIBRARY_SCOPE } from "../location";
+import { CROSS_LIBRARY_SCOPE, entryAddress, relativePath } from "../location";
 import { type Entry, type FolderListing, fetchEntryDetails, fetchListingPage, fetchSearchPage } from "./entries";
 import type { SortPreference } from "./preferences";
 import type { Rating } from "./ratingTags";
@@ -58,8 +59,10 @@ export interface Listing {
     readonly firstIndex?: number;
     /// 読み込み済みの最小の位置。省略すると 0 である。フィルムストリップは、この位置から並べる。
     readonly loadedFrom?: number;
-    /// Library 相対パスの Entry の位置を、読み込み済みの範囲から探す。持つ一覧は、ページを順に探さずにこれを使う。
+    /// Library 相対パスの Entry の位置を、読み込み済みの範囲から探す。タイムラインは、ページを順に探さずにこれを使う。
     locate?(path: string): number | undefined;
+    /// サーバーに `locate` を送り、返ったページを取り込んで Entry の位置を返す。見つからなければ `undefined`。
+    locateRemote?(path: string, signal: AbortSignal): Promise<number | undefined>;
     /// 位置の Entry が読み込み済みになるまで読む。ページ全体を読まず、その位置に届くまでだけ読み足す。
     ensureIndex?(index: number, signal: AbortSignal): Promise<void>;
 }
@@ -173,6 +176,25 @@ class FolderListingStore implements Listing {
         const index = this.pages.get(pageIndex)?.entries.findIndex((entry) => entry.path === path) ?? -1;
         return index < 0 ? undefined : pageIndex * PAGE_SIZE + index;
     };
+    /// Entry を `locate` で名指しし、返ったページをその `offset` のページとして取り込む。
+    /// 起点からの相対パスに直して送り、見つからなければ位置を返さない。
+    locateRemote = async (path: string, signal: AbortSignal): Promise<number | undefined> => {
+        const address = entryAddress(sourceScope(this.source), path);
+        const start = this.source.kind === "folder" ? this.source.path : this.source.criteria.path;
+        let page: FolderListing;
+        try {
+            page = await this.fetchLocated(relativePath(start, address.path), address.libraryId, signal);
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 404) return undefined;
+            throw error;
+        }
+        signal.throwIfAborted();
+        const index = Math.floor(page.offset / PAGE_SIZE);
+        this.client.setQueryData(this.key(index), page);
+        this.acceptPage(index, page);
+        const position = page.entries.findIndex((entry) => entry.path === path);
+        return position < 0 ? undefined : page.offset + position;
+    };
     pageStatus = (index: number): PageStatus => {
         if (this.pages.has(index)) return "loaded";
         const result = this.results.get(index);
@@ -202,6 +224,19 @@ class FolderListingStore implements Listing {
             this.source.libraryId,
             this.source.path,
             index * PAGE_SIZE,
+            { foldersFirst: true, ...(this.foldersOnly ? { foldersOnly: true } : {}), ...order },
+            signal,
+        );
+    }
+    private fetchLocated(locate: string, libraryId: string, signal: AbortSignal): Promise<FolderListing> {
+        const order = { sort: this.sort.key, order: this.sort.order };
+        if (this.source.kind === "search")
+            return fetchSearchPage(this.source.criteria, { locate, locateLibraryId: libraryId }, order, signal);
+        return fetchListingPage(
+            this.client,
+            this.source.libraryId,
+            this.source.path,
+            { locate },
             { foldersFirst: true, ...(this.foldersOnly ? { foldersOnly: true } : {}), ...order },
             signal,
         );
@@ -242,42 +277,45 @@ class FolderListingStore implements Listing {
     private receive(index: number, result: QueryObserverResult<FolderListing, Error>) {
         this.results.set(index, result);
         if (result.data && this.pages.get(index) !== result.data) {
-            const page = result.data;
-            this.detailPages.delete(index);
-            for (const entry of page.entries) this.details.delete(entry.path);
-            if (this.snapshot !== undefined && this.snapshot !== page.snapshot) {
-                this.generation += 1;
-                this.detailJob?.controller.abort();
-                this.details.clear();
-                this.detailPages.clear();
-                this.pathPages.clear();
-                this.mismatches.clear();
-                for (const stale of staleSnapshotPages(this.pages, page.snapshot)) this.pages.delete(stale);
-                /// 古い版の応答が後から届いて版を戻さないよう、未完了の要求も止めて観測を作り直す。
-                for (const [other, observed] of this.observers) {
-                    if (other === index) continue;
-                    observed.unsubscribe();
-                    observed.observer.destroy();
-                    this.observers.delete(other);
-                }
-                for (const query of this.client.getQueryCache().findAll({ queryKey: this.key(0).slice(0, -1) })) {
-                    const other = query.queryKey.at(-1) as number;
-                    if (other !== index) {
-                        this.client.removeQueries({ queryKey: query.queryKey, exact: true });
-                        this.results.delete(other);
-                    }
-                }
-            }
-            this.snapshot = page.snapshot;
-            this.totalCount = page.totalCount;
-            this.truncated = page.truncated;
-            this.pages.set(index, page);
-            for (const entry of page.entries) this.pathPages.set(entry.path, index);
-            this.emit();
-            this.syncObservers();
+            this.acceptPage(index, result.data);
         } else {
             this.emit();
         }
+    }
+    /// 届いたページをその位置のページとして取り込む。版が変われば、他のページを捨てる。
+    private acceptPage(index: number, page: FolderListing) {
+        this.detailPages.delete(index);
+        for (const entry of page.entries) this.details.delete(entry.path);
+        if (this.snapshot !== undefined && this.snapshot !== page.snapshot) {
+            this.generation += 1;
+            this.detailJob?.controller.abort();
+            this.details.clear();
+            this.detailPages.clear();
+            this.pathPages.clear();
+            this.mismatches.clear();
+            for (const stale of staleSnapshotPages(this.pages, page.snapshot)) this.pages.delete(stale);
+            /// 古い版の応答が後から届いて版を戻さないよう、未完了の要求も止めて観測を作り直す。
+            for (const [other, observed] of this.observers) {
+                if (other === index) continue;
+                observed.unsubscribe();
+                observed.observer.destroy();
+                this.observers.delete(other);
+            }
+            for (const query of this.client.getQueryCache().findAll({ queryKey: this.key(0).slice(0, -1) })) {
+                const other = query.queryKey.at(-1) as number;
+                if (other !== index) {
+                    this.client.removeQueries({ queryKey: query.queryKey, exact: true });
+                    this.results.delete(other);
+                }
+            }
+        }
+        this.snapshot = page.snapshot;
+        this.totalCount = page.totalCount;
+        this.truncated = page.truncated;
+        this.pages.set(index, page);
+        for (const entry of page.entries) this.pathPages.set(entry.path, index);
+        this.emit();
+        this.syncObservers();
     }
     setDetailPriority = (owner: object, paths: readonly string[]) => {
         this.priorities.set(owner, paths);

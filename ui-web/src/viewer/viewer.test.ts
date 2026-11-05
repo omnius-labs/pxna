@@ -36,6 +36,12 @@ function listing(entries: Entry[], initial: number[] = [0]) {
             loaded.add(page);
         });
     });
+    const locate = vi.fn(async (path: string) => {
+        const index = entries.findIndex((entry) => entry.path === path);
+        // 実際の一覧は、返ったページを取り込む。
+        if (index >= 0) loaded.add(Math.floor(index / PAGE_SIZE));
+        return index < 0 ? undefined : index;
+    });
     const value: Listing = {
         truncated: false,
         totalCount: entries.length,
@@ -46,8 +52,9 @@ function listing(entries: Entry[], initial: number[] = [0]) {
         pageError: () => null,
         loadPages,
         retry: () => {},
+        locateRemote: locate,
     };
-    return { value, loadPages, loaded };
+    return { value, loadPages, loaded, locate };
 }
 const signal = () => new AbortController().signal;
 
@@ -76,14 +83,15 @@ describe("viewer navigation", () => {
         expect(await neighbor(h.value, 201, 1, signal())).toBeUndefined();
         expect(loadedNeighbor(h.value, 198, -1)).toBeUndefined();
     });
-    it("reads only as far as the named entry for a direct URL", async () => {
+    it("asks the server for the page of the entry named by a direct URL", async () => {
         const entries = Array.from({ length: 601 }, (_, index) => entry(`${index}.txt`));
         entries[401] = entry("deep.png", "image/png");
         const h = listing(entries);
         expect(await findEntry(h.value, "/a", "deep.png", signal())).toMatchObject({ index: 401 });
-        expect(h.loadPages.mock.calls.map(([pages]) => pages)).toEqual([[1], [2]]);
+        expect(h.locate.mock.calls.map(([path]) => path)).toEqual(["/a/deep.png"]);
         expect(await findEntry(h.value, "/a", "missing.png", signal())).toBeUndefined();
-        expect(h.loadPages.mock.calls.map(([pages]) => pages)).toEqual([[1], [2], [3]]);
+        expect(h.locate.mock.calls.map(([path]) => path)).toEqual(["/a/deep.png", "/a/missing.png"]);
+        expect(h.loadPages).not.toHaveBeenCalled();
     });
     it("waits for the page before returning a neighboring image", async () => {
         const entries = Array.from({ length: 201 }, (_, index) => entry(`${index}.png`, "image/png"));
