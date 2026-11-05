@@ -221,12 +221,11 @@ impl SummaryData {
         }
     }
 
-    fn page(&self, options: &SummaryOptions, id: &str) -> models::FolderSummaryListing {
-        let options = &options.0;
+    /// 並べ方の順の位置のうち、絞り込みの条件に合うものを、順を保って返す。
+    fn matching(&self, options: &ListOptions) -> Vec<usize> {
         let base = if options.sort.key == ListSortKey::Name { &self.name_order } else { &self.kind_order };
         let groups = if options.sort.folders_first { vec![Some(true), Some(false)] } else { vec![None] };
-        let mut total = 0_u64;
-        let mut page = Vec::new();
+        let mut matching = Vec::new();
         for group in groups {
             let indices: Box<dyn Iterator<Item = &usize>> = if options.sort.descending { Box::new(base.iter().rev()) } else { Box::new(base.iter()) };
             for &index in indices {
@@ -235,13 +234,38 @@ impl SummaryData {
                 if group.is_some_and(|expected| folder != expected) || (options.folders_only && !folder) || !options.filter.matches(&listed.normalized) {
                     continue;
                 }
-                if total >= options.offset && page.len() < options.limit {
-                    page.push(listed.entry.clone());
-                }
-                total += 1;
+                matching.push(index);
             }
         }
-        models::FolderSummaryListing::new(page, total, options.offset, id.to_string(), false)
+        matching
+    }
+
+    fn page(&self, options: &SummaryOptions, id: &str) -> models::FolderSummaryListing {
+        let options = &options.0;
+        let matching = self.matching(options);
+        let page = matching
+            .iter()
+            .skip(options.offset as usize)
+            .take(options.limit)
+            .map(|&index| self.entries[index].entry.clone())
+            .collect();
+        models::FolderSummaryListing::new(page, matching.len() as u64, options.offset, id.to_string(), false)
+    }
+
+    /// `path` の Entry が現れる位置を求め、その位置を含むページを `limit` の倍数で切る。
+    fn locate(&self, options: &SummaryOptions, id: &str, path: &str) -> Option<models::FolderSummaryListing> {
+        let options = &options.0;
+        let matching = self.matching(options);
+        let position = matching.iter().position(|&index| self.entries[index].entry.path == path)? as u64;
+        let limit = options.limit as u64;
+        let offset = position / limit * limit;
+        let page = matching
+            .iter()
+            .skip(offset as usize)
+            .take(options.limit)
+            .map(|&index| self.entries[index].entry.clone())
+            .collect();
+        Some(models::FolderSummaryListing::new(page, matching.len() as u64, offset, id.to_string(), false))
     }
 }
 
@@ -258,6 +282,10 @@ pub struct SummarySnapshot {
 impl SummarySnapshot {
     pub fn page(&self, options: &SummaryOptions) -> models::FolderSummaryListing {
         self.data.page(options, &self.id)
+    }
+
+    pub fn locate(&self, options: &SummaryOptions, path: &str) -> Option<models::FolderSummaryListing> {
+        self.data.locate(options, &self.id, path)
     }
 
     fn fresh(&self, version: &Option<String>, now: DateTime<Utc>, config: &ListingConfig) -> bool {
@@ -519,6 +547,67 @@ mod tests {
         assert_eq!(data.page(&options(serde_json::json!({"path": "/"})), "snapshot").offset, 0);
         assert_eq!(data.page(&options(serde_json::json!({"path": "/", "offset": 2, "limit": 2})), "snapshot").offset, 2);
         assert_eq!(data.page(&options(serde_json::json!({"path": "/", "offset": 50, "limit": 2})), "snapshot").offset, 50);
+        Ok(())
+    }
+
+    fn summary_data(names: &[(&str, models::FileSystemEntryKind, bool)]) -> SummaryData {
+        SummaryData::new(
+            names
+                .iter()
+                .map(|(name, kind, archive)| SummaryEntry {
+                    entry: models::FileSystemEntrySummary::new(format!("/{name}").into(), (*name).into(), kind.clone(), *archive),
+                    normalized: (*name).into(),
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn locate_summary_matches_the_page_of_the_same_offset_test() -> testresult::TestResult {
+        use models::FileSystemEntryKind::{File, Folder};
+        let data = summary_data(&[("b", Folder, false), ("c.txt", File, false), ("a.txt", File, false), ("d.zip", File, true)]);
+        for sort in ["name", "kind"] {
+            for order in ["asc", "desc"] {
+                for folders_first in [false, true] {
+                    for folders_only in [false, true] {
+                        let value = |offset: u64| {
+                            serde_json::json!({"path": "/", "sort": sort, "order": order, "foldersFirst": folders_first,
+                                "foldersOnly": folders_only, "limit": 2, "offset": offset})
+                        };
+                        let current = options(value(0));
+                        for &index in &data.matching(&current.0) {
+                            let path = data.entries[index].entry.path.clone();
+                            let found = data.locate(&current, "snapshot", &path).expect("a matching Entry has a position");
+                            assert_eq!(found.offset % 2, 0);
+                            assert_eq!(
+                                found,
+                                data.page(&options(value(found.offset)), "snapshot"),
+                                "{sort} {order} first={folders_first} only={folders_only}"
+                            );
+                            assert!(found.entries.iter().any(|entry| entry.path == path));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn locate_summary_skips_entries_outside_the_sequence_test() -> testresult::TestResult {
+        use models::FileSystemEntryKind::{File, Folder};
+        let data = summary_data(&[("b", Folder, false), ("a.txt", File, false), ("c.zip", File, true)]);
+        let hidden = summary_data(&[("b", Folder, false), ("a.txt", File, false)]);
+        let base = options(serde_json::json!({"path": "/", "limit": 2}));
+        assert!(data.locate(&base, "snapshot", "/b").is_some());
+        assert!(data.locate(&base, "snapshot", "/missing.txt").is_none());
+        assert!(hidden.locate(&base, "snapshot", "/.hidden.txt").is_none());
+        let only_folders = options(serde_json::json!({"path": "/", "limit": 2, "foldersOnly": true}));
+        assert!(data.locate(&only_folders, "snapshot", "/a.txt").is_none());
+        assert!(data.locate(&only_folders, "snapshot", "/b").is_some());
+        let filtered = options(serde_json::json!({"path": "/", "limit": 2, "query": "a"}));
+        assert!(data.locate(&filtered, "snapshot", "/b").is_none());
+        assert!(data.locate(&filtered, "snapshot", "/a.txt").is_some());
         Ok(())
     }
 

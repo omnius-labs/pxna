@@ -80,10 +80,10 @@ A revert removes `locate` and `offset`, so a client that started using either st
 | No. | Content | Dependencies | State |
 | --- | --- | --- | --- |
 | [1](#s-1) | Add the contract and regenerate the types | - | Done |
-| [2](#s-2) | Return the page of an Entry from a detail snapshot | 1 | Not started |
-| [3](#s-3) | Return the page of an Entry from the summary index | 1 | Not started |
-| [4](#s-4) | Return the page of an Entry from a search | 1, 2 | Not started |
-| [5](#s-5) | Wire `locate` into the routes | 2, 3, 4 | Not started |
+| [2](#s-2) | Return the page of an Entry from a detail snapshot | 1 | Done |
+| [3](#s-3) | Return the page of an Entry from the summary index | 1 | Done |
+| [4](#s-4) | Return the page of an Entry from a search | 1, 2 | Done |
+| [5](#s-5) | Wire `locate` into the routes | 2, 3, 4 | Done |
 | [6](#s-6) | Request the page in the client store | 5 | Not started |
 | [7](#s-7) | Switch the viewer and "Show in folder" | 6 | Not started |
 | [8](#s-8) | Confirm in a browser and update the documents | 7 | Not started |

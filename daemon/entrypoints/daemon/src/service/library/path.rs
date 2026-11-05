@@ -48,6 +48,16 @@ impl LibraryRelativePath {
         &self.segments
     }
 
+    /// 一覧の起点からの相対 path を、起点と結合して 1 つの path にする。
+    pub fn join(start: &str, locate: &str) -> Result<Self> {
+        Self::parse(&format!("{}/{}", start.trim_end_matches('/'), locate))
+    }
+
+    /// 先頭に `/` を付けた Library 相対 path。
+    pub fn absolute(&self) -> String {
+        format!("/{}", self.segments.join("/"))
+    }
+
     // `C:` のような segment は、Windows で `Path::join` すると Library ルートを置き換える。
     fn is_drive_prefix(segment: &str) -> bool {
         let bytes = segment.as_bytes();

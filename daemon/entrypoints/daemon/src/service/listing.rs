@@ -123,6 +123,28 @@ impl ListOptions {
         models::FolderListing::new(page, total, self.offset, self.selection.snapshot_id(snapshot), entries.truncated)
     }
 
+    /// `path` の Entry が現れる位置を求め、その位置を含むページを `limit` の倍数で切る。
+    /// 位置は絞り込みの後で数え、見つからなければ `None`。
+    pub fn locate(&self, entries: &ListingEntries, indices: &[usize], path: &str, snapshot: String) -> Option<models::FolderListing> {
+        let matching = self.matching(entries, indices);
+        let position = matching.iter().position(|&index| entries.entries[index].entry.path == path)? as u64;
+        let limit = self.limit as u64;
+        let offset = position / limit * limit;
+        let page = matching
+            .iter()
+            .skip(offset as usize)
+            .take(self.limit)
+            .map(|&index| entries.entries[index].entry.clone())
+            .collect();
+        Some(models::FolderListing::new(
+            page,
+            matching.len() as u64,
+            offset,
+            self.selection.snapshot_id(snapshot),
+            entries.truncated,
+        ))
+    }
+
     /// 並べ方の順の位置のうち、絞り込みの条件に合うものだけを、順を保って返す。
     pub fn matching(&self, entries: &ListingEntries, indices: &[usize]) -> Vec<usize> {
         indices.iter().copied().filter(|&index| self.matches(&entries.entries[index])).collect()
@@ -533,6 +555,75 @@ pub(crate) mod tests {
         assert_eq!(list(&query(None, Some(2)), entries())?.offset, 0);
         assert_eq!(list(&query(Some(2), Some(2)), entries())?.offset, 2);
         assert_eq!(list(&query(Some(50), Some(2)), entries())?.offset, 50);
+        Ok(())
+    }
+    fn sized(name: &str, size: u64, day: i64) -> models::FileSystemEntry {
+        let mut e = entry(name);
+        e.metadata.size = size;
+        e.metadata.modified_at = Some(Nullable::Present(chrono::DateTime::from_timestamp(1_800_000_000 + day * 86_400, 0).unwrap()));
+        e
+    }
+    #[test]
+    fn locate_folder_matches_the_page_of_the_same_offset_test() -> testresult::TestResult {
+        let entries = || vec![folder("b"), sized("c.txt", 300, 3), sized("a.txt", 100, 1), file("d.zip", true), sized("e.txt", 200, 2)];
+        for sort in ["name", "kind", "size", "modified_at"] {
+            for order in ["asc", "desc"] {
+                for folders_first in [false, true] {
+                    for folders_only in [false, true] {
+                        for recursive in [false, true] {
+                            let mut q = query(Some(0), Some(2));
+                            q.sort = Some(sort.to_string());
+                            q.order = Some(order.to_string());
+                            q.folders_first = Some(folders_first);
+                            q.folders_only = Some(folders_only);
+                            q.recursive = Some(recursive);
+                            let options = ListOptions::from_query(&q)?;
+                            let entries = ListingEntries::from_entries(entries());
+                            let indices = options.sort.indices(&entries);
+                            for listed in entries.entries.iter().filter(|listed| options.matches(listed)) {
+                                let found = options
+                                    .locate(&entries, &indices, &listed.entry.path, "test".to_string())
+                                    .expect("a matching Entry has a position");
+                                assert_eq!(found.offset % 2, 0);
+                                let expected = ListOptions {
+                                    offset: found.offset,
+                                    ..options.clone()
+                                }
+                                .page(&entries, &indices, "test".to_string());
+                                assert_eq!(found, expected, "{sort} {order} first={folders_first} only={folders_only} recursive={recursive}");
+                                assert!(found.entries.iter().any(|entry| entry.path == listed.entry.path));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    #[test]
+    fn locate_folder_skips_entries_outside_the_sequence_test() -> testresult::TestResult {
+        let entries = ListingEntries::from_entries(vec![entry("a.txt"), entry(".hidden.txt"), folder("b"), file("c.zip", true)]);
+        let mut q = query(Some(0), Some(2));
+        let options = ListOptions::from_query(&q)?;
+        let indices = options.sort.indices(&entries);
+        assert!(options.locate(&entries, &indices, "/c.zip", "test".to_string()).is_some());
+        assert!(options.locate(&entries, &indices, "/missing.txt", "test".to_string()).is_none());
+
+        // 隠し Entry は includeHidden が false の走査で列に入らず、位置もない。
+        let visible = ListingEntries::from_entries(vec![entry("a.txt"), folder("b"), file("c.zip", true)]);
+        let visible_indices = options.sort.indices(&visible);
+        assert!(options.locate(&visible, &visible_indices, "/.hidden.txt", "test".to_string()).is_none());
+
+        q.folders_only = Some(true);
+        let options = ListOptions::from_query(&q)?;
+        assert!(options.locate(&entries, &indices, "/a.txt", "test".to_string()).is_none());
+        assert!(options.locate(&entries, &indices, "/b", "test".to_string()).is_some());
+
+        q.folders_only = None;
+        q.query = Some("a".to_string());
+        let options = ListOptions::from_query(&q)?;
+        assert!(options.locate(&entries, &indices, "/c.zip", "test".to_string()).is_none());
+        assert!(options.locate(&entries, &indices, "/a.txt", "test".to_string()).is_some());
         Ok(())
     }
     #[test]
