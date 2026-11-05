@@ -62,10 +62,10 @@ export async function findIndex(listing: Listing, path: string, signal: AbortSig
     signal.throwIfAborted();
     if (listing.totalCount === undefined) await listing.loadPages([0], signal);
     signal.throwIfAborted();
-    // 読み込み済みの範囲にあれば、そこから返す。
+    // Answer from the loaded range when it holds the Entry.
     const loaded = listing.locate?.(path);
     if (loaded !== undefined) return loaded;
-    // 未読のページにある Entry は、サーバーにページを聞く。
+    // An Entry on an unread page is found by asking the server for its page.
     if (listing.locateRemote) {
         const index = await listing.locateRemote(path, signal);
         signal.throwIfAborted();

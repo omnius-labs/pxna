@@ -176,8 +176,8 @@ class FolderListingStore implements Listing {
         const index = this.pages.get(pageIndex)?.entries.findIndex((entry) => entry.path === path) ?? -1;
         return index < 0 ? undefined : pageIndex * PAGE_SIZE + index;
     };
-    /// Entry を `locate` で名指しし、返ったページをその `offset` のページとして取り込む。
-    /// 起点からの相対パスに直して送り、見つからなければ位置を返さない。
+    /// Names the Entry with `locate` and keeps the returned page as the page at its `offset`.
+    /// It sends the path relative to the start of the listing, and returns no position when the server does not find it.
     locateRemote = async (path: string, signal: AbortSignal): Promise<number | undefined> => {
         const address = entryAddress(sourceScope(this.source), path);
         const start = this.source.kind === "folder" ? this.source.path : this.source.criteria.path;

@@ -17,7 +17,7 @@ export async function findEntry(
 ): Promise<IndexedEntry | undefined> {
     const path = joinPath([...pathSegments(base), ...pathSegments(view)]);
     signal.throwIfAborted();
-    // 読み込み済みの範囲にあれば、そこから返す。
+    // Answer from the loaded range when it holds the Entry.
     if (listing.totalCount === undefined) await listing.loadPages(listing.locateRemote ? [0] : [], signal);
     signal.throwIfAborted();
     const loaded = listing.locate?.(path);
@@ -25,7 +25,7 @@ export async function findEntry(
         const entry = listing.entryAt(loaded);
         if (entry !== undefined) return { index: loaded, entry };
     }
-    // 未読のページにある Entry は、サーバーにページを聞く。
+    // An Entry on an unread page is found by asking the server for its page.
     if (listing.locateRemote) {
         const index = await listing.locateRemote(path, signal);
         signal.throwIfAborted();

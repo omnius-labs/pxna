@@ -38,7 +38,7 @@ function listing(entries: Entry[], initial: number[] = [0]) {
     });
     const locate = vi.fn(async (path: string) => {
         const index = entries.findIndex((entry) => entry.path === path);
-        // 実際の一覧は、返ったページを取り込む。
+        // A real listing keeps the page the server returns.
         if (index >= 0) loaded.add(Math.floor(index / PAGE_SIZE));
         return index < 0 ? undefined : index;
     });

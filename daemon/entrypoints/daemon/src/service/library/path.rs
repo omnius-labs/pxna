@@ -48,12 +48,12 @@ impl LibraryRelativePath {
         &self.segments
     }
 
-    /// 一覧の起点からの相対 path を、起点と結合して 1 つの path にする。
+    /// Joins a path relative to the start of the listing with the start into one path.
     pub fn join(start: &str, locate: &str) -> Result<Self> {
         Self::parse(&format!("{}/{}", start.trim_end_matches('/'), locate))
     }
 
-    /// 先頭に `/` を付けた Library 相対 path。
+    /// The Library-relative path with a leading `/`.
     pub fn absolute(&self) -> String {
         format!("/{}", self.segments.join("/"))
     }

@@ -71,7 +71,7 @@ impl LibraryBrowser {
         Ok(self.snapshot(library_id, path, options).await?.page(options))
     }
 
-    /// `entry` は起点からの相対 path。その Entry を含むページを返す。
+    /// `entry` is relative to the start of the listing; returns the page that holds it.
     pub async fn list_folder_entries_located(&self, library_id: &str, path: &str, options: &ListOptions, entry: &str) -> Result<models::FolderListing> {
         self.snapshot(library_id, path, options)
             .await?
@@ -85,7 +85,7 @@ impl LibraryBrowser {
         Ok(self.search_results(libraries, path).await?.page(options))
     }
 
-    /// `entry` は起点からの相対 path。`library_id` の Entry を含むページを返す。
+    /// `entry` is relative to the start of the listing; returns the page that holds the Entry of `library_id`.
     pub async fn search_entries_located(
         &self,
         libraries: Vec<(String, ListOptions)>,
@@ -124,7 +124,7 @@ impl LibraryBrowser {
         Ok(self.summary_snapshot(library_id, path, options).await?.page(options))
     }
 
-    /// `entry` は起点からの相対 path。その Entry を含むページを返す。
+    /// `entry` is relative to the start of the listing; returns the page that holds it.
     pub async fn list_folder_summaries_located(&self, library_id: &str, path: &str, options: &SummaryOptions, entry: &str) -> Result<models::FolderSummaryListing> {
         self.summary_snapshot(library_id, path, options)
             .await?

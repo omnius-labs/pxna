@@ -351,7 +351,7 @@ mod tests {
             .unwrap()
     }
 
-    /// 直前に作ったフォルダーは、最初の一覧の後に作り直される。比較のため、更新時刻を古くする。
+    /// A folder written just now is rescanned after the first listing; age it so the two requests share a snapshot.
     fn age(path: &std::path::Path) -> std::io::Result<()> {
         let modified = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
         std::fs::File::open(path)?.set_modified(modified)

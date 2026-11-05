@@ -221,7 +221,7 @@ impl SummaryData {
         }
     }
 
-    /// 並べ方の順の位置のうち、絞り込みの条件に合うものを、順を保って返す。
+    /// Returns the positions that pass the conditions, in the order the page is cut from.
     fn matching(&self, options: &ListOptions) -> Vec<usize> {
         let base = if options.sort.key == ListSortKey::Name { &self.name_order } else { &self.kind_order };
         let groups = if options.sort.folders_first { vec![Some(true), Some(false)] } else { vec![None] };
@@ -252,7 +252,7 @@ impl SummaryData {
         models::FolderSummaryListing::new(page, matching.len() as u64, options.offset, id.to_string(), false)
     }
 
-    /// `path` の Entry が現れる位置を求め、その位置を含むページを `limit` の倍数で切る。
+    /// Finds the position of the Entry at `path` and cuts the page that holds it at a multiple of `limit`.
     fn locate(&self, options: &SummaryOptions, id: &str, path: &str) -> Option<models::FolderSummaryListing> {
         let options = &options.0;
         let matching = self.matching(options);

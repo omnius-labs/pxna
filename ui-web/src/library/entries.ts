@@ -96,16 +96,16 @@ export function isThumbnailable(entry: Entry): boolean {
     return entryKind(entry) !== "other";
 }
 
-/// `locate` で Entry を名指しする位置指定。`offset` の代わりに送る。
+/// A position that names an Entry with `locate`, sent in place of `offset`.
 export interface LocatePosition {
     locate: string;
     locateLibraryId?: string;
 }
 
-/// ページの位置。`offset` か、Entry を名指しする `locate` のどちらかである。
+/// A page position: an `offset`, or a `locate` that names an Entry.
 export type PagePosition = number | LocatePosition;
 
-/// 位置の指定をクエリにする。`locate` のときは `offset` を送らない。
+/// Turns a position into query parameters. A `locate` sends no `offset`.
 export function positionQuery(position: PagePosition) {
     if (typeof position === "number") return { offset: position };
     return {

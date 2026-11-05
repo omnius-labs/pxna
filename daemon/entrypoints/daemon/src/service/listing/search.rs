@@ -27,7 +27,7 @@ pub struct SearchResults {
     sources: Vec<SearchSource>,
 }
 
-/// Library ごとの一致を、並べ方の順に 1 つの列へまとめる。まとめた列は持たず、先頭から順に取り出す。
+/// Merges the matches of the Libraries into one sequence in sort order. It keeps no copy and yields from the head.
 struct Merge<'a> {
     sources: &'a [SearchSource],
     sort: ListSort,
@@ -59,7 +59,7 @@ impl<'a> Merge<'a> {
         self.matching.iter().map(|indices| indices.len() as u64).sum()
     }
 
-    /// 並びの値が等しいのは別の Library の同じ path だけで、そのときは Library の順で先のものを取る。
+    /// Only the same path in different Libraries compares equal, and the Library earlier in the request order wins.
     fn next(&mut self) -> Option<(usize, usize)> {
         let source = self
             .heads
@@ -104,8 +104,8 @@ impl SearchResults {
         self.listing(entries, total, options.offset)
     }
 
-    /// `path` の Entry が現れる位置を求め、その位置を含むページを `limit` の倍数で切る。
-    /// `library_id` は Entry の Library で、同じ path が複数の Library にあるときに選ぶ。
+    /// Finds the position of the Entry at `path` and cuts the page that holds it at a multiple of `limit`.
+    /// `library_id` selects the Library when the same path is in several.
     pub fn locate(&self, options: &ListOptions, library_id: &str, path: &str) -> Option<models::SearchListing> {
         let mut merge = Merge::new(&self.sources, options.sort());
         let mut position = 0_u64;

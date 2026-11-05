@@ -123,8 +123,8 @@ impl ListOptions {
         models::FolderListing::new(page, total, self.offset, self.selection.snapshot_id(snapshot), entries.truncated)
     }
 
-    /// `path` の Entry が現れる位置を求め、その位置を含むページを `limit` の倍数で切る。
-    /// 位置は絞り込みの後で数え、見つからなければ `None`。
+    /// Finds the position of the Entry at `path` and cuts the page that holds it at a multiple of `limit`.
+    /// The position counts after the conditions are applied, and an Entry outside them gives `None`.
     pub fn locate(&self, entries: &ListingEntries, indices: &[usize], path: &str, snapshot: String) -> Option<models::FolderListing> {
         let matching = self.matching(entries, indices);
         let position = matching.iter().position(|&index| entries.entries[index].entry.path == path)? as u64;
@@ -609,7 +609,7 @@ pub(crate) mod tests {
         assert!(options.locate(&entries, &indices, "/c.zip", "test".to_string()).is_some());
         assert!(options.locate(&entries, &indices, "/missing.txt", "test".to_string()).is_none());
 
-        // 隠し Entry は includeHidden が false の走査で列に入らず、位置もない。
+        // A hidden Entry is not in the sequence a scan with includeHidden false builds, so it has no position.
         let visible = ListingEntries::from_entries(vec![entry("a.txt"), folder("b"), file("c.zip", true)]);
         let visible_indices = options.sort.indices(&visible);
         assert!(options.locate(&visible, &visible_indices, "/.hidden.txt", "test".to_string()).is_none());

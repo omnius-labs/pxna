@@ -96,14 +96,14 @@ it("requests only zero and wanted pages, with offsets from page indexes", async 
         await h.dispose();
     }
 });
-/// 最後に送った `locate` の要求を取り出す。
+/// Takes the last `locate` request that was sent.
 function locateCall() {
     const call = get.mock.calls.find(([, options]) => options.params.query.locate !== undefined);
     if (!call) throw new Error("the listing must have sent a locate request");
     return call;
 }
 
-/// 実際の一覧と同じく、Entry をサーバーに聞く関数を取り出す。
+/// Takes the function that asks the server for an Entry, as a real listing does.
 function locateRemote(h: { current: { listing?: Listing } }) {
     const locate = h.current.listing?.locateRemote;
     if (!locate) throw new Error("the listing must locate an Entry remotely");
