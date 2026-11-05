@@ -656,7 +656,7 @@ The `[listing]` configuration, checking freshness by the target's version and el
 
 `listSearchEntries` is implemented by [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) and `LibraryBrowser::search_entries`: each Library's listing comes from the same snapshots as `listFolderEntries`, and `SearchResults` merges their sorted, filtered orders on every page (§5.3). `listFolderEntries` accepts only the name condition; rating and tag conditions are accepted only by the search API.
 
-`locate` and the response's `offset` of §4.5 are not implemented yet.
+`locate` and the response's `offset` of §4.5 are implemented in [listing.rs](../../daemon/entrypoints/daemon/src/service/listing.rs) for the detail listing, in [summary.rs](../../daemon/entrypoints/daemon/src/service/listing/summary.rs) for the summary listing, and in [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) for the search. The page is cut at a multiple of `limit` after the conditions are applied. The routes answer `InvalidInput` for `locate` with `offset`, for `locate` and `locateLibraryId` not given together in a search, and for a `locateLibraryId` outside `libraryIds`, and `NotFound` for an Entry outside the sequence. The web client asks with `locate` when the viewer URL or "Show in folder" names an Entry it has not read (Client Design §3.5).
 
 The name index of §5.1 and §5.2 is not implemented. Recursive listings with conditions, including the search API's, always walk the file system and are cut off by the number of walked Entries for each Library.
 
@@ -668,7 +668,7 @@ Only the dependencies must be respected.
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
 | L1 | Implement the name index, its update by aggregation and by the daemon's own changes, and answering recursive listings with name, rating, and tag conditions from it (§5.1, §5.2) | None | Not started |
-| L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Not started |
+| L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Done |
 
 L1 corresponds to M19 and L2 to M24 of [design.md §12.2](../design.md#122-roadmap).
 
