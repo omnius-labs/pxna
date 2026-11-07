@@ -27,7 +27,7 @@ On a phone, the owner can move between images, enlarge an image to the original,
 1. At the whole view, a horizontal flick shorter than 300 ms and longer than 50 CSS px moves to the next image (leftward) or the previous image (rightward), skipping non-images as the keys do
 2. A two-finger pinch changes the zoom around the midpoint of the fingers, within the limits of `clampZoom`
 3. A double tap at the whole view enlarges to 2 times around the tapped point, and a double tap while zoomed returns to the whole view. With the narrow-screen timing "only on zoom", the enlargement requests the original image
-4. At the whole view, a downward swipe longer than 80 CSS px closes the viewer the same way as the close button
+4. At the whole view, a downward swipe longer than 80 CSS px closes the viewer the same way as Esc
 5. While zoomed, a one-finger drag moves the display position and does not move or close the viewer
 6. In the video viewer, horizontal and downward swipes neither move nor close the viewer
 7. In Chromium's mobile emulation, a downward swipe on the image does not start pull-to-refresh or scroll the page
@@ -67,10 +67,10 @@ No API, configuration, or stored format changes.
 
 | No. | Content | Dependencies | State |
 | --- | --- | --- | --- |
-| [1](#s-1) | Recognize gestures from pointer samples | - | Not started |
-| [2](#s-2) | Zoom around a point | - | Not started |
-| [3](#s-3) | Connect the gestures to the image viewer | 1, 2 | Not started |
-| [4](#s-4) | Confirm in mobile emulation and update the current state | 3 | Not started |
+| [1](#s-1) | Recognize gestures from pointer samples | - | Done |
+| [2](#s-2) | Zoom around a point | - | Done |
+| [3](#s-3) | Connect the gestures to the image viewer | 1, 2 | Done |
+| [4](#s-4) | Confirm in mobile emulation and update the current state | 3 | Done |
 
 <a id="s-1"></a>
 ### Step 1. Recognize Gestures from Pointer Samples
@@ -103,7 +103,7 @@ Unit tests show that the point under the fingers stays in place and that the res
 [Viewer.tsx#L683](../../ui-web/src/components/Viewer.tsx#L683), [Viewer.tsx#L735](../../ui-web/src/components/Viewer.tsx#L735), [Viewer.tsx#L448](../../ui-web/src/components/Viewer.tsx#L448)
 
 **What to do**
-Pass `onFlick(direction)` and `onSwipeDown()` from the viewer into `ViewerImage`, mapping them to the same functions as the arrow keys and the close button, and feed the stage's pointer events to the recognizer. Give the stage `touch-action: none` and `overscroll-behavior: contain`. Do not pass the callbacks to the video viewer.
+Pass `onFlick(direction)` and `onSwipeDown()` from the viewer into `ViewerImage`, mapping them to the same functions as the arrow keys and Esc, and feed the stage's pointer events to the recognizer. Give the stage `touch-action: none` and `overscroll-behavior: contain`. Do not pass the callbacks to the video viewer.
 
 **Completion condition**
 Component tests with synthesized pointer events show a flick calling the step function, a swipe calling close, and a double tap changing the zoom, and the video viewer receiving no callbacks.
@@ -119,6 +119,8 @@ Run the checks of conditions 1 to 7 in Chromium's mobile emulation with playwrig
 
 **Completion condition**
 All observations of §6 for conditions 1 to 7 match, and `rg -n 'until C10' docs` returns nothing.
+
+Chromium's mobile emulation has no pull-to-refresh, so condition 7 was confirmed by the computed `touch-action: none` and `overscroll-behavior: contain` of the image area and by the page not scrolling; it has not been tried on a real phone.
 
 ## 6. Acceptance Checks
 

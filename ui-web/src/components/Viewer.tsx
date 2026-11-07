@@ -32,6 +32,7 @@ import { type BrowseLocation, CROSS_LIBRARY_SCOPE, entryAddress, relativePath, v
 import { DisplayImages } from "../viewer/displayImages";
 import { useViewerDisplayMode, type ViewerDisplayMode } from "../viewer/displayMode";
 import { filmstripItemSide } from "../viewer/filmstrip";
+import { createGestureRecognizer, type Gesture, type PointerSample } from "../viewer/gestures";
 import { displayImageSpec, fileContentUrl, originalImageUrl } from "../viewer/urls";
 import { useFullscreen } from "../viewer/useFullscreen";
 import { type SlideshowStep, useSlideshow } from "../viewer/useSlideshow";
@@ -39,6 +40,7 @@ import {
     clampPan,
     clampZoom,
     displayRequestSize,
+    doubleTapView,
     findEntry,
     fittedWidth,
     type IndexedEntry,
@@ -51,6 +53,7 @@ import {
     originalTiming,
     type ViewTransform,
     viewableNear,
+    zoomAround,
     zoomView,
 } from "../viewer/viewer";
 import { DeleteDialog } from "./DeleteDialog";
@@ -616,6 +619,10 @@ function ViewerView({
                                 size={sizeOf(current)}
                                 timing={originalTiming(current, originalImage)}
                                 onSettled={() => setSettledPath(current.path)}
+                                onFlick={(direction) => {
+                                    if (!nestedOpen) void step(direction);
+                                }}
+                                onSwipeDown={requestClose}
                             />
                         )}
                     </div>
@@ -974,10 +981,14 @@ interface ViewerImageProps {
     timing: OriginalTiming;
     /// 表示用画像が出たか、読めないと分かったときに呼ぶ。
     onSettled: () => void;
+    /// A flick at the whole view asks for the next (1) or previous (-1) image, as the arrow keys do.
+    onFlick: (direction: -1 | 1) => void;
+    /// A downward swipe at the whole view asks to close the viewer, as the close button does.
+    onSwipeDown: () => void;
 }
 
 /// 1 枚の画像と、その拡大と移動。Entry が変わると作り直し、拡大と元の画像の状態を捨てる。
-function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: ViewerImageProps) {
+function ViewerImage({ images, libraryId, entry, size, timing, onSettled, onFlick, onSwipeDown }: ViewerImageProps) {
     // Entry ごとに作り直すので、作った時刻が、この Entry へ移った時刻になる。
     const [shownFrom] = useState(() => performance.now());
     // 元の画像を要求し始めた時刻。
@@ -991,6 +1002,7 @@ function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: View
     const [originalFailed, setOriginalFailed] = useState(false);
     const [displayFailed, setDisplayFailed] = useState(false);
     const drag = useRef<{ x: number; y: number } | undefined>(undefined);
+    const [recognizer] = useState(createGestureRecognizer);
     const settle = useRef(onSettled);
     settle.current = onSettled;
 
@@ -1059,13 +1071,68 @@ function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: View
         originalFrom.current = performance.now();
     }
 
+    // A mouse drags an enlarged image. Touch and pen go through the gesture recognizer.
+    const sampleOf = (event: PointerEvent): PointerSample => ({
+        id: event.pointerId,
+        time: event.timeStamp,
+        x: event.clientX,
+        y: event.clientY,
+    });
+    /// A client position as a position from the center of the stage, where the image is scaled from.
+    const fromCenter = (point: { x: number; y: number }) => {
+        const rect = stage?.getBoundingClientRect();
+        return {
+            x: point.x - (rect?.left ?? 0) - container.width / 2,
+            y: point.y - (rect?.top ?? 0) - container.height / 2,
+        };
+    };
+    const apply = (gesture: Gesture | undefined) => {
+        switch (gesture?.kind) {
+            case "flickLeft":
+                onFlick(1);
+                break;
+            case "flickRight":
+                onFlick(-1);
+                break;
+            case "swipeDown":
+                onSwipeDown();
+                break;
+            case "doubleTap": {
+                const point = fromCenter(gesture.point);
+                setView((current) => doubleTapView(current, point, container));
+                break;
+            }
+            case "pinch": {
+                const { scale, shift } = gesture;
+                // Scale around where the midpoint was, then move by how far it went, so the content under the fingers stays under them.
+                const midpoint = fromCenter({ x: gesture.midpoint.x - shift.x, y: gesture.midpoint.y - shift.y });
+                setView((current) => zoomAround(current, scale, midpoint, container, shift));
+                break;
+            }
+            case "pan": {
+                const { x, y } = gesture.delta;
+                setView((current) => ({
+                    zoom: current.zoom,
+                    pan: clampPan({ x: current.pan.x + x, y: current.pan.y + y }, current.zoom, container),
+                }));
+                break;
+            }
+        }
+    };
     const pointerDown = (event: PointerEvent) => {
-        if (zoom > 1) {
+        if (event.pointerType !== "mouse") {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            recognizer.down(sampleOf(event));
+        } else if (zoom > 1) {
             drag.current = { x: event.clientX - pan.x, y: event.clientY - pan.y };
             event.currentTarget.setPointerCapture(event.pointerId);
         }
     };
     const pointerMove = (event: PointerEvent) => {
+        if (event.pointerType !== "mouse") {
+            apply(recognizer.move(sampleOf(event), zoom));
+            return;
+        }
         const origin = drag.current;
         if (origin) {
             const x = event.clientX - origin.x;
@@ -1073,8 +1140,19 @@ function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: View
             setView((current) => ({ zoom: current.zoom, pan: clampPan({ x, y }, current.zoom, container) }));
         }
     };
-    const pointerUp = () => {
-        drag.current = undefined;
+    const pointerUp = (event: PointerEvent) => {
+        if (event.pointerType !== "mouse") {
+            apply(recognizer.up(sampleOf(event), zoom));
+        } else {
+            drag.current = undefined;
+        }
+    };
+    const pointerCancel = (event: PointerEvent) => {
+        if (event.pointerType !== "mouse") {
+            recognizer.cancel(event.pointerId);
+        } else {
+            drag.current = undefined;
+        }
     };
 
     if (displayFailed) {
@@ -1084,11 +1162,12 @@ function ViewerImage({ images, libraryId, entry, size, timing, onSettled }: View
     return (
         <div
             ref={setStage}
-            className={`absolute inset-0 overflow-hidden select-none ${zoom > 1 ? "cursor-grab" : ""}`}
+            // The stage takes every touch gesture itself, so the browser neither scrolls the page nor pulls to refresh from it.
+            className={`absolute inset-0 touch-none overscroll-contain overflow-hidden select-none ${zoom > 1 ? "cursor-grab" : ""}`}
             onPointerDown={pointerDown}
             onPointerMove={pointerMove}
             onPointerUp={pointerUp}
-            onPointerCancel={pointerUp}
+            onPointerCancel={pointerCancel}
         >
             <div
                 className="absolute inset-0"

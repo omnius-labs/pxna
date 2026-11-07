@@ -1404,7 +1404,7 @@ M7 is a retired number and is not used.
 | M12 | Implement the web client's screen skeleton, the display preferences screen, grids and lists that secure the overall height, and search | M10, M11 | Done |
 | M13 | Implement the web client's Entry operations and activity panel | M3, M12 | Done |
 | M14 | Implement the web client's viewer enhancements, swapping to the original image, and the info panel, and put the rotation of images read with ffmpeg in the media info | M11, M13 | Done |
-| M15 | Implement the web client's viewer touch operations (flicks to move back and forth, pinch and double-tap to zoom, a downward swipe to close) | M6, M14 | Not started |
+| M15 | Implement the web client's viewer touch operations (flicks to move back and forth, pinch and double-tap to zoom, a downward swipe to close) | M6, M14 | Done |
 | M16 | Implement the index, aggregation, reflection of the daemon's own changes, and the timeline API of the [Timeline Design](./design/timeline.md) | M5, M8, M10 | Done |
 | M17 | Implement the web client's timeline screen | M13, M14, M16 | Done |
 | M18 | Implement the storage and API of the [Rating and Tag Design](./design/rating-tags.md), the info panel's tags, and the viewer's rate mode | M2, M14 | Done |
@@ -1420,11 +1420,11 @@ M7 is a retired number and is not used.
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
 
-The four items that block the positioning in §2 are M15 (viewer touch operations), M19 (name index), M25 (library-local trash), and M26 (content hash for ratings and tags), in that order.
+The items that still block the positioning in §2 are M19 (name index), M25 (library-local trash), and M26 (content hash for ratings and tags), in that order; M15 (viewer touch operations), which came first, is done.
 
 The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap), of M5 in [Storage Layer Design §10.2](./design/storage.md#102-roadmap), of M8 in [Video Playback Design §8.2](./design/video.md#82-roadmap), of M10 in [Listing and Search Design §9.2](./design/listing.md#92-roadmap), and of M11 only V4 of [Video Playback Design §8.2](./design/video.md#82-roadmap); the thumbnail output and the display preferences API are done and have no remaining work.
 The server side of M14 is V5 of the same §8.2.
-The current state of the completed M13 and M14, and the client-side remaining work of M15, are in [Client Design §6](./design/client.md#6-current-state-and-remaining-work).
+The current state of the completed M13, M14, and M15 is in [Client Design §6](./design/client.md#6-current-state-and-remaining-work).
 The breakdown of M19 is L1 of [Listing and Search Design §9.2](./design/listing.md#92-roadmap) and C12 of [Client Design §6.2](./design/client.md#62-roadmap), and of M20 is T1 of [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap) and C11 of the same Client Design §6.2.
 The breakdown of M23 is IC1 to IC3 of [Image Socket Design §10.2](./design/image-socket.md#102-roadmap); M20 follows M23, because its revalidation comes with the image socket.
 M16, M17, and M18 have no remaining work. The current state of M16 is in [Timeline Design §10](./design/timeline.md#10-current-state-and-remaining-work), of M17 in [Client Design §6.1](./design/client.md#61-current-code), and of M18 in [Rating and Tag Design §9](./design/rating-tags.md#9-current-state-and-remaining-work).
