@@ -78,12 +78,12 @@ The term `indexed` is already in [terms.md](../terms.md#2-term-list).
 
 | No. | Content | Dependencies | State |
 | --- | --- | --- | --- |
-| [1](#s-1) | Add `indexed` to the listing contract | - | Not started |
-| [2](#s-2) | Query matches from the index | - | Not started |
-| [3](#s-3) | Build snapshots of matches | 1, 2 | Not started |
-| [4](#s-4) | Start from ratings and tags | 3 | Not started |
-| [5](#s-5) | Show the notice for walked results | 1 | Not started |
-| [6](#s-6) | Measure on the fixture and update the current state | 3, 4, 5 | Not started |
+| [1](#s-1) | Add `indexed` to the listing contract | - | Done |
+| [2](#s-2) | Query matches from the index | - | Done |
+| [3](#s-3) | Build snapshots of matches | 1, 2 | Done |
+| [4](#s-4) | Start from ratings and tags | 3 | Done |
+| [5](#s-5) | Show the notice for walked results | 1 | Done |
+| [6](#s-6) | Measure on the fixture and update the current state | 3, 4, 5 | In progress |
 
 <a id="s-1"></a>
 ### Step 1. Add `indexed` to the Listing Contract
@@ -156,6 +156,10 @@ On the fixture of `name-index-store` after a full aggregation, run 20 searches p
 
 **Completion condition**
 The record meets condition 6, and `rg -n 'name index of §5.1 and §5.2 is not implemented' docs` returns nothing.
+
+**Result so far**
+[The record of 2026-11-07](../measurements/2026-11-07-name-index.md) was made at 1 million Entries, not 10 million. There the p95 of the first page was 0.019 s for terms of 4 characters (about 300 matches) and 2.8 s for rare terms of 2 characters (median 0.39 s), and the p95 of a following page was at most 2.2 ms, so condition 6 holds at that size.
+A search with only terms of 2 characters or fewer reads every Entry under the start, so at 10 million Entries it would take about ten times as long and a cold one would pass 5 s. The current-state text is rewritten; this step stays in progress until the 10-million-Entry run is done.
 
 ## 6. Acceptance Checks
 

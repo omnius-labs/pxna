@@ -632,7 +632,7 @@ For archives, `FileStorageArchive::block_groups` and `extract_group` extract eac
 For renames and moves within the same Library, `renamed` reassigns the rows' paths.
 The API has 4 endpoints: `GET /timeline/entries`, `GET /timeline/months`, `GET /timeline/status`, and `POST /timeline/refresh`, each taking a set of Libraries.
 A video's `creation_time` is read by `MediaTools::probe_creation_time`.
-Aggregation does not pass enumerated names to the name index, and startup does not look at whether the name index is usable. This is part of L1 in [Listing and Search Design §9.2](./listing.md#92-roadmap).
+`TimelineScanner` passes the direct children of every non-hidden folder it enumerates to the name index with the scan's generation, and sweeps it next to the timeline index. `TimelineService` marks a Library's name index usable after a full aggregation, and startup also starts a full aggregation for a Library whose name index is not usable ([Listing and Search Design §9.1](./listing.md#91-current-code)).
 
 ### 10.2 Roadmap
 
