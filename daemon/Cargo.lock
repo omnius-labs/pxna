@@ -3405,7 +3405,6 @@ dependencies = [
  "omnius-core-migration",
  "omnius-core-omnikit",
  "omnius-core-rocketpack",
- "omnius-core-testkit",
  "once_cell",
  "parking_lot",
  "rand 0.10.3",

@@ -13,7 +13,6 @@ omnius-core-base = { workspace = true }
 omnius-core-migration = { workspace = true }
 omnius-core-omnikit = { workspace = true }
 omnius-core-rocketpack = { workspace = true }
-omnius-core-testkit = { workspace = true }
 
 async-trait = { workspace = true }
 serde = { workspace = true }
