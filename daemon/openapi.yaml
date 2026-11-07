@@ -2958,6 +2958,7 @@ components:
                 - offset
                 - snapshot
                 - truncatedLibraryIds
+                - indexed
             properties:
                 entries:
                     type: array
@@ -2983,6 +2984,14 @@ components:
                     description: Libraries whose recursive traversal reached the entry limit.
                     items:
                         $ref: "#/components/schemas/LibraryId"
+                indexed:
+                    type: boolean
+                    description: |
+                        True when every searched Library answered from its name index.
+                        False when any Library walked the file system, whether because
+                        its index was not usable or because the search is not one the
+                        index answers (it is not recursive, has no condition, or starts
+                        in an archive).
 
         Capabilities:
             type: object

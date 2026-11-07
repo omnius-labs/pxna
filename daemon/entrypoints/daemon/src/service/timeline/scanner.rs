@@ -17,13 +17,24 @@ use omnius_pxna_engine::{
 };
 
 use super::{DateRules, TimelineBatch, TimelineDate, TimelineFileVersion, TimelineIndex, TimelineKind, TimelineRow, TimelineZone};
-use crate::{config::LibraryConfig, prelude::*};
+use crate::{
+    config::LibraryConfig,
+    prelude::*,
+    service::listing::{NameIndex, NameKind, NameRow},
+};
 
 /// 1 回の書き込みにまとめるファイルと行の数。
 const BATCH_SIZE: usize = 200;
 
 /// 同じディレクトリの local の画像と動画の日時を、同時に読む数。
 const LOCAL_READS: usize = 4;
+
+/// 集計の extraction と ffprobe の同時実行数。ブラウズの枠とは別に持つ。
+#[derive(Debug, Clone, Copy)]
+pub struct ScanLimits {
+    pub extractions: usize,
+    pub probes: usize,
+}
 
 /// 集計する範囲と、記録する世代。
 pub struct TimelineScan<'a> {
@@ -67,6 +78,7 @@ struct OpenArchive {
 pub struct TimelineScanner {
     storage: Arc<StorageService>,
     index: Arc<TimelineIndex>,
+    names: Arc<NameIndex>,
     tools: MediaTools,
     zone: TimelineZone,
     rules: DateRules,
@@ -80,20 +92,21 @@ impl TimelineScanner {
     pub fn new(
         storage: Arc<StorageService>,
         index: Arc<TimelineIndex>,
+        names: Arc<NameIndex>,
         tools: MediaTools,
         zone: TimelineZone,
         rules: DateRules,
-        max_extractions: usize,
-        max_probes: usize,
+        limits: ScanLimits,
     ) -> Self {
         Self {
             storage,
             index,
+            names,
             tools,
             zone,
             rules,
-            extractions: Arc::new(Semaphore::new(max_extractions)),
-            probes: Arc::new(Semaphore::new(max_probes)),
+            extractions: Arc::new(Semaphore::new(limits.extractions)),
+            probes: Arc::new(Semaphore::new(limits.probes)),
             locks: Mutex::new(HashMap::new()),
             slots: Mutex::new(HashMap::new()),
         }
@@ -117,26 +130,42 @@ impl TimelineScanner {
         let local = Self::local_path(target.library, target.scope);
         if !Self::is_hidden(target.scope) {
             match tokio::fs::symlink_metadata(&local).await {
-                Ok(meta) if meta.is_dir() => self.walk(target, local).await?,
+                Ok(meta) if meta.is_dir() => {
+                    if target.scope != "/" {
+                        self.names.upsert(&target.library.id, target.scope, NameKind::Folder, target.generation).await;
+                    }
+                    self.walk(target, local).await?;
+                }
                 Ok(meta) if meta.is_file() => {
                     let slot = self.slot(&target.library.id);
                     let _turn = slot.lock().await;
                     let parent = local.parent().map(Path::to_path_buf).unwrap_or_else(|| local.clone());
                     let name = local.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-                    let candidates = self
-                        .list(target, &parent)
-                        .await?
-                        .into_iter()
-                        .filter(|candidate| candidate.local.file_name().is_some_and(|candidate| candidate.to_string_lossy() == name))
-                        .collect::<Vec<_>>();
+                    let entries = {
+                        // The same ordering with the daemon's own changes as in `walk`.
+                        let lock = self.lock(&target.library.id);
+                        let _guard = lock.lock().await;
+                        let entries = self.entries(&parent).await?.into_iter().filter(|entry| Self::name(&entry.path) == name).collect::<Vec<_>>();
+                        if let Some(row) = entries.first().and_then(Self::name_row) {
+                            self.names.upsert(&target.library.id, target.scope, row.kind, target.generation).await;
+                        }
+                        entries
+                    };
+                    let candidates = entries.into_iter().filter_map(|entry| self.candidate(target.library, entry)).collect::<Vec<_>>();
                     self.process(target, candidates).await?;
                 }
                 Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    if target.scope != "/" {
+                        self.names.remove(&target.library.id, target.scope).await;
+                    }
+                }
                 Err(error) => return Err(error.into()),
             }
         }
-        self.index.sweep(&target.library.id, target.scope, target.generation, target.scoped).await
+        self.index.sweep(&target.library.id, target.scope, target.generation, target.scoped).await?;
+        self.names.sweep(&target.library.id, target.scope, target.generation).await;
+        Ok(())
     }
 
     async fn walk(&self, target: &TimelineScan<'_>, root: PathBuf) -> Result<()> {
@@ -144,11 +173,27 @@ impl TimelineScanner {
         let mut folders = vec![root];
         while let Some(folder) = folders.pop() {
             let _turn = slot.lock().await;
-            let entries = match self.entries(&folder).await {
-                Ok(entries) => entries,
-                Err(error) => {
-                    warn!(folder = %folder.display(), ?error, "timeline: cannot list folder");
-                    continue;
+            let entries = {
+                // The daemon's own changes take this lock to reach the name index, so what a folder looked like when it was listed is queued
+                // before any change made after that, and an older listing never overwrites a newer change.
+                let lock = self.lock(&target.library.id);
+                let _guard = lock.lock().await;
+                match self.entries(&folder).await {
+                    Ok(entries) => {
+                        if let Some(relative) = Self::relative(target.library, &folder) {
+                            let rows = entries.iter().filter_map(Self::name_row).collect::<Vec<_>>();
+                            self.names.replace_children(&target.library.id, &relative, &rows, target.generation).await;
+                        }
+                        entries
+                    }
+                    Err(error) => {
+                        warn!(folder = %folder.display(), ?error, "timeline: cannot list folder");
+                        // What is under a folder that could not be read is probably still there, so the sweep must not delete it.
+                        if let Some(relative) = Self::relative(target.library, &folder) {
+                            self.names.keep(&target.library.id, &relative, target.generation).await;
+                        }
+                        continue;
+                    }
                 }
             };
             for entry in &entries {
@@ -160,10 +205,6 @@ impl TimelineScanner {
             self.process(target, candidates).await?;
         }
         Ok(())
-    }
-
-    async fn list(&self, target: &TimelineScan<'_>, folder: &Path) -> Result<Vec<Candidate>> {
-        Ok(self.entries(folder).await?.into_iter().filter_map(|entry| self.candidate(target.library, entry)).collect())
     }
 
     /// local のフォルダの直下。storage の local driver を通し、走査中の symlink を追跡しない規則にそろえる。
@@ -178,6 +219,25 @@ impl TimelineScanner {
                 detail: entry.detail,
             })
             .collect())
+    }
+
+    /// What the name index holds for a direct child of a folder: every Entry that is not hidden.
+    fn name_row(entry: &FsEntry) -> Option<NameRow> {
+        let name = Self::name(&entry.path);
+        if name.starts_with('.') {
+            return None;
+        }
+        let kind = match &entry.detail {
+            FsEntryDetail::Dir { .. } => NameKind::Folder,
+            FsEntryDetail::File { archive: true } => NameKind::Archive,
+            FsEntryDetail::File { archive: false } => match MediaKind::of_name(name).map(Self::kind) {
+                Some(TimelineKind::Image) => NameKind::Image,
+                Some(TimelineKind::Video) => NameKind::Video,
+                None => NameKind::File,
+            },
+            FsEntryDetail::Link { .. } => NameKind::File,
+        };
+        Some(NameRow::new(name, kind))
     }
 
     fn candidate(&self, library: &LibraryConfig, entry: FsEntry) -> Option<Candidate> {
@@ -562,6 +622,7 @@ mod budget_tests {
         let scanner = TimelineScanner::new(
             storage,
             index,
+            Arc::new(NameIndex::disabled()),
             MediaTools::new(
                 MediaOptions {
                     // A missing executable is a deterministic failed probe after admission.
@@ -572,8 +633,7 @@ mod budget_tests {
             ),
             TimelineZone::new(Some("UTC"))?,
             DateRules::new(&[], &[])?,
-            1,
-            1,
+            ScanLimits { extractions: 1, probes: 1 },
         );
         let file = dir.path().join("image.jpg");
         std::fs::write(&file, b"invalid image")?;
@@ -613,11 +673,11 @@ mod budget_tests {
         let scanner = TimelineScanner::new(
             storage,
             index,
+            Arc::new(NameIndex::disabled()),
             MediaTools::new(MediaOptions::default(), std::time::Duration::from_secs(1)),
             TimelineZone::new(Some("UTC"))?,
             DateRules::new(&[], &[])?,
-            1,
-            1,
+            ScanLimits { extractions: 1, probes: 1 },
         );
 
         let held = budget.io().ticket(WorkClass::Background).counted(WorkKind::Summary).acquire().await?;

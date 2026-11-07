@@ -14,7 +14,7 @@ use serde::Deserialize;
 
 use omnius_pxna_engine::service::{ArchiveIdentity, MediaTools, SourceFingerprint, StorageService};
 
-use crate::{config::LibraryConfig, prelude::*};
+use crate::{config::LibraryConfig, prelude::*, service::listing::NameIndex};
 
 mod date;
 mod index;
@@ -80,6 +80,7 @@ pub struct TimelineStatus {
 pub struct TimelineService {
     libraries: Vec<LibraryConfig>,
     index: Arc<TimelineIndex>,
+    names: Arc<NameIndex>,
     scanner: Arc<TimelineScanner>,
     interval: Option<Duration>,
     clock: Arc<dyn Clock<Utc> + Send + Sync>,
@@ -92,6 +93,7 @@ impl TimelineService {
         config: &TimelineConfig,
         libraries: &[LibraryConfig],
         storage: Arc<StorageService>,
+        names: Arc<NameIndex>,
         tools: MediaTools,
         dir: &Path,
         clock: Arc<dyn Clock<Utc> + Send + Sync>,
@@ -104,15 +106,19 @@ impl TimelineService {
         let scanner = Arc::new(TimelineScanner::new(
             storage,
             index.clone(),
+            names.clone(),
             tools,
             zone,
             rules,
-            config.max_concurrent_extractions,
-            config.max_concurrent_probes,
+            ScanLimits {
+                extractions: config.max_concurrent_extractions,
+                probes: config.max_concurrent_probes,
+            },
         ));
         Ok(Arc::new(Self {
             libraries: libraries.to_vec(),
             index,
+            names,
             scanner,
             interval: (config.scan_interval_secs > 0).then(|| Duration::from_secs(config.scan_interval_secs)),
             clock,
@@ -122,13 +128,13 @@ impl TimelineService {
 
     /// 起動時の集計と、定期の集計を始める task を作る。
     ///
-    /// 起動時は、索引にファイルの行を持たない Library を集計する。以後は、最後に集計を終えてから間隔が過ぎた Library を集計する。
+    /// 起動時は、索引にファイルの行を持たない Library と、名前の索引が使えない Library を集計する。以後は、最後に集計を終えてから間隔が過ぎた Library を集計する。
     pub fn start(self: &Arc<Self>) {
         let weak = Arc::downgrade(self);
         tokio::spawn(async move {
             if let Some(service) = weak.upgrade() {
                 service
-                    .start_where(|service, library| async move { Ok(!service.index.has_files(&library.id).await?) })
+                    .start_where(|service, library| async move { Ok(!service.index.has_files(&library.id).await? || !service.names.is_usable_checked(&library.id).await) })
                     .await;
             }
             let mut ticks = tokio::time::interval(SCHEDULE_TICK);
@@ -192,6 +198,7 @@ impl TimelineService {
 
     async fn full_scan(&self, library: &LibraryConfig, progress: &AtomicU64) -> Result<()> {
         let generation = self.index.begin_scan(&library.id).await?;
+        self.names.begin_scan(&library.id, generation).await;
         info!(library = %library.id, generation, "timeline: scan started");
         let target = TimelineScan {
             library,
@@ -202,6 +209,7 @@ impl TimelineService {
         };
         self.scanner.scan(&target).await?;
         self.index.complete_scan(&library.id, self.clock.now()).await?;
+        self.names.mark_usable(&library.id, generation).await;
         info!(library = %library.id, files = progress.load(Ordering::Relaxed), "timeline: scan completed");
         Ok(())
     }
@@ -261,6 +269,7 @@ impl TimelineService {
             // 消えた path と、上書きされたファイルの行は、応答の前に消す。親フォルダの陰になる子も、1 つずつ調べる。
             let mut existing = Vec::new();
             let mut stale = Vec::new();
+            let mut gone = Vec::new();
             let mut sorted = paths.clone();
             sorted.sort();
             sorted.dedup();
@@ -272,6 +281,8 @@ impl TimelineService {
                 }
                 if present {
                     existing.push(path);
+                } else {
+                    gone.push(path);
                 }
             }
             if !stale.is_empty() {
@@ -281,6 +292,10 @@ impl TimelineService {
                     if let Err(error) = self.index.remove(&library.id, path).await {
                         warn!(library = %library.id, path, ?error, "timeline: cannot remove changed entries");
                     }
+                }
+                // The name index holds every Entry, not only the images and videos, so only what has gone leaves it here.
+                for path in &gone {
+                    self.names.remove(&library.id, path).await;
                 }
             }
             // 範囲の集計は、ほかの path の配下にある path をまとめて、外側の path だけで行う。
@@ -304,6 +319,7 @@ impl TimelineService {
         let library = self.library(library_id)?;
         let lock = self.scanner.lock(&library.id);
         let _guard = lock.lock().await;
+        self.names.rename(&library.id, src, dst).await;
         for archive in self.index.rename(&library.id, src, dst).await? {
             let local = Self::local(library, &archive);
             let Ok(fingerprint) = SourceFingerprint::read(&local).await else {
@@ -373,6 +389,8 @@ mod tests {
         _dir: tempfile::TempDir,
         root: PathBuf,
         state: PathBuf,
+        /// Where the name index file lives, as under the listing state directory in the daemon.
+        names: PathBuf,
     }
 
     impl Fixture {
@@ -380,8 +398,9 @@ mod tests {
             let dir = tempfile::tempdir()?;
             let root = dir.path().join("library");
             let state = dir.path().join("state");
+            let names = dir.path().join("listing");
             std::fs::create_dir_all(&root)?;
-            Ok(Self { _dir: dir, root, state })
+            Ok(Self { _dir: dir, root, state, names })
         }
 
         fn library(&self) -> LibraryConfig {
@@ -397,7 +416,18 @@ mod tests {
             self.service_with_rules(zone, interval_secs, Vec::new()).await
         }
 
+        /// The name index of this Fixture's Library. Every call opens the same file again.
+        async fn names(&self) -> Arc<NameIndex> {
+            let names = Arc::new(NameIndex::open(&self.names).await);
+            names.verified().await;
+            names
+        }
+
         async fn service_with_rules(&self, zone: &str, interval_secs: u64, date_rules: Vec<DateRuleConfig>) -> TestResult<Arc<TimelineService>> {
+            self.service_with_names(zone, interval_secs, date_rules, self.names().await).await
+        }
+
+        async fn service_with_names(&self, zone: &str, interval_secs: u64, date_rules: Vec<DateRuleConfig>, names: Arc<NameIndex>) -> TestResult<Arc<TimelineService>> {
             let rng = ChaCha20Rng::try_from_rng(&mut rand::rngs::SysRng)?;
             let tsid = Arc::new(Mutex::new(TsidProviderImpl::new(omnius_core_base::clock::ClockUtc, rng, 16)));
             let storage = Arc::new(StorageService::new(Arc::new(LocalStorageDriver::new(tsid)), Arc::new(ArchiveRuntime::default())));
@@ -411,6 +441,7 @@ mod tests {
                 &config,
                 &[self.library()],
                 storage,
+                names,
                 MediaTools::new(MediaOptions::default(), StdDuration::from_secs(10)),
                 &self.state,
                 Arc::new(ClockUtc),
@@ -926,6 +957,168 @@ mod tests {
         tokio::time::sleep(StdDuration::from_millis(500)).await;
         assert!(!service.status(LIBRARY).await?.running);
         assert_eq!(paths(&service).await?, ["/a.png"], "ファイルの行がある Library は間隔が 0 なら集計しない");
+        Ok(())
+    }
+
+    /// A Library with folders, non-media files, an archive, and hidden Entries.
+    fn name_index_library(fixture: &Fixture) -> TestResult {
+        std::fs::create_dir_all(fixture.path("sub/inner"))?;
+        std::fs::create_dir_all(fixture.path(".hidden"))?;
+        std::fs::write(fixture.path("a.png"), plain_png())?;
+        std::fs::write(fixture.path("notes.txt"), b"notes")?;
+        std::fs::write(fixture.path("sub/clip.mp4"), b"not really a video")?;
+        std::fs::write(fixture.path("sub/inner/Readme.MD"), b"readme")?;
+        std::fs::write(fixture.path(".secret.txt"), b"secret")?;
+        std::fs::write(fixture.path(".hidden/x.png"), plain_png())?;
+        write_7z(&fixture.path("pack.7z"), &[("inside.jpg", exif_jpeg("2024:01:01 00:00:00"))])?;
+        Ok(())
+    }
+
+    /// The names `held` returns, in its order: sorted as `path:kind` strings.
+    fn sorted(mut entries: Vec<&str>) -> Vec<String> {
+        entries.sort();
+        entries.into_iter().map(str::to_string).collect()
+    }
+
+    fn expected_names() -> Vec<String> {
+        sorted(vec![
+            "/a.png:3",
+            "/notes.txt:1",
+            "/pack.7z:2",
+            "/sub:0",
+            "/sub/clip.mp4:4",
+            "/sub/inner:0",
+            "/sub/inner/Readme.MD:1",
+        ])
+    }
+
+    #[tokio::test]
+    async fn a_full_scan_holds_every_visible_entry_outside_archives_and_marks_the_index_usable_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        name_index_library(&fixture)?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        assert!(!names.is_usable(LIBRARY).await);
+        wait_scan(&service).await?;
+        assert_eq!(
+            names.held(LIBRARY).await,
+            expected_names(),
+            "non-media files and folders are held; hidden Entries and archive contents are not"
+        );
+        assert!(names.is_usable(LIBRARY).await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_full_scan_removes_entries_it_did_not_see_and_keeps_the_rest_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        name_index_library(&fixture)?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        wait_scan(&service).await?;
+
+        std::fs::remove_file(fixture.path("notes.txt"))?;
+        std::fs::remove_dir_all(fixture.path("sub/inner"))?;
+        std::fs::write(fixture.path("later.txt"), b"later")?;
+        let finished = service.status(LIBRARY).await?.completed_at;
+        service.refresh(LIBRARY).await?;
+        wait_until(|| async { Ok(service.status(LIBRARY).await?.completed_at != finished) }).await?;
+        assert_eq!(
+            names.held(LIBRARY).await,
+            sorted(vec!["/a.png:3", "/later.txt:1", "/pack.7z:2", "/sub:0", "/sub/clip.mp4:4"])
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_range_scan_adds_the_entries_of_the_folder_it_enumerates_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        name_index_library(&fixture)?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        wait_scan(&service).await?;
+
+        std::fs::create_dir_all(fixture.path("new/deeper"))?;
+        std::fs::write(fixture.path("new/deeper/file.txt"), b"x")?;
+        std::fs::write(fixture.path("sub/added.png"), plain_png())?;
+        service.changed(&changes(&["/new", "/sub/added.png"])).await;
+        wait_until(|| async { Ok(names.held(LIBRARY).await.contains(&"/new/deeper/file.txt:1".to_string())) }).await?;
+        wait_until(|| async { Ok(names.held(LIBRARY).await.contains(&"/sub/added.png:3".to_string())) }).await?;
+        let held = names.held(LIBRARY).await;
+        assert!(held.contains(&"/new:0".to_string()) && held.contains(&"/new/deeper:0".to_string()));
+        assert!(held.contains(&"/sub/clip.mp4:4".to_string()), "the rest of the folder stays");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_scans_a_library_whose_name_index_is_not_usable_even_when_the_timeline_has_files_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        name_index_library(&fixture)?;
+        let service = fixture.service("UTC", 0).await?;
+        wait_scan(&service).await?;
+        drop(service);
+
+        // The timeline index keeps its files, but this name index file is new.
+        let fresh = Arc::new(NameIndex::open(&fixture.names.join("fresh")).await);
+        fresh.verified().await;
+        assert!(!fresh.is_usable(LIBRARY).await);
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), fresh.clone()).await?;
+        service.start();
+        wait_until(|| async { Ok(fresh.is_usable(LIBRARY).await) }).await?;
+        assert_eq!(fresh.held(LIBRARY).await, expected_names());
+
+        // With a usable index and timeline files, an interval of 0 starts nothing.
+        drop(service);
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), fresh.clone()).await?;
+        service.start();
+        tokio::time::sleep(StdDuration::from_millis(300)).await;
+        assert!(!service.status(LIBRARY).await?.running);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_change_reaches_the_name_index_only_after_the_scan_that_is_listing_a_folder_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        name_index_library(&fixture)?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        wait_scan(&service).await?;
+
+        // The scan holds this lock while it lists a folder and queues its names; the daemon's own changes wait for it, so they always come after.
+        let lock = service.scanner.lock(LIBRARY);
+        let guard = lock.lock().await;
+        let renaming = {
+            let service = service.clone();
+            tokio::spawn(async move { service.renamed(LIBRARY, "/notes.txt", "/moved.txt").await })
+        };
+        std::fs::remove_file(fixture.path("a.png"))?;
+        let deleting = {
+            let service = service.clone();
+            tokio::spawn(async move { service.changed(&changes(&["/a.png"])).await })
+        };
+        tokio::time::sleep(StdDuration::from_millis(300)).await;
+        assert!(!renaming.is_finished() && !deleting.is_finished());
+        assert!(names.held(LIBRARY).await.contains(&"/notes.txt:1".to_string()), "nothing has reached the index yet");
+        drop(guard);
+        renaming.await??;
+        deleting.await?;
+        let held = names.held(LIBRARY).await;
+        assert!(held.contains(&"/moved.txt:1".to_string()) && !held.contains(&"/notes.txt:1".to_string()), "{held:?}");
+        assert!(!held.contains(&"/a.png:3".to_string()), "{held:?}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_scan_whose_scope_vanished_removes_it_from_the_name_index_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        name_index_library(&fixture)?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        wait_scan(&service).await?;
+        // The folder vanished after it was reported, so the range aggregation finds nothing to enumerate.
+        std::fs::remove_dir_all(fixture.path("sub"))?;
+        service.scoped_scan(&fixture.library(), "/sub").await?;
+        assert_eq!(names.held(LIBRARY).await, sorted(vec!["/a.png:3", "/notes.txt:1", "/pack.7z:2"]));
         Ok(())
     }
 

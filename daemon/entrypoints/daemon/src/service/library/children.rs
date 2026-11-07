@@ -132,7 +132,10 @@ impl LibraryBrowser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::LibraryConfig, service::listing::ListingSnapshots};
+    use crate::{
+        config::LibraryConfig,
+        service::listing::{ListingSnapshots, NameIndex},
+    };
     use omnius_core_base::{clock::ClockUtc, tsid::TsidProviderImpl};
     use omnius_pxna_engine::service::{ArchiveRuntime, LocalStorageDriver, StorageService, WorkBudget, WorkClass, WorkKind};
     use rand::{SeedableRng as _, rngs::ChaCha20Rng};
@@ -156,6 +159,7 @@ mod tests {
             storage,
             4,
             ListingSnapshots::new(Default::default(), Arc::new(ClockUtc)),
+            Arc::new(NameIndex::disabled()),
         )
     }
     pub(super) fn aged(path: &Path) {
