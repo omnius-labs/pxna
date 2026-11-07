@@ -1792,3 +1792,221 @@ describe("Display modes", () => {
         }
     });
 });
+
+describe("Touch gestures", () => {
+    const trio = () =>
+        listed([image("0.png", "image/png", 1), image("1.png", "image/png", 1), image("2.png", "image/png", 1)]);
+    const container = { width: 800, height: 600 };
+    const stage = (h: { host: HTMLElement }) => {
+        const element = h.host.querySelector<HTMLElement>(".select-none");
+        if (!element) throw new Error("There is no image stage");
+        return element;
+    };
+    const transform = (h: { host: HTMLElement }) => stage(h).firstElementChild?.getAttribute("style") ?? "";
+    const scale = (h: { host: HTMLElement }) => Number(/scale\(([\d.]+)\)/.exec(transform(h))?.[1]);
+    /// Dispatches a pointer event, as jsdom has no touch input. Time is in milliseconds.
+    const touch = (
+        target: EventTarget,
+        type: "pointerdown" | "pointermove" | "pointerup" | "pointercancel",
+        id: number,
+        time: number,
+        x: number,
+        y: number,
+        pointerType = "touch",
+    ) =>
+        act(async () => {
+            const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y });
+            Object.defineProperties(event, {
+                pointerId: { value: id },
+                pointerType: { value: pointerType },
+                timeStamp: { value: time },
+            });
+            target.dispatchEvent(event);
+        });
+    const swipe = async (
+        target: EventTarget,
+        from: { x: number; y: number },
+        to: { x: number; y: number },
+        duration: number,
+        start = 0,
+    ) => {
+        await touch(target, "pointerdown", 1, start, from.x, from.y);
+        await touch(target, "pointermove", 1, start + duration / 2, (from.x + to.x) / 2, (from.y + to.y) / 2);
+        await touch(target, "pointermove", 1, start + duration - 1, to.x, to.y);
+        await touch(target, "pointerup", 1, start + duration, to.x, to.y);
+    };
+    const tap = async (target: EventTarget, time: number, x: number, y: number) => {
+        await touch(target, "pointerdown", 1, time, x, y);
+        await touch(target, "pointerup", 1, time + 40, x, y);
+    };
+    const open = async (view = "1.png") => {
+        trio();
+        const h = await harness(view, "/", "onZoom", container);
+        await wait(() => expect(findDisplayImage(h)).not.toBeNull());
+        await loadDisplay(h, 400);
+        return h;
+    };
+    let restore: (() => void) | undefined;
+    beforeEach(() => {
+        // jsdom has no pointer capture, and earlier tests may have deleted the pixel ratio.
+        const previous = HTMLElement.prototype.setPointerCapture;
+        HTMLElement.prototype.setPointerCapture = () => {};
+        Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 1 });
+        restore = () => {
+            HTMLElement.prototype.setPointerCapture = previous;
+            Reflect.deleteProperty(window, "devicePixelRatio");
+        };
+    });
+    afterEach(() => restore?.());
+
+    it("gives the image area every touch gesture", async () => {
+        const h = await open();
+        try {
+            expect(stage(h).classList).toContain("touch-none");
+            expect(stage(h).classList).toContain("overscroll-contain");
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("moves to the next image on a leftward flick and the previous on a rightward flick", async () => {
+        const h = await open();
+        try {
+            await swipe(stage(h), { x: 500, y: 300 }, { x: 380, y: 300 }, 120);
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("2.png"));
+            await swipe(stage(h), { x: 300, y: 300 }, { x: 420, y: 300 }, 120, 1000);
+            await wait(() => expect(h.onChange).toHaveBeenLastCalledWith("0.png"));
+            expect(h.onChange).toHaveBeenCalledTimes(2);
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("closes the viewer on a downward swipe", async () => {
+        const h = await open();
+        try {
+            await swipe(stage(h), { x: 400, y: 100 }, { x: 405, y: 300 }, 400);
+            expect(h.onChange).toHaveBeenCalledExactlyOnceWith(undefined);
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("enlarges 2 times on a double tap, requests the original image, and returns on the next one", async () => {
+        const h = await open();
+        try {
+            expect(originalImage(h)).toBeNull();
+            await tap(stage(h), 0, 600, 300);
+            await tap(stage(h), 150, 600, 300);
+            expect(scale(h)).toBe(2);
+            expect(transform(h)).toContain("translate(-200px, 0px)");
+            expect(originalImage(h)).not.toBeNull();
+            await tap(stage(h), 2000, 400, 300);
+            await tap(stage(h), 2150, 400, 300);
+            expect(scale(h)).toBe(1);
+            expect(h.onChange).not.toHaveBeenCalled();
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("changes the zoom around the midpoint of a pinch", async () => {
+        const h = await open();
+        try {
+            await touch(stage(h), "pointerdown", 1, 0, 300, 300);
+            await touch(stage(h), "pointerdown", 2, 0, 500, 300);
+            await touch(stage(h), "pointermove", 1, 50, 200, 300);
+            await touch(stage(h), "pointermove", 2, 60, 600, 300);
+            expect(scale(h)).toBeCloseTo(2, 5);
+            await touch(stage(h), "pointerup", 1, 100, 200, 300);
+            await touch(stage(h), "pointerup", 2, 100, 600, 300);
+            expect(h.onChange).not.toHaveBeenCalled();
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("keeps the content under the fingers under them while the midpoint of a pinch moves", async () => {
+        const h = await open();
+        try {
+            // The stage is 800 px wide, so its center is at x = 400, and the content under x = 300 and x = 500 is at -100 and 100.
+            await touch(stage(h), "pointerdown", 1, 0, 300, 300);
+            await touch(stage(h), "pointerdown", 2, 0, 500, 300);
+            await touch(stage(h), "pointermove", 1, 20, 150, 300);
+            await touch(stage(h), "pointermove", 2, 40, 450, 300);
+            const [x, y] = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(transform(h))?.slice(1).map(Number) ?? [];
+            expect(scale(h)).toBeCloseTo(1.5, 5);
+            // (150 - 400 - pan) / 1.5 = -100 and (450 - 400 - pan) / 1.5 = 100 both give a pan of -100.
+            expect(x).toBeCloseTo(-100, 5);
+            expect(y).toBeCloseTo(0, 5);
+            await touch(stage(h), "pointerup", 1, 60, 150, 300);
+            await touch(stage(h), "pointerup", 2, 60, 450, 300);
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("drags an enlarged image with one finger without moving or closing the viewer", async () => {
+        const h = await open();
+        try {
+            await tap(stage(h), 0, 400, 300);
+            await tap(stage(h), 150, 400, 300);
+            expect(scale(h)).toBe(2);
+            await swipe(stage(h), { x: 500, y: 100 }, { x: 380, y: 300 }, 100, 1000);
+            expect(transform(h)).toContain("translate(-120px, 200px)");
+            await swipe(stage(h), { x: 400, y: 300 }, { x: 405, y: 120 }, 400, 3000);
+            expect(h.onChange).not.toHaveBeenCalled();
+            expect(scale(h)).toBe(2);
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("still drags an enlarged image with a mouse", async () => {
+        const h = await open();
+        try {
+            await zoomIn(h);
+            const before = transform(h);
+            await touch(stage(h), "pointerdown", 1, 0, 400, 300, "mouse");
+            await touch(stage(h), "pointermove", 1, 10, 380, 280, "mouse");
+            await touch(stage(h), "pointerup", 1, 20, 380, 280, "mouse");
+            expect(transform(h)).not.toBe(before);
+            expect(h.onChange).not.toHaveBeenCalled();
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("does not treat a cancelled touch as a gesture, and leaves a mouse drag to the old drag", async () => {
+        const h = await open();
+        try {
+            await touch(stage(h), "pointerdown", 1, 0, 500, 300);
+            await touch(stage(h), "pointercancel", 1, 50, 380, 300);
+            await touch(stage(h), "pointerup", 1, 100, 380, 300);
+            await swipe(stage(h), { x: 500, y: 100 }, { x: 500, y: 400 }, 100);
+            // A mouse neither flicks nor swipes.
+            await touch(stage(h), "pointerdown", 1, 0, 500, 300, "mouse");
+            await touch(stage(h), "pointerup", 1, 80, 380, 300, "mouse");
+            expect(h.onChange).toHaveBeenCalledTimes(1);
+        } finally {
+            await h.dispose();
+        }
+    });
+
+    it("gives the video viewer no gestures", async () => {
+        listed([image("0.png", "image/png", 1), image("1.mp4", "video/mp4", 1), image("2.png", "image/png", 1)]);
+        const h = await harness("1.mp4", "/", "onZoom", container);
+        try {
+            await wait(() => expect(h.host.querySelector("video")).not.toBeNull());
+            expect(h.host.querySelector(".select-none")).toBeNull();
+            const video = h.host.querySelector("video");
+            if (!video) throw new Error("There is no video");
+            await swipe(video, { x: 500, y: 300 }, { x: 380, y: 300 }, 120);
+            await swipe(video, { x: 400, y: 100 }, { x: 405, y: 300 }, 400, 1000);
+            await act(async () => Promise.resolve());
+            expect(h.onChange).not.toHaveBeenCalled();
+        } finally {
+            await h.dispose();
+        }
+    });
+});
