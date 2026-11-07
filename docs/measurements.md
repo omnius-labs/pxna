@@ -30,6 +30,7 @@ Each record has the measurement method, the numbers, and the limits, and values 
 | [2026-10-27-image-channel](./measurements/2026-10-27-image-channel.md) | 2026-10-27 | External decodes of iPhone HEIC while browsing and viewing, and the `unchanged` answers after a reload, after the web client switched to the image socket |
 | [2026-10-27-thumbnail-fanout](./measurements/2026-10-27-thumbnail-fanout.md) | 2026-10-27 | Thumbnail generation with and without companions, a shape switch and a filmstrip request that hit companions, the bytes added per image, and the hit-rate change |
 | [2026-10-27-thumbnail-fanout-release-ab](./measurements/2026-10-27-thumbnail-fanout-release-ab.md) | 2026-10-27 | Release-build A/B of the fan-out on and off: primary latency, later-request latency, external decodes, stored bytes, and hit rate |
+| [2026-11-07-name-index](./measurements/2026-11-07-name-index.md) | 2026-11-07 | The first full aggregation with and without the name index, the index file's size per Entry, and recursive searches from the root, at one million Entries |
 
 ## 3. Comparison Procedures
 

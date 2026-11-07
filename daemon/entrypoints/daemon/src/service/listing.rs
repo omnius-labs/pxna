@@ -16,10 +16,12 @@ use omnius_pxna_interface::{models, types::Nullable};
 
 use crate::{prelude::*, service::library::EntryConverter};
 
+mod name_index;
 mod search;
 mod snapshot;
 mod summary;
 
+pub use name_index::*;
 pub use search::*;
 pub use snapshot::*;
 pub use summary::*;
@@ -74,6 +76,19 @@ impl ListOptions {
 
     pub fn recursive(&self) -> bool {
         self.recursive
+    }
+
+    /// The conditions the name index answers this listing from, if it is a listing the index can answer: a recursive one without hidden Entries,
+    /// with a name, rating, or tag condition. Whether the start is local and the index is usable is for the caller to check.
+    pub fn index_conditions(&self) -> Option<IndexConditions> {
+        if !self.recursive || self.include_hidden || (self.filter.terms.is_empty() && !self.marks.is_active()) {
+            return None;
+        }
+        Some(IndexConditions {
+            terms: self.filter.terms.clone(),
+            marks: format!("{:?}", self.marks),
+            selection: self.selection.clone(),
+        })
     }
 
     /// 評価とタグでの絞り込みの指定。
@@ -152,6 +167,61 @@ impl ListOptions {
 
     fn matches(&self, listed: &ListedEntry) -> bool {
         (!self.folders_only || EntryPosition::is_folder_like(&listed.entry)) && self.filter.matches(&listed.name) && self.selection.matches(&listed.entry)
+    }
+}
+
+/// Where the name index starts looking for the Entries that match a listing's conditions.
+pub enum IndexCandidates<'a> {
+    /// There is no rating or tag condition: every Entry under the start whose name matches.
+    Names,
+    /// These paths only, which are the good, bad, or tagged ones. They may be anywhere in the Library.
+    Paths(Vec<String>),
+    /// The images and videos under the start that are not in `rated` and, if given, are in `tagged`.
+    Unrated { rated: &'a HashSet<String>, tagged: Option<&'a HashSet<String>> },
+}
+
+/// What identifies the Entries the name index finds for a listing: the name terms and the rating and tag condition with the version of ratings and tags it was read at.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IndexKey {
+    terms: Vec<String>,
+    marks: String,
+    version: Option<u64>,
+}
+
+/// The conditions of a listing that the name index answers.
+#[derive(Debug, Clone)]
+pub struct IndexConditions {
+    terms: Vec<String>,
+    marks: String,
+    selection: MarkSelection,
+}
+
+impl IndexConditions {
+    pub fn key(&self) -> IndexKey {
+        IndexKey {
+            terms: self.terms.clone(),
+            marks: self.marks.clone(),
+            version: self.selection.active,
+        }
+    }
+
+    /// The normalized name terms.
+    pub fn terms(&self) -> &[String] {
+        &self.terms
+    }
+
+    pub fn candidates(&self) -> IndexCandidates<'_> {
+        let selection = &self.selection;
+        if selection.active.is_none() {
+            return IndexCandidates::Names;
+        }
+        match (&selection.rating, &selection.tagged) {
+            (Some(RatingMatch::Outside(rated)), tagged) => IndexCandidates::Unrated { rated, tagged: tagged.as_ref() },
+            (Some(RatingMatch::Among(rated)), Some(tagged)) => IndexCandidates::Paths(rated.intersection(tagged).cloned().collect()),
+            (Some(RatingMatch::Among(rated)), None) => IndexCandidates::Paths(rated.iter().cloned().collect()),
+            (None, Some(tagged)) => IndexCandidates::Paths(tagged.iter().cloned().collect()),
+            (None, None) => IndexCandidates::Names,
+        }
     }
 }
 
@@ -304,6 +374,8 @@ impl ListedEntry {
 pub struct ListingEntries {
     entries: Vec<ListedEntry>,
     truncated: bool,
+    /// The name index answered it, so `entries` holds only the matches.
+    indexed: bool,
 }
 
 impl ListingEntries {
@@ -345,7 +417,11 @@ impl ListingEntries {
                         .record("entry_count", entries.len())
                         .record("conversion_sec", conversion_sec)
                         .record("truncated", true);
-                    return Ok(Self { entries, truncated: true });
+                    return Ok(Self {
+                        entries,
+                        truncated: true,
+                        indexed: false,
+                    });
                 }
             }
         }
@@ -353,11 +429,28 @@ impl ListingEntries {
             .record("entry_count", entries.len())
             .record("conversion_sec", conversion_sec)
             .record("truncated", false);
-        Ok(Self { entries, truncated: false })
+        Ok(Self {
+            entries,
+            truncated: false,
+            indexed: false,
+        })
+    }
+
+    /// The Entries that the name index found, with their attributes read from the file system.
+    pub fn from_index(entries: Vec<models::FileSystemEntry>, truncated: bool) -> Self {
+        Self {
+            entries: entries.into_iter().map(ListedEntry::new).collect(),
+            truncated,
+            indexed: true,
+        }
     }
 
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn indexed(&self) -> bool {
+        self.indexed
     }
 
     #[cfg(test)]
@@ -365,6 +458,7 @@ impl ListingEntries {
         Self {
             entries: entries.into_iter().map(ListedEntry::new).collect(),
             truncated: false,
+            indexed: false,
         }
     }
 

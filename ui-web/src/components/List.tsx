@@ -17,6 +17,7 @@ import { useRevealEntry } from "../library/useRevealEntry";
 import { type ScrollDirection, tilePriority, wantedPagesForRows, wantedRows } from "../thumbnails/range";
 import { EntryIcon } from "./EntryIcon";
 import { EntryMenu } from "./EntryMenu";
+import { ListingNotices } from "./ListingNotices";
 import { LoadFailure } from "./LoadFailure";
 
 const ROW_HEIGHT = 56;
@@ -28,6 +29,8 @@ interface ListProps {
     source: ListingSource;
     /// 検索の結果に出す場所。省略すると場所を出さない。
     place?: (entry: Entry) => string;
+    /// 名前の索引が答える検索か。索引が答えなかったときに、索引を作成中という通知を出す。
+    expectIndex?: boolean;
     libraryReadonly?: boolean;
     shape: DisplaySet["thumbnailShape"];
     narrow: boolean;
@@ -47,6 +50,7 @@ interface ListProps {
 export function List({
     source,
     place,
+    expectIndex = false,
     libraryReadonly = false,
     shape,
     narrow,
@@ -152,11 +156,7 @@ export function List({
     return (
         <EntryMenu>
             <div className="flex h-full flex-col" data-view="list">
-                {listing.truncated && (
-                    <p role="status" className="shrink-0 border-b p-3 text-sm text-muted-foreground">
-                        {t("common.partialResults")}
-                    </p>
-                )}
+                <ListingNotices truncated={listing.truncated} indexing={expectIndex && listing.indexed === false} />
                 {!narrow && (
                     // biome-ignore lint/a11y/useFocusableInteractive: CSS グリッドによる疑似テーブルのヘッダ行。ネイティブ table への置換は別課題
                     // biome-ignore lint/a11y/useSemanticElements: CSS グリッドによる疑似テーブルのヘッダ行。ネイティブ table への置換は別課題

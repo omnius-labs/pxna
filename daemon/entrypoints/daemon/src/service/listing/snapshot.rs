@@ -19,7 +19,7 @@ use crate::{
     prelude::*,
     service::{
         library::LibraryRelativePath,
-        listing::{ListOptions, ListSort, ListingEntries, SummaryIndex},
+        listing::{IndexConditions, IndexKey, ListOptions, ListSort, ListingEntries, SummaryIndex},
     },
 };
 
@@ -70,6 +70,8 @@ pub struct SnapshotKey {
     path: String,
     recursive: bool,
     include_hidden: bool,
+    /// Set for a listing answered from the name index, which holds only the matches of these conditions.
+    conditions: Option<IndexKey>,
 }
 
 impl SnapshotKey {
@@ -80,7 +82,14 @@ impl SnapshotKey {
             path: format!("/{}", relative.segments().join("/")),
             recursive: options.recursive(),
             include_hidden: options.include_hidden(),
+            conditions: None,
         })
+    }
+
+    /// The key of a listing answered from the name index for `conditions`.
+    pub fn answered_from(mut self, conditions: &IndexConditions) -> Self {
+        self.conditions = Some(conditions.key());
+        self
     }
 }
 

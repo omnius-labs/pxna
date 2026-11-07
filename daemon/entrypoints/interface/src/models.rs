@@ -7962,17 +7962,22 @@ pub struct SearchListing {
     #[serde(rename = "truncatedLibraryIds")]
     #[validate(nested)]
     pub truncated_library_ids: Vec<models::LibraryId>,
+
+    /// True when every searched Library answered from its name index. False when any Library walked the file system, whether because its index was not usable or because the search is not one the index answers (it is not recursive, has no condition, or starts in an archive).
+    #[serde(rename = "indexed")]
+    pub indexed: bool,
 }
 
 impl SearchListing {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(entries: Vec<models::SearchEntry>, total_count: u64, offset: u64, snapshot: String, truncated_library_ids: Vec<models::LibraryId>) -> SearchListing {
+    pub fn new(entries: Vec<models::SearchEntry>, total_count: u64, offset: u64, snapshot: String, truncated_library_ids: Vec<models::LibraryId>, indexed: bool) -> SearchListing {
         SearchListing {
             entries,
             total_count,
             offset,
             snapshot,
             truncated_library_ids,
+            indexed,
         }
     }
 }
@@ -7992,6 +7997,8 @@ impl std::fmt::Display for SearchListing {
             Some(self.snapshot.to_string()),
             Some("truncatedLibraryIds".to_string()),
             Some(self.truncated_library_ids.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+            Some("indexed".to_string()),
+            Some(self.indexed.to_string()),
         ];
 
         write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
@@ -8014,6 +8021,7 @@ impl std::str::FromStr for SearchListing {
             pub offset: Vec<u64>,
             pub snapshot: Vec<String>,
             pub truncated_library_ids: Vec<Vec<models::LibraryId>>,
+            pub indexed: Vec<bool>,
         }
 
         let mut intermediate_rep = IntermediateRep::default();
@@ -8039,6 +8047,8 @@ impl std::str::FromStr for SearchListing {
                     #[allow(clippy::redundant_clone)]
                     "snapshot" => intermediate_rep.snapshot.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     "truncatedLibraryIds" => return std::result::Result::Err("Parsing a container in this style is not supported in SearchListing".to_string()),
+                    #[allow(clippy::redundant_clone)]
+                    "indexed" => intermediate_rep.indexed.push(<bool as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     _ => return std::result::Result::Err("Unexpected key while parsing SearchListing".to_string()),
                 }
             }
@@ -8066,6 +8076,7 @@ impl std::str::FromStr for SearchListing {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "truncatedLibraryIds missing in SearchListing".to_string())?,
+            indexed: intermediate_rep.indexed.into_iter().next().ok_or_else(|| "indexed missing in SearchListing".to_string())?,
         })
     }
 }

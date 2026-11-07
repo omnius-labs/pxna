@@ -58,6 +58,7 @@ const searchPage = (page: FolderListing) => ({
     offset: page.offset,
     snapshot: page.snapshot,
     truncatedLibraryIds: page.truncated ? ["search"] : [],
+    indexed: page.indexed,
 });
 const folderSource: ListingSource = { kind: "folder", libraryId: "big", path: "/" };
 async function harness(
@@ -65,6 +66,7 @@ async function harness(
     source: ListingSource = folderSource,
     data: FolderListing | ReturnType<typeof searchPage> | null = listPage(),
     place?: (entry: Entry) => string,
+    expectIndex = false,
 ) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     get.mockImplementation(() =>
@@ -81,6 +83,7 @@ async function harness(
                     <List
                         source={source}
                         place={place}
+                        expectIndex={expectIndex}
                         shape="crop"
                         narrow={narrow}
                         sort={sort}
@@ -221,6 +224,19 @@ it("リストは結果があるときも打ち切りを示す", async () => {
     const h = await harness(false, searchSource(true), searchPage({ ...listPage(), truncated: true }), placeUnder);
     try {
         expect(h.host.querySelector('[role="status"]')?.textContent).toContain("Narrow the Libraries");
+    } finally {
+        await h.dispose();
+    }
+});
+it.each([
+    ["the index did not answer a search it should", true, false, true],
+    ["the index answered", true, true, false],
+    ["the search is one that walks by design", false, false, false],
+])("the list shows the index notice only when %s", async (_, expectIndex, indexed, shown) => {
+    const h = await harness(false, searchSource(true), searchPage({ ...listPage(), indexed }), placeUnder, expectIndex);
+    try {
+        const notice = "The index is being built, so the results may be incomplete.";
+        expect(h.host.textContent?.includes(notice)).toBe(shown);
     } finally {
         await h.dispose();
     }

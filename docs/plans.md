@@ -29,9 +29,9 @@ During implementation, advance the state of the child and of this document, and 
 | [lan-plaintext-exposure](./plans/lan-plaintext-exposure.md) | Setting `PXNA_BIND` lets a phone on the LAN or a VPN log in to the compose setup over plain HTTP | Not started | - |
 | [viewer-touch-gestures](./plans/viewer-touch-gestures.md) | The image viewer can be operated with one hand on a phone | Done | - |
 | [restore-last-folder](./plans/restore-last-folder.md) | Opening `/` returns to the last folder instead of asking for a Library | Done | - |
-| [name-index-store](./plans/name-index-store.md) | Every non-hidden Entry of a Library is held in a name index that follows our own changes | Not started | - |
+| [name-index-store](./plans/name-index-store.md) | Every non-hidden Entry of a Library is held in a name index that follows our own changes | In progress | - |
 | [search-condition-panel](./plans/search-condition-panel.md) | Every Library, or chosen ones, can be searched by name, rating, and several tags with the conditions in the left area | Done | - |
-| [name-index-search](./plans/name-index-search.md) | A search from the root of a 10-million-Entry Library returns its first page within a second | Not started | name-index-store, search-condition-panel |
+| [name-index-search](./plans/name-index-search.md) | A search from the root of a 10-million-Entry Library returns its first page within a second | In progress | name-index-store, search-condition-panel |
 | [viewer-display-modes](./plans/viewer-display-modes.md) | A work can be viewed in the wide-screen viewer's gallery and focus modes, and the mode returns on the next opening | Done | - |
 
 The thumbnail and image socket plans form a chain: `thumbnail-store-batching` and `source-jobs` follow `thumbnail-fanout-and-viewer-settings`, and `image-socket-server` follows `source-jobs`.

@@ -32,6 +32,7 @@ export const ja = {
         folderEmpty: "このフォルダは空です。",
         extractTimedOut: "展開に時間がかかりすぎて、読めませんでした。",
         partialResults: "結果の一部を表示しています。Library を絞るか、場所を下げて探し直してください。",
+        indexBuilding: "索引を作成中のため、結果が不完全な場合があります。",
     },
     language: {
         label: "言語",

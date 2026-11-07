@@ -44,6 +44,8 @@ export function sourceScope(source: ListingSource): string {
 
 export interface Listing {
     truncated: boolean;
+    /// Whether the name index answered a search. It is undefined until a search page arrives and for listings of folders.
+    indexed?: boolean;
     totalCount: number | undefined;
     readonly version: number;
     snapshot: string | undefined;
@@ -115,6 +117,7 @@ export class ListingSnapshotChanged extends Error {
 /// 観測は表示範囲と明示的な読み込みの和に限る。観測を外すと Query が渡した signal で要求も止まる。
 class FolderListingStore implements Listing {
     truncated = false;
+    indexed: boolean | undefined;
     totalCount: number | undefined;
     snapshot: string | undefined;
     private pages = new Map<number, FolderListing>();
@@ -312,6 +315,7 @@ class FolderListingStore implements Listing {
         this.snapshot = page.snapshot;
         this.totalCount = page.totalCount;
         this.truncated = page.truncated;
+        this.indexed = page.indexed;
         this.pages.set(index, page);
         for (const entry of page.entries) this.pathPages.set(entry.path, index);
         this.emit();

@@ -1408,7 +1408,7 @@ M7 is a retired number and is not used.
 | M16 | Implement the index, aggregation, reflection of the daemon's own changes, and the timeline API of the [Timeline Design](./design/timeline.md) | M5, M8, M10 | Done |
 | M17 | Implement the web client's timeline screen | M13, M14, M16 | Done |
 | M18 | Implement the storage and API of the [Rating and Tag Design](./design/rating-tags.md), the info panel's tags, and the viewer's rate mode | M2, M14 | Done |
-| M19 | Implement the name index of the [Listing and Search Design](./design/listing.md), its update by aggregation, answering recursive listings with conditions from it, and the web client's notice for walked results | M10, M16, M18 | Not started |
+| M19 | Implement the name index of the [Listing and Search Design](./design/listing.md), its update by aggregation, answering recursive listings with conditions from it, and the web client's notice for walked results | M10, M16, M18 | Done |
 | M20 | Have the web client want folder and archive thumbnails again after the daemon's own changes, so that a changed representative appears | M13, M23 | Not started |
 | M21 | Make the address the compose port is published on configurable with `PXNA_BIND` (default `127.0.0.1`) and enable `insecure_cookie` in the bundled configuration (§11.1) | M9 | Not started |
 | M22 | Implement the search API across Libraries of the [Listing and Search Design](./design/listing.md#53-searching-across-libraries), and the web client's search mode with its conditions in the left area and the three-choice mode switch | M12, M17, M18 | Done |
@@ -1420,12 +1420,13 @@ M7 is a retired number and is not used.
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
 
-The items that still block the positioning in §2 are M19 (name index), M25 (library-local trash), and M26 (content hash for ratings and tags), in that order; M15 (viewer touch operations), which came first, is done.
+The items that still block the positioning in §2 are M25 (library-local trash) and M26 (content hash for ratings and tags), in that order; M15 (viewer touch operations) and M19 (name index), which came first, are done.
 
 The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap), of M5 in [Storage Layer Design §10.2](./design/storage.md#102-roadmap), of M8 in [Video Playback Design §8.2](./design/video.md#82-roadmap), of M10 in [Listing and Search Design §9.2](./design/listing.md#92-roadmap), and of M11 only V4 of [Video Playback Design §8.2](./design/video.md#82-roadmap); the thumbnail output and the display preferences API are done and have no remaining work.
 The server side of M14 is V5 of the same §8.2.
 The current state of the completed M13, M14, and M15 is in [Client Design §6](./design/client.md#6-current-state-and-remaining-work).
-The breakdown of M19 is L1 of [Listing and Search Design §9.2](./design/listing.md#92-roadmap) and C12 of [Client Design §6.2](./design/client.md#62-roadmap), and of M20 is T1 of [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap) and C11 of the same Client Design §6.2.
+The current state of the completed M19 is in [Listing and Search Design §9.1](./design/listing.md#91-current-code), [Timeline Design §10.1](./design/timeline.md#101-current-code), and [Client Design §6.1](./design/client.md#61-current-code).
+The breakdown of M20 is T1 of [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap) and C11 of [Client Design §6.2](./design/client.md#62-roadmap).
 The breakdown of M23 is IC1 to IC3 of [Image Socket Design §10.2](./design/image-socket.md#102-roadmap); M20 follows M23, because its revalidation comes with the image socket.
 M16, M17, and M18 have no remaining work. The current state of M16 is in [Timeline Design §10](./design/timeline.md#10-current-state-and-remaining-work), of M17 in [Client Design §6.1](./design/client.md#61-current-code), and of M18 in [Rating and Tag Design §9](./design/rating-tags.md#9-current-state-and-remaining-work).
 

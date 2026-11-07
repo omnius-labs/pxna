@@ -1,0 +1,218 @@
+{
+    "schema": 1,
+    "date": "2026-11-07",
+    "subject": "first full aggregation and recursive search of the name index at about one million Entries",
+    "fixture": {
+        "tool": "a generator script that is not kept in the repository",
+        "entries_generated": 999998,
+        "folders": 90908,
+        "seed": 1,
+        "extra_entries_for_search": 800,
+        "entries_in_final_runs": 1000798
+    },
+    "builds": {
+        "A": {
+            "commit": "8558d875c8370cff54f732f0e9f7656843684991",
+            "sha256": "41d15f93efc9658f438533d4623e824d9bc1b976e303b48a2831bcec00765764"
+        },
+        "B_final": {
+            "description": "worktree of the change before its commit, after the review fixes except the generation of folders made by rename",
+            "sha256": "a192395e1a83accdb92b3a8b639b3bbc7b4243339abca81311be45c82feeb457"
+        },
+        "B_batched_writer": {
+            "description": "the build before the review fixes",
+            "sha256": "b5a717c1c7d2066c15ab384224b4dc3d85a137174d86428a5f3b65947ad1f47b"
+        }
+    },
+    "order": "ABBAAB",
+    "aggregation_final": [
+        {
+            "run": 1,
+            "label": "A",
+            "elapsed_sec": 349.186,
+            "names_db_bytes": 0,
+            "peak_rss_mib": 49.1
+        },
+        {
+            "run": 2,
+            "label": "B",
+            "elapsed_sec": 351.991,
+            "names_db_bytes": 167006208,
+            "peak_rss_mib": 60.3
+        },
+        {
+            "run": 3,
+            "label": "B",
+            "elapsed_sec": 350.934,
+            "names_db_bytes": 167006208,
+            "peak_rss_mib": 58.4
+        },
+        {
+            "run": 4,
+            "label": "A",
+            "elapsed_sec": 329.484,
+            "names_db_bytes": 0,
+            "peak_rss_mib": 48.0
+        },
+        {
+            "run": 5,
+            "label": "A",
+            "elapsed_sec": 329.625,
+            "names_db_bytes": 0,
+            "peak_rss_mib": 49.2
+        },
+        {
+            "run": 6,
+            "label": "B",
+            "elapsed_sec": 325.635,
+            "names_db_bytes": 167006208,
+            "peak_rss_mib": 54.0
+        }
+    ],
+    "aggregation_final_medians": {
+        "A_sec": 329.625,
+        "B_sec": 350.934,
+        "ratio": 1.065,
+        "bytes_per_entry": 166.9
+    },
+    "aggregation_batched_writer": [
+        {
+            "run": 1,
+            "label": "A",
+            "elapsed_sec": 369.43
+        },
+        {
+            "run": 2,
+            "label": "B",
+            "elapsed_sec": 332.007
+        },
+        {
+            "run": 3,
+            "label": "B",
+            "elapsed_sec": 342.642
+        },
+        {
+            "run": 4,
+            "label": "A",
+            "elapsed_sec": 307.882
+        },
+        {
+            "run": 5,
+            "label": "A",
+            "elapsed_sec": 301.33
+        },
+        {
+            "run": 6,
+            "label": "B",
+            "elapsed_sec": 310.52
+        }
+    ],
+    "aggregation_batched_writer_medians": {
+        "A_sec": 307.882,
+        "B_sec": 332.007,
+        "ratio": 1.078
+    },
+    "aggregation_first_implementation": [
+        {
+            "run": 1,
+            "label": "A",
+            "elapsed_sec": 446.624
+        },
+        {
+            "run": 2,
+            "label": "B",
+            "elapsed_sec": 566.171
+        },
+        {
+            "run": 3,
+            "label": "B",
+            "elapsed_sec": 551.547
+        },
+        {
+            "run": 4,
+            "label": "A",
+            "elapsed_sec": 318.976
+        },
+        {
+            "run": 5,
+            "label": "A",
+            "elapsed_sec": 305.774
+        },
+        {
+            "run": 6,
+            "label": "B",
+            "elapsed_sec": 549.299
+        }
+    ],
+    "aggregation_first_implementation_medians": {
+        "A_sec": 318.976,
+        "B_sec": 551.547,
+        "ratio": 1.729
+    },
+    "search_final": {
+        "aggregation_sec": 326.6,
+        "searches_per_class": 20,
+        "long": {
+            "matches_min_median_max": [
+                249,
+                292,
+                330
+            ],
+            "first_page_sec": {
+                "p95": 0.0189,
+                "median": 0.016,
+                "max": 0.0218
+            },
+            "second_page_sec": {
+                "p95": 0.0022,
+                "median": 0.0021
+            }
+        },
+        "short": {
+            "matches_min_median_max": [
+                40,
+                40,
+                40
+            ],
+            "first_page_sec": {
+                "p95": 2.8133,
+                "median": 0.388,
+                "max": 2.853
+            },
+            "second_page_sec": {
+                "p95": 0.0018,
+                "median": 0.0016
+            }
+        }
+    },
+    "search_batched_writer": {
+        "aggregation_sec": 319.2,
+        "long": {
+            "first_page_sec": {
+                "p95": 0.0227,
+                "median": 0.0182,
+                "max": 0.0244
+            },
+            "second_page_sec": {
+                "p95": 0.0023,
+                "median": 0.0021
+            }
+        },
+        "short": {
+            "first_page_sec": {
+                "p95": 2.8389,
+                "median": 0.3886,
+                "max": 2.8635
+            },
+            "second_page_sec": {
+                "p95": 0.0017,
+                "median": 0.0015
+            }
+        }
+    },
+    "integrity_check": {
+        "command": "PRAGMA quick_check(1)",
+        "file_bytes": 166887424,
+        "seconds_warm_cache": 2.57
+    }
+}
