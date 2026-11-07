@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { QueryClientProvider } from "@tanstack/react-query";
+import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 
-import type { Entry } from "../library/entries";
+import { type Entry, startInArchiveQuery } from "../library/entries";
 import { librariesQuery } from "../library/queries";
 import { lastSearchLocation } from "../library/searchReturn";
 import type { Selection } from "../library/selection";
@@ -13,7 +13,11 @@ import { testEntry } from "../testing/entries";
 import { stubMatchMedia } from "../testing/preferences";
 import { loadRouterAt } from "../testing/router";
 
-const grid = vi.hoisted(() => ({ source: undefined as unknown, place: undefined as unknown }));
+const grid = vi.hoisted(() => ({
+    source: undefined as unknown,
+    place: undefined as unknown,
+    expectIndex: undefined as unknown,
+}));
 vi.mock("../components/AppShell", () => ({
     AppShell: ({ children, footer }: { children: ReactNode; footer: ReactNode }) => (
         <>
@@ -29,16 +33,19 @@ vi.mock("../components/Grid", () => ({
     Grid: ({
         source,
         place,
+        expectIndex,
         onOpen,
         onSelectionChange,
     }: {
         source: unknown;
         place?: (entry: Entry) => string;
+        expectIndex?: boolean;
         onOpen: (entry: Entry) => void;
         onSelectionChange: (selection: Selection) => void;
     }) => {
         grid.source = source;
         grid.place = place;
+        grid.expectIndex = expectIndex;
         return (
             <>
                 <button
@@ -112,7 +119,7 @@ const libraries = [
     { id: "videos", name: "Videos", readonly: true },
 ];
 
-async function harness(href: string) {
+async function harness(href: string, prepare?: (client: QueryClient) => void) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     const host = document.createElement("div");
     document.body.append(host);
@@ -121,6 +128,7 @@ async function harness(href: string) {
     const router = await loadRouterAt(href);
     const client = router.options.context.queryClient;
     client.setQueryData(librariesQuery.queryKey, libraries);
+    prepare?.(client);
     await act(async () =>
         root.render(
             <QueryClientProvider client={client}>
@@ -151,6 +159,7 @@ async function wait(assertion: () => void) {
 afterEach(() => {
     grid.source = undefined;
     grid.place = undefined;
+    grid.expectIndex = undefined;
 });
 
 it("条件がないときは一覧を要求せず、入力を促す", async () => {
@@ -206,6 +215,26 @@ it("Library を指定しなければすべての Library を探し、複数の�
         const place = grid.place as (entry: Entry) => string;
         expect(place(testEntry("/photos/a/b/x.png"))).toBe("Photos/a/b");
         expect(place(testEntry("/videos/x.mp4"))).toBe("Videos");
+    } finally {
+        await h.dispose();
+    }
+});
+
+it.each([
+    ["the whole of every Library", "/search?q=x", undefined, true],
+    ["the whole of one Library", "/search?lib=photos&q=x", undefined, true],
+    ["a folder outside archives", "/search?lib=photos&path=%2Fa%2Fb&q=x", false, true],
+    ["a folder inside an archive", "/search?lib=photos&path=%2Fa.7z%2Fb&q=x", true, false],
+    ["direct children only", "/search?lib=photos&q=x&flat=1", undefined, false],
+    ["a folder that has not been checked yet", "/search?lib=photos&path=%2Fa&q=x", undefined, false],
+])("expects the name index to answer a search from %s: %s", async (_, href, inArchive, expected) => {
+    const h = await harness(href, (client) => {
+        if (inArchive === undefined) return;
+        const path = new URL(href, "http://x").searchParams.get("path") ?? "/";
+        client.setQueryData(startInArchiveQuery("photos", path).queryKey, inArchive);
+    });
+    try {
+        expect(grid.expectIndex).toBe(expected);
     } finally {
         await h.dispose();
     }

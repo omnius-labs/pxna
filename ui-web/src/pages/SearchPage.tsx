@@ -17,7 +17,7 @@ import { StatusBar } from "../components/StatusBar";
 import { Viewer } from "../components/Viewer";
 import { EntryActionContext, type EntryEditing } from "../library/actionContext";
 import { useClipboard } from "../library/clipboard";
-import { type Entry, entryKind, entryPlace, isFolderLike } from "../library/entries";
+import { type Entry, entryKind, entryPlace, isFolderLike, startInArchiveQuery } from "../library/entries";
 import { useInfoPanel } from "../library/infoPanel";
 import { hasSearchConditions, type ListingSource } from "../library/listing";
 import { usePreferences } from "../library/preferences";
@@ -190,6 +190,14 @@ export function SearchPage() {
         };
     })();
 
+    // The name index answers a search under a folder outside archives. Where the start may be inside an archive, ask the server before reporting that the index did not answer.
+    const startPath = libraryIds.length === 1 ? criteria.path : "/";
+    const startInArchive = useQuery({
+        ...startInArchiveQuery(libraryIds[0] ?? "", startPath),
+        enabled: startPath !== "/" && libraryIds.length === 1,
+    });
+    const expectIndex = criteria.recursive && (startPath === "/" || startInArchive.data === false);
+
     const viewing = search.view;
     return (
         <EntryActionContext.Provider
@@ -251,6 +259,7 @@ export function SearchPage() {
                         key={`${viewState}:${sortKey}`}
                         source={source}
                         place={place}
+                        expectIndex={expectIndex}
                         shape={set.thumbnailShape}
                         narrow={narrow}
                         sort={sort}
@@ -266,6 +275,7 @@ export function SearchPage() {
                         key={`${viewState}:${sortKey}`}
                         source={source}
                         place={place}
+                        expectIndex={expectIndex}
                         tileSize={set.tileSize}
                         shape={set.thumbnailShape}
                         narrow={narrow}

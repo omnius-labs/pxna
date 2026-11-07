@@ -12,6 +12,7 @@ import { useListingRows } from "../library/useListingRows";
 import { useRevealEntry } from "../library/useRevealEntry";
 import { type ScrollDirection, tilePriority, wantedPagesForRows, wantedRows } from "../thumbnails/range";
 import { EntryMenu } from "./EntryMenu";
+import { ListingNotices } from "./ListingNotices";
 import { LoadFailure } from "./LoadFailure";
 import { Tile } from "./Tile";
 
@@ -20,6 +21,8 @@ interface GridProps {
     source: ListingSource;
     /// 検索の結果に出す場所。省略すると場所を出さない。
     place?: (entry: Entry) => string;
+    /// 名前の索引が答える検索か。索引が答えなかったときに、索引を作成中という通知を出す。
+    expectIndex?: boolean;
     libraryReadonly?: boolean;
     /// タイルサイズの段階（1 から 5）。
     tileSize: number;
@@ -41,6 +44,7 @@ interface GridProps {
 export function Grid({
     source,
     place,
+    expectIndex = false,
     libraryReadonly = false,
     tileSize,
     shape,
@@ -165,11 +169,7 @@ export function Grid({
     });
     const { focusedIndex, click, keyDown } = interaction;
 
-    const notice = listing.truncated ? (
-        <p role="status" className="shrink-0 border-b p-3 text-sm text-muted-foreground">
-            {t("common.partialResults")}
-        </p>
-    ) : null;
+    const notice = <ListingNotices truncated={listing.truncated} indexing={expectIndex && listing.indexed === false} />;
     if (totalCount === undefined && listing.pageStatus(0) === "error") {
         return (
             <LoadFailure
