@@ -68,24 +68,56 @@ The assumed operation is as follows.
 - Exposed in plaintext HTTP on a LAN, and reached from outside the LAN only through a VPN such as Tailscale
 - Mainly a large number of files including images, emphasizing thumbnail display and browsing inside archives
 
+The owner this software assumes is not starting a new photo collection.
+They already have a large number of photos, videos, and archives in folders on the home server, and they have not organized them.
+They do not want to import the files into a library or rename them to fit a scheme, and they do not want to upload them to a cloud.
+The files stay where they are, with the names and folders the owner already gave them.
+
+Pxna is therefore not a photo app that takes over the storage.
+It reads the folders and archives as they are and adds browsing, classification, and operations on top.
+Classification does not move the files.
+What it offers is not a list of features but one workflow: the owner can see everything, including inside archives, classify it without changing a file, and then act on the files in the same screen.
+A photo app that imports files does the seeing and classifying well; a file manager does the acting; Pxna does the three on the same existing tree.
+
+The workflow has three parts.
+
+- See: the existing folder tree and archives. ZIP and 7z are read as folders, and nested archives are read up to the configured depth.
+- Classify: ratings and tags stored outside the files, so they can be given in a `readonly` Library and inside an archive. They do not change the file's contents, name, or modification time.
+- Act: upload, move, copy, delete, and rename, with asynchronous Operations and a conflict policy. The screen that shows the thumbnail can change the files.
+
+What supports the workflow is the implementation behind it.
+One WebSocket per tab carries thumbnails, sprite sheets, and display images, and one decode produces the variants that the listing, the shape switch, and the filmstrip need.
+Listings are paginated by `offset` over a snapshot, and the tree is virtualized, so a large folder does not have to be read in full before it is shown.
+The server reads formats a browser may not display, such as HEIC, JXL, and TIFF, and returns a display image instead of the original.
+The daemon is one process and one Docker image with ffmpeg, ffprobe, and heif-dec bundled, built for amd64 and arm64.
+The API is written first in `openapi.yaml`, and the tests, the measurements, and the design documents are kept with the code.
+
+Pxna does not claim to replace a photo app.
+It has no automatic upload from a phone, no sharing, no face recognition, no albums, no image or video editing, and no multi-user permission model.
+Those are out of scope in §2.1, not gaps to be closed in the next release.
+The next bet is organization assistance, not photo-app parity: local-only, opt-in inference, starting with similar and duplicate detection, so that the owner can find what to keep without sending files anywhere.
+
 ### 2.1 Out of Scope
 
 The following have been decided not to be built.
 
 - Shared use by multiple users, share links, invitations
-- File versioning, trash, undoing deletion
+- Automatic upload from a phone, albums, and face recognition
+- File versioning and recovering an Entry after the Trash is emptied
 - Synchronization or replication with other hosts
-- Full-text search, metadata indexes for search
+- Full-text search and automatic metadata extraction for search
 - Integration with general cloud storage (such as Google Drive)
 - SMB compatibility
 - Video editing
 - Image processing
+- Sending files to an inference service outside the host
 - TLS termination and certificate management
 
-By excluding these, we avoid having a permission model, restoring deletions, maintaining index consistency, resolving cloud sync conflicts, an SMB compatibility layer, an operation system for editing and processing, and issuing and renewing certificates.
+By excluding these, we avoid having a permission model, a multi-version history, maintaining search-index consistency, resolving cloud sync conflicts, an SMB compatibility layer, an operation system for editing and processing, and issuing and renewing certificates.
 For the timeline (§6.3), aggregation builds a timeline index that holds only the timeline dates of images and videos.
 The same walk also updates a name index that holds only the names of Entries, for subtree search (§8.9).
 Neither index is used for full-text or metadata search, and external changes are reflected in the next aggregation, so they do not always keep consistency with the actual files.
+Ratings and tags use a full hash of the content (§11.1) so that they survive an external move or rename; that hash is not a search index either.
 When deciding to widen the scope, first read the deferred items in §11.2.
 Some of them even state the conditions for "when to decide".
 
@@ -505,12 +537,18 @@ The handling when multiple source names correspond to the same destination on a 
 
 ### 8.4 Deletion
 
-Hard delete only, with no trash.
+Deletion moves the target into the Trash of its Library instead of removing it from the file system.
+The owner can restore an Entry from the trash or empty the trash to remove it permanently.
+The trash is excluded from listings, search, the timeline, and the tree, so it does not appear as ordinary content.
 
 The HTTP `DELETE` verb is not used, and it is unified into `POST /files/delete` and `POST /folders/delete` (the reason is in §11.1).
 
 Deleting a non-empty folder requires `recursive=true` to be explicit.
 It does not recurse when omitted, so there is no path by which a mistaken operation deletes a whole tree.
+
+The trash is per Library, so a deletion stays a rename when the Library is on one file system.
+If a Library spans file systems, the move into the trash can copy bytes.
+A `readonly` Library, and a path inside an archive, still reject deletion with 403.
 
 ### 8.5 CSRF
 
@@ -678,12 +716,13 @@ At startup it takes a process lock to prevent multiple instances.
 
 | Location                          | Contents                                                           | Impact when lost                                                   |
 | --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| SQLite (`state_dir/sqlite.db`)    | Users, sessions, display preferences, ratings and tags             | Setup is needed again. Display preferences return to defaults, and ratings and tags are lost |
+| SQLite (`state_dir/sqlite.db`)    | Users, sessions, display preferences, ratings and tags, content hashes | Setup is needed again. Display preferences return to defaults, ratings and tags are lost, and content hashes are computed again |
 | `state_dir/thumbnail`             | Thumbnail cache                                                    | Regenerated                                                        |
 | `state_dir/storage/archive`       | archive extraction cache                                           | Re-inspect and re-extract are needed                               |
 | `state_dir/video`                 | HLS segments of transcode sessions                                 | Transcoded playback in progress is interrupted                     |
 | `state_dir/timeline`              | Timeline index                                                     | Rebuilt by the next aggregation, and until it finishes, Entries to list in the timeline are missing |
 | `state_dir/listing`               | Browse index and name index                                        | Summary listings are enumerated again. Recursive search walks the file system until the next full aggregation finishes |
+| Trash (one per Library)          | Entries deleted through Pxna, until the owner empties the Trash   | The deleted entries are gone permanently. The rest of the Library is unaffected |
 | Staging area                      | Bytes of uploads in progress                                       | Uploads in progress are lost                                       |
 | Memory                            | Operations, transcode sessions, media info, listing snapshots      | Tracking of operations and transcodes in progress is lost. Listings are rescanned on the next request |
 
@@ -942,21 +981,54 @@ If the default is destructive, an implementation that forgot to attach the param
 The engine's `TransferOptions` originally had three options, `Skip` / `Overwrite` / `Rename`, with no option to reject.
 It was a design that "always does something on conflict", and could not express a safe default, so we rejected it.
 
-#### Delete Is a Hard Delete, Unified on POST
+#### Delete Moves the Entry to a Library-Local Trash, Unified on POST
 
 **Decision**
-There is no trash.
+Deletion moves the target into the Trash of its Library, and the owner can restore it or empty the Trash.
 We unify on `POST /files/delete` and `POST /folders/delete` and do not use the `DELETE` verb.
 We require `recursive=true` for non-empty folders.
+The trash is excluded from listings, search, the timeline, and the tree.
 
 **Reason**
-A trash would mean implementing undoing deletion, which falls under the out-of-scope items in §2.1.
+The assumed user organizes a large pile of files, and deleting duplicates and junk is part of that work.
+An irreversible delete makes a mistake in that work permanent, and the owner has no second chance.
+A per-Library trash keeps the move on the same file system when the Library is on one file system, so deletion stays a rename and does not copy bytes.
+If a Library spans file systems, the move can copy bytes.
+The explicit `recursive=true` still prevents a single mistaken request from deleting a whole tree.
 Batch deletion needs a body with an array of targets.
 Attaching a body to `DELETE` is handled inconsistently by intermediary software.
 
 **Rejected alternative**
+Hard delete with a confirmation dialog only.
+It is simpler, but it makes the main organizing operation unsafe, so we rejected it.
+A trash under `state_dir` shared by all Libraries.
+It would keep the Library tree clean, but a move across file systems becomes a copy, and the capacity and retention policy would have to be decided separately.
 The `DELETE /files?path=` form.
 It can express only single deletion and would create a double path alongside batch.
+
+#### Identify Ratings and Tags by Content, Not by Path
+
+**Decision**
+Ratings and tags are attached to the content of an Entry, not to its path.
+The identity is a full hash of the content, computed lazily when an Entry is first rated or tagged, and on a read when no hash is cached for its current path.
+The hash is cached with the size, modification time, and inode of the file, or with the archive identity and inner path for an entry inside an archive.
+An Entry that is moved or renamed outside Pxna keeps its ratings and tags while its content is unchanged.
+Entries with identical content share ratings and tags, including across Libraries.
+A change that preserves the size and modification time is not detected.
+
+**Reason**
+The assumed user already has files that Pxna did not create, and may move or rename them with another tool.
+A path key would silently detach the user's own classification at the first external move.
+Content is the identity that survives a move across folders and file systems without writing to the file.
+Sharing tags among identical content is a consequence of that choice; it treats the same bytes as the same work.
+
+**Rejected alternative**
+A path key.
+It is cheap, but it breaks on the external moves that the assumed user actually performs.
+A sidecar file next to each Entry.
+It is portable, but it cannot be written in a `readonly` Library or inside an archive, which are the places Pxna is meant to classify.
+An inode key.
+It survives a rename within one file system, but not a move across file systems or a restore from a backup.
 
 #### Archives Are Read-Only
 
@@ -1245,6 +1317,34 @@ Splitting only the port before deciding what to expose cannot settle the positio
 **Conditions for deciding**
 When operations requiring authorization separate from the API appear.
 
+#### RAR and Password-Protected Archives
+
+**Current state**
+Pxna reads ZIP and 7z archives.
+A RAR archive is not recognized as an archive, and an encrypted ZIP or 7z is reported as `PasswordRequired` rather than opened.
+
+**Why not decide now**
+The assumed user has some archives, and the common case is an unencrypted ZIP.
+RAR needs a decoder that is not in the current dependencies, and its license and distribution terms would have to be checked before adding it.
+Password entry adds a secret to the API and the web client.
+
+**Conditions for deciding**
+When the archives the target user actually keeps are RAR or password-protected often enough that the current support is the reason they do not use Pxna.
+
+#### Local AI for Organization
+
+**Current state**
+Ratings and tags are manual.
+No model runs in the daemon, and no embedding or duplicate index exists.
+
+**Why not decide now**
+The first bet is similar and duplicate detection with a local embedding model, but the model, its license, the CPU cost, and the shape of the opt-in UI are not chosen.
+The content hash used by ratings and tags (§11.1) gives exact duplicates a key; near-duplicates still need an embedding, so the order is fixed even though the model is not.
+
+**Conditions for deciding**
+When the library has enough duplicate or near-duplicate content that manual cleanup is the bottleneck, and a local model can run within the owner's hardware budget.
+The first job is similar and duplicate detection; automatic tagging, OCR, and face clustering are decided after that.
+
 ## 12. Current State and Remaining Work
 
 ### 12.1 Implementation Status
@@ -1279,6 +1379,9 @@ The implementation status of the storage layer, listing and search, thumbnails, 
 
 The container passes build and smoke tests in native CI for amd64 and arm64.
 
+The library-local trash and the content hash for ratings and tags are not implemented; they are M25 and M26 in §12.2.
+The local AI assistance of §2 is a deferred item in §11.2.
+
 ### 12.2 Roadmap
 
 The order is provisional.
@@ -1311,9 +1414,13 @@ M7 is a retired number and is not used.
 | M22 | Implement the search API across Libraries of the [Listing and Search Design](./design/listing.md#53-searching-across-libraries), and the web client's search mode with its conditions in the left area and the three-choice mode switch | M12, M17, M18 | Done |
 | M23 | Merge every want for a source into one source job, carry thumbnails, sprite sheets, and display images over the [image socket](./design/image-socket.md), switch the web client to it with its own image cache, and remove the thumbnail HTTP route | M4, M12, M14 | Done |
 | M24 | Implement `locate` of the [Listing and Search Design](./design/listing.md#45-locating-an-entry) in the three listing APIs, and have the web client's directly opened viewer URL and "Show in folder" use it | M22 | Done |
+| M25 | Implement the library-local Trash: move deleted entries into the Trash, restore and empty them, exclude the Trash from listings, search, the timeline, and the tree, and add the delete confirmation and Trash screen of the web client | M3, M10, M13, M16, M22 | Not started |
+| M26 | Identify ratings and tags by a lazily computed content hash, cache it with the file's metadata or the archive identity and inner path, and share ratings and tags among identical content | M2, M10, M18, M22 | Not started |
 
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
+
+The four items that block the positioning in §2 are M15 (viewer touch operations), M19 (name index), M25 (library-local trash), and M26 (content hash for ratings and tags), in that order.
 
 The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap), of M5 in [Storage Layer Design §10.2](./design/storage.md#102-roadmap), of M8 in [Video Playback Design §8.2](./design/video.md#82-roadmap), of M10 in [Listing and Search Design §9.2](./design/listing.md#92-roadmap), and of M11 only V4 of [Video Playback Design §8.2](./design/video.md#82-roadmap); the thumbnail output and the display preferences API are done and have no remaining work.
 The server side of M14 is V5 of the same §8.2.
