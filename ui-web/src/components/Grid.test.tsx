@@ -123,17 +123,19 @@ const searchSource = (recursive: boolean, query = "txt"): ListingSource => ({
 const placeUnder = (entry: Entry) =>
     entryPlace("/base", { ...entry, path: entryAddress(CROSS_LIBRARY_SCOPE, entry.path).path });
 /// 検索の応答。Entry は Library の id を添える。
-const searchPage = (entries: Entry[], totalCount: number, snapshot: string, truncated: boolean) => ({
+const searchPage = (entries: Entry[], totalCount: number, snapshot: string, truncated: boolean, indexed?: boolean) => ({
     entries: entries.map((entry) => ({ libraryId: "search", entry })),
     totalCount,
     offset: 0,
     snapshot,
     truncatedLibraryIds: truncated ? ["search"] : [],
+    indexed,
 });
 async function searchHarness(
     source: ListingSource,
     data: FolderListing | ReturnType<typeof searchPage> | null,
     place?: (entry: Entry) => string,
+    expectIndex = false,
 ) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     mock.first = 0;
@@ -151,6 +153,7 @@ async function searchHarness(
                 <Grid
                     source={source}
                     place={place}
+                    expectIndex={expectIndex}
                     tileSize={3}
                     shape="crop"
                     narrow={false}
@@ -228,6 +231,38 @@ it("グリッドは 0 件の通常の一覧を空のフォルダと示す", asyn
     );
     try {
         expect(h.host.textContent).toBe("This folder is empty.");
+    } finally {
+        await h.dispose();
+    }
+});
+it.each([
+    ["the index did not answer a search it should", true, false, true],
+    ["the index answered", true, true, false],
+    ["the search is one that walks by design", false, false, false],
+])("the grid shows the index notice only when %s", async (_, expectIndex, indexed, shown) => {
+    const h = await searchHarness(
+        searchSource(true),
+        searchPage(searchEntries, 2, "search", false, indexed),
+        placeUnder,
+        expectIndex,
+    );
+    try {
+        const notice = "The index is being built, so the results may be incomplete.";
+        expect(h.host.textContent?.includes(notice)).toBe(shown);
+    } finally {
+        await h.dispose();
+    }
+});
+it("the grid shows the index notice with the empty result too", async () => {
+    const h = await searchHarness(
+        searchSource(true, "missing"),
+        searchPage([], 0, "empty", false, false),
+        placeUnder,
+        true,
+    );
+    try {
+        expect(h.host.textContent).toContain("The index is being built");
+        expect(h.host.textContent).toContain("No matching items.");
     } finally {
         await h.dispose();
     }

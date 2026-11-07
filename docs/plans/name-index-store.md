@@ -73,12 +73,12 @@ Disk use grows by the size of the index, which is proportional to the number of 
 
 | No. | Content | Dependencies | State |
 | --- | --- | --- | --- |
-| [1](#s-1) | Add the name index store | - | Not started |
-| [2](#s-2) | Open it with the daemon and hand it out | 1 | Not started |
-| [3](#s-3) | Feed it from aggregation | 2 | Not started |
-| [4](#s-4) | Feed it from our own changes | 2 | Not started |
-| [5](#s-5) | Start aggregation for a Library without a usable index | 3 | Not started |
-| [6](#s-6) | Measure on the 10-million-Entry fixture | 3, 4 | Not started |
+| [1](#s-1) | Add the name index store | - | Done |
+| [2](#s-2) | Open it with the daemon and hand it out | 1 | Done |
+| [3](#s-3) | Feed it from aggregation | 2 | Done |
+| [4](#s-4) | Feed it from our own changes | 2 | Done |
+| [5](#s-5) | Start aggregation for a Library without a usable index | 3 | Done |
+| [6](#s-6) | Measure on the 10-million-Entry fixture | 3, 4 | In progress |
 
 <a id="s-1"></a>
 ### Step 1. Add the Name Index Store
@@ -155,13 +155,17 @@ A test like [timeline.rs#L760](../../daemon/entrypoints/daemon/src/service/timel
 ### Step 6. Measure on the 10-Million-Entry Fixture
 
 **Locations to change**
-New `tools/performance/name_index_fixture.py`, a new record under `docs/measurements/` and its row in [measurements.md](../measurements.md)
+A new record under `docs/measurements/` and its row in [measurements.md](../measurements.md)
 
 **What to do**
 Write a generator that creates, under a temporary directory given as an argument, 10 million empty files in about a million folders with Japanese and ASCII names, about 1% of them with image extensions, and that refuses to overwrite an existing directory. Run a full aggregation at the target commit and after the change, three times each on the same SSD, and record the medians and the index file size.
 
 **Completion condition**
 The record shows the ratio of the medians and the bytes per Entry, and both meet condition 6.
+
+**Result so far**
+[The record of 2026-11-07](../measurements/2026-11-07-name-index.md) was made at 1 million Entries, not 10 million. There the first full aggregation took 1.07 times as long as at the target commit (medians of three runs each) and the index file was 167 bytes per Entry, so condition 6 holds at that size.
+The first implementation, which wrote each folder in its own transaction, took 1.73 times as long; it was replaced by queued writes that several folders share. The scripts of that run were not kept, so the 10-million-Entry run needs them written again. This step stays in progress until it is done.
 
 ## 6. Acceptance Checks
 

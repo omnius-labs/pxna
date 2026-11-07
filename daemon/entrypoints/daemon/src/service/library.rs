@@ -16,8 +16,8 @@ use crate::{
     config::LibraryConfig,
     prelude::*,
     service::listing::{
-        ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, SearchResults, SearchSource, SnapshotKey, SnapshotVersion, SummaryData, SummaryKey, SummaryOptions,
-        SummarySnapshot,
+        ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, NameIndex, SearchResults, SearchSource, SnapshotKey, SnapshotVersion, SummaryData, SummaryKey,
+        SummaryOptions, SummarySnapshot,
     },
 };
 
@@ -25,10 +25,12 @@ mod children;
 pub use children::ChildProbeCache;
 mod content;
 mod entry;
+mod indexed;
 mod path;
 
 pub use content::*;
 pub use entry::*;
+pub use indexed::*;
 pub use path::*;
 
 /// Library 相対 path で表された読み取り要求を、`StorageService` の操作へ落とす。
@@ -36,19 +38,23 @@ pub struct LibraryBrowser {
     /// 一覧で返す順序を保つため、設定に書いた順のまま持つ。
     libraries: Vec<LibraryConfig>,
     storage: Arc<StorageService>,
-    resolver: LibraryPathResolver,
+    resolver: Arc<LibraryPathResolver>,
     snapshots: Arc<ListingSnapshots>,
     details: Arc<Semaphore>,
+    indexed: Arc<IndexedListing>,
 }
 
 impl LibraryBrowser {
-    pub fn new(libraries: &[LibraryConfig], storage: Arc<StorageService>, max_nested_depth: usize, snapshots: Arc<ListingSnapshots>) -> Self {
+    pub fn new(libraries: &[LibraryConfig], storage: Arc<StorageService>, max_nested_depth: usize, snapshots: Arc<ListingSnapshots>, names: Arc<NameIndex>) -> Self {
+        let resolver = Arc::new(LibraryPathResolver::new(storage.clone(), max_nested_depth));
+        let details = Arc::new(Semaphore::new(4));
         Self {
             libraries: libraries.to_vec(),
-            resolver: LibraryPathResolver::new(storage.clone(), max_nested_depth),
+            indexed: Arc::new(IndexedListing::new(names, resolver.clone(), details.clone())),
+            resolver,
             storage,
             snapshots,
-            details: Arc::new(Semaphore::new(4)),
+            details,
         }
     }
 
@@ -223,14 +229,33 @@ impl LibraryBrowser {
     async fn snapshot(&self, library_id: &str, path: &str, options: &ListOptions) -> Result<Arc<ListingSnapshot>> {
         let library = self.library(library_id)?;
         let (folder, entry) = self.resolve_folder(library, path).await?;
-        let key = SnapshotKey::new(library_id, path, options)?;
+        let mut key = SnapshotKey::new(library_id, path, options)?;
         let version = SnapshotVersion::for_folder(&folder, &entry, options.recursive());
         let root = library.path.clone();
         let recursive = options.recursive();
         let include_hidden = options.include_hidden();
         let max_entries = self.snapshots.recursive_max_entries();
+        // A recursive listing with conditions from a local folder is answered from the name index while it is usable, and walks otherwise.
+        let mut from_index = None;
+        if folder.archive_identity().is_none()
+            && let Some(conditions) = options.index_conditions()
+            && self.indexed.is_usable(library_id).await
+        {
+            key = key.answered_from(&conditions);
+            from_index = Some((
+                self.indexed.clone(),
+                library.clone(),
+                format!("/{}", LibraryRelativePath::parse(path)?.segments().join("/")),
+                conditions,
+            ));
+        }
         self.snapshots
             .get_or_scan(key, version, move || async move {
+                if let Some((indexed, library, start, conditions)) = from_index
+                    && let Some(entries) = indexed.entries(&library, &start, &conditions, max_entries).await?
+                {
+                    return Ok(entries);
+                }
                 ListingEntries::scan(&folder, &root, recursive, include_hidden, max_entries).await
             })
             .await

@@ -191,7 +191,8 @@ The walked snapshot is built in the combination that does not include `query` (�
 
 ### 5.1 Name Index
 
-The name index holds, per Library, the Library-relative path, the parent's path, the kind, and the normalized name of every Entry outside archives.
+The name index holds, per Library, the kind and the normalized name of every Entry outside archives, and the Library-relative path of every folder, so the path of an Entry is its folder's path and its own name.
+Each folder's path is held once and its Entries refer to the folder, so the index grows by the Entries' names and not by repeating their paths.
 Hidden Entries whose names start with `.`, and the Entries inside them, are not held, by the same rule as aggregation ([Timeline Design §3](./timeline.md#3-what-is-listed)).
 An archive is held as one Entry, and its contents are not.
 It is derived state in SQLite under the listing state directory, separate from the authentication DB.
@@ -200,13 +201,17 @@ The index is updated at the same points as the timeline index.
 Each time aggregation enumerates a folder, the rows of that folder's direct children are replaced with the enumerated names ([Timeline Design §6.1](./timeline.md#61-scanning-and-skipping-rereads)).
 A full aggregation records its generation in the rows it saw, and when the scan finishes, removes the rows in the scanned range that do not have it.
 The daemon's own changes delete the rows of a path that no longer exists and everything under it, and reassign the rows under a renamed or moved path to the destination, before the response ([Timeline Design §6.4](./timeline.md#64-the-daemons-own-changes)).
+A rename or move to a hidden name or into a hidden folder deletes the rows instead, because the index holds no hidden Entries.
+The index records the generation of each full aggregation. A generation that is not above the last one means the timeline index was recreated and the rows can no longer be compared with it, so the Library's rows are deleted and it waits for the aggregation that began.
 Added Entries appear when range aggregation enumerates their folder.
 External changes appear at the next full aggregation or manual aggregation.
-A result that has changed externally since then is still returned, and opening it gives `NotFound` through the existing revalidation of the path.
+An Entry deleted externally since then is dropped when a listing is built from the index (§5.2), and an Entry added externally is missing until then.
+Aggregation takes the Library's lock while it lists a folder and queues its names, and the daemon's own changes take it to reach the index, so a listing made before a change is queued before it and never overwrites it.
 
 An index of a Library becomes usable when a full aggregation of that Library has finished with it once, and this is recorded in the index file per Library.
 Later aggregations update the rows in place, so the index stays usable while they run.
 If reading, writing, or verifying the index fails, the process stops using it and returns to walking.
+The file is checked with SQLite's quick integrity check in the background after startup, so a damaged file stops the index for the process without delaying startup.
 At the next startup the file is verified again, and a Library whose record of usability is missing or whose file was discarded waits for a full aggregation ([Timeline Design §6.3](./timeline.md#63-when-aggregation-starts)).
 A snapshot answered from the index is discarded by the daemon's own changes and after `snapshot_max_age_secs`, as other recursive listings are (§4.3).
 A missing, corrupt, or unknown-format index is discarded and rebuilt by the next full aggregation, and does not affect the authentication DB.
@@ -658,7 +663,9 @@ The `[listing]` configuration, checking freshness by the target's version and el
 
 `locate` and the response's `offset` of §4.5 are implemented in [listing.rs](../../daemon/entrypoints/daemon/src/service/listing.rs) for the detail listing, in [summary.rs](../../daemon/entrypoints/daemon/src/service/listing/summary.rs) for the summary listing, and in [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) for the search. The page is cut at a multiple of `limit` after the conditions are applied. The routes answer `InvalidInput` for `locate` with `offset`, for `locate` and `locateLibraryId` not given together in a search, and for a `locateLibraryId` outside `libraryIds`, and `NotFound` for an Entry outside the sequence. The web client asks with `locate` when the viewer URL or "Show in folder" names an Entry it has not read (Client Design §3.5).
 
-The name index of §5.1 and §5.2 is not implemented. Recursive listings with conditions, including the search API's, always walk the file system and are cut off by the number of walked Entries for each Library.
+The name index of §5.1 is implemented by `NameIndex` in [name_index.rs](../../daemon/entrypoints/daemon/src/service/listing/name_index.rs), one SQLite file `listing/names.db` under the listing state directory. It holds a row for every Entry outside archives by its folder's id and its own name, a row for each folder with its path, so a path is stored once per folder, and a contentless trigram table of the normalized names. `TimelineScanner` passes the direct children of every folder it enumerates with the scan's generation, sweeps what a scan did not see, and marks the Library usable after a full aggregation; `LibraryMutation` removes and moves rows before the response. A file that is corrupt, of another version, or marked broken by a failure while running is discarded at startup.
+Changes go through one writer task in the order they are made: the folders of a scan are queued without waiting and written together in one transaction, while a rename, a delete, the sweep at the end of a scan, and the mark of usability return after they are applied.
+`LibraryBrowser::snapshot` answers a recursive listing of §5.2 through [indexed.rs](../../daemon/entrypoints/daemon/src/service/library/indexed.rs), keys its snapshot by the conditions and the version of ratings and tags, reads the attributes of the matches from the file system, and drops those that have gone. The search API's `indexed` tells whether every searched Library was answered this way. Ratings and tags are still keyed by path here, so the candidates of §5.2 are paths; the content hash (M26) changes how they are found.
 
 ### 9.2 Roadmap
 
@@ -667,7 +674,7 @@ Only the dependencies must be respected.
 
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
-| L1 | Implement the name index, its update by aggregation and by the daemon's own changes, and answering recursive listings with name, rating, and tag conditions from it (§5.1, §5.2) | None | Not started |
+| L1 | Implement the name index, its update by aggregation and by the daemon's own changes, and answering recursive listings with name, rating, and tag conditions from it (§5.1, §5.2) | None | Done |
 | L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Done |
 
 L1 corresponds to M19 and L2 to M24 of [design.md §12.2](../design.md#122-roadmap).

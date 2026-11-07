@@ -17,7 +17,7 @@ use crate::{
     prelude::*,
     service::{
         library::LibraryBrowser,
-        listing::ListingSnapshots,
+        listing::{ListingSnapshots, NameIndex},
         mutation::{LibraryMutation, OperationService, UploadService},
         sockets::image::{ImageSocketLimits, ImageSockets},
         timeline::TimelineService,
@@ -42,6 +42,9 @@ pub struct DaemonState {
     pub pools: WorkPools,
     pub videos: Arc<VideoService>,
     pub timeline: Arc<TimelineService>,
+    /// The names of every Entry outside archives, which aggregation and our own changes keep up to date.
+    #[cfg(test)]
+    pub names: Arc<NameIndex>,
     /// The open image sockets, their limits, and the signal that closes them at shutdown.
     pub image_sockets: Arc<ImageSockets>,
 }
@@ -78,13 +81,15 @@ impl DaemonState {
             archive,
         ));
         let snapshots = ListingSnapshots::open(conf.listing.clone(), clock.clone(), &state_dir.join("listing"), budget).await;
-        let library = LibraryBrowser::new(&conf.libraries, storage.clone(), conf.storage.archive.max_nested_depth, snapshots.clone());
+        let names = Arc::new(NameIndex::open(&state_dir.join("listing")).await);
+        let library = LibraryBrowser::new(&conf.libraries, storage.clone(), conf.storage.archive.max_nested_depth, snapshots.clone(), names.clone());
         let db = DatabaseBootstrap::connect(&state_dir).await?;
         let rating_tags = Arc::new(RatingTagService::new(db.clone()).await?);
         let timeline = TimelineService::open(
             &conf.timeline,
             &conf.libraries,
             storage.clone(),
+            names.clone(),
             MediaTools::new(conf.media.clone(), conf.thumbnail.video_timeout),
             &Self::timeline_dir(&state_dir),
             clock.clone(),
@@ -138,6 +143,8 @@ impl DaemonState {
             pools,
             videos,
             timeline,
+            #[cfg(test)]
+            names,
             image_sockets: ImageSockets::new(ImageSocketLimits::default()),
         })
     }

@@ -1418,6 +1418,14 @@ export interface components {
             snapshot: string;
             /** @description Libraries whose recursive traversal reached the entry limit. */
             truncatedLibraryIds: components["schemas"]["LibraryId"][];
+            /**
+             * @description True when every searched Library answered from its name index.
+             *     False when any Library walked the file system, whether because
+             *     its index was not usable or because the search is not one the
+             *     index answers (it is not recursive, has no condition, or starts
+             *     in an archive).
+             */
+            indexed: boolean;
         };
         Capabilities: {
             summaryListing: boolean;

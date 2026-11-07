@@ -32,6 +32,7 @@ export const en = {
         extractTimedOut: "Extraction took too long, so the contents could not be loaded.",
         partialResults:
             "Showing part of the results. Narrow the Libraries or go deeper into a location and search again.",
+        indexBuilding: "The index is being built, so the results may be incomplete.",
     },
     language: {
         label: "Language",

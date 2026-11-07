@@ -654,6 +654,108 @@ pub(crate) mod tests {
         Ok(())
     }
 
+    async fn names_held(state: &DaemonState) -> Vec<String> {
+        state.names.held("photos").await
+    }
+
+    #[tokio::test]
+    async fn names_follow_a_delete_before_the_response_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let state = &fixture.server.state;
+        let root = state.conf.libraries[0].path.clone();
+        std::fs::create_dir_all(root.join("gone/deeper"))?;
+        std::fs::write(root.join("gone/deeper/a.txt"), b"a")?;
+        std::fs::write(root.join("single.txt"), b"s")?;
+        std::fs::write(root.join("stay.txt"), b"s")?;
+        timeline_scanned(state).await?;
+        assert!(state.names.is_usable("photos").await);
+        assert!(names_held(state).await.contains(&"/gone/deeper/a.txt:1".to_string()));
+
+        state
+            .operations
+            .delete_entries("photos", &[models::RelativePath("/single.txt".to_string())], false, false)
+            .await?;
+        let held = names_held(state).await;
+        assert!(!held.contains(&"/single.txt:1".to_string()) && held.contains(&"/stay.txt:1".to_string()), "{held:?}");
+
+        let DeleteResult::Started(operation) = state.operations.delete_entries("photos", &[models::RelativePath("/gone".to_string())], true, true).await? else {
+            panic!("recursive deletion must start an Operation");
+        };
+        assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
+        let held = names_held(state).await;
+        assert!(!held.iter().any(|entry| entry.starts_with("/gone")), "{held:?}");
+        assert!(held.contains(&"/stay.txt:1".to_string()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn names_follow_a_move_within_a_library_before_the_response_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let state = &fixture.server.state;
+        let root = state.conf.libraries[0].path.clone();
+        std::fs::create_dir_all(root.join("src/sub"))?;
+        std::fs::create_dir_all(root.join("dst"))?;
+        std::fs::create_dir_all(root.join("src2"))?;
+        std::fs::write(root.join("src/x.png"), b"x")?;
+        std::fs::write(root.join("src/sub/y.txt"), b"y")?;
+        std::fs::write(root.join("dst/z.png"), b"z")?;
+        std::fs::write(root.join("src2/keep.txt"), b"k")?;
+        timeline_scanned(state).await?;
+
+        let request: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/src"],"dstPath":"/dst","conflict":"overwrite"}))?;
+        assert!(matches!(state.operations.move_entries("photos", &request, true).await?, MoveResult::Completed(_)));
+        let held = names_held(state).await;
+        for expected in ["/dst/x.png:3", "/dst/sub:0", "/dst/sub/y.txt:1", "/dst/z.png:3"] {
+            assert!(held.contains(&expected.to_string()), "{expected} moves before the response: {held:?}");
+        }
+        assert!(!held.iter().any(|entry| entry.starts_with("/src/") || entry == "/src:0"), "{held:?}");
+        assert!(
+            held.contains(&"/src2/keep.txt:1".to_string()),
+            "a folder whose name starts the same is not touched: {held:?}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn names_follow_a_rename_before_the_response_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let state = &fixture.server.state;
+        let root = state.conf.libraries[0].path.clone();
+        std::fs::create_dir_all(root.join("folder"))?;
+        std::fs::write(root.join("folder/Old Name.txt"), b"x")?;
+        timeline_scanned(state).await?;
+
+        std::fs::rename(root.join("folder/Old Name.txt"), root.join("folder/New Name.txt"))?;
+        state.mutation.renamed("photos", "/folder/Old Name.txt", "/folder/New Name.txt").await;
+        let held = names_held(state).await;
+        assert!(
+            held.contains(&"/folder/New Name.txt:1".to_string()) && !held.contains(&"/folder/Old Name.txt:1".to_string()),
+            "{held:?}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn names_drop_a_path_that_left_the_library_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let state = &fixture.server.state;
+        let root = state.conf.libraries[0].path.clone();
+        std::fs::create_dir_all(root.join("leaving/inner"))?;
+        std::fs::write(root.join("leaving/inner/a.txt"), b"a")?;
+        timeline_scanned(state).await?;
+        assert!(names_held(state).await.contains(&"/leaving/inner/a.txt:1".to_string()));
+
+        // A move to another Library copies the tree there and removes the source, which reports the source path as changed.
+        std::fs::remove_dir_all(root.join("leaving"))?;
+        state
+            .mutation
+            .apply_changes(&crate::service::listing::ListingInvalidation::for_entry("photos", "/leaving")?)
+            .await;
+        let held = names_held(state).await;
+        assert!(!held.iter().any(|entry| entry.starts_with("/leaving")), "{held:?}");
+        Ok(())
+    }
+
     async fn timeline_paths(state: &DaemonState) -> TestResult<Vec<String>> {
         let page = state
             .timeline
@@ -663,6 +765,7 @@ pub(crate) mod tests {
     }
 
     async fn timeline_scanned(state: &DaemonState) -> TestResult {
+        state.names.verified().await;
         state.timeline.refresh("photos").await?;
         for _ in 0..400 {
             let status = state.timeline.status("photos").await?;

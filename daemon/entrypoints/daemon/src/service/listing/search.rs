@@ -149,7 +149,8 @@ impl SearchResults {
             .filter(|source| source.snapshot.entries().truncated)
             .map(|source| models::LibraryId(source.library_id.clone()))
             .collect();
-        models::SearchListing::new(entries, total, offset, snapshot, truncated)
+        let indexed = self.sources.iter().all(|source| source.snapshot.entries().indexed());
+        models::SearchListing::new(entries, total, offset, snapshot, truncated, indexed)
     }
 }
 

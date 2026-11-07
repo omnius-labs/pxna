@@ -16,6 +16,8 @@ export type Entry = Omit<DetailedEntry, "metadata"> & {
 export type FolderListing = Omit<components["schemas"]["FolderListing"], "entries"> & {
     entries: Entry[];
     summary?: boolean;
+    /// Whether the name index answered a search. Only a search tells it.
+    indexed?: boolean;
 };
 export const capabilitiesQuery = queryOptions({
     queryKey: ["capabilities"],
@@ -170,6 +172,7 @@ export async function fetchSearchPage(
         offset: page.offset,
         snapshot: page.snapshot,
         truncated: page.truncatedLibraryIds.length > 0,
+        indexed: page.indexed,
     };
 }
 
@@ -243,6 +246,31 @@ export async function fetchListingPage(
             ...(entry.kind === "file" ? { file: { archive } } : {}),
         })),
     };
+}
+
+const DETAILS_PER_REQUEST = 200;
+
+/// Whether the folder at `path`, or one of the folders above it, is an archive, which the server tells by the archive hint of the details.
+/// A search from inside an archive walks by design, so the web client does not report a missing index for it.
+export function startInArchiveQuery(libraryId: string, path: string) {
+    return queryOptions({
+        queryKey: ["entries", libraryId, path, "in-archive"],
+        queryFn: async ({ signal }) => {
+            const segments = path.split("/").filter((segment) => segment !== "");
+            const paths = segments.map((_, index) => `/${segments.slice(0, index + 1).join("/")}`);
+            // The server takes at most 200 paths in one request.
+            for (let from = 0; from < paths.length; from += DETAILS_PER_REQUEST) {
+                const results = await fetchEntryDetails(
+                    libraryId,
+                    paths.slice(from, from + DETAILS_PER_REQUEST),
+                    signal,
+                );
+                if (results.some((result) => result.detail?.file?.archive === true)) return true;
+            }
+            return false;
+        },
+        staleTime: 60_000,
+    });
 }
 
 export async function fetchEntryDetails(libraryId: string, paths: string[], signal: AbortSignal) {
