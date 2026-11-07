@@ -51,7 +51,9 @@ The boundaries with other concerns are as follows.
 - Tags do not have hierarchy or attributes.
   They are treated as a set of words, so creating words and attaching and detaching them is enough.
 - Sorting by ratings and tags, and filtering in the timeline, are not included in the scope of this document (§8.2).
-- Following external changes to Entries (moves, renames, and deletions that do not go through Pxna) is not included in the scope of this document (§8.2).
+- Following a change to an Entry's content is not included.
+  A file whose bytes change has a different content hash and starts unrated and untagged.
+- Cleaning content hashes that no Entry refers to is not included (§8.2).
 - It does not involve changing Entries.
   Neither ratings nor tags change the Entry's own contents, name, or modification time.
 - Ratings and tags are not shared among multiple users.
@@ -100,52 +102,52 @@ The vocabulary keeps words even after they are removed from Entries, and serves 
 
 ### 6.1 What Is Stored
 
+The decision to key ratings and tags by content, and its reasons, are in [design.md §11.1](../design.md#identify-ratings-and-tags-by-content-not-by-path).
 Ratings and tags are saved in the following tables of `state_dir/sqlite.db`.
 `user_id` is the identifier of the session's user, and rows are split per user.
 Different sessions of the same user use the same `user_id`, so they read and write the same values.
 
 | Table | Primary key | Contents |
 | --- | --- | --- |
-| `entry_ratings` | `user_id`, `library_id`, `path` | good or bad and the update time. An unrated Entry has no row |
+| `entry_content` | `library_id`, `path` | The content hash of the Entry at the path, with the size, modification time, and inode used to decide whether the cached hash is still valid. A path with no row, or with a changed fingerprint, is hashed again when read or written |
+| `entry_ratings` | `user_id`, `content_hash` | good or bad and the update time. An unrated Entry has no row |
 | `tags` | `id`. `user_id` and `name` are unique | The per-user vocabulary |
-| `entry_tags` | `user_id`, `library_id`, `path`, `tag_id` | The words attached to an Entry |
+| `entry_tags` | `user_id`, `content_hash`, `tag_id` | The words attached to an Entry |
 
-`path` is the resolved Entry's Library-relative path (starting with `/`).
-The request's path is not used as is, and after going through the resolution of the Entry it becomes the key for saving and searching.
-This is so that different spellings containing `./` or `..` do not create separate rows for the same Entry.
+`content_hash` is a full SHA3-256 of the Entry's bytes.
+For an entry inside an archive, it is the hash of the extracted entry, and the path cache uses the archive identity and inner path instead of the inode.
+The hash is computed lazily, when ratings or tags are first read or written for a path, or when the cached fingerprint no longer matches.
+The `entry_content` row is a cache and may be written on a read as well as on a write; when a rating or tag is written, the cache update and the value write are in one transaction.
+A path that has never been rated or tagged may have no `entry_content` row; the listing filter treats it as unrated and untagged until the Entry is read or written.
+
+The API still addresses an Entry by `(library_id, path)`.
+The daemon resolves the path to the content hash before reading or writing ratings and tags, so different spellings containing `./` or `..` do not create separate rows.
 
 Replacing an Entry's tags is done in one transaction.
 Even if it fails midway, both the tags and the vocabulary return to the state before the replacement.
 
+`entry_content` is a cache; if it is lost, the hashes are computed again and the ratings and tags remain.
 If `sqlite.db` is deleted, ratings and tags are also lost, and there is no means of restoring them.
 The tables are migrated by the component that uses them, at construction time.
 Even if you go back to an older daemon, these tables remain unused and are not deleted.
 
-### 6.2 Following Changes to Entries
+### 6.2 Changes to Entries
 
-Ratings and tags follow changes to Entries made through Pxna.
-At the end of a mutating operation, rows are reassigned or deleted as follows.
+Ratings and tags are attached to the content, so a change to the path does not reassign them.
+The following table is the behavior after each change.
 
-| Operation | Ratings and tags |
+| Change | Ratings and tags |
 | --- | --- |
-| Move and rename within the same Library | Reassigned to the destination path. For folders and archives, the rows of Entries underneath are also reassigned |
-| Move across Libraries | Reassigned to the destination Library and path |
-| Copy | Not given. A copy is a different Entry and does not inherit the original's rating and tags |
-| Delete | The rows of Entries that no longer exist, and of Entries underneath, are deleted. The vocabulary remains |
-| Overwrite at the same path | Remain as they are. The Entry's path does not change |
+| Move or rename, through Pxna or outside it | Remain on the same content hash. The path cache is refreshed on the next read |
+| Copy | Shared with the copy, because the content hash is the same |
+| Delete, including a move to the trash | Remain on the content hash. They apply again if the content is restored or exists in another Entry |
+| Empty the trash | Remain until a cleanup removes content hashes that no Entry refers to (§8.2) |
+| Overwrite at the same path | The new content has a new hash and starts unrated and untagged. The old content's rows remain for any other copy |
+| Content changes at the same path | The fingerprint changes and the Entry starts unrated and untagged. A change that preserves the size and modification time is not detected |
 
-Reassignment targets the rows of all users.
-An Entry's path is one regardless of the user, so this is so that one user's move does not leave other users' rows behind.
-When a row already exists at the destination, it is treated as overwritten by the moved Entry and is deleted first and then reassigned.
-A name that merely matches by prefix (`/ab` when moving `/a`) is matched including the path delimiter (`/a/`) and is not moved.
-
-Reassignment and deletion are done after the file operation completes, and even if they fail they are only logged and the operation is not made a failure.
-In a failed reassignment, the transaction is rolled back and the rows of the source and the destination remain as they were.
-The source path no longer exists, so when the following reflection of the change succeeds in deleting, the moved Entry's rating and tags are removed.
-The rating and tags of the overwritten Entry that was at the destination remain by the rollback, and are shown on the Entry now at the destination, that is, the moved Entry.
-When the following reflection of the change could not confirm the source's non-existence, or when the deletion fails, the moved Entry's rating and tags remain at the source path.
-In a failed deletion, the deleted Entry's rows remain, and when a file is created at the same path, that rating and tags are shown on the new Entry.
-Changes not made through Pxna also cannot be followed because the daemon does not know about them (§8.2).
+No reassignment pass runs after a mutating operation.
+The old design reassigned path-keyed rows after each move and deleted them after each delete; content identity removes that pass and the failure path that came with it.
+A copy inherits the original's ratings and tags, because the same bytes are the same content.
 
 ## 7. API
 
@@ -164,9 +166,9 @@ The rating can be one of good, bad, or none (unrated), and tags can be any numbe
 It can also be combined with name terms, recursion, the Libraries searched, and sorting.
 
 - Filtering selects only images and videos. Folders and files that are neither images nor videos cannot be rated or tagged, so they are not included under any condition. Unrated means images and videos that have not been rated, and does not include folders and the like.
-- Filtering is not put into the listing's snapshot, and is done when cutting the page, with the set of paths looked up from the user's ratings and tags. Giving a rating or tag does not rescan, and the snapshot can be shared independently of the filtering conditions, as with names and sort order.
-- A recursive listing answered from the name index is the exception. It starts from the user's rated or tagged paths under the start (for unrated, from the images and videos of the index minus the rated paths), keeps those the name index holds, and puts only the result in the snapshot, together with the conditions and the version of ratings and tags ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)). Writing a rating or tag rebuilds that snapshot from the index without walking the file system. A row left by an Entry deleted outside Pxna does not appear there after the next aggregation, because the index no longer holds the path.
-- The sets of rated and tagged paths are looked up for each Library searched, and each Library's listing is filtered with its own sets before the listings are merged.
+- Filtering is not put into the listing's snapshot, and is done when cutting the page, with the set of content hashes looked up from the user's ratings and tags. The page's Entries are joined to `entry_content` to get their hashes; an Entry whose path has no cached hash, or whose fingerprint no longer matches, is treated as unrated and untagged for that page. It is hashed when it is read or written, and a later page reflects the result. Giving a rating or tag does not rescan, and the snapshot can be shared independently of the filtering conditions, as with names and sort order.
+- A recursive listing answered from the name index is the exception. It starts from the paths in `entry_content` whose hashes match the condition (for unrated, from the images and videos of the index minus the paths whose hash has a rating), keeps those the name index holds, and puts only the result in the snapshot, together with the conditions and the version of ratings and tags ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)). Writing a rating or tag rebuilds that snapshot from the index without walking the file system. A path that the index no longer holds does not appear there after the next aggregation.
+- The sets of content hashes are looked up once per user, and each Library's listing is filtered with the paths in `entry_content` that carry them.
 - During filtering, the version of ratings and tags is added to the listing's identifier. The version advances inside the daemon each time ratings or tags are written. If a rating were given in the middle of reading pages in succession, the preceding and following pages would be cut from different sets, so the identifier is changed to make the client reread. The identifier of an unfiltered listing does not change.
 - Only the search API accepts the conditions. The folder listing and the summary listing do not.
 - The timeline does not accept conditions (§8.2).
@@ -217,18 +219,20 @@ At present the only user is the single owner, but if separated per user, values 
 A method that prevents giving them in `readonly` Libraries.
 The `readonly` rule would be kept uniform, but one could not sort in browse-only Libraries, so we rejected it.
 
-#### The Storage Key Is the Library and the Library-Relative Path
+#### Do Not Reassign Ratings and Tags After Mutations
 
 **Decision**
-An Entry is pointed at and saved by `(library_id, path)` (§6).
+A move, rename, copy, or delete does not reassign ratings and tags (§6.2).
+The content hash is the key, so a path change is reflected by refreshing the path cache on the next read.
 
 **Reason**
-Entries have no stable identifier, and the daemon does not put marks on Entry contents.
-With a path, Entries inside archives can be pointed at in the same form.
+The old design reassigned path-keyed rows after each mutation and deleted them after each delete.
+That pass ran after the file operation, could fail on its own, and could not follow a move made outside Pxna.
+Content identity removes the pass and the failure path, and it makes an external move behave the same as one made through Pxna.
 
 **Rejected alternative**
-A method that points at them by a content hash.
-Ratings would follow even if an Entry is moved, but large files would have to be read entirely, and the cost for Entries inside archives would also increase, so we rejected it.
+Reassigning path-keyed rows after each mutation.
+It is the old design, and it cannot follow external moves, so we rejected it.
 
 #### Keep Words in the Vocabulary Even After They Are Removed from Entries
 
@@ -242,20 +246,6 @@ The vocabulary is small, so keeping them costs nothing.
 **Rejected alternative**
 A method that automatically deletes words attached to no Entry.
 The vocabulary would be tidy, but words one tried attaching and detaching would disappear from completion, so we rejected it.
-
-#### Make Ratings and Tags Follow Changes Made Through Pxna
-
-**Decision**
-When Pxna's mutating operations finish, ratings and tags are reassigned to the destination on moves and renames and removed on deletions. They are not inherited on copies (§6.2).
-
-**Reason**
-Ratings and tags are pointed at by path, so unless they follow, the results of sorting are lost at the point the user fixes a name or location.
-Pxna's mutating operations go through the inside of the daemon, so the path is known at the end and this can be done at the same time as the reassignment the timeline index does.
-A copy creates a different Entry, and if the original's rating were inherited, then when only the original is later rated again, the copy's rating would disagree.
-
-**Rejected alternative**
-A method that does not follow, and has the user reattach them after a move or rename.
-No implementation would be needed, but the results of sorting would be lost every time a name is fixed, so we rejected it.
 
 #### Do Filtering in Search Mode and Apply It When Cutting the Page
 
@@ -300,18 +290,19 @@ No API change would be needed, but a photo tagged with both a place and a person
 
 ### 8.2 Deferred
 
-#### Following External Changes to Entries
+#### Cleaning Content Hashes and Path Cache Rows with No Entry
 
 **Current state**
-Changes made through Pxna are followed (§6.2). Moves, renames, and deletions not made through Pxna are not known to the daemon, so ratings and tags remain at the original path and are not attached to the new path.
-Rows of deleted Entries also remain.
+Ratings and tags are keyed by content hash, and `entry_content` caches the hash per path (§6.1).
+When every copy of a content is deleted or a path disappears, the rows remain in SQLite.
 
 **Why not decide now**
-To know about external changes, periodic scans of the Library or file system notifications are needed.
-Timeline aggregation ([Timeline Design §6](./timeline.md#6-aggregation)) does scan, but to reassign the paths of ratings and tags there is no clue for telling that contents are identical, and a deletion cannot be told apart from the addition of a new Entry.
+A file can be temporarily absent, for example when an external disk is unmounted or the trash has not been emptied.
+Deleting the rows then would lose the user's classification when the content returns.
+The rows are small.
 
 **Conditions for deciding**
-When the user moves or renames an Entry without going through Pxna and is actually troubled that ratings and tags were lost.
+When the rows have grown enough to matter, or when the user asks to forget a content.
 
 #### Filtering in the Timeline, and Sorting by Ratings and Tags
 
@@ -346,12 +337,13 @@ The tables are migrated at construction time.
 The daemon's handlers check the target (an existing file that is an image or video) and then call `RatingTagService`.
 The API is the 5 operations of reading and writing ratings, reading and writing an Entry's tags, and listing the vocabulary, plus the filtering conditions on the search API, and the contract and generated artifacts are in [openapi.yaml](../../daemon/openapi.yaml).
 At the end of mutating operations, `LibraryMutation` calls the reassignment and deletion of ratings and tags.
+The current code keys ratings and tags by `(library_id, path)` and reassigns them after mutations; the content hash of §6 is not implemented.
 
 The web client has ratings of images and videos (display only) and attaching and detaching tags in the info panel, rate mode in the viewer, and filtering by a rating and several tags in search mode ([Client Design §6.1](./client.md#61-current-code)).
 
 ### 9.2 Roadmap
 
-There is no remaining work in this milestone.
+The content hash identity of §6.1 and §6.2 is M26 of [design.md §12.2](../design.md#122-roadmap).
 The deferred issues are covered by §8.2.
 
 For confirmed defects, see [issues.md](../issues.md).

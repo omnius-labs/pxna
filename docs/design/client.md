@@ -370,7 +370,7 @@ Whether something can be changed is judged from the logical OR of the Library's 
 | --- | --- | --- |
 | New folder | ⌥⇧N | Create a folder |
 | Rename | F2 | A move into the same folder |
-| Delete | ⌘⌫, Delete | Delete files and folders |
+| Delete | ⌘⌫, Delete | Move files and folders to the trash |
 | Cut, copy, paste | ⌘X, ⌘C, ⌘V | move, copy |
 | Upload | None | A one-shot write or an upload session |
 | Download | None | The content API |
@@ -383,9 +383,10 @@ The dialog can be opened wherever the target is in the listing, so even if the t
 When a new folder, rename, or delete succeeds, the selection is cleared.
 For a folder in the tree, new folder (created inside that folder), rename, and delete can be done from the menu, and the first two open the same dialog. Library root items do not show rename and delete.
 Key operations are not made to work inside input fields and dialogs (including confirmation dialogs). Some environments change the character when ⌥ is pressed, so the new-folder key is judged by the physical position of the pressed key (`KeyN`).
-Delete is confirmed with a dialog that shows the number of targets and that it cannot be undone, and then sent.
-A deletion that includes folders states in the dialog that the contents are deleted along with them, and is sent with `recursive=true`.
+Delete is confirmed with a dialog that shows the number of targets and that they move to the trash, and then sent.
+A deletion that includes folders states in the dialog that the contents move to the trash along with them, and is sent with `recursive=true`.
 A selection mixing files and folders is split into two requests by kind ([design.md §8.1](../design.md#81-namespaces)).
+The trash of each Library is opened from the Library's menu. It lists the Entries in the trash, restores a chosen Entry to its original path, and empties the trash. The trash is not shown in the tree, the listing, the search, or the timeline. Restoring and emptying are confirmed in a dialog, and become Operations when they can take long.
 
 Cut and copy remember the selected Entries' Library and path in a clipboard inside the web client.
 The OS clipboard is not used.
@@ -1751,6 +1752,7 @@ The wide-screen viewer's header switches between standard, gallery, and focus mo
 In standard mode the wide-screen image and video viewer has the filmstrip at the bottom edge ([Filmstrip.tsx](../../ui-web/src/components/Filmstrip.tsx)), whose item side follows the filmstrip size, and the image viewer has the header's slideshow, full-screen, download, and delete buttons. The header's gear opens the viewer settings panel ([ViewerSettings.tsx](../../ui-web/src/components/ViewerSettings.tsx)) with the filmstrip size and the swapping to the original image. Rate mode's buttons and undo history are in [Viewer.tsx](../../ui-web/src/components/Viewer.tsx). On narrow screens, the slideshow and full-screen are placed in the "その他" (More) menu, the gear of an image has only the swapping to the original image, and the filmstrip, download, and delete are not shown. Confirmation dialogs, menus, and toasts are drawn inside the outer frame element of `Modal`, and full-screen display is also performed on that element (§5.1).
 Parts are built with Tailwind, the shadcn/ui parts in `ui-web/src/components/ui`, and in-house code.
 On a wide screen, from the listing's context menu and the toolbar, one can create folders, rename, delete, and download a single file. Creating, renaming, and deleting can also use key operations. In the tree too, one can create inside, rename, and delete the right-clicked folder. Creating and renaming are done in the modal dialog of [NameDialog.tsx](../../ui-web/src/components/NameDialog.tsx), which shows the target's path. Whether something can be changed is decided by the logical OR of the Library's `readonly` and the Entry's or the current folder's `metadata.readonly`. After success, that Library's listing and tree are reread.
+Delete in the current code removes files permanently; the trash and its screen in §3.7 are not implemented.
 [clipboard.ts](../../ui-web/src/library/clipboard.ts) holds the targets of cut and copy across authenticated screens. They can be operated with the menu and Ctrl or ⌘ X, C, and V, and during cut the targets in the grid and list are shown faintly. Paste targets the current folder, or a tile or tree folder, and transfer to another Library is also possible.
 [TransferProvider.tsx](../../ui-web/src/components/TransferProvider.tsx) checks the destination's writability and Entries of the same name, and if there are conflicts, asks the policy only once. It splits the requests for files and folders, notifies synchronous success and rereads the listing and tree, and keeps accepted Operations even if there are partial failures.
 Internal drag moves to the same Library's tree and folder tiles, and copies when Alt is pressed. It rejects destinations that are readonly or archives, scrolls at the listing's edges, and expands closed tree folders after 1 second.
@@ -1786,8 +1788,9 @@ Only the dependencies must be respected.
 | C10 | Implement back-and-forth movement by left and right flicks in the viewer, zoom by pinch and double tap, and closing by a downward swipe | None |
 | C11 | Discard the states of folder and archive tiles and want them again when the listing is reread after the daemon's own change (§4) | None |
 | C12 | Display the notice of §3.6 when a subtree search from a folder outside archives is not answered from the name index | L1 of [Listing and Search Design §9.2](./listing.md#92-roadmap) |
+| C14 | Open the trash of a Library, restore a chosen Entry, and empty the trash, and change the delete confirmation to say that targets move to the trash | M25 of [design.md §12.2](../design.md#122-roadmap) |
 
-C10 corresponds to M15, C11 to part of M20, and C12 to part of M19 of [design.md §12.2](../design.md#122-roadmap).
+C10 corresponds to M15, C11 to part of M20, C12 to part of M19, and C14 to M25 of [design.md §12.2](../design.md#122-roadmap).
 M13, which corresponds to C8b, M14, which corresponds to C9a and C9b, M17, which corresponds to the timeline screen, and M24, which corresponds to C13, are complete.
 With the narrow-screen default of "only on zoom" as is, the state in which the original image cannot be shown by touch operation alone continues until C10.
 
