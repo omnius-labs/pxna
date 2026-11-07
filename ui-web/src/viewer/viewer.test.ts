@@ -6,6 +6,7 @@ import {
     clampPan,
     clampZoom,
     displayRequestSize,
+    doubleTapView,
     findEntry,
     fittedWidth,
     loadedNeighbor,
@@ -15,6 +16,7 @@ import {
     originalTiming,
     viewableNear,
     zoomAfterWheel,
+    zoomAround,
     zoomView,
 } from "./viewer";
 
@@ -226,6 +228,63 @@ describe("zoomView", () => {
 
     it("keeps the pan while zooming in", () => {
         expect(zoomView({ zoom: 2, pan: { x: 100, y: 0 } }, -100, container).pan).toEqual({ x: 100, y: 0 });
+    });
+});
+
+describe("zoomAround", () => {
+    const container = { width: 1000, height: 600 };
+    // The content coordinate under a point is (point - pan) / zoom, measured from the center of the container.
+    const under = (view: { zoom: number; pan: { x: number; y: number } }, point: { x: number; y: number }) => ({
+        x: (point.x - view.pan.x) / view.zoom,
+        y: (point.y - view.pan.y) / view.zoom,
+    });
+
+    it("keeps the content under the point in place", () => {
+        const point = { x: 200, y: -100 };
+        const from = { zoom: 1, pan: { x: 0, y: 0 } };
+        const to = zoomAround(from, 2, point, container);
+        expect(to.zoom).toBe(2);
+        expect(under(to, point).x).toBeCloseTo(under(from, point).x);
+        expect(under(to, point).y).toBeCloseTo(under(from, point).y);
+        const again = zoomAround(to, 1.5, { x: -50, y: 80 }, container);
+        expect(again.zoom).toBe(3);
+        expect(under(again, { x: -50, y: 80 }).x).toBeCloseTo(under(to, { x: -50, y: 80 }).x);
+        expect(under(again, { x: -50, y: 80 }).y).toBeCloseTo(under(to, { x: -50, y: 80 }).y);
+    });
+
+    it("moves the view by the shift", () => {
+        const view = zoomAround({ zoom: 2, pan: { x: 0, y: 0 } }, 1, { x: 0, y: 0 }, container, { x: 30, y: -20 });
+        expect(view).toEqual({ zoom: 2, pan: { x: 30, y: -20 } });
+    });
+
+    it("clamps the zoom and keeps the pan within its limits", () => {
+        const edge = zoomAround({ zoom: 1, pan: { x: 0, y: 0 } }, 2, { x: 500, y: 300 }, container);
+        expect(edge.pan).toEqual({ x: -500, y: -300 });
+        expect(zoomAround({ zoom: 8, pan: { x: 0, y: 0 } }, 4, { x: 0, y: 0 }, container).zoom).toBe(MAX_ZOOM);
+    });
+
+    it("resets the pan once the zoom returns to the whole view", () => {
+        expect(zoomAround({ zoom: 2, pan: { x: 300, y: 100 } }, 0.2, { x: 10, y: 10 }, container)).toEqual({
+            zoom: 1,
+            pan: { x: 0, y: 0 },
+        });
+    });
+});
+
+describe("doubleTapView", () => {
+    const container = { width: 1000, height: 600 };
+
+    it("enlarges the whole view 2 times around the tapped point", () => {
+        const view = doubleTapView({ zoom: 1, pan: { x: 0, y: 0 } }, { x: 100, y: 0 }, container);
+        expect(view.zoom).toBe(2);
+        expect(view.pan).toEqual({ x: -100, y: 0 });
+    });
+
+    it("returns an enlarged view to the whole view", () => {
+        expect(doubleTapView({ zoom: 3, pan: { x: 200, y: 50 } }, { x: 100, y: 0 }, container)).toEqual({
+            zoom: 1,
+            pan: { x: 0, y: 0 },
+        });
     });
 });
 

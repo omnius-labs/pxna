@@ -197,6 +197,41 @@ export interface ViewTransform {
     pan: { x: number; y: number };
 }
 
+export const DOUBLE_TAP_ZOOM = 2;
+
+/// Scales the view by `factor` while the content under `point` stays under it, then moves it by `shift`.
+/// `point` and `shift` are in CSS px, and `point` is measured from the center of the container.
+/// Zooming back to the whole view resets the position, and any other result is kept within the pan limits.
+export function zoomAround(
+    view: ViewTransform,
+    factor: number,
+    point: { x: number; y: number },
+    container: { width: number; height: number },
+    shift: { x: number; y: number } = { x: 0, y: 0 },
+): ViewTransform {
+    const zoom = clampZoom(view.zoom * factor);
+    if (zoom === MIN_ZOOM) {
+        return { zoom, pan: { x: 0, y: 0 } };
+    }
+    const ratio = zoom / view.zoom;
+    const pan = {
+        x: point.x - (point.x - view.pan.x) * ratio + shift.x,
+        y: point.y - (point.y - view.pan.y) * ratio + shift.y,
+    };
+    return { zoom, pan: clampPan(pan, zoom, container) };
+}
+
+/// A double tap enlarges the whole view around the tapped point, and returns an enlarged view to the whole view.
+export function doubleTapView(
+    view: ViewTransform,
+    point: { x: number; y: number },
+    container: { width: number; height: number },
+): ViewTransform {
+    return view.zoom > MIN_ZOOM
+        ? { zoom: MIN_ZOOM, pan: { x: 0, y: 0 } }
+        : zoomAround(view, DOUBLE_TAP_ZOOM, point, container);
+}
+
 /// ホイールの回転量で拡大率を変え、動かした位置を、新しい拡大率で動かせる範囲へ収め直す。
 /// 縮小して 1 に戻ると位置もリセットする。
 export function zoomView(
