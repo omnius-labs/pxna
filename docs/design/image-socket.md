@@ -272,6 +272,6 @@ Only the dependencies must be respected.
 | --- | --- | --- | --- |
 | IC1 | Open the socket, authenticate it, hold the wanted sets, pass items to generation by class and order, and send images in chunks with revalidation (§3 to §8, [plan](../plans/image-socket-server.md)) | None | Done |
 | IC2 | Switch every part of the web client to the socket and keep images in its own cache ([Client Design §6.1](./client.md#61-current-code)) | IC1 | Done |
-| IC3 | Remove the thumbnail HTTP route ([plan](../plans/thumbnail-get-removal.md)) | IC2 | Done |
+| IC3 | Remove the thumbnail HTTP route | IC2 | Done |
 
 For confirmed defects, see [issues.md](../issues.md).
