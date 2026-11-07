@@ -26,7 +26,6 @@ During implementation, advance the state of the child and of this document, and 
 | [source-jobs](./plans/source-jobs.md) | While several requests for different sizes or kinds of one image arrive, the daemon decodes it once at a time | Done | thumbnail-fanout-and-viewer-settings |
 | [image-socket-server](./plans/image-socket-server.md) | A client can want images over one WebSocket and receive them in priority order, with held images answered by `unchanged` | Done | source-jobs |
 | [split-video-and-image-pools](./plans/split-video-and-image-pools.md) | Video ffmpeg runs have their own slots, so a slow video does not block HEIC decodes | Done | - |
-| [lan-plaintext-exposure](./plans/lan-plaintext-exposure.md) | Setting `PXNA_BIND` lets a phone on the LAN or a VPN log in to the compose setup over plain HTTP | Not started | - |
 | [viewer-touch-gestures](./plans/viewer-touch-gestures.md) | The image viewer can be operated with one hand on a phone | Done | - |
 | [restore-last-folder](./plans/restore-last-folder.md) | Opening `/` returns to the last folder instead of asking for a Library | Done | - |
 | [name-index-store](./plans/name-index-store.md) | Every non-hidden Entry of a Library is held in a name index that follows our own changes | In progress | - |
@@ -36,4 +35,4 @@ During implementation, advance the state of the child and of this document, and 
 
 The thumbnail and image socket plans form a chain: `thumbnail-store-batching` and `source-jobs` follow `thumbnail-fanout-and-viewer-settings`, and `image-socket-server` follows `source-jobs`.
 The two name index plans run in order, and `name-index-search` also follows `search-condition-panel`, whose search API it answers.
-The `lan-plaintext-exposure`, `viewer-touch-gestures`, `restore-last-folder`, and `viewer-display-modes` plans are independent of each other and of them.
+The `viewer-touch-gestures`, `restore-last-folder`, and `viewer-display-modes` plans are independent of each other and of them.
