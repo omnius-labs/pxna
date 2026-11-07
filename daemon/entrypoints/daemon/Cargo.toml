@@ -61,12 +61,6 @@ bytes = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
 
-[target.'cfg(unix)'.dependencies]
-rustix = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true }
-
 [dev-dependencies]
 jsonschema = { workspace = true }
 tokio-tungstenite = { workspace = true }

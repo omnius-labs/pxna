@@ -62,53 +62,11 @@ impl Executor {
         Ok(())
     }
 
-    // 同じ設定ディレクトリを指す 2 つ目の daemon を拒否する。
+    // Reject a second daemon that points at the same configuration directory.
+    // `FileLock` holds an OS advisory lock. The OS releases it however the process exits,
+    // so a file left behind can be acquired again.
     async fn acquire_process_lock(config_dir: &Path) -> tokio::io::Result<FileLock> {
-        let path = config_dir.join(LOCK_FILE_NAME);
-
-        match FileLock::acquire(&path).await {
-            Err(e) if e.kind() == tokio::io::ErrorKind::AlreadyExists => {
-                // FileLock がロックを消すのは Drop だけである。SIGKILL や電源断のあとは
-                // 残骸が居座り、以後の起動を恒久的に塞ぐ。ロックに書かれた PID の生存を見て、
-                // 持ち主がいないものだけ取り除き、1 度だけ取り直す。
-                if Self::lock_owner_is_alive(&path).await {
-                    return Err(e);
-                }
-                tokio::fs::remove_file(&path).await?;
-                let lock = FileLock::acquire(&path).await?;
-
-                // 同じ残骸を見た 2 つ目の daemon が、こちらの取得直後に remove_file して
-                // own のロックを作ると、双方が起動してしまう。取り直した中身が自分の PID か
-                // 読み返し、奪われていれば起動しない。窓は残るが、無条件に信じるよりは狭い。
-                // 根本的には core-rs の FileLock を advisory lock にする必要がある。
-                Self::verify_lock_owner(&path).await?;
-
-                Ok(lock)
-            }
-            result => result,
-        }
-    }
-
-    // 読めない、PID として解釈できない、PID が生きている、のいずれも「持ち主がいる」とする。
-    // 判定を誤るなら、他人のロックを奪うより起動を拒否する側へ倒す。
-    async fn lock_owner_is_alive(path: &Path) -> bool {
-        let Ok(text) = tokio::fs::read_to_string(path).await else {
-            return true;
-        };
-        let Ok(pid) = text.trim().parse::<u32>() else {
-            return true;
-        };
-
-        sys::process_exists(pid)
-    }
-
-    async fn verify_lock_owner(path: &Path) -> tokio::io::Result<()> {
-        let text = tokio::fs::read_to_string(path).await?;
-        if text.trim() != std::process::id().to_string() {
-            return Err(tokio::io::Error::new(tokio::io::ErrorKind::AlreadyExists, "the process lock was taken by another daemon"));
-        }
-
-        Ok(())
+        FileLock::acquire(config_dir.join(LOCK_FILE_NAME)).await
     }
 
     async fn handle_start(config_dir: impl AsRef<Path>) -> Result<()> {
@@ -197,57 +155,6 @@ impl Executor {
     }
 }
 
-#[cfg(unix)]
-mod sys {
-    use rustix::{
-        io::Errno,
-        process::{Pid, test_kill_process},
-    };
-
-    /// `kill(pid, 0)` は signal を送らず、送れるかどうかだけを見る。
-    /// `EPERM` は別ユーザーのプロセスが存在することを意味するため、生存として扱う。
-    // omnius-lint:allow(free-fn) Unixのprocess生存確認をcfg moduleのOS境界として公開する
-    pub fn process_exists(pid: u32) -> bool {
-        let Ok(raw) = i32::try_from(pid) else {
-            return true;
-        };
-        let Some(pid) = Pid::from_raw(raw) else {
-            return true;
-        };
-
-        !matches!(test_kill_process(pid), Err(Errno::SRCH))
-    }
-}
-
-#[cfg(windows)]
-mod sys {
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, FALSE, STILL_ACTIVE},
-        System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
-    };
-
-    /// 終了済みでも handle を開ける場合があるため、`OpenProcess` の成否だけでは足りず
-    /// 終了コードまで見る。exit code が偶然 `STILL_ACTIVE` と同じ場合は生存と誤るが、
-    /// 起動を拒否する側へ倒れるため許容する。
-    // omnius-lint:allow(free-fn) Windowsのprocess生存確認をcfg moduleのOS境界として公開する
-    pub fn process_exists(pid: u32) -> bool {
-        // SAFETY: PID を渡して handle を得るだけで、無効な PID には null が返る。
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
-        if handle.is_null() {
-            // 存在しない PID は ERROR_INVALID_PARAMETER になる。権限不足なら存在している。
-            return std::io::Error::last_os_error().raw_os_error() != Some(87);
-        }
-
-        let mut code = 0u32;
-        // SAFETY: handle は直前の OpenProcess が返した有効なものである。
-        let ok = unsafe { GetExitCodeProcess(handle, &mut code) };
-        // SAFETY: 同上。ここで所有権を手放す。
-        unsafe { CloseHandle(handle) };
-
-        ok == 0 || code == STILL_ACTIVE as u32
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use tokio::sync::Notify;
@@ -329,7 +236,7 @@ mod tests {
         assert!(dir.path().join(LOCK_FILE_NAME).exists());
 
         let error = Executor::acquire_process_lock(dir.path()).await.expect_err("second daemon should be rejected");
-        assert_eq!(error.kind(), tokio::io::ErrorKind::AlreadyExists);
+        assert_eq!(error.kind(), tokio::io::ErrorKind::WouldBlock);
 
         Ok(())
     }
@@ -346,41 +253,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn acquire_process_lock_when_owner_is_alive() -> TestResult {
+    async fn acquire_process_lock_over_a_leftover_file() -> TestResult {
         let dir = tempfile::tempdir()?;
-        std::fs::write(dir.path().join(LOCK_FILE_NAME), std::process::id().to_string())?;
-
-        let error = Executor::acquire_process_lock(dir.path()).await.expect_err("a live owner should keep the lock");
-        assert_eq!(error.kind(), tokio::io::ErrorKind::AlreadyExists);
-
-        Ok(())
-    }
-
-    // 終了済みプロセスの PID を仕込むため、reap まで面倒を見られる unix に限る。
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn acquire_process_lock_when_owner_is_gone() -> TestResult {
-        let dir = tempfile::tempdir()?;
-
-        let child = std::process::Command::new("/usr/bin/true").spawn()?;
-        let dead_pid = child.id();
-        child.wait_with_output()?;
-
-        std::fs::write(dir.path().join(LOCK_FILE_NAME), dead_pid.to_string())?;
+        std::fs::write(dir.path().join(LOCK_FILE_NAME), "999999")?;
 
         let _lock = Executor::acquire_process_lock(dir.path()).await?;
         assert_eq!(std::fs::read_to_string(dir.path().join(LOCK_FILE_NAME))?, std::process::id().to_string());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn acquire_process_lock_when_lock_is_unreadable() -> TestResult {
-        let dir = tempfile::tempdir()?;
-        std::fs::write(dir.path().join(LOCK_FILE_NAME), "not a pid")?;
-
-        let error = Executor::acquire_process_lock(dir.path()).await.expect_err("an unparsable lock should be kept");
-        assert_eq!(error.kind(), tokio::io::ErrorKind::AlreadyExists);
 
         Ok(())
     }
