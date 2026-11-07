@@ -36,7 +36,7 @@ While several requests for different sizes or kinds of one image arrive, from on
 
 ### 2.2 Non-Goals
 
-- The image socket and the switch of the web client to it. They are IC1 and IC2 of [Image Socket Design §10.2](../design/image-socket.md#102-roadmap), planned in [image-socket-server](./image-socket-server.md) and [image-socket-client](./image-socket-client.md).
+- The image socket and the switch of the web client to it. They are IC1 and IC2 of [Image Socket Design §10.2](../design/image-socket.md#102-roadmap).
 - Changing the slots or threads of external processes. It is deferred ([Thumbnail Design §10.2](../design/thumbnail.md#threads-and-slots-of-the-external-processes-for-images)).
 
 ## 3. Current State

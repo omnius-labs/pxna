@@ -39,8 +39,8 @@ A client can want thumbnails, sprite sheets, and display images over one WebSock
 
 ### 2.2 Non-Goals
 
-- The web client's use of the socket and its image cache. They are IC2, planned in [image-socket-client](./image-socket-client.md).
-- Removing `GET /libraries/{libraryId}/thumbnails`. It is IC3, planned in [thumbnail-get-removal](./thumbnail-get-removal.md).
+- The web client's use of the socket and its image cache. They are IC2 of [Image Socket Design §10.2](../design/image-socket.md#102-roadmap).
+- Removing `GET /libraries/{libraryId}/thumbnails`. It is IC3 of [Image Socket Design §10.2](../design/image-socket.md#102-roadmap).
 
 ## 3. Current State
 
