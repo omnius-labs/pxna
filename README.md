@@ -8,13 +8,15 @@
 
 Pxna is a self-hosted remote file manager. A Rust daemon serves files from directories on your server (Libraries), and a web client lets you browse, view, search, and manage them from a browser.
 
+Pxna is not a photo app that imports your files. It reads the folders you already have, including inside ZIP and 7z archives, and adds browsing and ratings and tags without moving anything, plus the file operations to manage them. It is built for a single owner on a home server who does not want to upload the library to a cloud.
+
 ## Features
 
-- Browse a Library as a tree, grid, or list, with thumbnails for images and videos
+- Browse a Library as a tree, grid, or list, with thumbnails for images and videos, including inside ZIP and 7z archives
 - Receive thumbnails, sprite sheets, and display images over one WebSocket per tab, cached in the browser and revalidated by `ETag`
 - View images and play videos, including on-the-fly HLS transcoding of formats a browser cannot play
 - Timeline view that groups media by date
-- Ratings and tags, with filtering in search
+- Ratings and tags stored outside the files, usable in readonly Libraries and inside archives, with filtering in search
 - Upload, rename, move, copy, and delete files
 - Single-owner authentication with server-side sessions
 - English and Japanese UI, chosen from the browser's language or the settings menu

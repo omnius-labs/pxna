@@ -34,6 +34,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | Owner | all | `UserRole::Owner` | `owner` | Pxna's only user, registered once by initial setup | administrator |
 | Natural order | all | - | - | A name ordering that compares runs of digits as numbers and everything else without distinguishing case | - |
 | Folder-like Entry | all | - | `foldersFirst`, `foldersOnly` | A collective name for an Entry whose `kind` is `folder` and an Entry whose file detail `archive` is true | - |
+| Trash | all | - | - | A reserved hidden folder at the root of a Library where deleted Entries are moved, so they can be restored until the owner empties it | deleted folder |
 | block | storage | `ArchiveBlockId` | `-` | The unit extracted in one decode. One entry for ZIP and non-solid 7z | - |
 | ResolvedStoragePath | storage | `ResolvedStoragePath` | - | A value that holds the resolved driver, the path within the namespace, and the archive identity for the duration of a request | - |
 | ArchiveIdentity | storage | `ArchiveIdentity` | `-` | A SHA3-256 value that identifies one archive | archive key |
@@ -104,6 +105,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | [Rating](./terms/rating-tags.md#t-rating) | rating-tags | `Rating` | `rating`, `RatingValue` | The good or bad value a user gives to an image or video. The unrated state is represented as none | star, score |
 | Vocabulary | rating-tags | `RatingTagService::tags` | `GET /tags` | The list of tag words the user has created so far. Words removed from Entries remain and serve as completion candidates while typing | tag list |
 | Tag | rating-tags | `TagName` | `tags` | A word the user freely attaches to an image or video. Up to 32 per Entry, each word up to 64 characters, case-sensitive | label |
+| Content hash | rating-tags | - | - | A full SHA3-256 of an Entry's bytes, used as the identity of ratings and tags. For an entry inside an archive, it is the hash of the extracted entry | content identity, content key |
 
 ## 3. Boundaries Between Neighboring Terms
 
