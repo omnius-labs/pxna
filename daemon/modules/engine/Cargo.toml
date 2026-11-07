@@ -35,7 +35,6 @@ futures = { workspace = true }
 futures-util = { workspace = true }
 serial_test = { workspace = true }
 rupnp = { workspace = true }
-pin-utils = { workspace = true }
 local-ip-address = { workspace = true }
 nom = { workspace = true }
 fast-socks5 = { workspace = true }

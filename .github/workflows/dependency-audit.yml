@@ -54,5 +54,6 @@ jobs:
         with:
           tool: cargo-audit@0.22.1
 
+      # testcontainers 0.28 still depends on the unmaintained astral-tokio-tar in its test-only path.
       - name: Audit Rust dependencies
-        run: cargo audit --file daemon/Cargo.lock --deny unmaintained --deny unsound
+        run: cargo audit --file daemon/Cargo.lock --deny unmaintained --deny unsound --ignore RUSTSEC-2026-0440
