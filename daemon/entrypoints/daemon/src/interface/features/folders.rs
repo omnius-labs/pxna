@@ -352,9 +352,10 @@ mod tests {
     }
 
     /// A folder written just now is rescanned after the first listing; age it so the two requests share a snapshot.
+    /// `File::open` cannot open a directory on Windows, so set the time through `filetime`.
     fn age(path: &std::path::Path) -> std::io::Result<()> {
         let modified = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
-        std::fs::File::open(path)?.set_modified(modified)
+        filetime::set_file_mtime(path, filetime::FileTime::from_system_time(modified))
     }
 
     #[tokio::test]
