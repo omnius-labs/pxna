@@ -1,0 +1,334 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - "main"
+      - "release/*"
+
+permissions:
+  contents: read
+
+# A new push to a pull request replaces its previous run. A run on a main branch is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Decides which scopes a change touches, so the jobs below can skip themselves while `gate` still reports.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      daemon: ${{ steps.scope.outputs.daemon }}
+      ui: ${{ steps.scope.outputs.ui }}
+      interface: ${{ steps.scope.outputs.interface }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Select the scopes
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          all=false
+          files=""
+          case "$EVENT" in
+            pull_request)
+              files=$(git diff --name-only "$BASE" "$GITHUB_SHA")
+              ;;
+            push)
+              if [[ "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+                all=true
+              else
+                files=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+              fi
+              ;;
+            *)
+              all=true
+              ;;
+          esac
+          if printf '%s\n' "$files" | grep -Eq '^\.github/'; then
+            all=true
+          fi
+          echo "all scopes: $all"
+          echo "changed files:"
+          printf '%s\n' "$files"
+
+          touches() {
+            [ "$all" = true ] || printf '%s\n' "$files" | grep -Eq "$1"
+          }
+          daemon=false; ui=false; interface=false
+          if touches '^daemon/'; then daemon=true; fi
+          if touches '^(ui-web/|daemon/openapi\.yaml$|daemon/sockets/image\.schema\.json$|mise\.toml$|mise\.lock$)'; then ui=true; fi
+          if touches '^(daemon/openapi\.yaml$|daemon/entrypoints/interface/|daemon/entrypoints/gen-interface\.sh$)'; then interface=true; fi
+          {
+            echo "daemon=$daemon"
+            echo "ui=$ui"
+            echo "interface=$interface"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  daemon-lint:
+    needs: changes
+    if: needs.changes.outputs.daemon == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ./daemon
+    steps:
+      - name: Maximize build space
+        uses: AdityaGarg8/remove-unwanted-software@v5
+        with:
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: "recursive"
+
+      - name: restore timestamps
+        uses: chetan/git-restore-mtime-action@v2
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "20.1"
+          directory: ${{ runner.temp }}/llvm
+
+      - name: Setup rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup cargo make
+        uses: davidB/rust-cargo-make@v1
+        with:
+          version: latest
+
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@v2.9.3
+        with:
+          shared-key: "ubuntu-latest-lint"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: "true"
+          cache-workspace-crates: "true"
+          workspaces: |
+            daemon -> target
+
+      - name: Lint
+        run: cargo make lint
+
+  # A pull request runs Linux only. A main branch and a manual dispatch run every target of design.md.
+  daemon-test:
+    needs: changes
+    if: needs.changes.outputs.daemon == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
+    defaults:
+      run:
+        working-directory: ./daemon
+    steps:
+      - name: Maximize build space
+        if: runner.os == 'Linux'
+        uses: AdityaGarg8/remove-unwanted-software@v5
+        with:
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: "recursive"
+
+      - name: restore timestamps
+        uses: chetan/git-restore-mtime-action@v2
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "20.1"
+          directory: ${{ runner.temp }}/llvm
+
+      - name: Setup rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install cargo nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@v2.9.3
+        with:
+          shared-key: "${{ matrix.os }}-test"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: "true"
+          cache-workspace-crates: "true"
+          workspaces: |
+            daemon -> target
+
+      - name: Install libheif and ffmpeg 9 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libheif-examples libheif-plugin-libde265 libheif-plugin-dav1d
+          curl -fsSL -o /tmp/ffmpeg.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz"
+          echo "68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269  /tmp/ffmpeg.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/ffmpeg"
+          tar -xJf /tmp/ffmpeg.tar.xz -C "$RUNNER_TEMP/ffmpeg" --strip-components=1
+          echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
+
+      - name: Install ffmpeg and libheif (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg libheif
+
+      - name: Install ffmpeg 9 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n9.0.2-17-g2a571b6068-win64-gpl-9.0.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\ffmpeg.zip"
+          Expand-Archive "$env:RUNNER_TEMP\ffmpeg.zip" -DestinationPath "$env:RUNNER_TEMP\ffmpeg"
+          $bin = Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Directory | Select-Object -First 1
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $bin.FullName "bin")
+
+      - name: Use system unwinder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "DYLD_LIBRARY_PATH=" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=$LLVM_PATH/lib" >> "$GITHUB_ENV"
+
+      # The Postgres container tests cannot start on the Windows and macOS runners. The lint is not
+      # repeated here; daemon-lint runs it.
+      - name: Test
+        shell: bash
+        env:
+          NEXTEST_PROFILE: ci
+          PXNA_REQUIRE_FFMPEG: "1"
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            export PXNA_REQUIRE_HEIF_DEC=1
+          fi
+          filter=""
+          if [ "$RUNNER_OS" != "Linux" ]; then
+            filter="not (package(omnius-core-migration) & binary(postgres))"
+          fi
+          cargo nextest run --all-features ${filter:+-E "$filter"}
+
+  ui:
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ./ui-web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup tools
+        uses: jdx/mise-action@v5
+
+      - name: Cache npm
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('ui-web/package-lock.json') }}
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Regenerate API types
+        run: npm run gen:api
+
+      - name: Check generated API types are up to date
+        run: |
+          git status --porcelain -- src/api
+          test -z "$(git status --porcelain -- src/api)"
+
+      - name: Regenerate socket types
+        run: npm run gen:image-socket
+
+      - name: Check generated socket types are up to date
+        run: |
+          git status --porcelain -- src/api
+          test -z "$(git status --porcelain -- src/api)"
+
+  interface:
+    needs: changes
+    if: needs.changes.outputs.interface == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ./daemon
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: "recursive"
+
+      - name: Setup tools
+        uses: jdx/mise-action@v5
+
+      - name: Setup java
+        uses: actions/setup-java@v6
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Setup rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Regenerate interface
+        run: bash ./entrypoints/gen-interface.sh
+
+      - name: Check generated interface is up to date
+        run: |
+          git status --porcelain -- entrypoints/interface
+          test -z "$(git status --porcelain -- entrypoints/interface)"
+
+  # A skipped job does not report, so `gate` is the only job that branch protection can require.
+  gate:
+    if: always()
+    needs: [changes, daemon-lint, daemon-test, ui, interface]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null
