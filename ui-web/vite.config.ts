@@ -4,8 +4,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-// daemon の既定の待ち受けアドレス（daemon/config/pxna.toml.example の listen_addr）。
-// 別の daemon へ繋ぐときは、環境変数 `PXNA_DAEMON_ORIGIN` で上書きする。
+// The daemon's default listen address (listen_addr in daemon/config/pxna.toml.example).
+// Set PXNA_DAEMON_ORIGIN to reach another daemon.
 const daemonOrigin = process.env.PXNA_DAEMON_ORIGIN ?? "http://localhost:6050";
 
 export default defineConfig({
@@ -17,16 +17,16 @@ export default defineConfig({
     },
     server: {
         proxy: {
-            // Host を書き換えない。daemon の Origin の検証は Origin を Host と比べるため、
-            // Host を daemon のアドレスへ書き換えると、cookie を持つ変更系の要求が 403 になる。
-            // `ws` は image socket の WebSocket の upgrade も同じ先へ渡す。
+            // Do not rewrite Host. The daemon compares Origin with Host, so rewriting Host to the
+            // daemon's address makes cookie-bearing mutations answer 403. `ws` also forwards the
+            // image socket's WebSocket upgrade to the same target.
             "/api": { target: daemonOrigin, changeOrigin: false, ws: true },
         },
     },
     test: {
         environment: "node",
         include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-        // どのテストも、実際の WebSocket と IndexedDB を使わないよう、画像の窓口を偽物にしておく。
+        // Every test fakes the image source so it never opens a real WebSocket or IndexedDB.
         setupFiles: ["./src/testing/setup.ts"],
     },
 });

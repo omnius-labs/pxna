@@ -13,6 +13,8 @@ import { TransferContext } from "../library/transfer";
 import { type UploadInput, useUploads } from "../library/upload";
 import { CollisionDialog } from "./CollisionDialog";
 
+const entryName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+
 export function TransferProvider({ children }: { children: ReactNode }) {
     const uploads = useUploads();
     const client = useQueryClient();
@@ -82,7 +84,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
                 throw new Error(t("transfer.readOnly"));
             if (source.libraryId === destination.libraryId) {
                 for (const entry of source.entries) {
-                    const target = childPath(destination.path, entry.path.split("/").at(-1)!);
+                    const target = childPath(destination.path, entryName(entry.path));
                     if (
                         (source.mode === "cut" && target === entry.path) ||
                         (entry.folder &&
@@ -91,15 +93,13 @@ export function TransferProvider({ children }: { children: ReactNode }) {
                         throw new Error(t("transfer.invalidTarget"));
                 }
             }
-            const incoming = source.entries.map((entry) => entry.path.split("/").at(-1)!);
+            const incoming = source.entries.map((entry) => entryName(entry.path));
             const collisions = await findCollisions(incoming, destination, signal);
             signal.throwIfAborted();
             const duplicate =
                 source.mode === "copy" &&
                 source.libraryId === destination.libraryId &&
-                source.entries.some(
-                    (entry) => childPath(destination.path, entry.path.split("/").at(-1)!) === entry.path,
-                );
+                source.entries.some((entry) => childPath(destination.path, entryName(entry.path)) === entry.path);
             const policy =
                 collisions.length || duplicate
                     ? await confirm(collisions.length ? collisions : incoming, duplicate)
@@ -149,7 +149,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
             });
             signal.throwIfAborted();
             if (!library || !canMutate(library, folder)) throw new Error(t("errors.cannotSendHere"));
-            const roots = [...new Set(inputs.map((input) => input.path.split("/")[0]!))];
+            const roots = [...new Set(inputs.map((input) => input.path.split("/")[0] ?? input.path))];
             const policy = await resolveConflict(roots, destination, confirm, signal);
             if (policy === "cancel" || signal.aborted || !active.current) return;
             uploads.store.enqueue(inputs, destination, policy);

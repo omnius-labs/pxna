@@ -1,0 +1,3 @@
+# The workflows report every failing test of a run instead of stopping at the first.
+[profile.ci]
+fail-fast = false

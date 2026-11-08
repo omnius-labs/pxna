@@ -43,7 +43,7 @@ jobs:
       - name: Audit web dependencies
         run: npm audit --prefix ui-web --package-lock-only --include=dev --audit-level=high
 
-  rust:
+  cargo:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

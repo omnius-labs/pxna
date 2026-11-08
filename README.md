@@ -4,7 +4,7 @@
 
 <h1 align="center">Pxna - Omnius Remote File Manager (Work in Progress)</h1>
 
-[![test-daemon-all](https://github.com/omnius-labs/pxna/actions/workflows/test-daemon-all.yml/badge.svg)](https://github.com/omnius-labs/pxna/actions/workflows/test-daemon-all.yml)
+[![ci](https://github.com/omnius-labs/pxna/actions/workflows/ci.yml/badge.svg)](https://github.com/omnius-labs/pxna/actions/workflows/ci.yml)
 
 Pxna is a self-hosted remote file manager. A Rust daemon serves files from directories on your server (Libraries), and a web client lets you browse, view, search, and manage them from a browser.
 
@@ -91,6 +91,37 @@ The CLI still depends on [braces with an unpatched denial-of-service vulnerabili
 (cd daemon && cargo make lint)
 (cd ui-web && npm run lint)
 ```
+
+### CI
+
+The `ci` workflow runs on a pull request, on a push to `main` or `release/*`, and on a manual dispatch.
+A change selects the jobs by the files it touches, and the `gate` job always reports, so it is the one check meant for branch protection.
+
+| Change | Jobs |
+| --- | --- |
+| `daemon/**` | `daemon-lint`, `daemon-test` |
+| `daemon/openapi.yaml` | `daemon-lint`, `daemon-test`, `ui`, `interface` |
+| `daemon/sockets/image.schema.json` | `daemon-lint`, `daemon-test`, `ui` |
+| `ui-web/**`, `mise.toml`, `mise.lock` | `ui` |
+| `.github/**` | Every job |
+| Anything else, such as `docs/` | Only `changes` and `gate` |
+
+A pull request runs the daemon tests on Linux, and a push to `main` or `release/*` runs them on Linux, macOS, and Windows.
+A separate `dependency-audit` workflow runs weekly and on dependency changes; it is not part of the merge gate.
+The design is in [ci.md](./docs/design/ci.md).
+
+Run the same checks by hand:
+
+```sh
+(cd daemon && cargo make lint)
+(cd daemon && cargo nextest run --all-features)
+(cd ui-web && npm ci && npm run lint && npm run typecheck && npm test && npm run build)
+(cd ui-web && npm run gen:api && npm run gen:image-socket && test -z "$(git status --porcelain -- src/api)")
+bash daemon/entrypoints/gen-interface.sh && test -z "$(git status --porcelain -- daemon/entrypoints/interface)"
+```
+
+The daemon tests need ffmpeg 9 and, on Linux, `heif-dec` from libheif. The CI installs ffmpeg 9 on every runner and libheif on Linux and macOS; the Docker image includes both for container use.
+The `postgres` test binary starts a container, so it needs a container runtime and runs on Linux only.
 
 ## Running in Docker
 
