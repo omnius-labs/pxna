@@ -23,6 +23,7 @@ Definitions of words are not in this document.
 | [Client Design](./design/client.md)           | Screen structure of the web client, behavior of tiles and the viewer, how thumbnails and listings are requested, Entry operations, display preferences |
 | [Timeline Design](./design/timeline.md)       | What is listed in the timeline, timeline dates, the timeline index, aggregation and reading                                                              |
 | [Rating and Tag Design](./design/rating-tags.md) | What can be rated and tagged, value rules, storage, following changes, filtering listings, API conventions                                          |
+| [CI Design](./design/ci.md)                   | Triggers, change scope, jobs, the platform split, the merge gate, the dependency audit, and the runtime conventions of the workflows                    |
 | [terms.md](./terms.md)                        | Definitions of terms, spelling, aliases, boundaries with neighboring terms                                                                              |
 | [issues.md](./issues.md)                      | Clear defects confirmed in code and handling policies                                                                                                    |
 | [knowledge.md](./knowledge.md)                | Facts verified about the libraries and external components depended on                                                                                   |

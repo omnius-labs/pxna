@@ -943,11 +943,11 @@ Concurrent requests to the same block are collapsed into one decode by single-fl
 The result of inspect is held by the in-process index cache per `ArchiveIdentity`, and results where it was determined that it cannot be opened as an archive are negative-cached.
 The old `local_archive` module has been deleted.
 
-The engine depends on `async_zip`, `sevenz-rust2` 0.22.0, `encoding_rs`, `sqlx`, `tempfile`, and `sha3`.
+The engine depends on `async_zip`, `sevenz-rust2` 0.24.2, `encoding_rs`, `sqlx`, `tempfile`, and `sha3`.
 For no-replace rename, it depends on `rustix` on unix and `windows-sys` on Windows.
 
 The archive foundation has passed CI verification on Linux, macOS, and Windows.
-`test-daemon-all` can also be run by workflow_dispatch, and on Linux it verifies all tests including Docker, and on macOS and Windows it verifies excluding only the PostgreSQL Docker tests.
+The `daemon-test` job of `ci` runs on every operating system for a push to `main` or `release/*` and for a manual dispatch; on Linux it verifies all tests including Docker, and on macOS and Windows it verifies excluding only the PostgreSQL Docker tests.
 
 `ErrorKind` has the 6 kinds of §5.4.
 The daemon configuration has `core`, `logging`, `libraries`, and `[storage.archive]`.

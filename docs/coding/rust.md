@@ -41,36 +41,36 @@ The following code is out of scope.
 | Under `#[cfg(test)]` and test functions | This document does not constrain test structure |
 | `fn main`                             | The entrypoint the language requires            |
 
-## 2. Owners of Behavior
+## 2. Owners of behavior
 
-### 2.1 Prefer the Natural Owner
+### 2.1 Prefer the natural owner
 
-Behavior that has a type representing its input or result, a type holding its state, or an adapter interpreting an external format goes in the `impl` of that type.
-Callers no longer need to tell state and input apart from a function name and arguments alone, and the impact of a change stays within the type.
+Processing whose types represent inputs or results, types with state, and adapters that interpret an external format live in the `impl` of that type.
+This lets the caller tell the state and the inputs apart from the function name and arguments alone, and closes the blast radius of a change within the type.
 
 ```rust
-// Form to avoid
+// shape to avoid
 fn detect_format(head: &[u8]) -> Result<ArchiveFormat> { ... }
 
-// Form with a clear owner
+// shape with a clear owner
 impl ArchiveFormat {
     fn detect(head: &[u8]) -> Result<Self> { ... }
 }
 ```
 
-You do not need to invent a meaningless type just to move a free function into it.
-The following may be free functions when they have no natural owner.
+There is no need to create a meaningless type only to move free functions into types.
+The following kinds of processing may be free functions when they have no natural owner.
 
-- Stateless low-level algorithms used by several peer types
-- Platform boundaries that wrap OS APIs or FFI
-- Callbacks for which a framework requires a function
+- low-level stateless algorithms used by multiple peer types
+- platform boundaries wrapping an OS API or FFI
+- callbacks the framework requires as functions
 
-When you put a free function in production code, leave the reason next to the code with the marker described in chapter 4.
+When a free function is placed in production code, leave the reason next to the code with a chapter 4 marker.
 
-### 2.2 Unit Structs and Associated Functions Without self
+### 2.2 unit structs and related functions without self
 
-A type with no fields can be used when its name expresses a single role.
-Stateless trait implementations, parsers, migrators, and converters fit this form.
+A type without fields is usable when the type name expresses one role.
+Stateless trait implementations, parsers, migrators, and converters fit this shape.
 
 ```rust
 struct ElementParser;
@@ -80,87 +80,87 @@ impl ElementParser {
 }
 ```
 
-A unit struct is not a place to park free functions.
-Do not create a type with a name that accepts any behavior, such as `Util`, `Helpers`, or `Functions`.
+A unit struct is not a repository for free functions.
+Do not create a type with a name that can hold any processing, such as `Util`, `Helpers`, or `Functions`.
 
-Associated functions that take no self are not limited to constructors that return `Self`.
-It is enough that the set of operations fits the role the type represents and the type does not become a place to add other responsibilities.
+Related functions that do not take `self` are not limited to constructors returning `Self`.
+It is enough that the operations fit the role the type represents and do not become a place to add unrelated responsibilities.
 
-### 2.3 One File Handles One Concept
+### 2.3 One file handles one concept
 
-Split files by cohesive responsibility, not by the number of types.
-A main type, its trait implementations, its dedicated input and output types, and a fake may live together.
+Files are split by a cohesive responsibility, not by the number of types.
+A main type, its trait implementations, dedicated input and output types, and fakes may coexist.
 
-Putting an implementation and its fake in `clock.rs`, or several precisions of the same representation in `timestamp.rs`, fits within one concept.
-On the other hand, do not gather loosely related behavior in `util.rs` or `helpers.rs`, and do not name a file only after a processing stage, as in `extract.rs`, and put functions in it.
+Putting an implementation and its fake in `clock.rs`, or placing multiple precisions of the same representation in `timestamp.rs`, fits within one concept.
+On the other hand, do not gather loosely related processing into `util.rs` or `helpers.rs`, or name a file after only a processing stage like `extract.rs` and put functions in it.
 
 Keep the file name able to explain the concept the file owns.
 
-## 3. What a Type Holds
+## 3. What types hold
 
-### 3.1 Separate Dependencies by Lifetime
+### 3.1 Split dependencies by lifetime
 
-When a type keeps using the same collaborator after construction, receive that dependency in the constructor and keep it in a field.
-Method arguments hold only operation inputs that change on every call.
+When a dependency keeps being used by the same party after construction, receive it in the constructor and hold it in a field.
+Method arguments hold only the operation inputs that change per call.
 
-Choose among generics, trait objects, and `Arc` by whether sharing is needed and whether dynamic dispatch is needed.
-Do not unify everything under `Arc<dyn Trait>` merely because it is an external boundary.
+Whether to use a generic, a trait object, or `Arc` is decided by whether sharing and dynamic dispatch are needed.
+Do not unify everything into `Arc<dyn Trait>` just because it is an external boundary.
 
 The number of arguments alone cannot distinguish dependencies from inputs.
 When arguments grow, check the lifetime of each value before reducing the count.
 
-### 3.2 Split Error Conversion by Whether Context Matters
+### 3.2 Split error conversion by whether context matters
 
-A one-to-one conversion from an external error to the crate's error that does not depend on context goes in `From`.
-Only conversions that yield the same `ErrorKind` wherever `?` is used qualify.
+A one-to-one context-independent conversion from an external error to the crate's error lives in `From`.
+Only conversions that produce the same `ErrorKind` wherever `?` is used qualify.
 
-A conversion whose classification changes with the context of the called feature, such as encryption, an unsupported format, or corruption, goes in the adapter or domain type that owns the external format.
-Keep the original error as the source in such a conversion wherever possible.
+A conversion whose classification changes with the context of the called feature, such as encryption, unsupported formats, or corruption, lives in the adapter or domain type that owns the external format.
+This conversion keeps the original error as the source wherever possible.
 
-### 3.3 Constructor Names
+### 3.3 Constructor names
 
-When a type has one standard way to be created, you may use `new` even if it can fail and returns `Result<Self>`.
-Use `parse`, `open`, `connect`, and `acquire` when the name should convey the meaning of the operation rather than plain construction.
+If there is one standard path for creating a type, `new` may be used even when it fails and returns `Result<Self>`.
+`parse`, `open`, `connect`, and `acquire` are used when the name should express the meaning of an operation rather than plain construction.
 
-Implement `Default` only for types with a single valid default value.
-Do not use it to fill required values with placeholders.
+`Default` is implemented only by types with one valid default.
+It is not used to fill required values with placeholders.
 
-## 4. Free-Function Markers
+## 4. Markers for free functions
 
-### 4.1 Permanent Exceptions
+### 4.1 Permanent exceptions
 
-Put an `allow` marker immediately before the declaration of a production free function that has no natural owner.
-In the reason, write why the function does not belong in a type's `impl`.
+A production free function without a natural owner places an `allow` marker right before its declaration.
+The reason states why it does not belong in a type's `impl`.
 
 ```rust
-// omnius-lint:allow(free-fn) Exposes the per-OS system call as the boundary of the cfg module
+// omnius-lint:allow(free-fn) surface per-OS system calls as the boundary of the cfg module
 fn process_exists(pid: u32) -> bool { ... }
 ```
 
-### 4.2 Unresolved Responsibility Placement
+### 4.2 Unresolved responsibility placement
 
-When a natural owner exists but the move, which changes behavior, is split into a separate change, put a `debt` marker.
-In the reason, write the type or the missing concept to move to, and why it is not moved in this change.
+When a natural owner exists but a move that changes behavior belongs to another change, a `debt` marker is used.
+The reason states the target type or the missing concept, and why it is not moved now.
 
 ```rust
-// omnius-lint:debt(free-fn) Separate the refactor that moves this to ArchiveExtractor from the behavior change
+// omnius-lint:debt(free-fn) separate the refactor to ArchiveExtractor from the behavior change
 fn materialize(...) -> Result<MaterializedFile> { ... }
 ```
 
-A `debt` is not a permission; it is a debt in the responsibility placement that remains today.
-Do not add a `debt` in a new change, and delete the marker when you move or delete the existing function.
-Review the PR diff to check these increases and decreases.
+`debt` is not a permit; it is the debt of the responsibility placement that currently remains.
+Do not add `debt` in a new change, and when an existing function is moved or deleted, remove the marker as well.
+This increase and decrease is confirmed in the PR diff review.
 
-### 4.3 Checking Markers
+### 4.3 Checking markers
 
-A reason in a marker is mandatory.
-An unmarked free function, an invalid marker, an empty reason, and a marker without a corresponding function make `cargo make lint-style` fail.
+The marker reason is mandatory.
+An unmarked free function, a malformed marker, an empty reason, or a marker without a corresponding function fails `cargo make lint-style`.
 
-The checker reports `debt`, but a `debt` alone does not make it fail, so the conventions can be introduced while preserving existing behavior.
+The checker displays `debt` but does not fail on `debt` alone, so the conventions can be introduced while keeping existing behavior.
 
-Unit structs, associated functions without self, file concept boundaries, dependency lifetimes, and error conversions need judgment of meaning, so review checks them.
+unit structs, related functions without self, file concept boundaries, dependency lifetimes, and error conversion require semantic judgment, so they are confirmed by review.
 
-The checker is implemented in core-rs's `entrypoints/lint-style`, and pxna uses the same binary through the submodule.
+The checker implementation lives in core-rs's `entrypoints/lint-style`.
 
 ## 5. Check Commands
 
