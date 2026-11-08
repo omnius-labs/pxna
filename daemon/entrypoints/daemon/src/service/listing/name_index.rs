@@ -1737,6 +1737,8 @@ mod tests {
         corrupt.verified().await;
         assert!(!corrupt.is_usable(LIB).await, "the index stops answering");
         assert!(dir.path().join("listing").join(BROKEN_MARKER_NAME).exists());
+        // Windows cannot remove the file while a connection from this pool is still open.
+        pool(&corrupt).close().await;
         drop(corrupt);
 
         let rebuilt = open(&dir).await;
