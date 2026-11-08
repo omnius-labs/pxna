@@ -257,7 +257,10 @@ mod tests {
         let dir = tempfile::tempdir()?;
         std::fs::write(dir.path().join(LOCK_FILE_NAME), "999999")?;
 
-        let _lock = Executor::acquire_process_lock(dir.path()).await?;
+        // Windows does not let another handle read a file while it is locked.
+        {
+            let _lock = Executor::acquire_process_lock(dir.path()).await?;
+        }
         assert_eq!(std::fs::read_to_string(dir.path().join(LOCK_FILE_NAME))?, std::process::id().to_string());
 
         Ok(())
