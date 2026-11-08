@@ -47,8 +47,10 @@ export async function renameEntry(
         await api.POST(route, { params: { path: { libraryId } }, body: { srcPaths: [path], dstPath } }),
     );
     if (!("entries" in data)) throw new Error(t("errors.renameNotSync"));
+    const [renamed] = data.entries;
+    if (!renamed) throw new Error(t("errors.renameNotSync"));
     await refreshLibrary(client, libraryId);
-    return data.entries[0]!;
+    return renamed;
 }
 /// 部分的な成功を捨てず、受理された Operation と元の失敗を呼び出し側へ返す。
 export class DeleteEntriesError extends ApiError {

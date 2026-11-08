@@ -68,14 +68,22 @@ export function buildRows(items: readonly DatedItem[], columns: number, tileSide
     const tilesHeight = rowHeight(tileSide);
     let index = 0;
     while (index < items.length) {
-        const day = dayOf(items[index]!.date);
+        const item = items[index];
+        if (!item) break;
+        const day = dayOf(item.date);
         let end = index;
-        while (end < items.length && dayOf(items[end]!.date) === day) end += 1;
+        while (end < items.length) {
+            const endItem = items[end];
+            if (!endItem || dayOf(endItem.date) !== day) break;
+            end += 1;
+        }
         rows.push({ type: "heading", key: `h:${day}`, day, height: DAY_HEADING_HEIGHT });
         for (let first = index; first < end; first += columns) {
+            const firstItem = items[first];
+            if (!firstItem) break;
             rows.push({
                 type: "tiles",
-                key: `t:${items[first]!.path}`,
+                key: `t:${firstItem.path}`,
                 day,
                 first,
                 count: Math.min(columns, end - first),
@@ -104,7 +112,8 @@ export function rowAtOffset(starts: readonly number[], offset: number): number {
     let high = starts.length - 1;
     while (low < high) {
         const middle = Math.ceil((low + high) / 2);
-        if (starts[middle]! <= offset) low = middle;
+        const start = starts[middle];
+        if (start !== undefined && start <= offset) low = middle;
         else high = middle - 1;
     }
     return Math.max(0, low);
@@ -116,7 +125,8 @@ export function rowOfItem(rows: readonly TimelineRow[], position: number): numbe
     let high = rows.length - 1;
     while (low <= high) {
         const middle = Math.floor((low + high) / 2);
-        const row = rows[middle]!;
+        const row = rows[middle];
+        if (!row) break;
         if (row.type === "heading") {
             // 見出しは、直後のタイルの行と同じ側へ寄せて探す。
             const next = rows[middle + 1];
@@ -139,11 +149,12 @@ export function verticalTarget(
 ): number | undefined {
     const rowIndex = rowOfItem(rows, position);
     if (rowIndex === undefined) return undefined;
-    const row = rows[rowIndex] as TilesRow;
+    const row = rows[rowIndex];
+    if (row?.type !== "tiles") return undefined;
     const column = (position - row.first) % columns;
     for (let next = rowIndex + direction; next >= 0 && next < rows.length; next += direction) {
-        const target = rows[next]!;
-        if (target.type === "tiles") return target.first + Math.min(column, target.count - 1);
+        const target = rows[next];
+        if (target?.type === "tiles") return target.first + Math.min(column, target.count - 1);
     }
     return undefined;
 }
@@ -165,14 +176,17 @@ export function anchorAt(
 ): ScrollAnchor | undefined {
     if (rows.length === 0) return undefined;
     const index = rowAtOffset(starts, scrollTop);
-    const row = rows[index]!;
-    return { key: row.key, path: items[firstItemOfRow(rows, index)]?.path, offset: scrollTop - starts[index]! };
+    const row = rows[index];
+    const start = starts[index];
+    if (!row || start === undefined) return undefined;
+    return { key: row.key, path: items[firstItemOfRow(rows, index)]?.path, offset: scrollTop - start };
 }
 
 /// 行の先頭の Entry の位置。見出しの行は、その日の最初のタイルの位置である。
 export function firstItemOfRow(rows: readonly TimelineRow[], index: number): number {
     for (let next = index; next < rows.length; next += 1) {
-        const row = rows[next]!;
+        const row = rows[next];
+        if (!row) break;
         if (row.type === "tiles") return row.first;
     }
     return 0;
@@ -192,5 +206,6 @@ export function restoreScroll(
         const found = position < 0 ? undefined : rowOfItem(rows, position);
         if (found !== undefined) index = found;
     }
-    return index < 0 ? undefined : starts[index]! + saved.offset;
+    const start = starts[index];
+    return index < 0 || start === undefined ? undefined : start + saved.offset;
 }

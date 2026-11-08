@@ -355,7 +355,8 @@ class FolderListingStore implements Listing {
             (page) => this.pages.get(page)?.summary && !this.detailPages.has(page),
         );
         if (index === undefined) return;
-        const page = this.pages.get(index)!;
+        const page = this.pages.get(index);
+        if (!page) return;
         if (page.entries.length === 0) {
             this.detailPages.add(index);
             return;

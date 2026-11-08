@@ -23,6 +23,10 @@ function stepIndex(tileSize: number): number {
     return Math.min(Math.max(Math.round(tileSize), MIN_TILE_SIZE), MAX_TILE_SIZE) - 1;
 }
 
+function stepValue<T>(values: readonly [T, ...T[]], index: number): T {
+    return values[index] ?? values[0];
+}
+
 /// 一覧の幅とタイルサイズの段階から、列の数とタイルの一辺を求める。
 /// 広い画面では、段階の値を一辺の最小値として入る列の数を求める。狭い画面では、段階を列の数として扱う。
 /// どちらも、列を一覧の幅いっぱいに広げる。タイルの間と左端の余白は `TILE_GAP` で、右端に余白は残らない。
@@ -37,8 +41,8 @@ export function gridLayout({
 }): GridLayout {
     const index = stepIndex(tileSize);
     const columns = narrow
-        ? NARROW_COLUMNS[index]!
-        : Math.max(1, Math.floor(width / (TILE_MIN_SIDES[index]! + TILE_GAP)));
+        ? stepValue(NARROW_COLUMNS, index)
+        : Math.max(1, Math.floor(width / (stepValue(TILE_MIN_SIDES, index) + TILE_GAP)));
     return { columns, tileSide: Math.max(1, Math.floor(width / columns) - TILE_GAP) };
 }
 
@@ -60,5 +64,7 @@ export function requestTileSide({
     screenWidth: number;
 }): number {
     const index = stepIndex(tileSize);
-    return narrow ? Math.max(1, Math.floor(screenWidth / NARROW_COLUMNS[index]!) - TILE_GAP) : TILE_MIN_SIDES[index]!;
+    return narrow
+        ? Math.max(1, Math.floor(screenWidth / stepValue(NARROW_COLUMNS, index)) - TILE_GAP)
+        : stepValue(TILE_MIN_SIDES, index);
 }

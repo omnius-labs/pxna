@@ -72,11 +72,11 @@ export class ChildProbeQueue {
     }
     private publish() {
         const now = Date.now();
-        this.results = new Map(
-            [...this.states]
-                .filter(([, state]) => state.value !== undefined && state.expires > now)
-                .map(([key, state]) => [key, state.value!]),
-        );
+        const results = new Map<string, boolean>();
+        for (const [key, state] of this.states) {
+            if (state.value !== undefined && state.expires > now) results.set(key, state.value);
+        }
+        this.results = results;
         for (const listener of this.listeners) listener();
     }
     private pump() {
@@ -114,11 +114,12 @@ export class ChildProbeQueue {
         if (this.disposed || controller.signal.aborted || this.wanted.get(target.key)?.snapshot !== target.snapshot)
             return;
         const now = Date.now();
-        const known = result.hasChildren !== null && !!result.sourceVersion && result.maxAgeMs > 0;
+        const value = result.hasChildren ?? undefined;
+        const known = value !== undefined && !!result.sourceVersion && result.maxAgeMs > 0;
         const failures = known ? 0 : (this.states.get(target.key)?.failures ?? 0) + 1;
         this.states.set(target.key, {
             snapshot: target.snapshot,
-            value: known ? result.hasChildren! : undefined,
+            value: known ? value : undefined,
             expires: known ? now + Math.min(result.maxAgeMs, 30000) : 0,
             retryAt: known ? 0 : now + Math.min(500 * 2 ** Math.min(failures - 1, 6), 30000),
             failures,

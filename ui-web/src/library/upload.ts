@@ -213,7 +213,7 @@ export class UploadStore {
                 const folder = await prepareFolder(parent, signal);
                 signal.throwIfAborted();
                 if (folder === undefined) return;
-                const name = input.path.split("/").at(-1)!;
+                const name = input.path.split("/").at(-1) ?? input.path;
                 if (input.file && policy === "skip" && (await existingEntry(destination.libraryId, folder, name)))
                     return;
                 return input.file ? childPath(folder, name) : folder;

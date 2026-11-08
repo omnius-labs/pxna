@@ -9,7 +9,7 @@ export const INFO_PANEL_THUMBNAIL_SIDES = [256, 384, 512, 640] as const;
 /// 枠の幅と高さ（CSS px）から、要求するサムネイルの一辺を決める。
 export function infoThumbnailSide(width: number, height: number): number {
     const need = Math.max(width, height);
-    return INFO_PANEL_THUMBNAIL_SIDES.find((side) => side >= need) ?? INFO_PANEL_THUMBNAIL_SIDES.at(-1)!;
+    return INFO_PANEL_THUMBNAIL_SIDES.find((side) => side >= need) ?? INFO_PANEL_THUMBNAIL_SIDES.at(-1) ?? need;
 }
 
 /// 保存した開閉を読む。保存がないときと、読めないときは、開いた状態にする。

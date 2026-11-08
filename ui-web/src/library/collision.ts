@@ -53,7 +53,9 @@ export async function findCollisions(
     await Promise.all(
         Array.from({ length: Math.min(8, unique.length) }, async () => {
             while (next < unique.length) {
-                const name = unique[next++]!;
+                const name = unique[next];
+                next += 1;
+                if (name === undefined) break;
                 if ((await readNames(destination, name, signal)).has(name)) collisions.add(name);
             }
         }),

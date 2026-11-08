@@ -93,7 +93,9 @@ function BrowseScreen({ location }: { location: BrowseLocation }) {
         [...selection.items.values()].every((item) => !item.readonly);
     const rename = useCallback(() => {
         if (!canRename) return;
-        const [path, item] = [...selection.items][0]!;
+        const entry = [...selection.items][0];
+        if (!entry) return;
+        const [path, item] = entry;
         setEditing({ type: "rename", path, folder: item.folder });
     }, [canRename, selection.items]);
     const canDelete =
