@@ -3346,7 +3346,6 @@ dependencies = [
  "regex",
  "reqwest",
  "ring",
- "rustix",
  "serde",
  "serde_json",
  "serial_test",
@@ -3371,7 +3370,6 @@ dependencies = [
  "urlencoding",
  "uuid",
  "validator",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
