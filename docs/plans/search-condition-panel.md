@@ -43,7 +43,7 @@ A user can search every Library, or chosen ones, by name, rating, and several ta
 
 ### 2.2 Non-Goals
 
-- Answering the search API from the name index. The `name-index-search` plan does it after this work, as Listing and Search Design §9.2 L1 keeps it.
+- Answering the search API from the name index. It is the separate work L1 of Listing and Search Design §9.2, described in its §5.2.
 - Search conditions that match any one of several tags. Rating and Tag Design §8.2 keeps it deferred.
 - Filtering the timeline by conditions. Rating and Tag Design §8.2 keeps it deferred.
 
@@ -173,10 +173,10 @@ Component tests show conditions 7 and 8.
 ### Step 7. Update the Current State and the Roadmap
 
 **Locations to change**
-[listing.md §9](../design/listing.md#9-current-state-and-remaining-work), [rating-tags.md §9](../design/rating-tags.md#9-current-state-and-remaining-work), [client.md §6](../design/client.md#6-current-state-and-remaining-work), [design.md §12.2](../design.md#122-roadmap), [name-index-search.md](./name-index-search.md)
+[listing.md §9](../design/listing.md#9-current-state-and-remaining-work), [rating-tags.md §9](../design/rating-tags.md#9-current-state-and-remaining-work), [client.md §6](../design/client.md#6-current-state-and-remaining-work), [design.md §12.2](../design.md#122-roadmap)
 
 **What to do**
-Rewrite the current-state sentences on search for the new API and screen, mark M22 as done, and point the `name-index-search` plan's listing contract and notice at `listSearchEntries`.
+Rewrite the current-state sentences on search for the new API and screen, and mark M22 as done.
 
 **Completion condition**
 `rg -n '/search/\{libraryId\}|filtering conditions on the folder listing' docs/design` returns only the redirect descriptions in Client Design §3.6 and §6.1, and M22 is Done.

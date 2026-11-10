@@ -48,6 +48,7 @@ The following are design issues whose fix has not been decided, so they are not 
 | Optimistic locking with ETag and If-Match | [design.md §11.2](./design.md#optimistic-locking-with-etag--if-match) |
 | Separating the admin port | [design.md §11.2](./design.md#separating-the-admin-port) |
 | Whether to reflect external changes in listings immediately | [Listing and Search Design §8.2](./design/listing.md#whether-to-reflect-external-changes-in-listings-immediately) |
+| Whether the name index keeps its time and size targets at 10 million Entries | [Listing and Search Design §8.2](./design/listing.md#whether-the-name-index-keeps-its-time-and-size-targets-at-10-million-entries) |
 | Process isolation for archive handling | [Storage Layer Design §9.2](./design/storage.md#process-isolation-for-archive-handling) |
 | Password-protected archives and decrypted caches | [Storage Layer Design §9.2](./design/storage.md#password-protected-archives-and-decrypted-caches) |
 | Legacy encodings other than CP932 | [Storage Layer Design §9.2](./design/storage.md#legacy-encodings-other-than-cp932) |
