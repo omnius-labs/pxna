@@ -28,11 +28,8 @@ During implementation, advance the state of the child and of this document, and 
 | [split-video-and-image-pools](./plans/split-video-and-image-pools.md) | Video ffmpeg runs have their own slots, so a slow video does not block HEIC decodes | Done | - |
 | [viewer-touch-gestures](./plans/viewer-touch-gestures.md) | The image viewer can be operated with one hand on a phone | Done | - |
 | [restore-last-folder](./plans/restore-last-folder.md) | Opening `/` returns to the last folder instead of asking for a Library | Done | - |
-| [name-index-store](./plans/name-index-store.md) | Every non-hidden Entry of a Library is held in a name index that follows our own changes | In progress | - |
 | [search-condition-panel](./plans/search-condition-panel.md) | Every Library, or chosen ones, can be searched by name, rating, and several tags with the conditions in the left area | Done | - |
-| [name-index-search](./plans/name-index-search.md) | A search from the root of a 10-million-Entry Library returns its first page within a second | In progress | name-index-store, search-condition-panel |
 | [viewer-display-modes](./plans/viewer-display-modes.md) | A work can be viewed in the wide-screen viewer's gallery and focus modes, and the mode returns on the next opening | Done | - |
 
 The thumbnail and image socket plans form a chain: `thumbnail-store-batching` and `source-jobs` follow `thumbnail-fanout-and-viewer-settings`, and `image-socket-server` follows `source-jobs`.
-The two name index plans run in order, and `name-index-search` also follows `search-condition-panel`, whose search API it answers.
 The `viewer-touch-gestures`, `restore-last-folder`, and `viewer-display-modes` plans are independent of each other and of them.

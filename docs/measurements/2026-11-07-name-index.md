@@ -5,7 +5,7 @@ Back to the [measurement list](../measurements.md).
 ## 1. Subject and Conditions
 
 2026-11-07 (UTC). We measured what the name index adds to the first full aggregation of a Library, how large its file is, and how fast recursive searches from the Library root answer from it.
-The plans ask for this on a 10-million-Entry fixture ([name-index-store](../plans/name-index-store.md) condition 6 and [name-index-search](../plans/name-index-search.md) condition 6). **This record is at about 1 million Entries, not 10 million**: the machine was shared and had 48 GiB of disk free, and one first aggregation took five to six minutes at this size. What changes with the size is read in section 4.
+The plans ask for this on a 10-million-Entry fixture (`name-index-store` condition 6 and `name-index-search` condition 6). **This record is at about 1 million Entries, not 10 million**: the machine was shared and had 48 GiB of disk free, and one first aggregation took five to six minutes at this size. What changes with the size is read in section 4.
 
 - Fixture: made by a generator script that is not kept in the repository, with 1,000,000 Entries asked for and a fixed random seed: 999,998 Entries, 90,908 folders and 909,090 empty files with Japanese and ASCII names, about 1% of the files with image extensions. The folders are at most six deep. The search measurement added 800 files with rare 2-character terms to it, and the final measurements below all ran on the fixture of 1,000,798 Entries.
 - A build: the daemon of commit `8558d87` (the commit before the change), `cargo build --release -p omnius-pxna-daemon`, sha256 `41d15f93efc9658f438533d4623e824d9bc1b976e303b48a2831bcec00765764`.

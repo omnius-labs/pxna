@@ -646,6 +646,22 @@ An index would hold memory as large as the listing in each snapshot and would ha
 **Conditions for deciding**
 When `locate` requests on a Library in real operation repeatedly take long enough to be noticed on screen, for example when opening a viewer URL waits visibly.
 
+#### Whether the Name Index Keeps Its Time and Size Targets at 10 Million Entries
+
+**Current state**
+The targets set for the name index are a first full aggregation at most 20% longer than without the index, an index file of at most 200 bytes per Entry, and, for a search from the Library root whose terms match at most 1,000 Entries, a p95 of the first page within 1 second for a term of 3 or more characters and within 5 seconds for terms of 2 characters or fewer, with a following page within 100 ms.
+They were measured only at about 1 million Entries ([2026-11-07-name-index](../measurements/2026-11-07-name-index.md)), where all of them held: the aggregation took 1.07 times as long, the file was 167 bytes per Entry, and the p95 of the first page was 0.019 seconds for 4-character terms and 2.8 seconds for rare 2-character terms.
+They have not been measured at the 10 million Entries the design assumes.
+A search with only terms of 2 characters or fewer compares every row under the start (§5.1), so the record estimates that a cold one from the root of a 10-million-Entry Library takes longer than 5 seconds.
+
+**Why not decide now**
+At 1 million Entries every target holds, and the only case expected to miss one at 10 million is a search with only short terms.
+The scripts that generated the fixture and drove the measurement were not kept, so measuring at 10 million means writing them again and finding a machine with enough free disk.
+We spend that only once a user meets a slow case.
+
+**Conditions for deciding**
+When a user reports that a search or the first full aggregation of a Library is slow. Then measure at that Library's size against the targets above, and decide whether short terms need another way of matching.
+
 ## 9. Current State and Remaining Work
 
 ### 9.1 Current Code
