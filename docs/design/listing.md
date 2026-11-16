@@ -619,6 +619,64 @@ Listings and details are for reference display, and for operations that open or 
 It skips enumeration and natural-order sorting after a restart, and avoids being unable to browse because of an index failure.
 It keeps the checks of maximum age and version and does not become a cache that returns stale displays forever. The cost is that the first enumeration and sorting after the expiry remain.
 
+#### Index the Entries Inside Archives Too
+
+**Decision**
+The name index also holds the Entries inside archives, down to `max_nested_depth`, and aggregation's walk fills it with them.
+A Scope says whether a listing reads the insides of archives; when it does not, an archive is one Entry.
+This replaces the rule of §2.1 that neither a recursive walk nor the name index descends into archives.
+
+**Reason**
+A Scope that reads inside archives has to be answered for every Filter and every sort, not only for images and videos in timeline-date order, which is all the timeline index holds.
+Aggregation already opens every archive in its range to read timeline dates ([Timeline Design §6.2](./timeline.md#62-archive-extraction)), so adding the names of what it enumerates costs index size, not extraction.
+The reason for the old rule, not building the indexes of all archives in the walk, no longer holds once aggregation builds them anyway.
+
+**Rejected alternative 1**
+Answering a Scope that reads inside archives only for images and videos, from the timeline index.
+No index would grow, but the files inside archives could not be listed by name or size, and other files inside them not at all, so we rejected it.
+
+**Rejected alternative 2**
+Walking the insides of archives at request time.
+No index would be needed, but a recursive listing would open every archive in its range and be cut off by count, so we rejected it.
+
+#### List the Entries of a Scope Through One API
+
+**Decision**
+One listing API, `listEntries`, takes a Scope, a Filter, and a sort that includes the timeline date, and replaces `listSearchEntries` and `listTimelineEntries`.
+The per-month counts of the timeline become a separate aggregate that takes the same Scope and Filter.
+How `listEntries` cuts pages is deferred (§8.2).
+
+**Reason**
+Switching a Shelf between the grid and the timeline then changes only the sort, so a client keeps one store for every Shelf.
+The two APIs it replaces have no clients but the web client and the iOS app, which follow the contract they are built against.
+
+**Rejected alternative 1**
+Keeping the two APIs and sharing only the schemas of the Scope and the Filter.
+Their paging could stay as it is, but each client would keep two stores and call another API whenever a Shelf changes its Layout, so we rejected it.
+
+**Rejected alternative 2**
+Adding `listEntries` and keeping the old APIs for a while.
+Moving over would be gradual, but there is no outside client to keep them for, so we rejected it.
+
+#### List Only Files Recursively Unless the Filter Asks for Folders
+
+**Decision**
+A Filter's kind chooses among folders, archives, images, videos, and other files.
+A recursive listing whose Filter names no kind returns every kind except folders, and folders appear only when the kind names them.
+A listing of direct children returns every kind, as before.
+
+**Reason**
+A recursive Shelf is a flat set of files, such as the books under a shelf or the images under output folders, and folders mixed into it would only interrupt it.
+Naming folders in the kind still finds a folder by its name, which is the way back to the tree.
+
+**Rejected alternative 1**
+Always including folders, as subtree search did.
+Folders could be found by name without asking, but every flat set would carry them, so we rejected it.
+
+**Rejected alternative 2**
+Never returning folders from a recursive listing.
+The rule would be simpler, but a folder could no longer be found by name, so we rejected it.
+
 ### 8.2 Deferred
 
 #### Whether to Reflect External Changes in Listings Immediately
@@ -661,6 +719,18 @@ We spend that only once a user meets a slow case.
 
 **Conditions for deciding**
 When a user reports that a search or the first full aggregation of a Library is slow. Then measure at that Library's size against the targets above, and decide whether short terms need another way of matching.
+
+#### How listEntries Cuts Pages
+
+**Current state**
+Listings and search cut pages by `offset` from a snapshot and find an Entry's page with `locate` (§4).
+The timeline cuts pages with cursors and starts from a month or from around an Entry ([Timeline Design §7](./timeline.md#7-reading)).
+
+**Why not decide now**
+The choice depends on whether a sequence in timeline-date order can be cut at any `offset` at the assumed scale, and on whether the clients reserve the overall height for every Layout, which the timeline does not do.
+
+**Conditions for deciding**
+Before the contract of `listEntries` is written in `openapi.yaml`.
 
 ## 9. Current State and Remaining Work
 
