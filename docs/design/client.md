@@ -1674,6 +1674,47 @@ There would be fewer gestures to tell apart, but reaching the enlarged view and 
 A method that also moves back and forth among videos with flicks.
 Movement would be the same for images and videos, but a horizontal drag on the seek bar would be taken as a flick, so we rejected it.
 
+#### Enter Through the Libraries and the Shelves
+
+**Decision**
+The top-level entrances of every client are the Libraries, the Shelves, and the settings.
+Opening search opens an Unsaved Shelf, and saving it makes it a Shelf; search from a folder opens an Unsaved Shelf whose Scope is that folder.
+A default Shelf named Timeline is created with every Library in its Scope, the insides of archives read, images and videos in its Filter, and the timeline Layout, and it takes over the Libraries chosen in `timelineLibraries`.
+The owner can edit and delete it like any other Shelf.
+This replaces the switch of three choices between folder view, the timeline, and search mode.
+
+**Reason**
+The two entrances follow the two ways of browsing ([design.md §11.1](../design.md#browse-through-the-tree-and-shelves)).
+With the default Shelf, an owner who only wants to look through photos by date sees the timeline from the first use, without composing anything.
+It can be changed like any Shelf, because Pxna does not keep anything in the owner's way that the owner cannot change.
+
+**Rejected alternative 1**
+Keeping search and the timeline at the top level and letting each be saved as a Shelf.
+The present screens would stay, but three entrances would show what is one concept, so we rejected it.
+
+**Rejected alternative 2**
+Shelves only, with no default Shelf.
+It is the purest form, but an owner would have to build a timeline before seeing one, so we rejected it.
+
+#### Decide How an Archive Opens by Settings, Not by Layout
+
+**Decision**
+The Layouts are the grid, the list, and the timeline.
+Whether a listing shows folders and archives as tiles or a flat set of files follows the Scope's choice of descendants.
+Whether opening an archive shows its pages as a folder or opens the viewer at its first page is a display setting, resolved over the display preferences, the folder settings, and the Shelf ([design.md §11.1](../design.md#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
+
+**Reason**
+What is listed, how it is arranged, and how an opened Entry behaves are then three settings that do not overlap.
+A shelf of books is a recursive Scope of archives in the grid with archives opening in the viewer, and larger covers come from the tile size and shape the grid already has.
+
+**Rejected alternative 1**
+A bookshelf Layout that shows covers and opens archives in the viewer.
+It is easy to explain, but it would overlap the setting of how an archive opens and need a rule for which wins, so we rejected it.
+
+**Rejected alternative 2**
+Separate Layouts for a grid of folders and a flat grid.
+They would repeat the Scope's choice of descendants and allow contradictory pairs, so we rejected it.
+
 ### 5.2 Deferred
 
 #### Whether to Show Counts on Folder Tiles

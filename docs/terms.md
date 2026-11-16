@@ -35,6 +35,8 @@ Design rationale, implementation status, defects, and external behavior are each
 | Natural order | all | - | - | A name ordering that compares runs of digits as numbers and everything else without distinguishing case | - |
 | Folder-like Entry | all | - | `foldersFirst`, `foldersOnly` | A collective name for an Entry whose `kind` is `folder` and an Entry whose file detail `archive` is true | - |
 | Trash | all | - | - | A reserved hidden folder at the root of a Library where deleted Entries are moved, so they can be restored until the owner empties it | deleted folder |
+| Shelf | all | - | - | A saved way to browse the tree that holds a Scope, a Filter, and a Layout. It names folders and rules, never member Entries, and the daemon keeps it for every client | bookmark, album, collection |
+| Background work | all | - | - | Work the daemon starts on its own and no request waits for, such as aggregation | job |
 | block | storage | `ArchiveBlockId` | `-` | The unit extracted in one decode. One entry for ZIP and non-solid 7z | - |
 | ResolvedStoragePath | storage | `ResolvedStoragePath` | - | A value that holds the resolved driver, the path within the namespace, and the archive identity for the duration of a request | - |
 | ArchiveIdentity | storage | `ArchiveIdentity` | `-` | A SHA3-256 value that identifies one archive | archive key |
@@ -63,6 +65,8 @@ Design rationale, implementation status, defects, and external behavior are each
 | Subtree search | listing | - | `recursive=true` with `query`, the default scope of search mode | A listing that covers everything under a starting folder and returns Entries whose names match the condition, from the name index or by walking | global search |
 | Search listing | listing | `SearchListing` | `listSearchEntries`, `libraryIds`, `truncatedLibraryIds` | A listing that applies name, rating, and tag conditions to the listing of each given Library and merges them into one sequence of Entries carrying their Library ids | global search |
 | Locate | listing | - | `locate`, `locateLibraryId` (request parameters) | A listing request parameter that names an Entry and returns the page holding it, in place of the page at an `offset`. It is distinct from the web client's `Listing.locate`, which finds an Entry only among the pages already read | find position, seek |
+| Scope | listing | - | - | The part of a listing request that names what is read: one or more pairs of a Library and a Library-relative path, whether descendants are included, and whether the insides of archives are read | range, source |
+| Filter | listing | - | - | The conditions by which a listing keeps Entries: name, rating, tags, and kind | criteria |
 | Search mode | client | - | `/search`, `lib`, `q`, `path`, `flat=1`, `rating`, `tag` | The web screen where you choose, in its left area, the Libraries, a start (the whole Library or under a folder, only while one Library is chosen), a scope (include descendants or only direct children), and search by name, rating, and tags. The toolbar's switch places it beside folder view and the timeline | search box, search page |
 | Activity panel | client | - | - | A list, overlaid at the bottom right of the web client, of the progress and results of Operations and uploads | transfer panel |
 | Info panel | client | - | `pxna.infoPanelOpen` (a `localStorage` key) | The web display, placed to the right of a listing, of the details and media info of the selected Entry | inspector |
@@ -82,6 +86,9 @@ Design rationale, implementation status, defects, and external behavior are each
 | Position meter | client | `PositionMeter` | - | A row of thin bars at the bottom edge of the viewer in gallery and focus modes, which shows the open Entry's proportional position and moves on a click | scrubber |
 | Folder view | client | - | `/browse/{libraryId}/…`, "Folder" | The web screen that lists the direct children of the folder selected in the tree | dir mode |
 | Display preferences | client | `Preferences` | `/preferences` | The set of values for the web client's appearance and behavior that the owner chooses and saves on the server | settings |
+| Layout | client | - | - | How a listing arranges its Entries: as a grid, a list, or the timeline | view |
+| Unsaved Shelf | client | - | - | A Shelf being composed that has not been saved, which is what opening search shows | temporary search |
+| Folder settings | client | - | - | Display settings saved for one folder and inherited by the folders under it, applied between the display preferences and a Shelf | per-folder preferences |
 | Image socket client | client | `ImageSocketClient` | - | The web client's one holder per tab of the image wants of every part, which merges them into items, keeps received images in IndexedDB, and talks to the image socket | thumbnail queue |
 | Size steps | thumbnail | - | `[thumbnail] sizes`, `display_sizes` | The fixed set of values to which the server rounds up the width and height of thumbnails and display images | - |
 | Companion | thumbnail | - | - | A thumbnail that one generation makes from the same decode as the requested image and stores as an ordinary cache entry: the smallest three size steps in both shapes, and, for a thumbnail or a sprite sheet request, the other shape at the requested size | - |

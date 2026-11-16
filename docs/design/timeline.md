@@ -590,6 +590,22 @@ We do not assert from the difference in time alone which of disk waits, VirtioFS
 **Reason**
 Even if only metadata is throttled, load remains if aggregation's content reading and extraction run concurrently elsewhere.
 
+#### Make the Timeline a Layout of a Scope
+
+**Decision**
+The timeline is the timeline Layout of a Shelf: the Entries of a Scope and a Filter in descending timeline date, read through `listEntries` ([Listing and Search Design §8.1](./listing.md#list-the-entries-of-a-scope-through-one-api)).
+The timeline index answers that order, so the timeline Layout is offered only while the Filter's kind is within images and videos.
+The Scope takes the place of the chosen Libraries, so a timeline can cover folders as well as whole Libraries.
+This replaces the decision "List the Chosen Libraries in One Timeline" above.
+
+**Reason**
+The owner wants to look through the photos of chosen folders by date, not only those of whole Libraries, and that is the same unit a Shelf already names.
+One reading path for every Layout keeps the timeline's filters the same as those of every other listing.
+
+**Rejected alternative**
+Keeping the timeline as its own mode over a set of Libraries.
+It is what exists, but it could not be narrowed to folders, ratings, or tags, and it would be a second way to choose a range, so we rejected it.
+
 ### 9.2 Deferred
 
 #### Whether to Use Exif's Time Zone Fields

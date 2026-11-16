@@ -106,12 +106,12 @@ The following have been decided not to be built.
 - Automatic upload from a phone, albums, and face recognition
 - File versioning and recovering an Entry after the Trash is emptied
 - Synchronization or replication with other hosts
-- Full-text search and automatic metadata extraction for search
+- Full-text search
 - Integration with general cloud storage (such as Google Drive)
 - SMB compatibility
 - Video editing
 - Image processing
-- Sending files to an inference service outside the host
+- Sending files to an inference service on a host the owner does not control
 - TLS termination and certificate management
 
 By excluding these, we avoid having a permission model, a multi-version history, maintaining search-index consistency, resolving cloud sync conflicts, an SMB compatibility layer, an operation system for editing and processing, and issuing and renewing certificates.
@@ -1233,6 +1233,119 @@ A phone on the LAN or the VPN could log in right after `docker compose up`, but 
 A configuration that changes the daemon's default of `insecure_cookie` to `true`.
 Every way of starting the daemon would work in plaintext, but a daemon opened through `localhost` or behind HTTPS would also lose `Secure`, so we rejected it.
 
+#### Judge Scope by Whether the Owner Keeps Sovereignty
+
+**Decision**
+A feature is in scope only if the owner keeps sovereignty over the files under it.
+Sovereignty has six parts.
+
+- The files stay on the owner's disks, with the names and folders the owner gave them
+- Anything that passes through a third party can be decrypted only by the owner
+- The files' contents, names, and modification times are not changed
+- The owner can leave Pxna with the files as they are and with ratings and tags in a standard form
+- Pxna keeps working without its author, an account, or any outside service
+- Processing such as thumbnail generation and inference runs on hosts the owner controls
+
+Cloud storage and relays are acceptable when they are end-to-end encrypted.
+Inference is acceptable on any host the owner controls, including another machine at home, and not on an outside service.
+
+**Reason**
+The owner's objection is to losing control over the files, not to the cloud as such.
+"Do not entrust files to the cloud" would reject an end-to-end encrypted relay, which lets the owner reach the daemon from outside without exposing anything, while it says nothing about ratings and tags that cannot be taken out or about background work the owner cannot stop.
+Inference needs the plaintext, so encryption cannot protect it, and only where it runs can.
+
+**Rejected alternative**
+Not using the cloud as the test.
+It is simple to apply, but it rejects encrypted relays and misses leaving and control, so we rejected it.
+
+#### Keep Background Work Quiet and Under the Owner's Control
+
+**Decision**
+Nothing has to finish before the owner can start browsing, and browsing does not wait for background work.
+Background work runs within a budget, shows its progress, can be stopped and resumed, and is opt-in.
+How the owner sees and controls it is deferred (§11.2).
+
+**Reason**
+A photo app that generates thumbnails for the whole library in a first batch makes a new owner wait before the first look, and work that keeps using the CPU without the owner's knowledge takes control of the owner's own hardware away.
+Thumbnails are already generated only on request ([Thumbnail Design §10.1](./design/thumbnail.md#generate-when-a-request-is-received)), so this governs aggregation and the local AI of §11.2.
+
+**Rejected alternative 1**
+Having no background work.
+Every heavy job would run only when the owner looks or asks, but the timeline, subtree search, and duplicate detection need an index built in advance, so we rejected it.
+
+**Rejected alternative 2**
+Only giving browsing priority over background work.
+It is what the scheduler already does, but it leaves the CPU use itself out of the owner's control, so we rejected it.
+
+#### Browse Through the Tree and Shelves
+
+**Decision**
+The tree of Libraries and folders is authoritative, and Shelves are the other way to browse it.
+A Shelf is a saved Scope, Filter, and Layout.
+Search is an Unsaved Shelf, and the timeline is a Layout of a Shelf.
+The daemon stores Shelves, and every client reads and edits the same ones.
+A Shelf names folders and rules, never member Entries.
+
+**Reason**
+The files in the tree are not organized, and the owner wants to browse them in units that cut across folders: the books of a shelf spread over several folders, the unrated images of several output folders of an image generator, the photos of several Libraries by date.
+Search and the timeline were each such a unit with a range selection of its own, and neither could be kept.
+One concept removes the duplication and lets a unit of work be saved.
+Naming folders and rules keeps the files where they are, and keeps a Shelf apart from an album (§2.1), whose membership would have to be kept per Entry.
+The daemon stores Shelves so that a unit made on the desktop can be opened on the phone, and the other way round.
+
+**Rejected alternative 1**
+Keeping search and the timeline as separate modes and adding saved searches.
+The present screens would stay, but three places would choose a range in different ways, so we rejected it.
+
+**Rejected alternative 2**
+A Shelf that is a set of folders only, without a Filter.
+It is the simplest, but a unit such as "the unrated images" could not be saved and would have to be searched again each time, so we rejected it.
+
+**Rejected alternative 3**
+Keeping Shelves in each client.
+No daemon change would be needed, but a Shelf made on one device would not exist on the other, so we rejected it.
+
+#### Resolve Display Settings over the Display Preferences, Folder Settings, and the Shelf
+
+**Decision**
+The Layout, the sort, the tile size, and how an archive opens are resolved from the display preferences, then the folder settings of the nearest folder above that has them, then the open Shelf, the later winning.
+Folder settings are stored in the daemon's database keyed by the Library and the Library-relative path, follow the daemon's own moves and renames, and are lost when the folder is moved or renamed outside Pxna.
+Every client shares them, as it shares the display preferences.
+
+**Reason**
+A shelf of books or an output folder is a whole subtree, so without inheritance every folder under it would need the same setting.
+The Shelf wins because the owner made it for one piece of work.
+A file next to the folder would change the tree and cannot be written in a `readonly` Library or inside an archive.
+Losing a folder's settings on an outside rename is cheaper than identifying folders by content, which a folder does not have.
+
+**Rejected alternative 1**
+Folder settings without inheritance.
+They are easy to predict, but a deep shelf would need a setting on every folder, so we rejected it.
+
+**Rejected alternative 2**
+Only Shelves, without folder settings.
+There would be fewer concepts, but reading books while walking the tree would need a Shelf for each folder, which goes against the tree being authoritative, so we rejected it.
+
+**Rejected alternative 3**
+A settings file inside each folder.
+It would follow outside moves, but it changes the owner's tree and cannot be written where Pxna is meant to classify, so we rejected it.
+
+#### Organize on the Web Client and View on the Phone
+
+**Decision**
+The web client is where the owner organizes: Entry operations, uploads, control of background work, and classifying many Entries with the keyboard.
+The iOS app is where the owner views, reads, and classifies in passing: browsing, the viewer, rating in the viewer, and creating and editing Shelves in full.
+Of Entry operations, the iOS app only deletes into the Trash.
+
+**Reason**
+Classifying in bulk is fastest with a keyboard and a large screen, and classifying while looking through images is natural with a swipe.
+Moving and copying need the conflict policy and Operations (§8), which are worth building once, on the desktop.
+Shelves are edited in full on the phone too, because the owner should not have to sit down at a computer only to make one.
+
+**Rejected alternative**
+Giving both clients the same features.
+Either device would be enough on its own, but every Entry operation would be built twice, so we rejected it.
+
 ### 11.2 Deferred
 
 The following are intentionally undecided.
@@ -1345,6 +1458,33 @@ The content hash used by ratings and tags (§11.1) gives exact duplicates a key;
 **Conditions for deciding**
 When the library has enough duplicate or near-duplicate content that manual cleanup is the bottleneck, and a local model can run within the owner's hardware budget.
 The first job is similar and duplicate detection; automatic tagging, OCR, and face clustering are decided after that.
+
+#### Controlling Background Work
+
+**Current state**
+At startup, aggregation starts for a Library whose timeline index has no file row or whose name index is not usable, and it also starts every `scan_interval_secs` unless that is 0 ([Timeline Design §6.3](./design/timeline.md#63-when-aggregation-starts)).
+Its progress is returned by the timeline's status API and is not an Operation.
+A running aggregation cannot be stopped, and aggregation is not opt-in, so it does not yet meet §11.1 "Keep Background Work Quiet and Under the Owner's Control".
+
+**Why not decide now**
+The mechanism, such as one list of background work that every client shows and how stopping and opting in are offered, depends on the work it governs, and the second kind of work, the local AI of "Local AI for Organization" above, is not designed.
+Making aggregation opt-in also removes the name index that subtree search answers from, so what happens to search before the owner opts in has to be decided with it.
+
+**Conditions for deciding**
+Before the local AI for organization is designed, or when the owner reports aggregation as a burden.
+
+#### Searching by Embedded Metadata
+
+**Current state**
+Listings match Entries by name, rating, and tags.
+Exif and the generation parameters an image generator embeds in a PNG, such as the prompt, are not searched.
+
+**Why not decide now**
+Searching them needs an index of metadata contents that follows external changes, which is the consistency §2.1 avoids for full-text search.
+Owners of generated images do look for images by prompt, but showing the embedded text of one Entry needs no index and may be enough.
+
+**Conditions for deciding**
+When Shelves are in use and finding generated images by name, rating, and tags is not enough.
 
 ## 12. Current State and Remaining Work
 
