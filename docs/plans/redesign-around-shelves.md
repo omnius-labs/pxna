@@ -98,7 +98,7 @@ The documents then describe a design whose contract breaks compatibility with th
 | [1](#s-1) | Rewrite what Pxna is | | Done |
 | [2](#s-2) | Rewrite the name index and recursive listings over a Scope and a Filter | | Done |
 | [3](#s-3) | Decide the parameters and paging of `listEntries` | 2 | Done |
-| [4](#s-4) | Rewrite the timeline as reading in timeline-date order | 3 | Not started |
+| [4](#s-4) | Rewrite the timeline as reading in timeline-date order | 3 | Done |
 | [5](#s-5) | Describe the storage and API of Shelves and folder settings | 3 | Not started |
 | [6](#s-6) | Rewrite the web client's screens around the entrances and Shelves | 4, 5 | Not started |
 | [7](#s-7) | Add the deferred items of the later bets | 1 | Not started |
@@ -164,7 +164,7 @@ Listing and Search Design §8.2 has no item named "How listEntries Cuts Pages", 
 **What to do**
 Describe what the timeline index answers: `listEntries` sorted by timeline date over a Scope and a Filter whose kind is within images and videos.
 Decide how the index narrows to the starts of a Scope, how it applies rating and tag conditions, and how it excludes the insides of archives when the Scope does not read them, and write the per-month counts over the same Scope and Filter.
-Rewrite "List the Chosen Libraries in One Timeline" and "Point at a Page's Position with a Cursor" into rejected alternatives of the new decisions, following the paging of step 3, and rewrite design.md §6.3 to the timeline Layout.
+Rewrite "List the Chosen Libraries in One Timeline" into a rejected alternative of the new decisions, keep "Point at a Page's Position with a Cursor" as a decided item updated for the paging of step 3, which keeps cursors, and rewrite design.md §6.3 to the timeline Layout.
 Close Rating and Tag Design's deferred item "Filtering in the Timeline, and Sorting by Ratings and Tags" for filtering, keeping sorting by ratings and tags and any-of tags deferred.
 
 **Completion condition**

@@ -399,13 +399,13 @@ The transcode sessions, output, concurrency, configuration, and reasons for adop
 
 ### 6.3 Timeline
 
-The timeline lists the images and videos of the chosen Libraries in one sequence in descending order of timeline date, decided from the shooting date and time (or else the modification time), without folder hierarchy.
-The daemon aggregates each Library periodically, writes the timeline dates to the timeline index, and answers page requests from the web client from the index.
+The timeline is the Layout that shows the images and videos of a Scope, through a Filter, in descending order of timeline date, decided from the shooting date and time (or else the modification time), without folder hierarchy (§11.1 "Browse Through the Tree and Shelves").
+The daemon aggregates each Library periodically, writes the timeline dates to the timeline index, and answers `listEntries` in timeline-date order and the per-month counts from the index.
 Images and videos inside archives are also extracted and their timeline dates read, and the extraction for aggregation is done in a concurrency budget separate from browsing.
 The daemon's own mutating operations immediately reflect only the range they changed in the index.
 
 What is listed, the timeline date, the index, aggregation, the configuration, and the reasons for adoption are authoritative in [Timeline Design](./design/timeline.md).
-The screen and how it loads are covered by [Client Design §3.10](./design/client.md#310-timeline).
+The request and paging are covered by [Listing and Search Design §4.6](./design/listing.md#46-pages-in-timeline-date-order), and the screen and how it loads by [Client Design §3.10](./design/client.md#310-timeline).
 
 ### 6.4 Ratings and Tags
 

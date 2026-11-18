@@ -2,7 +2,7 @@
 
 ## 1. About This Document
 
-This document covers the server side of the timeline, which lists the images and videos of the chosen Libraries in one sequence in the order of their timeline dates, and defines what is listed, how timeline dates are decided, the timeline index, aggregation, reading, and the reasons for adopting them.
+This document covers the server side of the timeline, which reads the images and videos of a Scope through a Filter in the order of their timeline dates for the timeline Layout, and defines what is listed, how timeline dates are decided, the timeline index, aggregation, reading, and the reasons for adopting them.
 The intended readers are developers and AI agents who implement or review this concern.
 It assumes the vocabulary of [terms.md](../terms.md).
 The definitions of words are not in this document.
@@ -11,11 +11,11 @@ The definitions of words are not in this document.
 
 | Document | What it covers |
 | --- | --- |
-| This document | What is listed, timeline dates, the timeline index, aggregation, reading, configuration, reasons for adoption, deferred items |
+| This document | What is listed, timeline dates, the timeline index, aggregation, reading in timeline-date order and the per-month counts, configuration, reasons for adoption, deferred items |
 | [design.md](../design.md) | Pxna's overall scope, where state lives, conventions for mutating APIs |
 | [Client Design](./client.md) | The timeline screen and when pages are read |
 | [Storage Layer Design](./storage.md) | Block-level extraction of archives, and the extraction path aggregation uses |
-| [Listing and Search Design](./listing.md) | Folder listings and name search |
+| [Listing and Search Design](./listing.md) | Folder listings, name search, the request and paging of `listEntries`, and the name index whose matches narrow the timeline |
 | [Video Playback Design](./video.md) | Media info for images and videos |
 | [terms.md](../terms.md) | Definitions of terms |
 | [issues.md](../issues.md) | Clear defects confirmed in code and handling policies |
@@ -31,12 +31,13 @@ If you want to know what works now, read §10 first.
 
 ## 2. Responsibilities and Boundaries
 
-The timeline is a listing for viewing the photos and videos of the chosen Libraries in one sequence in the order they were taken, without following folder hierarchy.
+The timeline is the order in which `listEntries` reads the photos and videos of a Scope through a Filter by when they were taken, without following folder hierarchy; it is what the timeline Layout of a Shelf shows (§9.1).
 Folder listings return the result of scanning the target after receiving a request, and recursive searches with conditions are answered from the name index ([Listing and Search Design §4](./listing.md#4-snapshots), [§5.2](./listing.md#52-answering-recursive-listings-with-conditions)).
 The timeline is returned from the timeline index that the daemon has aggregated in advance.
 If the whole Library were scanned on every request, the wait until the first page would be proportional to the size of the Library, and images and videos would have to be opened one by one to obtain the timeline dates (§9.1).
 
-This document covers the span from scanning a Library, reading timeline dates, and reflecting them in the timeline index, to returning pages and per-month counts from the index.
+This document covers the span from scanning a Library, reading timeline dates, and reflecting them in the timeline index, to returning pages in timeline-date order and per-month counts over a Scope and a Filter from the index.
+The request, the cursors, and the response of `listEntries` are authoritative in [Listing and Search Design §4.6](./listing.md#46-pages-in-timeline-date-order).
 The boundaries with other concerns are as follows.
 
 | Matter | Authoritative source |
@@ -54,19 +55,19 @@ The boundaries with other concerns are as follows.
 
 - Thumbnails are not made by aggregation.
   Aggregation reads only timeline dates, and thumbnails are made when requested, as before ([Thumbnail Design §2.1](./thumbnail.md#21-what-is-not-built)).
-- The timeline index is not used for name search or listings.
-  The index holds only images and videos, so it cannot produce search results that include folders and other files.
-  Instead, the walk passes the names it enumerates to the name index ([Listing and Search Design §5.1](./listing.md#51-name-index)).
+- The timeline index does not match names, and does not answer listings in other orders.
+  The index holds only images and videos, so it cannot produce listings that include folders and other files.
+  Instead, the walk passes the names it enumerates to the name index ([Listing and Search Design §5.1](./listing.md#51-name-index)), and name, rating, and tag conditions in timeline-date order are applied over its matches (§7).
 - External changes to files are not followed by notifications.
   External changes are reflected by the next aggregation.
 
 ## 3. What Is Listed
 
-What the timeline lists is the Library's images and videos.
+What the timeline lists is the images and videos under the starts of the Scope that the Filter keeps; a Filter that names only images or only videos keeps that kind.
 Whether something is an image or a video is decided with the same table of extensions as thumbnail targets ([Thumbnail Design §3](./thumbnail.md#3-determining-the-target)).
 Folders, archives themselves, and other files are not listed.
 
-Images and videos inside archives are also listed.
+Images and videos inside archives are also listed when the Scope reads the insides of archives.
 Nested archives are descended to `max_nested_depth`, as in browsing ([Storage Layer Design §7.2](./storage.md#72-defaults)).
 For an archive that cannot be opened because it is password-protected, of unknown format, or exceeds limits, the Entries inside are not listed.
 
@@ -130,6 +131,7 @@ The index holds the following.
 
 The Library-relative path of an Entry inside an archive is held as the archive's path joined with the inner path ([design.md §11.1](../design.md#represent-paths-inside-archives-by-joining-paths)).
 The local file it belongs to is the outermost archive that contains that Entry, or the Entry's own local file.
+An Entry is therefore inside an archive exactly when its path differs from the path of its local file, which is how a Scope that does not read the insides of archives leaves them out (§7).
 
 The per-month counts are increased or decreased in the same transaction that adds or removes Entry rows.
 Therefore, the per-month counts always match the number obtained by counting Entry rows by month.
@@ -227,17 +229,29 @@ Range aggregation also performs the check just before writing (§6.1) and record
 
 ## 7. Reading
 
-Every read names the set of Libraries to list, and the Entries of those Libraries are returned as one sequence.
-Timeline pages are ordered by timeline date, newest first, and Entries with the same timeline date are ordered by Library id and then by Library-relative path.
+`listEntries` in timeline-date order reads the starts of a Scope through a Filter as one sequence ([Listing and Search Design §4.6](./listing.md#46-pages-in-timeline-date-order)).
+Entries are ordered by timeline date, newest first, and Entries with the same timeline date are ordered by Library id and then by Library-relative path.
 The position of a page is pointed at by the timeline date, Library id, and Library-relative path of the Entry at the page's edge (a cursor), and the Entries before or after it are returned.
-A cursor carries no set of Libraries, so it keeps its meaning only when read again with the same set.
-Instead of a cursor, specifying a month returns from that month's newest Entry, and specifying a Library and a Library-relative path returns a range containing that Entry in the center.
-To read in this order across Libraries, the index orders Entry rows by timeline date first, not by Library.
+A cursor carries no Scope or Filter, so it keeps its meaning only when read again with the same ones.
+Instead of a cursor, specifying a month returns from that month's newest Entry, and naming an Entry returns a range containing that Entry in the center.
+
+Each start is read from the index in one of two ways.
+A start that is the root of a Library follows the rows in the index's order, which puts the timeline date first, not the Library, so that several Libraries are read together.
+A start that is a folder or an archive takes the rows under its path through the primary key and orders them by timeline date, so the cost of a page grows with the Entries under the start, not with the Library.
+When the Scope does not read the descendants of its starts, both kinds of start take the rows under the start's path through the primary key and keep only its direct children, since the date order would skip the whole Library to find them; the insides of an archive among those children are its descendants and are not read.
+When the Scope does not read the insides of archives, only rows whose path is their local file's are read.
+The per-start sequences are merged in the order above, and an Entry reached from two starts is listed once, as in other listings ([Listing and Search Design §5.3](./listing.md#53-listing-several-starts)).
+
+When the Filter has a name, rating, or tag condition, the candidates are the matches that the name index answers for each start ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), and they are ordered by the timeline dates of their rows.
+A match without a row, which is not an image or video or has not been aggregated yet, is not listed.
+The matches are bounded per start by the recursion limit and are walked while the name index is not usable, so in this case the response names the starts cut off or walked, as other listings over a Scope do.
 
 The Entries of a page are returned as the same `FileSystemEntry` as listings, with the Library, the timeline date, and the timeline date source added.
 The Entry of a file that vanished externally is also returned until the next aggregation.
 
-The per-month counts are returned as a sequence in newest-month-first order, summed over the named Libraries.
+The per-month counts take the same Scope and Filter and are returned as a sequence in newest-month-first order.
+When every start is the root of a Library, the Scope reads the insides of archives, and the Filter has no condition and keeps both kinds, they are the sums of the counts held per Library (§5).
+Otherwise they are counted on each request from the rows, or from the matches, that the same reading would return, so their cost grows with the Entries in the Scope.
 
 ## 8. Configuration
 
@@ -280,7 +294,7 @@ The same happens when no list has been recorded yet and rules are configured, so
 The timeline is returned from the timeline index that the daemon has aggregated in advance (§5, §6).
 
 **Reason**
-The whole Library is the target, so if it were scanned after receiving a request, the wait until the first page would be proportional to the size of the Library.
+A Scope can span whole Libraries, so if it were scanned after receiving a request, the wait until the first page would be proportional to the size of the Library.
 To decide timeline dates from shooting dates, images and videos must be opened one by one, which cannot be done on every request.
 The cost is carrying a discrepancy between the index and the actual files.
 External changes are not reflected until the next aggregation, and until then the Entries of vanished files are also returned.
@@ -395,27 +409,6 @@ Keeping the value without a time zone by default matches Exif and avoids guessin
 **Rejected alternative**
 A fixed set of built-in patterns.
 It needs no configuration, but each app's naming convention would require a daemon release, and the time zone could not be chosen per convention.
-
-#### List the Chosen Libraries in One Timeline
-
-**Decision**
-The timeline lists the Entries of the Libraries named in each read as one sequence (§7).
-Choosing a single Library gives the listing of that Library, so there is no separate per-Library timeline.
-Aggregation, the index rows, and the per-month counts stay per Library, and only reading combines them.
-
-**Reason**
-Photos are often spread over several Libraries, for example per device or per storage, and the user wants to see them in the order they were taken without switching Libraries.
-A Library of photos and a Library gathering other images are kept apart by not naming the latter, so they do not get mixed into one sequence against the user's wish.
-Because the index already held the Library on every row, combining at read time needed no change to aggregation or to the reflection of the daemon's own changes.
-The cost is that changeability is decided per Entry, since `readonly` belongs to the Library of each Entry, and that a selection spanning Libraries is sent as one request per Library.
-
-**Rejected alternative 1**
-A method that holds the timeline per Library, with the Library in the URL and the API path.
-It was adopted first and matched the unit of `readonly`, but photos spread over Libraries could only be viewed one Library at a time, so we rejected it.
-
-**Rejected alternative 2**
-A method that has both per-Library timelines and a timeline across all Libraries.
-They could be used selectively, but the API and the screen would have two entrances, and a set of one Library already gives the per-Library listing, so we rejected it.
 
 #### Start Aggregation Periodically and Manually
 
@@ -553,14 +546,15 @@ The mechanism is the simplest, but a deleted photo would remain in the timeline 
 #### Point at a Page's Position with a Cursor
 
 **Decision**
-A timeline page is pointed at by the pair of the timeline date and Library-relative path of the Entry at the page's edge, and the part before or after it is returned (§7).
+A timeline page is pointed at by the timeline date, Library id, and Library-relative path of the Entry at the page's edge, and the part before or after it is returned (§7).
+Pages of `listEntries` in timeline-date order are cut this way ([Listing and Search Design §8.1](./listing.md#cut-pages-by-offset-and-by-cursor-in-timeline-date-order)).
 
 **Reason**
 As long as the timeline date does not change, the position before and after a cursor does not move even when rows increase or decrease through aggregation.
 With a fixed index, Entries neither overlap nor go missing between pages.
 When aggregation adds an Entry at a position falling within the range of pages already read, that Entry does not appear in the continuation from an existing cursor, and appears when reread.
 The screen does not insert it automatically into the already loaded grid, and adds it with a reread operation ([Client Design §3.10](./client.md#310-timeline)).
-The index's B-tree in sort order can be followed as is, so a page at any position can be returned at the same cost.
+The index's B-tree in sort order can be followed as is, so for a Library root a page at any position can be returned at the same cost, and for other starts a page skips no rows outside the start ("Read a Library Root by the Date Order and a Folder Start by Its Path" below).
 The timeline has no upper limit on count and does not reserve the overall height in advance ([Client Design §5.1](./client.md#the-timeline-does-not-reserve-the-overall-height-and-reads-the-continuation)), so specifying a month is enough for the use of jumping to any position.
 
 **Rejected alternative**
@@ -578,7 +572,7 @@ Counting on every request would mean reading all the Entry rows.
 
 **Rejected alternative**
 A method that groups and counts Entry rows by month on every request.
-The index would have one fewer table, but when the number of rows reaches millions, the display of the list of years and months would slow down in proportion, so we rejected it.
+The index would have one fewer table, but when the number of rows reaches millions, the display of the list of years and months would slow down in proportion, so we rejected it for whole Libraries; a narrower Scope is counted on request ("Sum the Per-Month Counts in Advance Only for Whole Libraries" below).
 
 <a id="background-scan-budget"></a>
 #### Route Aggregation's Heavy Processing Through the Shared Background Slot
@@ -597,8 +591,8 @@ Even if only metadata is throttled, load remains if aggregation's content readin
 **Decision**
 The timeline is the timeline Layout of a Shelf: the Entries of a Scope and a Filter in descending timeline date, read through `listEntries` ([Listing and Search Design §8.1](./listing.md#list-the-entries-of-a-scope-through-one-api)).
 The timeline index answers that order, so the timeline Layout is offered only while the Filter's kind is within images and videos.
-The Scope takes the place of the chosen Libraries, so a timeline can cover folders as well as whole Libraries.
-This replaces the decision "List the Chosen Libraries in One Timeline" above.
+The Scope takes the place of the chosen Libraries, so a timeline can cover folders as well as whole Libraries, and several Libraries are read together as before.
+It replaces the earlier decision to list the Libraries chosen for the timeline in one sequence.
 
 **Reason**
 The owner wants to look through the photos of chosen folders by date, not only those of whole Libraries, and that is the same unit a Shelf already names.
@@ -606,9 +600,77 @@ One reading path for every Layout keeps the timeline's filters the same as those
 
 **Rejected alternative**
 Keeping the timeline as its own mode over a set of Libraries.
-It is what exists, but it could not be narrowed to folders, ratings, or tags, and it would be a second way to choose a range, so we rejected it.
+It is what exists, and it let photos spread over Libraries per device or per storage be seen in the order they were taken, but it could not be narrowed to folders, ratings, or tags, and it would be a second way to choose a range, so it gave way to the Layout, which keeps reading several Libraries together.
+
+#### Read a Library Root by the Date Order and a Folder Start by Its Path
+
+**Decision**
+In timeline-date order, a start at the root of a Library follows the index's date order, and a start at a folder or an archive takes the rows under its path through the primary key and orders them by timeline date (§7).
+A Scope that does not read descendants takes the direct children of every start in the same way as a folder start.
+
+**Reason**
+A Library root needs every row of the Library, which the date order gives a page at a time.
+A folder is usually a small part of its Library, and following the date order for it would skip every row of the Library outside the folder before a page fills, so a page under a small folder of a large Library would cost as much as the whole Library.
+The rows under a path are one range of the primary key, so a folder's page costs the Entries under the folder.
+The cost of ordering a large folder has not been measured (§9.2).
+
+**Rejected alternative**
+Following the date order for every start and keeping the rows under its path.
+One query shape would serve every start, but a small folder would cost as much as its Library, so we rejected it.
+
+#### Apply Name, Rating, and Tag Conditions over the Matches of the Name Index
+
+**Decision**
+In timeline-date order, a Filter with a name, rating, or tag condition is answered by ordering the matches of the name index for each start by the timeline dates of their rows (§7).
+The matches are bounded by the recursion limit as in other listings, and the response names the starts cut off or walked.
+
+**Reason**
+The name index already answers these conditions for a Scope, with normalized names, trigrams, and the sets of rated and tagged paths ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), and the timeline index has none of them.
+Ordering the matches keeps the Filter the same in every Layout, so switching a Shelf to the timeline does not change what it lists.
+
+**Rejected alternative**
+Accepting only rating and tag conditions in timeline-date order, from the sets of rated and tagged paths, and rejecting name conditions.
+The timeline would need no name index, but a Shelf with a name condition could not be shown as a timeline, so we rejected it.
+
+#### Leave Out the Insides of Archives by the Entry's Local File
+
+**Decision**
+When the Scope does not read the insides of archives, timeline-date order reads only the rows whose path is the path of their local file (§5, §7).
+
+**Reason**
+Every row already holds the local file it belongs to, and an Entry inside an archive is exactly a row whose path differs from it, so no column or index is added.
+
+**Rejected alternative**
+A column that marks rows inside archives.
+It would state the fact directly, but it repeats what the two paths already say, so we rejected it.
+
+#### Sum the Per-Month Counts in Advance Only for Whole Libraries
+
+**Decision**
+The per-month counts over a Scope and a Filter are the sums of the counts held per Library when every start is a Library root, the insides of archives are read, and the Filter keeps both kinds with no condition; otherwise they are counted on each request (§7).
+
+**Reason**
+The counts held per Library are exact only for whole Libraries with everything in them, and a Scope of folders or a Filter narrows them in ways that cannot be summed from them.
+Counting on request costs the Entries in the Scope, which is what reading that Scope costs anyway.
+
+**Rejected alternative**
+Holding per-month counts for every folder.
+Any Scope of folders could be summed, but the index would grow by every folder and every month in it, and each write would update every ancestor, so we rejected it.
 
 ### 9.2 Deferred
+
+#### Whether Ordering a Large Folder Start Keeps Pages Fast
+
+**Current state**
+A start at a folder or an archive orders the rows under its path for each page (§7), so the cost of a page grows with the Entries under it.
+It has not been measured.
+
+**Why not decide now**
+Folders are usually a small part of their Library, and a folder that holds most of a Library can be named as the Library root instead.
+Whether another path is needed depends on folders in actual use.
+
+**Conditions for deciding**
+When a user reports that the timeline of a folder is slow to page. Then measure at that folder's size, and decide whether the order needs an index by path and date.
 
 #### Whether to Use Exif's Time Zone Fields
 

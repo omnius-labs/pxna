@@ -50,7 +50,7 @@ The boundaries with other concerns are as follows.
   The sorting operation can be narrowed to the three of two choices and "do not rate".
 - Tags do not have hierarchy or attributes.
   They are treated as a set of words, so creating words and attaching and detaching them is enough.
-- Sorting by ratings and tags, and filtering in the timeline, are not included in the scope of this document (§8.2).
+- Sorting by ratings and tags is not included in the scope of this document (§8.2).
 - Following a change to an Entry's content is not included.
   A file whose bytes change has a different content hash and starts unrated and untagged.
 - Cleaning content hashes that no Entry refers to is not included (§8.2).
@@ -171,7 +171,7 @@ It can also be combined with the name condition and the kind of the Filter, the 
 - The sets of content hashes are looked up once per user, and each start's listing is filtered with the paths in `entry_content` that carry them.
 - During filtering, the version of ratings and tags is added to the listing's identifier. The version advances inside the daemon each time ratings or tags are written. If a rating were given in the middle of reading pages in succession, the preceding and following pages would be cut from different sets, so the identifier is changed to make the client reread. The identifier of an unfiltered listing does not change.
 - Only `listEntries` accepts the conditions, as part of the Filter. The folder listing and the summary listing do not.
-- The timeline does not accept conditions (§8.2).
+- In timeline-date order, the conditions are applied over the matches of the name index, ordered by timeline date ([Timeline Design §7](./timeline.md#7-reading)).
 
 ## 8. Design Decisions
 
@@ -308,18 +308,17 @@ The rows are small.
 **Conditions for deciding**
 When the rows have grown enough to matter, or when the user asks to forget a content.
 
-#### Filtering in the Timeline, and Sorting by Ratings and Tags
+#### Sorting by Ratings and Tags, and Any of Several Tags
 
 **Current state**
-Filtering is only in the search API (search mode), and the timeline API does not accept conditions.
-In neither listing is sorting in the order of ratings or tags possible. Several tags combine only as all of them, not as any of them.
+No listing sorts in the order of ratings or tags. Several tags combine only as all of them, not as any of them.
+Filtering in the timeline is decided ([Timeline Design §9.1](./timeline.md#apply-name-rating-and-tag-conditions-over-the-matches-of-the-name-index)).
 
 **Why not decide now**
-The timeline index is in a separate SQLite and pages are cut by the index's cursor, so adding conditions would change the count per page and the meaning of the cursor.
 Sorting would be a design that adds ratings and tags to the listing's sort order, and would affect the sharing of the snapshot's order.
 
 **Conditions for deciding**
-When the need to view the timeline narrowed by ratings or tags actually arises, or when the need to search for Entries that have any one of several tags actually arises.
+When the need to sort by ratings or tags actually arises, or when the need to search for Entries that have any one of several tags actually arises.
 
 #### Organizing the Vocabulary, and Completion for a Large Vocabulary
 

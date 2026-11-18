@@ -190,7 +190,8 @@ A cursor keeps its meaning only with the same Scope and Filter.
 The response has neither `totalCount` nor `offset`, so the client does not reserve the overall height and reads the continuation as it scrolls ([Client Design §5.1](./client.md#the-timeline-does-not-reserve-the-overall-height-and-reads-the-continuation)).
 Its Entries come from the index as of the last aggregation, and an Entry added by aggregation within the range already read appears when the client reads again.
 In this order the kinds are images and videos only: a Filter that names no kind reads both, and one that names another kind is `InvalidInput`.
-The response names no starts cut off or walked, because the timeline index has no recursion limit and no walk; while aggregation runs, it returns what the finished part holds, and the progress comes from the timeline's status ([Timeline Design §9.1](./timeline.md#show-results-from-the-part-where-aggregation-has-finished)).
+Without a name, rating, or tag condition, the response names no starts cut off or walked, because the timeline index has no recursion limit and no walk; while aggregation runs, it returns what the finished part holds, and the progress comes from the timeline's status ([Timeline Design §9.1](./timeline.md#show-results-from-the-part-where-aggregation-has-finished)).
+With one, the candidates are the matches of the name index, so the starts cut off or walked are named as in §5.3 ([Timeline Design §7](./timeline.md#7-reading)).
 
 ## 5. Name Search
 
@@ -720,7 +721,7 @@ The grid and the list therefore reserve the overall height, and the timeline Lay
 
 **Reason**
 A listing cut from a snapshot is bounded by the recursion limit per start, so its overall height can be reserved and the scrollbar can jump anywhere, which a large folder needs ([Client Design §3.5](./client.md#35-loading-listings)).
-A sequence in timeline-date order can reach millions of Entries with the insides of archives, which exceeds the height a browser can reserve, and its index is a B-tree that a cursor follows at the same cost anywhere, while an `offset` costs time in proportion to the rows it skips ([Timeline Design §9.1](./timeline.md#point-at-a-pages-position-with-a-cursor)).
+A sequence in timeline-date order can reach millions of Entries with the insides of archives, which exceeds the height a browser can reserve, and a cursor follows its index without skipping rows, at the same cost anywhere for a Library root, while an `offset` costs time in proportion to the rows it skips ([Timeline Design §9.1](./timeline.md#point-at-a-pages-position-with-a-cursor)).
 Jumping in time is done by month, in the web client's list of years and months and in the iOS app's sheet of them.
 The two forms meet in one API, so a client switches a Shelf's Layout by changing the sort and keeps one store that reads either form.
 
