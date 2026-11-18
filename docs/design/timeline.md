@@ -48,7 +48,7 @@ The boundaries with other concerns are as follows.
 | How to read the Exif shooting date and time | [Video Playback Design §3](./video.md#3-media-info) |
 | The daemon's own mutating operations, and the point at which they finish | [design.md §8](../design.md#8-conventions-for-mutating-apis) |
 | Where the index lives, and the impact when it is lost | [design.md §9.2](../design.md#92-where-state-lives) |
-| The timeline screen and when pages are read | [Client Design §3.10](./client.md#310-timeline) |
+| The timeline screen and when pages are read | [Client Design §3.10](./client.md#310-timeline-layout) |
 | The name index that aggregation's walk updates, and when it becomes usable | [Listing and Search Design §5.1](./listing.md#51-name-index) |
 
 ### 2.1 What Is Not Built
@@ -553,7 +553,7 @@ Pages of `listEntries` in timeline-date order are cut this way ([Listing and Sea
 As long as the timeline date does not change, the position before and after a cursor does not move even when rows increase or decrease through aggregation.
 With a fixed index, Entries neither overlap nor go missing between pages.
 When aggregation adds an Entry at a position falling within the range of pages already read, that Entry does not appear in the continuation from an existing cursor, and appears when reread.
-The screen does not insert it automatically into the already loaded grid, and adds it with a reread operation ([Client Design §3.10](./client.md#310-timeline)).
+The screen does not insert it automatically into the already loaded grid, and adds it with a reread operation ([Client Design §3.10](./client.md#310-timeline-layout)).
 The index's B-tree in sort order can be followed as is, so for a Library root a page at any position can be returned at the same cost, and for other starts a page skips no rows outside the start ("Read a Library Root by the Date Order and a Folder Start by Its Path" below).
 The timeline has no upper limit on count and does not reserve the overall height in advance ([Client Design §5.1](./client.md#the-timeline-does-not-reserve-the-overall-height-and-reads-the-continuation)), so specifying a month is enough for the use of jumping to any position.
 

@@ -405,7 +405,7 @@ Images and videos inside archives are also extracted and their timeline dates re
 The daemon's own mutating operations immediately reflect only the range they changed in the index.
 
 What is listed, the timeline date, the index, aggregation, the configuration, and the reasons for adoption are authoritative in [Timeline Design](./design/timeline.md).
-The request and paging are covered by [Listing and Search Design §4.6](./design/listing.md#46-pages-in-timeline-date-order), and the screen and how it loads by [Client Design §3.10](./design/client.md#310-timeline).
+The request and paging are covered by [Listing and Search Design §4.6](./design/listing.md#46-pages-in-timeline-date-order), and the screen and how it loads by [Client Design §3.10](./design/client.md#310-timeline-layout).
 
 ### 6.4 Ratings and Tags
 
@@ -433,7 +433,7 @@ A folder inside an archive has settings by its joined path, as any other folder 
 The Shelves are read in full, created, replaced whole, and deleted one at a time, and their order is replaced as a whole; the paths and schemas are in `openapi.yaml`.
 A Shelf is listed by sending its Scope and Filter to `listEntries`, as an Unsaved Shelf is ([Listing and Search Design §8.1](./design/listing.md#carry-a-scope-and-a-filter-in-the-query-of-one-get-request)).
 The folder settings are read in full when a client starts, and written or removed one folder at a time.
-A client resolves a folder's values itself: each unset value is taken from the nearest folder above, the folder itself included, that sets it, and then from the display preferences; an open Shelf's set values win over both ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
+A client resolves a folder's values itself: each unset value is taken from the nearest folder above, the folder itself included, that sets it, and then from the display preferences; an open Shelf's set values win over both, and inside a Shelf only how an archive opens is taken from folder settings ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
 These requests change no Library, so they respond synchronously and follow, of the conventions of §8, only the `Origin` check of §8.5.
 
 The daemon's own changes keep both in step with the tree.
@@ -697,7 +697,7 @@ Completed ones are pruned after about an hour.
 Search opens an Unsaved Shelf: a Scope and a Filter that are not saved, read through `listEntries` like any Shelf ([Listing and Search Design §8.1](./design/listing.md#list-the-entries-of-a-scope-through-one-api)).
 A recursive listing over a Scope is answered from the name index that aggregation updates, and walks the file system only while that index is not usable.
 The sorting of listings, snapshots, name matching, recursion limits, and the reasons for adopting these are authoritative in [Listing and Search Design](./design/listing.md).
-How the client reads listings and search is covered by [Client Design §3.5](./design/client.md#35-loading-listings) and [§3.6](./design/client.md#36-search).
+How the client reads listings and search is covered by [Client Design §3.5](./design/client.md#35-loading-listings) and [§3.6](./design/client.md#36-shelves-and-search).
 
 ## 9. Configuration and Persistence
 
@@ -1353,6 +1353,7 @@ No daemon change would be needed, but a Shelf made on one device would not exist
 
 **Decision**
 The Layout, the sort, the tile size, and how an archive opens are resolved from the display preferences, then the folder settings of the nearest folder above that has them, then the open Shelf, the later winning.
+Inside a Shelf, folder settings apply only to how an archive opens, taken from the folder settings at or above the archive, because a Shelf's listing spans folders ([Client Design §5.1](./design/client.md#do-not-apply-folder-settings-inside-a-shelf-except-how-an-archive-opens)).
 Folder settings are stored in the daemon's database keyed by the Library and the Library-relative path, follow the daemon's own moves and renames, and are lost when the folder is moved or renamed outside Pxna.
 Every client shares them, as it shares the display preferences.
 

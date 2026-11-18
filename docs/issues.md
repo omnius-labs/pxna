@@ -59,5 +59,4 @@ The following are design issues whose fix has not been decided, so they are not 
 | Number of devices that play transcoded video at the same time | [Video Playback Design §7.2](./design/video.md#number-of-devices-that-play-transcoded-video-at-the-same-time) |
 | Whether to show counts on folder tiles | [Client Design §5.2](./design/client.md#whether-to-show-counts-on-folder-tiles) |
 | Whether to download multiple Entries at once | [Client Design §5.2](./design/client.md#whether-to-download-multiple-entries-at-once) |
-| Whether to filter listings by kind | [Client Design §5.2](./design/client.md#whether-to-filter-listings-by-kind) |
 | Whether to show an Entry's details from the viewer | [Client Design §5.2](./design/client.md#whether-to-show-an-entrys-details-from-the-viewer) |

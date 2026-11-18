@@ -100,7 +100,7 @@ The documents then describe a design whose contract breaks compatibility with th
 | [3](#s-3) | Decide the parameters and paging of `listEntries` | 2 | Done |
 | [4](#s-4) | Rewrite the timeline as reading in timeline-date order | 3 | Done |
 | [5](#s-5) | Describe the storage and API of Shelves and folder settings | 3 | Done |
-| [6](#s-6) | Rewrite the web client's screens around the entrances and Shelves | 4, 5 | Not started |
+| [6](#s-6) | Rewrite the web client's screens around the entrances and Shelves | 4, 5 | Done |
 | [7](#s-7) | Add the deferred items of the later bets | 1 | Not started |
 | [8](#s-8) | Bring the vocabulary in line | 6 | Not started |
 | [9](#s-9) | Rewrite the roadmaps | 6, 7 | Not started |
@@ -188,7 +188,7 @@ design.md has a section on Shelves and folder settings that covers their storage
 ### Step 6. Rewrite the Web Client's Screens Around the Entrances and Shelves
 
 **Locations to change**
-[Client Design §2](../design/client.md#2-responsibilities-and-boundaries), [§3.1](../design/client.md#31-web), [§3.4](../design/client.md#34-viewer), [§3.5](../design/client.md#35-loading-listings), [§3.6](../design/client.md#36-search), [§3.9](../design/client.md#39-display-preferences), [§3.10](../design/client.md#310-timeline), [§5.1](../design/client.md#51-decided), [§5.2](../design/client.md#52-deferred)
+[Client Design §2](../design/client.md#2-responsibilities-and-boundaries), [§3.1](../design/client.md#31-web), [§3.4](../design/client.md#34-viewer), [§3.5](../design/client.md#35-loading-listings), [§3.6](../design/client.md#36-shelves-and-search), [§3.9](../design/client.md#39-display-preferences), [§3.10](../design/client.md#310-timeline-layout), [§5.1](../design/client.md#51-decided), [§5.2](../design/client.md#52-deferred)
 
 **What to do**
 Describe the entrances of the Libraries, the Shelves, and the settings, the Unsaved Shelf opened by search and by search from a folder, the screen that creates and edits a Shelf, the three Layouts, and the folder settings in §3.9.

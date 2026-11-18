@@ -48,7 +48,7 @@ The boundaries with other concerns are as follows.
 | The operation that enumerates Entries inside folders and archives, and the rule of not following symlinks | [Storage Layer Design §5.1](./storage.md#51-read-operations), [§4.4](./storage.md#44-symlinks-and-special-entries) |
 | How name order is compared | [design.md §11.1](../design.md#compare-name-order-in-natural-order) |
 | Mutating operations the daemon itself performs | [design.md §8](../design.md#8-conventions-for-mutating-apis) |
-| In what range and when listings are read, the search screen | [Client Design §3.5](./client.md#35-loading-listings), [§3.6](./client.md#36-search) |
+| In what range and when listings are read, the search screen | [Client Design §3.5](./client.md#35-loading-listings), [§3.6](./client.md#36-shelves-and-search) |
 | Returning a Library's images and videos in timeline-date order from an index built by aggregation | [Timeline Design](./timeline.md) |
 
 ### 2.1 What Is Not Built
@@ -270,7 +270,7 @@ These hold for each start of a Scope, so one start can be answered from the inde
 Otherwise the listing of the start walks the file system as before.
 A start that is an archive or a path inside one is walked inside that archive, which is small and gives exact results.
 The response lists, by start value, the starts that were walked because the index of their Library is not usable.
-When only the last condition fails, the walked result may be cut off by the walk's count and has none of the Entries inside archives, so it returns archives like other files, and the client shows that the index is being built ([Client Design §3.6](./client.md#36-search)).
+When only the last condition fails, the walked result may be cut off by the walk's count and has none of the Entries inside archives, so it returns archives like other files, and the client shows that the index is being built ([Client Design §3.6](./client.md#36-shelves-and-search)).
 A walk taken for one of the other reasons is the intended answer and is not marked.
 
 The snapshot holds only the matching Entries, sorted by the same rules as other snapshots.
@@ -322,7 +322,7 @@ For a listing answered from the name index, the same `recursive_max_entries` lim
 Matching Entries are a part of the Entries underneath, so a search from the Library root is not cut off unless the conditions themselves match that many.
 There is no walk to bound, and the query is stopped when all requests waiting for it disconnect, as with a scan (§4.1).
 
-When the client receives `truncated`, or a start that was cut off from `listEntries`, it indicates that the result is partial and urges narrowing the Libraries or moving the start down ([Client Design §3.6](./client.md#36-search)).
+When the client receives `truncated`, or a start that was cut off from `listEntries`, it indicates that the result is partial and urges narrowing the Libraries or moving the start down ([Client Design §3.6](./client.md#36-shelves-and-search)).
 
 ## 7. Configuration
 
@@ -745,7 +745,7 @@ A saved Shelf is read by sending its Scope and Filter, not its id.
 
 **Reason**
 A listing is a read, and a GET keeps it outside the checks of mutating requests ([design.md §8.5](../design.md#85-csrf)) and in the form of the other listing APIs.
-A Library id cannot contain `/` ([openapi.yaml](../../daemon/openapi.yaml), `LibraryId`), so one value names a Library and a path without ambiguity, as the web client's timeline already does in its URL ([Client Design §3.10](./client.md#310-timeline)).
+A Library id cannot contain `/` ([openapi.yaml](../../daemon/openapi.yaml), `LibraryId`), so one value names a Library and a path without ambiguity, as the web client's timeline already does in its URL ([Client Design §3.10](./client.md#310-timeline-layout)).
 Sending the Scope and the Filter reads a saved Shelf and an Unsaved Shelf the same way, so the server has one path and a Shelf being edited can be read before it is saved.
 
 **Rejected alternative 1**
