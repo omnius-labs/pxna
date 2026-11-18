@@ -102,7 +102,7 @@ The documents then describe a design whose contract breaks compatibility with th
 | [5](#s-5) | Describe the storage and API of Shelves and folder settings | 3 | Done |
 | [6](#s-6) | Rewrite the web client's screens around the entrances and Shelves | 4, 5 | Done |
 | [7](#s-7) | Add the deferred items of the later bets | 1 | Done |
-| [8](#s-8) | Bring the vocabulary in line | 6 | Not started |
+| [8](#s-8) | Bring the vocabulary in line | 6 | Done |
 | [9](#s-9) | Rewrite the roadmaps | 6, 7 | Not started |
 
 <a id="s-1"></a>

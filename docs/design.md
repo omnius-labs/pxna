@@ -518,7 +518,7 @@ If they were combined into one endpoint, which validation to apply would not be 
 When operating on a mixed multiple selection, the client splits it into two requests by kind.
 
 An archive's path points to different things depending on the namespace.
-In the `folders` API (including listings and subtree search) it points to the root inside the archive, and in the `files` API it points to the archive's file itself.
+In the `folders` API (including direct and recursive listings) it points to the root inside the archive, and in the `files` API it points to the archive's file itself.
 This is so that, at the same path, one can both list its contents and download, copy, or delete it as a file.
 
 ### 8.2 Determining Sync and Async
@@ -1315,7 +1315,7 @@ Thumbnails are already generated only on request ([Thumbnail Design §10.1](./de
 
 **Rejected alternative 1**
 Having no background work.
-Every heavy job would run only when the owner looks or asks, but the timeline, subtree search, and duplicate detection need an index built in advance, so we rejected it.
+Every heavy job would run only when the owner looks or asks, but the timeline, recursive listings with conditions, and duplicate detection need an index built in advance, so we rejected it.
 
 **Rejected alternative 2**
 Only giving browsing priority over background work.
@@ -1588,7 +1588,7 @@ A running aggregation cannot be stopped, and aggregation is not opt-in, so it do
 
 **Why not decide now**
 The mechanism, such as one list of background work that every client shows and how stopping and opting in are offered, depends on the work it governs, and the second kind of work, the local AI of "Local AI for Organization" above, is not designed.
-Making aggregation opt-in also removes the name index that subtree search answers from, so what happens to search before the owner opts in has to be decided with it.
+Making aggregation opt-in also removes the name index that recursive listings with conditions answer from, so what happens to search before the owner opts in has to be decided with it.
 
 **Conditions for deciding**
 Before the local AI for organization is designed, or when the owner reports aggregation as a burden.

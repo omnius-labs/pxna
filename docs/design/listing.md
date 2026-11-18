@@ -312,7 +312,7 @@ A cut-off snapshot lists only the Entries already walked and sets `truncated` in
 Which Entries become already walked is decided by the storage layer's walk order and has nothing to do with the sort order.
 
 The limit is there to hold down memory and the wait until the first page.
-In a subtree search from the Library root, the snapshot would hold the Entries of the whole Library.
+In a recursive listing from the Library root, the snapshot would hold the Entries of the whole Library.
 Without the limit, one search would use memory and wait time proportional to the size of the Library.
 
 In a Scope of several starts, the limit is counted for each start separately, so the memory and the wait until the first page can reach as many times the single-start amount as there are starts (§5.3).
@@ -612,7 +612,7 @@ For a listing answered from the name index, the same limit counts matching Entri
 The limit is counted per start of a Scope, and the Entries inside archives count like any other.
 
 **Reason**
-Even in a subtree search from the Library root, memory and the wait until the first page stay within the limit.
+Even in a recursive listing from the Library root, memory and the wait until the first page stay within the limit.
 Even when cut off, the results for the range already walked are returned, so the user can move the starting point down and search again.
 A snapshot from the name index holds only the matching Entries, so counting matches bounds the same memory without cutting off a search merely because the Library is large.
 
