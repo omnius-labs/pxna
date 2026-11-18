@@ -97,7 +97,7 @@ The documents then describe a design whose contract breaks compatibility with th
 | --- | --- | --- | --- |
 | [1](#s-1) | Rewrite what Pxna is | | Done |
 | [2](#s-2) | Rewrite the name index and recursive listings over a Scope and a Filter | | Done |
-| [3](#s-3) | Decide the parameters and paging of `listEntries` | 2 | Not started |
+| [3](#s-3) | Decide the parameters and paging of `listEntries` | 2 | Done |
 | [4](#s-4) | Rewrite the timeline as reading in timeline-date order | 3 | Not started |
 | [5](#s-5) | Describe the storage and API of Shelves and folder settings | 3 | Not started |
 | [6](#s-6) | Rewrite the web client's screens around the entrances and Shelves | 4, 5 | Not started |
