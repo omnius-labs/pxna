@@ -30,7 +30,7 @@ During implementation, advance the state of the child and of this document, and 
 | [restore-last-folder](./plans/restore-last-folder.md) | Opening `/` returns to the last folder instead of asking for a Library | Done | - |
 | [search-condition-panel](./plans/search-condition-panel.md) | Every Library, or chosen ones, can be searched by name, rating, and several tags with the conditions in the left area | Done | - |
 | [viewer-display-modes](./plans/viewer-display-modes.md) | A work can be viewed in the wide-screen viewer's gallery and focus modes, and the mode returns on the next opening | Done | - |
-| [redesign-around-shelves](./plans/redesign-around-shelves.md) | The design documents describe browsing through the tree and Shelves, with search and the timeline absorbed and one listing API over a Scope and a Filter | Not started | - |
+| [redesign-around-shelves](./plans/redesign-around-shelves.md) | The design documents describe browsing through the tree and Shelves, with search and the timeline absorbed and one listing API over a Scope and a Filter | In progress | - |
 
 The thumbnail and image socket plans form a chain: `thumbnail-store-batching` and `source-jobs` follow `thumbnail-fanout-and-viewer-settings`, and `image-socket-server` follows `source-jobs`.
 The `viewer-touch-gestures`, `restore-last-folder`, `viewer-display-modes`, and `redesign-around-shelves` plans are independent of each other and of them.

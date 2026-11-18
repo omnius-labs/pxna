@@ -58,10 +58,14 @@ The client can draw a listing without reading the original files.
 It targets both images and videos, and for videos it extracts multiple frames so they can be flipped through on a tile.
 An opened image is shown as a display image that the server shrinks for the screen, and a video in a format the client cannot play is delivered while the server converts it.
 
-Why this is needed now can be explained by contrast with a NAS and Google Photos.
+Why this is needed now can be explained by contrast with a NAS, Google Photos, and Immich.
 A NAS is heavy and slow with direct access over SMB, and vendor-provided dedicated clients offer a limited viewing experience on phones.
-Google Photos does not target assets on a home server and presupposes that files are entrusted to the cloud.
-By using the assets on the home server as they are, it meets both the demand of not entrusting home files to the cloud and the demand of avoiding capacity limits and cost.
+Google Photos does not target assets on a home server and presupposes that the files are uploaded to Google's cloud.
+Immich is self-hosted, but it works on assets of its own.
+Files enter it by upload, or by a scan of an external library that creates an asset for each photo and video it loads ([Immich: Libraries](https://docs.immich.app/features/libraries)).
+Each uploaded asset starts background jobs that include metadata extraction, thumbnail generation, and machine learning ([Immich: Jobs and Workers](https://docs.immich.app/administration/jobs-workers)).
+The formats it outlines as the most common are images and videos ([Immich: Supported Formats](https://docs.immich.app/features/supported-formats)).
+By using the assets on the home server as they are, Pxna lets the owner keep sovereignty over them, avoid capacity limits and cost, and see them without waiting for an import or a batch.
 
 The assumed operation is as follows.
 
@@ -75,16 +79,24 @@ They do not want to import the files into a library or rename them to fit a sche
 The files stay where they are, with the names and folders the owner already gave them.
 
 Pxna is therefore not a photo app that takes over the storage.
-It reads the folders and archives as they are and adds browsing, classification, and operations on top.
-Classification does not move the files.
+Its foundation is that the owner keeps sovereignty over the files, which includes keeping them unchanged on the owner's disks and letting the owner leave Pxna with them ([§11.1](#judge-scope-by-whether-the-owner-keeps-sovereignty)).
+On that foundation, its main strength is seeing: the owner views the existing folders and archives as they are, without importing them and without waiting for anything to finish first ([§11.1](#keep-background-work-quiet-and-under-the-owners-control)).
+Classifying and acting extend it.
 What it offers is not a list of features but one workflow: the owner can see everything, including inside archives, classify it without changing a file, and then act on the files in the same screen.
 A photo app that imports files does the seeing and classifying well; a file manager does the acting; Pxna does the three on the same existing tree.
 
 The workflow has three parts.
 
-- See: the existing folder tree and archives. ZIP and 7z are read as folders, and nested archives are read up to the configured depth.
+- See, the main strength: the existing folder tree and archives. ZIP and 7z are read as folders, and nested archives are read up to the configured depth.
 - Classify: ratings and tags stored outside the files, so they can be given in a `readonly` Library and inside an archive. They do not change the file's contents, name, or modification time.
 - Act: upload, move, copy, delete, and rename, with asynchronous Operations and a conflict policy. The screen that shows the thumbnail can change the files.
+
+The owner browses in two ways ([§11.1](#browse-through-the-tree-and-shelves)).
+The tree of Libraries and folders is authoritative and shows the files where they are.
+A Shelf cuts across it with a saved Scope of folders, a Filter, and a Layout such as the timeline, so that books spread over several folders, or the unrated outputs of an image generator, open as one unit.
+Search opens an Unsaved Shelf.
+The Layout, the sort, and how an archive opens are resolved from the display preferences, the folder settings, and the open Shelf ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
+The web client is where the owner organizes, and the iOS app is where the owner views, reads, and classifies in passing ([§11.1](#organize-on-the-web-client-and-view-on-the-phone)).
 
 What supports the workflow is the implementation behind it.
 One WebSocket per tab carries thumbnails, sprite sheets, and display images, and one decode produces the variants that the listing, the shape switch, and the filmstrip need.
@@ -96,7 +108,7 @@ The API is written first in `openapi.yaml`, and the tests, the measurements, and
 Pxna does not claim to replace a photo app.
 It has no automatic upload from a phone, no sharing, no face recognition, no albums, no image or video editing, and no multi-user permission model.
 Those are out of scope in §2.1, not gaps to be closed in the next release.
-The next bet is organization assistance, not photo-app parity: local-only, opt-in inference, starting with similar and duplicate detection, so that the owner can find what to keep without sending files anywhere.
+The next bet is organization assistance, not photo-app parity: opt-in inference on hosts the owner controls, starting with similar and duplicate detection, so that the owner can find what to keep without sending files to an outside service.
 
 ### 2.1 Out of Scope
 
@@ -116,8 +128,8 @@ The following have been decided not to be built.
 
 By excluding these, we avoid having a permission model, a multi-version history, maintaining search-index consistency, resolving cloud sync conflicts, an SMB compatibility layer, an operation system for editing and processing, and issuing and renewing certificates.
 For the timeline (§6.3), aggregation builds a timeline index that holds only the timeline dates of images and videos.
-The same walk also updates a name index that holds only the names of Entries, for subtree search (§8.9).
-Neither index is used for full-text or metadata search, and external changes are reflected in the next aggregation, so they do not always keep consistency with the actual files.
+The same walk also updates a name index that holds the names of Entries, the Entries inside archives included, for recursive listings over a Scope (§8.9).
+Neither index is used for full-text search, metadata search is deferred ([§11.2](#searching-by-embedded-metadata)), and external changes are reflected in the next aggregation, so the indexes do not always keep consistency with the actual files.
 Ratings and tags use a full hash of the content (§11.1) so that they survive an external move or rename; that hash is not a search index either.
 When deciding to widen the scope, first read the deferred items in §11.2.
 Some of them even state the conditions for "when to decide".
@@ -651,8 +663,8 @@ Completed ones are pruned after about an hour.
 
 ### 8.9 Search
 
-Search is a listing with conditions. The search API applies name, rating, and tag conditions to the listing of each chosen Library, recursive when searching under a folder, and merges them into one sequence.
-A recursive listing with conditions is answered from the name index that aggregation updates, and walks the file system only while that index is not usable.
+Search opens an Unsaved Shelf: a Scope and a Filter that are not saved, read through `listEntries` like any Shelf ([Listing and Search Design §8.1](./design/listing.md#list-the-entries-of-a-scope-through-one-api)).
+A recursive listing over a Scope is answered from the name index that aggregation updates, and walks the file system only while that index is not usable.
 The sorting of listings, snapshots, name matching, recursion limits, and the reasons for adopting these are authoritative in [Listing and Search Design](./design/listing.md).
 How the client reads listings and search is covered by [Client Design §3.5](./design/client.md#35-loading-listings) and [§3.6](./design/client.md#36-search).
 
@@ -758,6 +770,7 @@ When using a hardware encoder, the operator passes the device to the container a
 
 The screen structure, the behavior of tiles and the viewer, and how thumbnails are requested are authoritative in [Client Design](./design/client.md).
 This chapter holds only the serving method, the handling of sessions, and constraints common to clients.
+The web client is where the owner organizes, and the iOS app, designed in its own repository, is where the owner views; what each does is decided in [§11.1](#organize-on-the-web-client-and-view-on-the-phone).
 
 ### 10.1 Web
 
