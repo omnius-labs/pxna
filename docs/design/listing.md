@@ -110,7 +110,7 @@ A page is specified by `offset` and `limit`, and cut out from the sequence after
 If `offset` exceeds the count, an empty page is returned.
 
 The response has the page's Entries, the `offset` the page was cut at, `totalCount`, the snapshot's id, and whether the recursion was cut off (`truncated`, §6).
-A response of `listEntries` lists the starts that were cut off in place of `truncated` (§5.3).
+A response of `listEntries` lists the starts that were cut off in place of `truncated`, and also the starts that were walked and the missing starts (§5.3).
 The snapshot's id is a value newly assigned each time a snapshot is built, and it changes if rebuilt even when the version is the same.
 
 The client learns that the listing has changed by comparing the id of each page.
@@ -190,6 +190,7 @@ A cursor keeps its meaning only with the same Scope and Filter.
 The response has neither `totalCount` nor `offset`, so the client does not reserve the overall height and reads the continuation as it scrolls ([Client Design §5.1](./client.md#the-timeline-does-not-reserve-the-overall-height-and-reads-the-continuation)).
 Its Entries come from the index as of the last aggregation, and an Entry added by aggregation within the range already read appears when the client reads again.
 In this order the kinds are images and videos only: a Filter that names no kind reads both, and one that names another kind is `InvalidInput`.
+The missing starts are named in this order too (§5.3).
 Without a name, rating, or tag condition, the response names no starts cut off or walked, because the timeline index has no recursion limit and no walk; while aggregation runs, it returns what the finished part holds, and the progress comes from the timeline's status ([Timeline Design §9.1](./timeline.md#show-results-from-the-part-where-aggregation-has-finished)).
 With one, the candidates are the matches of the name index, so the starts cut off or walked are named as in §5.3 ([Timeline Design §7](./timeline.md#7-reading)).
 
@@ -290,7 +291,9 @@ The starts may be in one Library or in several, and any folder of a Library can 
 An Entry is listed once even when starts overlap: a start that another start already covers adds nothing, and an Entry reached from two starts is kept at its first start.
 A start inside an archive is covered only when the Scope reads the insides of archives.
 Entries are told apart by Library and path, so two Entries compare as equal only when they have the same path in different Libraries, and those are ordered by the position of their start in the Scope.
-A start that names no Library is `NotFound`.
+A start whose folder or Library no longer exists is a missing start: it is skipped, the other starts are listed, and the response lists the missing starts by start value, in every sort, the timeline date included.
+When every start is missing, the result is empty and every start is named.
+A start goes missing when its folder is deleted, through Pxna or outside it, or moved or renamed outside Pxna, or when its Library no longer exists ([design.md §6.5](../design.md#65-shelves-and-folder-settings)).
 
 The merged sequence is not kept as a snapshot of its own.
 Each start's listing comes from the snapshot of §4.1 for that combination, which is shared with folder listings of the same target.
@@ -463,7 +466,7 @@ The previous implementation took this form, and no server change is needed, but 
 **Decision**
 `listEntries` accepts a Scope of several starts in one or several Libraries, builds the listing of each start with the snapshots of §4.1, and merges them on the server.
 The recursion limit is counted for each start (§5.3, §6).
-The merged sequence has no snapshot of its own, and the response lists by value the starts that were cut off and the starts that were walked because the index was not usable.
+The merged sequence has no snapshot of its own, and the response lists by value the starts that were cut off, the starts that were walked because the index was not usable, and the missing starts.
 
 **Reason**
 The client's virtual scrolling needs one sequence with `totalCount` and pages at any position ([Client Design §3.5](./client.md#35-loading-listings)), and only the server can cut such a page out of several starts without reading all of them.
@@ -841,6 +844,18 @@ A Shelf is a set of Entries, and the owner may name a folder and one of its subf
 **Rejected alternative**
 Rejecting a Scope whose starts overlap as `InvalidInput`.
 The rule would be explicit, but a Shelf could break when a folder is moved under another of its starts, so we rejected it.
+
+#### List a Shelf Without Its Missing Starts
+
+**Decision**
+`listEntries` skips a start whose folder or Library no longer exists, returns the rest, and names the missing starts in the response (§5.3).
+
+**Reason**
+A Shelf of several folders is still useful when one of them is gone, and naming the missing ones lets the client lead the owner to fix the Shelf.
+
+**Rejected alternative**
+Answering `NotFound` when any start is missing.
+The failure would be plain, but one folder renamed outside Pxna would make the whole Shelf unreadable, so we rejected it.
 
 #### Count the Entries Inside Archives Toward the Name Index's Targets
 

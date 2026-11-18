@@ -415,6 +415,36 @@ Ratings and tags do not change Entries and are saved per user in `sqlite.db`, so
 What can be rated or tagged, the value rules, storage, following changes made through Pxna, filtering listings, and the reasons for adoption are authoritative in [Rating and Tag Design](./design/rating-tags.md).
 The operations of rate mode and the info panel are covered by [Client Design §3.4](./design/client.md#34-viewer) and [§3.8](./design/client.md#38-info-panel).
 
+### 6.5 Shelves and Folder Settings
+
+Shelves and folder settings are saved per user in `sqlite.db`, so every client reads and edits the same ones (§11.1 "Browse Through the Tree and Shelves").
+They are held in three tables.
+
+| Table | One row per | Holds |
+| --- | --- | --- |
+| `shelves` | Shelf | The user, the name, the position among the Shelves, the Scope's choices, the Filter, and the display values |
+| `shelf_starts` | Start of a Shelf | The Shelf, the position among its starts, the Library id, and the Library-relative path |
+| `folder_settings` | Folder that has settings | The user, the Library id, the Library-relative path, and the display values |
+
+The display values are the Layout, the sort, the tile size, and how an archive opens, in the shape of the display preferences: the Layout and the tile size per set of the wide and narrow screens, and the sort and how an archive opens once ([Client Design §3.9](./design/client.md#39-display-preferences)).
+Any value can be left unset, which means it is taken from the layer below.
+A folder inside an archive has settings by its joined path, as any other folder ([§11.1](#represent-paths-inside-archives-by-joining-paths)).
+
+The Shelves are read in full, created, replaced whole, and deleted one at a time, and their order is replaced as a whole; the paths and schemas are in `openapi.yaml`.
+A Shelf is listed by sending its Scope and Filter to `listEntries`, as an Unsaved Shelf is ([Listing and Search Design §8.1](./design/listing.md#carry-a-scope-and-a-filter-in-the-query-of-one-get-request)).
+The folder settings are read in full when a client starts, and written or removed one folder at a time.
+A client resolves a folder's values itself: each unset value is taken from the nearest folder above, the folder itself included, that sets it, and then from the display preferences; an open Shelf's set values win over both ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
+These requests change no Library, so they respond synchronously and follow, of the conventions of §8, only the `Origin` check of §8.5.
+
+The daemon's own changes keep both in step with the tree.
+At the point where `LibraryMutation` reassigns the rows of the indexes, a rename or move reassigns the folder settings and the Shelf starts at or under the old path to the new one, and a delete removes the folder settings at or under the path and keeps the Shelf starts.
+Changes made outside Pxna are not followed, so a folder renamed outside loses its settings, and a Shelf start that no longer names a folder is a missing start.
+`listEntries` lists a Shelf without its missing starts and names them ([Listing and Search Design §5.3](./design/listing.md#53-listing-several-starts)), and the client shows the Shelf with a notice that leads to editing it.
+
+The default Shelf is created once, by the first read of the Shelves of a user who has never had a Shelf, in the same transaction that records the creation, so two clients reading first at the same time create it once.
+It is named Timeline, its starts are the roots of the Libraries in `timelineLibraries` of the display preferences, or of every Library when none is saved, it reads descendants and the insides of archives, its Filter keeps images and videos, and its Layout is the timeline ([Client Design §5.1](./design/client.md#enter-through-the-libraries-and-the-shelves)).
+That it was created is recorded, so it is not created again after the owner deletes it, and `timelineLibraries` is no longer read.
+
 ## 7. Authentication and Sessions
 
 ### 7.1 Initial Setup
@@ -470,6 +500,7 @@ Even when the username does not exist, a dummy hash is verified, to make it hard
 
 This section gathers the mutating conventions scattered across `openapi.yaml` from the viewpoint of judgment.
 For individual paths and schemas, see `openapi.yaml`.
+Writing the daemon's own state, such as the display preferences, the Shelves, and the folder settings, changes no Library and follows only §8.5 (§6.5).
 API paths in this document are written relative to the server base `/api/v1`, such as `/libraries/{id}/files/...`.
 
 ### 8.1 Namespaces
@@ -729,7 +760,7 @@ At startup it takes a process lock to prevent multiple instances.
 
 | Location                          | Contents                                                           | Impact when lost                                                   |
 | --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| SQLite (`state_dir/sqlite.db`)    | Users, sessions, display preferences, ratings and tags, content hashes | Setup is needed again. Display preferences return to defaults, ratings and tags are lost, and content hashes are computed again |
+| SQLite (`state_dir/sqlite.db`)    | Users, sessions, display preferences, Shelves, folder settings, ratings and tags, content hashes | Setup is needed again. Display preferences return to defaults, Shelves, folder settings, ratings and tags are lost, the default Shelf is created again, and content hashes are computed again |
 | `state_dir/thumbnail`             | Thumbnail cache                                                    | Regenerated                                                        |
 | `state_dir/storage/archive`       | archive extraction cache                                           | Re-inspect and re-extract are needed                               |
 | `state_dir/video`                 | HLS segments of transcode sessions                                 | Transcoded playback in progress is interrupted                     |
@@ -1358,6 +1389,80 @@ Shelves are edited in full on the phone too, because the owner should not have t
 **Rejected alternative**
 Giving both clients the same features.
 Either device would be enough on its own, but every Entry operation would be built twice, so we rejected it.
+
+#### Store Shelves and Folder Settings per User in Tables of the Daemon's Database
+
+**Decision**
+Shelves, their starts, and folder settings are rows of three tables in `sqlite.db`, keyed by the user (§6.5).
+
+**Reason**
+The daemon's own moves have to find the starts and folder settings at or under a path, which a table keyed by Library and path finds by one range, and a start in its own row is rewritten without touching the rest of its Shelf.
+Keying by the user follows ratings and tags, so the values do not mix with others' if users are ever added ([Rating and Tag Design §8.1](./design/rating-tags.md#save-ratings-and-tags-per-user-and-allow-them-in-readonly-libraries)).
+
+**Rejected alternative**
+One JSON value for all Shelves, as the display preferences are stored.
+It would need no tables, but every move would rewrite every Shelf and finding the starts under a path would read them all, so we rejected it.
+
+#### Replace a Shelf Whole, and Resolve Folder Settings on the Client
+
+**Decision**
+A Shelf is created, replaced whole, deleted, and reordered through its own requests, and the folder settings are read in full at startup and resolved by the client, value by value from the nearest folder above (§6.5).
+
+**Reason**
+A Shelf is edited on one screen and saved as a whole, as the display preferences are, so replacing it whole needs no rule for merging parts.
+The owner is expected to set only a few folders, so reading them all costs one small response, and resolving on the client lets a folder open with its values without a request per folder.
+Resolving value by value lets a folder set only how its archives open and keep the Layout of the shelf above it.
+
+**Rejected alternative 1**
+Updating parts of a Shelf in place of replacing it whole.
+A request would be smaller, but the merge of parts would need its own rules and tests for a screen that saves the whole, so we rejected it.
+
+**Rejected alternative 2**
+A request per folder that returns the values the server resolved.
+The client would hold no settings, but every move between folders would wait for one more request, so we rejected it.
+
+**Rejected alternative 3**
+Inheriting the whole set of the nearest folder that has settings.
+The rule would be simpler, but a folder that sets one value would hide every value set above it, so we rejected it.
+
+#### Move Folder Settings and Shelf Starts with the Daemon's Own Changes
+
+**Decision**
+A rename or move by the daemon reassigns the folder settings and the Shelf starts at or under the path, and a delete removes the folder settings and keeps the starts, which then are missing (§6.5).
+
+**Reason**
+The daemon knows its own changes, as it does when it reassigns the rows of its indexes, so a Shelf or a folder setting does not break when the owner reorganizes through Pxna.
+A deleted folder's settings have nothing left to apply to, while a missing start tells the owner which part of a Shelf to fix.
+
+**Rejected alternative**
+Leaving the Shelf starts as they are on a move.
+Moves would touch one table fewer, but a Shelf would lose a folder the owner only moved through Pxna, so we rejected it.
+
+#### Create the Default Shelf Once from timelineLibraries
+
+**Decision**
+The first read of the Shelves of a user who has never had a Shelf creates the default Shelf Timeline from `timelineLibraries`, records that it did so, and does not create it again (§6.5).
+
+**Reason**
+Creating it at the first read takes over the Libraries the owner chose for the timeline, and it works for a user who is registered after the daemon starts.
+Recording the creation keeps a deleted default Shelf deleted, as an owner who deleted it meant.
+
+**Rejected alternative**
+Creating it in the migration that adds the tables.
+It would be one step, but the owner may not be registered yet, and there would be no user to key it by, so we rejected it.
+
+#### Hold Folder Settings and Shelves in the Shape of the Display Preferences
+
+**Decision**
+Folder settings and Shelves hold the Layout and the tile size per set of the wide and narrow screens, and the sort and how an archive opens once, each of which can be unset (§6.5).
+
+**Reason**
+The layers are resolved value by value, so each value has to have the same shape in every layer.
+A tile size means a width in CSS pixels on a wide screen and a number of columns on a narrow one ([Client Design §3.9](./design/client.md#39-display-preferences)), so one value could not serve both.
+
+**Rejected alternative**
+One set without the tile size, which would stay in the display preferences only.
+The shape would be smaller, but a shelf of books could not ask for larger covers, so we rejected it.
 
 ### 11.2 Deferred
 
