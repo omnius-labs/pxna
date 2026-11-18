@@ -325,7 +325,7 @@ The grid or list, info panel, status bar, and viewer are the same as in folder v
 The last checked Library cannot be unchecked, so at least one Library is always searched. Checking every Library is the same as omitting `lib`, so a Library added later is also searched.
 The start can be chosen only while one Library is checked. Pressing it opens a tree of that Library's folders and archives in a popover, and choosing a folder there makes it the start; the popover also has "Library 全体" (Whole Library). While several Libraries are checked, it reads "各 Library の全体" (Whole of each Library), and checking another Library returns the start to the whole Library.
 When the search terms, rating, and tags are all absent, a listing is not requested and input is prompted.
-Otherwise, `listSearchEntries` is requested with the checked Libraries, the start, the scope, and the conditions ([Listing and Search Design §5.3](./listing.md#53-searching-across-libraries)). When searching underneath, `recursive=true` is attached.
+Otherwise, `listSearchEntries` is requested with the checked Libraries, the start, the scope, and the conditions ([Listing and Search Design §5.3](./listing.md#53-listing-several-starts)). When searching underneath, `recursive=true` is attached.
 The results line up in the same grid and list as ordinary listings.
 
 The switch's "検索" (Search) opens search mode with the conditions last used in search mode while the tab is open, or else every Library with no conditions. The result open in the viewer is not restored.

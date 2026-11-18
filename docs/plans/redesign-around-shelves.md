@@ -96,7 +96,7 @@ The documents then describe a design whose contract breaks compatibility with th
 | No. | Content | Depends on | Status |
 | --- | --- | --- | --- |
 | [1](#s-1) | Rewrite what Pxna is | | Done |
-| [2](#s-2) | Rewrite the name index and recursive listings over a Scope and a Filter | | Not started |
+| [2](#s-2) | Rewrite the name index and recursive listings over a Scope and a Filter | | Done |
 | [3](#s-3) | Decide the parameters and paging of `listEntries` | 2 | Not started |
 | [4](#s-4) | Rewrite the timeline as reading in timeline-date order | 3 | Not started |
 | [5](#s-5) | Describe the storage and API of Shelves and folder settings | 3 | Not started |
@@ -126,7 +126,7 @@ In §10, state the web client's role of organizing and point to the iOS app's ro
 ### Step 2. Rewrite the Name Index and Recursive Listings over a Scope and a Filter
 
 **Locations to change**
-[Listing and Search Design §2](../design/listing.md#2-responsibilities-and-boundaries), [§2.1](../design/listing.md#21-what-is-not-built), [§5](../design/listing.md#5-name-search), [§5.1](../design/listing.md#51-name-index), [§5.2](../design/listing.md#52-answering-recursive-listings-with-conditions), [§5.3](../design/listing.md#53-searching-across-libraries), [§6](../design/listing.md#6-recursion-limit), [§7](../design/listing.md#7-configuration), [§8.1](../design/listing.md#81-decided), [Rating and Tag Design §7.1](../design/rating-tags.md#71-filtering-listings), [§8.1](../design/rating-tags.md#81-decided)
+[Listing and Search Design §2](../design/listing.md#2-responsibilities-and-boundaries), [§2.1](../design/listing.md#21-what-is-not-built), [§5](../design/listing.md#5-name-search), [§5.1](../design/listing.md#51-name-index), [§5.2](../design/listing.md#52-answering-recursive-listings-with-conditions), [§5.3](../design/listing.md#53-listing-several-starts), [§6](../design/listing.md#6-recursion-limit), [§7](../design/listing.md#7-configuration), [§8.1](../design/listing.md#81-decided), [Rating and Tag Design §7.1](../design/rating-tags.md#71-filtering-listings), [§8.1](../design/rating-tags.md#81-decided)
 
 **What to do**
 Describe the Scope as one or more starts, each a Library and a Library-relative path, with the choice of descendants and of reading inside archives, and the Filter as name, rating, tags, and kind with the default kind of a recursive listing.

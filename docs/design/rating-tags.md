@@ -161,16 +161,16 @@ The path, parameters, schemas, and status codes of each operation are authoritat
 
 ### 7.1 Filtering Listings
 
-The search API ([Listing and Search Design §5.3](./listing.md#53-searching-across-libraries)) can narrow Entries by conditions on ratings and tags.
+The Filter of a listing over a Scope ([Listing and Search Design §5](./listing.md#5-name-search)) can narrow Entries by conditions on ratings and tags.
 The rating can be one of good, bad, or none (unrated), and tags can be any number of words; an Entry matches only when it has all the given tags and, if a rating is given, that rating.
-It can also be combined with name terms, recursion, the Libraries searched, and sorting.
+It can also be combined with the name condition and the kind of the Filter, the starts and choices of the Scope, and sorting.
 
 - Filtering selects only images and videos. Folders and files that are neither images nor videos cannot be rated or tagged, so they are not included under any condition. Unrated means images and videos that have not been rated, and does not include folders and the like.
 - Filtering is not put into the listing's snapshot, and is done when cutting the page, with the set of content hashes looked up from the user's ratings and tags. The page's Entries are joined to `entry_content` to get their hashes; an Entry whose path has no cached hash, or whose fingerprint no longer matches, is treated as unrated and untagged for that page. It is hashed when it is read or written, and a later page reflects the result. Giving a rating or tag does not rescan, and the snapshot can be shared independently of the filtering conditions, as with names and sort order.
 - A recursive listing answered from the name index is the exception. It starts from the paths in `entry_content` whose hashes match the condition (for unrated, from the images and videos of the index minus the paths whose hash has a rating), keeps those the name index holds, and puts only the result in the snapshot, together with the conditions and the version of ratings and tags ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)). Writing a rating or tag rebuilds that snapshot from the index without walking the file system. A path that the index no longer holds does not appear there after the next aggregation.
-- The sets of content hashes are looked up once per user, and each Library's listing is filtered with the paths in `entry_content` that carry them.
+- The sets of content hashes are looked up once per user, and each start's listing is filtered with the paths in `entry_content` that carry them.
 - During filtering, the version of ratings and tags is added to the listing's identifier. The version advances inside the daemon each time ratings or tags are written. If a rating were given in the middle of reading pages in succession, the preceding and following pages would be cut from different sets, so the identifier is changed to make the client reread. The identifier of an unfiltered listing does not change.
-- Only the search API accepts the conditions. The folder listing and the summary listing do not.
+- Only `listEntries` accepts the conditions, as part of the Filter. The folder listing and the summary listing do not.
 - The timeline does not accept conditions (§8.2).
 
 ## 8. Design Decisions
@@ -247,15 +247,15 @@ The vocabulary is small, so keeping them costs nothing.
 A method that automatically deletes words attached to no Entry.
 The vocabulary would be tidy, but words one tried attaching and detaching would disappear from completion, so we rejected it.
 
-#### Do Filtering in Search Mode and Apply It When Cutting the Page
+#### Filter by Ratings and Tags in the Filter and Apply It When Cutting the Page
 
 **Decision**
-Filtering by ratings and tags is done as a condition of search mode. The server does not change the snapshot, and at page cutting, matches against the set looked up from the user's ratings and tags (§7.1).
+Filtering by ratings and tags is done as a condition of the Filter, which every listing over a Scope takes, a Shelf and an Unsaved Shelf alike. The server does not change the snapshot, and at page cutting, matches against the set looked up from the user's ratings and tags (§7.1).
 The version of ratings and tags is added to the identifier of a listing during filtering.
 A recursive listing answered from the name index starts from the set of rated or tagged paths, or for unrated from the index's images and videos minus the rated paths, and its snapshot holds only the result (§7.1).
 
 **Reason**
-Search mode is a screen for choosing a start and a scope and searching, so "only good in this folder" and "tagged videos across the whole Library" can be expressed with the same operation.
+A Scope and a Filter express "only good in this folder" and "tagged videos across the whole Library" with the same operation, and a Shelf can keep them.
 Ratings and tags change each time they are given, so if they were put in the snapshot's conditions, each time a rating is given it would rescan.
 If matched at page cutting, the scan result can be shared as with name conditions.
 Ratings and tags are a set of paths that can be looked up one by one per Entry, so at the scale of personal use, reading the set on every request is cheap.
@@ -263,12 +263,16 @@ Matching at page cutting needs a snapshot of all Entries under the start, which 
 Rated and tagged Entries are a small part of a Library, so starting from them and rebuilding when a rating is written costs one lookup in the index. Only the unrated condition starts from the index's images and videos, and is bounded by the count limit of listings.
 
 **Rejected alternative 1**
-A method that also places filtering in the folder view.
-Search entrances would be two, and the way of choosing the start and scope would not match, so we rejected it.
+A method that also places filtering in the folder listing.
+There would be two ways of choosing the range and the conditions, while opening an Unsaved Shelf from a folder already narrows that folder, so we rejected it.
 
 **Rejected alternative 2**
 A method that has each Entry of the listing snapshot hold its rating and tags.
 Filtering matching would be faster, but the snapshot would have to be rebuilt each time a rating is given, so we rejected it.
+
+**Rejected alternative 3**
+Keeping the conditions only in search mode.
+It was the earlier form, but a Shelf, which has a Filter of its own, could not narrow by ratings and tags, so it gave way to the Filter.
 
 #### Combine Several Tag Conditions as All of Them
 

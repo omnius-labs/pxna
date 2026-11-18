@@ -179,6 +179,8 @@ Aggregation does not occupy browsing's concurrency budget, and the archive extra
 
 The limit and deadline for one extraction use the same values of `[storage.archive]` as browsing.
 
+An archive that cannot be opened is recorded with its `ArchiveIdentity` and no Entries inside, so it is not reread until that identity changes (§6.1).
+
 ### 6.3 When Aggregation Starts
 
 At daemon startup, a Library whose index has not a single file row starts a full aggregation immediately.

@@ -9,7 +9,7 @@ This work adds a search API that spans Libraries, and rebuilds the web client's 
 | Document | What it covers |
 | --- | --- |
 | This document | The steps and acceptance checks of the search API across Libraries and the new search mode |
-| [Listing and Search Design §5.3](../design/listing.md#53-searching-across-libraries) | How the search API merges per-Library listings, its start, its snapshot id, and its limit |
+| [Listing and Search Design §5.3](../design/listing.md#53-listing-several-starts) | How the search API merges per-Library listings, its start, its snapshot id, and its limit |
 | [Rating and Tag Design §7.1](../design/rating-tags.md#71-filtering-listings) | Rating and tag conditions, accepted only by the search API, with several tags combined as all of them |
 | [Client Design §3.6](../design/client.md#36-search) | The URL, the left area, the entrances, the narrow-screen layout, and the operations of search mode |
 | [Client Design §3.1](../design/client.md#31-web) | The three-choice switch |
@@ -65,7 +65,7 @@ In the web client, give the paged listing store a search source alongside the fo
 
 | Decision | Source |
 | --- | --- |
-| Merging per-Library listings on the server, the start, the snapshot id, and the per-Library limit | [Listing and Search Design §8.1](../design/listing.md#search-several-libraries-by-merging-per-library-listings-on-the-server) |
+| Merging per-Library listings on the server, the start, the snapshot id, and the per-Library limit | [Listing and Search Design §8.1](../design/listing.md#list-several-starts-by-merging-per-start-listings-on-the-server) |
 | Name search as a listing condition | [Listing and Search Design §8.1](../design/listing.md#treat-name-search-as-a-listing-condition) |
 | Several tags combined as all of them | [Rating and Tag Design §8.1](../design/rating-tags.md#combine-several-tag-conditions-as-all-of-them) |
 | Conditions in the left area | [Client Design §5.1](../design/client.md#put-the-search-conditions-in-the-left-area-in-place-of-the-tree) |
