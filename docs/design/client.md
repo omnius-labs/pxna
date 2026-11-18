@@ -1737,6 +1737,20 @@ Until the info panel is used on real screens, we cannot judge whether overlaying
 **Conditions for deciding**
 When the info panel has been used on real screens and one can judge whether overlaying the same part on the viewer is enough.
 
+#### Reading an Archive as a Book
+
+**Current state**
+An archive opened in the viewer is shown with the viewer of §3.4, one Entry at a time in the order of the archive's listing.
+There is no reading direction, no two-page spread, and no way to resume at the page last read.
+
+**Why not decide now**
+How a book is read depends on the book: right-to-left or left-to-right, single pages or spreads, and a cover that stands alone; whether these come from the archive, from the folder settings, or from the owner each time is not chosen.
+Resuming needs a reading position per archive, and whether it is stored by the daemon like folder settings, so that the phone and the desktop share it, or per device, is open, as is how a position survives an outside rename of the archive.
+The iOS app reads books too ([design.md §11.1](../design.md#organize-on-the-web-client-and-view-on-the-phone)), so the reader should be designed once for both clients.
+
+**Conditions for deciding**
+When the Shelves are built and reading books in the viewer of §3.4 is the main use that falls short, or before either client builds a reader.
+
 ## 6. Current State and Remaining Work
 
 ### 6.1 Current Code

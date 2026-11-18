@@ -331,6 +331,20 @@ In personal use, the vocabulary is expected to stay within a few hundred words, 
 **Conditions for deciding**
 When words have grown to the point that organizing the vocabulary is needed, or when the vocabulary response becomes noticeable as a delay in completion.
 
+#### Exporting Ratings and Tags in a Standard Form
+
+**Current state**
+Ratings and tags exist only in `sqlite.db`, keyed by content hash and user (§6.1), and there is no way to take them out.
+The sovereignty decision requires that the owner can leave Pxna with ratings and tags in a standard form ([design.md §11.1](../design.md#judge-scope-by-whether-the-owner-keeps-sovereignty)), so this is not yet met.
+
+**Why not decide now**
+The standard form is not chosen: XMP sidecar files next to the Entries would be read by other photo tools but would write into the owner's tree, which Pxna does not change, while a file of paths and values that the owner downloads leaves the tree alone but is read by no other tool.
+Entries inside archives and in `readonly` Libraries can have no sidecar, so a sidecar form would still need a second form for them.
+Exporting reads the content hash of every rated or tagged Entry, so it needs the content hash identity of §6.1 first.
+
+**Conditions for deciding**
+After the content hash identity of §6.1 is built, or when the owner wants to move ratings and tags to another tool.
+
 ## 9. Current State and Remaining Work
 
 ### 9.1 Current Code

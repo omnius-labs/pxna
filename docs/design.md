@@ -1571,11 +1571,12 @@ Ratings and tags are manual.
 No model runs in the daemon, and no embedding or duplicate index exists.
 
 **Why not decide now**
-The first bet is similar and duplicate detection with a local embedding model, but the model, its license, the CPU cost, and the shape of the opt-in UI are not chosen.
+The first bet is similar and duplicate detection with an embedding model on a host the owner controls, the daemon's own or another machine at home ([§11.1](#judge-scope-by-whether-the-owner-keeps-sovereignty)), but the model, its license, the CPU cost, where it runs, and the shape of the opt-in UI are not chosen.
+It is background work, so it runs under the control that "Controlling Background Work" below defers, quiet, within a budget, visible, stoppable, and opt-in ([§11.1](#keep-background-work-quiet-and-under-the-owners-control)).
 The content hash used by ratings and tags (§11.1) gives exact duplicates a key; near-duplicates still need an embedding, so the order is fixed even though the model is not.
 
 **Conditions for deciding**
-When the library has enough duplicate or near-duplicate content that manual cleanup is the bottleneck, and a local model can run within the owner's hardware budget.
+When the library has enough duplicate or near-duplicate content that manual cleanup is the bottleneck, a model can run within the budget of a host the owner controls, and the control of background work is decided.
 The first job is similar and duplicate detection; automatic tagging, OCR, and face clustering are decided after that.
 
 #### Controlling Background Work
