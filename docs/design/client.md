@@ -1810,8 +1810,12 @@ Only the dependencies must be respected.
 | --- | --- | --- |
 | C11 | Discard the states of folder and archive tiles and want them again when the listing is reread after the daemon's own change (§4) | None |
 | C14 | Open the trash of a Library, restore a chosen Entry, and empty the trash, and change the delete confirmation to say that targets move to the trash | M25 of [design.md §12.2](../design.md#122-roadmap) |
+| C15 | Put the Libraries and the Shelves in the left area, edit a Shelf in the conditions bar, open search as an Unsaved Shelf, and read every Shelf through one store with `listEntries` (§3.1, §3.5, §3.6) | M28 and M29 of [design.md §12.2](../design.md#122-roadmap) |
+| C16 | Show the timeline Layout with its years and months under its Shelf, and redirect the old timeline URLs to the default Shelf (§3.10) | C15 |
+| C17 | Save folder settings from the settings menu, and open archives as folders or in the viewer by the resolved setting (§3.4, §3.9) | C15 |
+| C18 | Remove search mode, the timeline screen over chosen Libraries, and the three-choice switch | C16, C17 |
 
-C11 corresponds to part of M20 and C14 to M25 of [design.md §12.2](../design.md#122-roadmap).
+C11 corresponds to part of M20, C14 to M25, and C15 to C18 to M30 of [design.md §12.2](../design.md#122-roadmap).
 M13, which corresponds to C8b, M14, which corresponds to C9a and C9b, M15, which corresponds to C10, M17, which corresponds to the timeline screen, M19, which corresponds to C12, and M24, which corresponds to C13, are complete.
 
 For confirmed defects, see [issues.md](../issues.md).

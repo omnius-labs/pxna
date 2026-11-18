@@ -1641,6 +1641,7 @@ The implementation status of the storage layer, listing and search, thumbnails, 
 The container passes build and smoke tests in native CI for amd64 and arm64.
 
 The library-local trash and the content hash for ratings and tags are not implemented; they are M25 and M26 in §12.2.
+The documents describe browsing through the tree and the Shelves (§2, §6.5), while the code has search mode over `listSearchEntries`, the timeline over chosen Libraries with `listTimelineEntries`, and a name index without the insides of archives; M27 to M31 in §12.2 close that gap.
 The local AI assistance of §2 is a deferred item in §11.2.
 
 ### 12.2 Roadmap
@@ -1677,11 +1678,19 @@ M7 is a retired number and is not used.
 | M24 | Implement `locate` of the [Listing and Search Design](./design/listing.md#45-locating-an-entry) in the three listing APIs, and have the web client's directly opened viewer URL and "Show in folder" use it | M22 | Done |
 | M25 | Implement the library-local Trash: move deleted entries into the Trash, restore and empty them, exclude the Trash from listings, search, the timeline, and the tree, and add the delete confirmation and Trash screen of the web client | M3, M10, M13, M16, M22 | Not started |
 | M26 | Identify ratings and tags by a lazily computed content hash, cache it with the file's metadata or the archive identity and inner path, and share ratings and tags among identical content | M2, M10, M18, M22 | Not started |
+| M27 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while the index is not usable, as in [Listing and Search Design §5.1](./design/listing.md#51-name-index) | M19 | Not started |
+| M28 | Implement `listEntries` over a Scope and a Filter, with pages by `offset` and by cursor in timeline-date order, the starts cut off, walked, and missing, and the per-month counts over the same Scope and Filter ([Listing and Search Design §4.6](./design/listing.md#46-pages-in-timeline-date-order), [§5.3](./design/listing.md#53-listing-several-starts), [Timeline Design §7](./design/timeline.md#7-reading)) | M24, M27 | Not started |
+| M29 | Implement the storage and API of Shelves and folder settings, their reassignment by the daemon's own changes, and the default Shelf (§6.5) | M2, M3, M11 | Not started |
+| M30 | Rebuild the web client around the Libraries and the Shelves: the left area, the conditions bar and the Unsaved Shelf, the timeline Layout, folder settings, and how archives open ([Client Design §3](./design/client.md#3-screens)) | M28, M29 | Not started |
+| M31 | Remove `listSearchEntries`, `listTimelineEntries`, and the timeline's month API once the web client and the iOS app read `listEntries` | M30 | Not started |
+| M32 | Decide and implement the control of background work (§11.2 "Controlling Background Work"), including what the Shelves list before the owner opts in to aggregation | M27, M30 | Not started |
+| M33 | Export ratings and tags in a standard form ([Rating and Tag Design §8.2](./design/rating-tags.md#exporting-ratings-and-tags-in-a-standard-form)), leaving out or marking the Entries in the Trash | M25, M26 | Not started |
 
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
 
-The items that still block the positioning in §2 are M25 (library-local trash) and M26 (content hash for ratings and tags), in that order; M15 (viewer touch operations) and M19 (name index), which came first, are done.
+The items that still block the positioning in §2 are the Shelves (M27 to M31), then M32 (control of background work), M25 (library-local trash), M26 (content hash for ratings and tags), and M33 (exporting ratings and tags), in that order; M15 (viewer touch operations) and M19 (name index), which came first, are done.
+M31 also needs the iOS app to read `listEntries`, which it does in its own repository.
 
 The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap), of M5 in [Storage Layer Design §10.2](./design/storage.md#102-roadmap), of M8 in [Video Playback Design §8.2](./design/video.md#82-roadmap), of M10 in [Listing and Search Design §9.2](./design/listing.md#92-roadmap), and of M11 only V4 of [Video Playback Design §8.2](./design/video.md#82-roadmap); the thumbnail output and the display preferences API are done and have no remaining work.
 The server side of M14 is V5 of the same §8.2.

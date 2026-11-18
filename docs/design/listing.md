@@ -946,7 +946,10 @@ Only the dependencies must be respected.
 | --- | --- | --- | --- |
 | L1 | Implement the name index, its update by aggregation and by the daemon's own changes, and answering recursive listings with name, rating, and tag conditions from it (§5.1, §5.2) | None | Done |
 | L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Done |
+| L3 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while it is not usable (§5.1, §5.2) | L1 | Not started |
+| L4 | Implement `listEntries` over a Scope and a Filter with pages by `offset` and by cursor, the starts cut off, walked, and missing, and `locate` in the form of a start (§3, §4.5, §4.6, §5.3) | L2, L3 | Not started |
+| L5 | Remove `listSearchEntries` once no client calls it | L4 | Not started |
 
-L1 corresponds to M19 and L2 to M24 of [design.md §12.2](../design.md#122-roadmap).
+L1 corresponds to M19, L2 to M24, L3 to M27, L4 to part of M28, and L5 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
 
 For confirmed defects, see [issues.md](../issues.md).

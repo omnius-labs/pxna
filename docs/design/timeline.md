@@ -716,7 +716,16 @@ A video's `creation_time` is read by `MediaTools::probe_creation_time`.
 
 ### 10.2 Roadmap
 
-There is no remaining work in this milestone.
-The web client's screen is in [Client Design §6.1](./client.md#61-current-code).
+The order is provisional.
+Only the dependencies must be respected.
+
+| No. | Content | Dependencies assumed | State |
+| --- | --- | --- | --- |
+| TL1 | Read timeline-date order for `listEntries` over a Scope and a Filter, with Library roots by the date order, folder starts by their paths, conditions over the name index's matches, and the insides of archives left out by the local file (§7) | L4 of [Listing and Search Design §9.2](./listing.md#92-roadmap) | Not started |
+| TL2 | Return the per-month counts over a Scope and a Filter, summed in advance only for whole Libraries (§7) | TL1 | Not started |
+| TL3 | Remove `listTimelineEntries` and the month API over chosen Libraries once no client calls them | TL2 | Not started |
+
+TL1 and TL2 correspond to part of M28, and TL3 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
+The web client's current screen is in [Client Design §6.1](./client.md#61-current-code).
 
 For confirmed defects, see [issues.md](../issues.md).

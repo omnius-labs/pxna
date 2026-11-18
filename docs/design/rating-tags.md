@@ -341,9 +341,10 @@ The sovereignty decision requires that the owner can leave Pxna with ratings and
 The standard form is not chosen: XMP sidecar files next to the Entries would be read by other photo tools but would write into the owner's tree, which Pxna does not change, while a file of paths and values that the owner downloads leaves the tree alone but is read by no other tool.
 Entries inside archives and in `readonly` Libraries can have no sidecar, so a sidecar form would still need a second form for them.
 Exporting reads the content hash of every rated or tagged Entry, so it needs the content hash identity of §6.1 first.
+An Entry moved into the library-local Trash keeps its ratings and tags, so the export has to decide whether such Entries are left out or marked, which needs the Trash (M25 of [design.md §12.2](../design.md#122-roadmap)) to exist.
 
 **Conditions for deciding**
-After the content hash identity of §6.1 is built, or when the owner wants to move ratings and tags to another tool.
+After the content hash identity of §6.1 and the library-local Trash are built, or when the owner wants to move ratings and tags to another tool.
 
 ## 9. Current State and Remaining Work
 
@@ -361,6 +362,7 @@ The web client has ratings of images and videos (display only) and attaching and
 ### 9.2 Roadmap
 
 The content hash identity of §6.1 and §6.2 is M26 of [design.md §12.2](../design.md#122-roadmap).
+Exporting ratings and tags, once its deferred item in §8.2 is decided, is M33 of the same roadmap.
 The deferred issues are covered by §8.2.
 
 For confirmed defects, see [issues.md](../issues.md).
