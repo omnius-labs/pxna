@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -63,6 +63,53 @@ enum CandidateKind {
     Archive,
 }
 
+/// What an archive is read for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArchiveRead {
+    /// For the timeline's rows and for the name index's insides.
+    Timeline,
+    /// For the name index's insides alone, when the timeline skips the archive. No image or video is extracted.
+    NamesOnly,
+}
+
+/// The folders and Entries inside an archive that are not hidden, collected by their joined Library-relative paths, in the form the name index holds.
+#[derive(Default)]
+struct ArchiveNames {
+    /// From the Library-relative path of a folder to the names and kinds of its direct children.
+    folders: BTreeMap<String, BTreeMap<String, NameKind>>,
+}
+
+impl ArchiveNames {
+    /// Adds `entry`, which is inside the archive at `prefix`, with the folders on its way.
+    fn add(&mut self, prefix: &str, entry: &FsEntry) {
+        let Some(row) = TimelineScanner::name_row(entry) else {
+            return;
+        };
+        let segments = entry.path.split('/').filter(|segment| !segment.is_empty()).collect::<Vec<_>>();
+        let mut folder = prefix.to_string();
+        for segment in segments.iter().take(segments.len().saturating_sub(1)) {
+            self.folders.entry(folder.clone()).or_default().insert((*segment).to_string(), NameKind::Folder);
+            folder = format!("{folder}/{segment}");
+        }
+        self.folders.entry(folder).or_default().entry(row.name).or_insert(row.kind);
+    }
+
+    fn into_folders(self) -> Vec<(String, Vec<NameRow>)> {
+        self.folders
+            .into_iter()
+            .map(|(folder, children)| (folder, children.into_iter().map(|(name, kind)| NameRow { name, kind }).collect()))
+            .collect()
+    }
+}
+
+/// Counts, for the tests, the archives read for the timeline and the archives read for the name index alone.
+#[cfg(test)]
+#[derive(Default)]
+struct ArchiveReads {
+    timeline: std::sync::atomic::AtomicUsize,
+    names: std::sync::atomic::AtomicUsize,
+}
+
 /// 開いている archive と、その中の Entry の Library 相対パスの接頭辞、日時の最後の手がかり。
 struct OpenArchive {
     archive: FileStorageArchive,
@@ -86,6 +133,8 @@ pub struct TimelineScanner {
     probes: Arc<Semaphore>,
     locks: Mutex<HashMap<String, Arc<TokioMutex<()>>>>,
     slots: Mutex<HashMap<String, Arc<TokioMutex<()>>>>,
+    #[cfg(test)]
+    reads: ArchiveReads,
 }
 
 impl TimelineScanner {
@@ -109,7 +158,15 @@ impl TimelineScanner {
             probes: Arc::new(Semaphore::new(limits.probes)),
             locks: Mutex::new(HashMap::new()),
             slots: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            reads: ArchiveReads::default(),
         }
+    }
+
+    /// The archives read since the last call, for the timeline and for the name index alone, and starts counting again.
+    #[cfg(test)]
+    pub fn take_archive_reads(&self) -> (usize, usize) {
+        (self.reads.timeline.swap(0, Ordering::Relaxed), self.reads.names.swap(0, Ordering::Relaxed))
     }
 
     /// Library ごとの排他。集計の書き込みと、daemon 自身の変更の反映が使う。
@@ -275,6 +332,9 @@ impl TimelineScanner {
                 };
                 if known.get(&candidate.relative) == Some(&version) {
                     batch.touched.push(candidate.relative.clone());
+                    if let TimelineFileVersion::Archive(identity) = &version {
+                        self.skip_archive(target, candidate, identity).await?;
+                    }
                     continue;
                 }
                 match candidate.content {
@@ -283,7 +343,7 @@ impl TimelineScanner {
                         let TimelineFileVersion::Archive(identity) = version else {
                             continue;
                         };
-                        self.read_archive(target, candidate, identity).await?;
+                        self.read_archive(target, candidate, identity, ArchiveRead::Timeline).await?;
                     }
                 }
             }
@@ -338,22 +398,52 @@ impl TimelineScanner {
         (candidate, version.clone(), row)
     }
 
+    /// The timeline skips this archive because its `ArchiveIdentity` is unchanged. The name index keeps what it holds under the archive when its
+    /// record has the same identity, and otherwise, as after the name index is rebuilt, reads the archive for names alone.
+    async fn skip_archive(&self, target: &TimelineScan<'_>, candidate: &Candidate, identity: &str) -> Result<()> {
+        // An index that cannot be written or read would make every archive look unrecorded, and every aggregation read them all.
+        if !self.names.is_serving() {
+            return Ok(());
+        }
+        if self.names.archive_identity(&target.library.id, &candidate.relative).await.as_deref() == Some(identity) {
+            self.names.keep(&target.library.id, &candidate.relative, target.generation).await;
+            return Ok(());
+        }
+        self.read_archive(target, candidate, identity.to_string(), ArchiveRead::NamesOnly).await
+    }
+
     /// archive を開き、中と入れ子の archive の画像と動画を block ごとに読んで、その archive の行を置き換える。
+    /// It also replaces the rows of the archive in the name index with the folders and Entries inside it that are not hidden.
     ///
     /// 開けない archive は、中の Entry を持たない archive として記録し、変わるまで読み直さない。
-    async fn read_archive(&self, target: &TimelineScan<'_>, candidate: &Candidate, identity: String) -> Result<()> {
+    ///
+    /// For `ArchiveRead::NamesOnly`, only the nested archives down to `max_nested_depth` are extracted, and the timeline's rows are not touched.
+    async fn read_archive(&self, target: &TimelineScan<'_>, candidate: &Candidate, identity: String, read: ArchiveRead) -> Result<()> {
+        #[cfg(test)]
+        match read {
+            ArchiveRead::Timeline => self.reads.timeline.fetch_add(1, Ordering::Relaxed),
+            ArchiveRead::NamesOnly => self.reads.names.fetch_add(1, Ordering::Relaxed),
+        };
+        let for_timeline = read == ArchiveRead::Timeline;
         let file = (candidate.relative.clone(), TimelineFileVersion::Archive(identity.clone()));
         let local = candidate.local.to_string_lossy().into_owned();
+        let mut names = ArchiveNames::default();
         let archive = match self.storage.open_archive(&local, WorkClass::Background).await {
             Ok(archive) => archive,
             Err(error) => {
                 debug!(archive = %local, ?error, "timeline: cannot open archive");
-                let batch = TimelineBatch {
-                    replaced: vec![candidate.relative.clone()],
-                    files: vec![file],
-                    ..Default::default()
-                };
-                self.commit_archive(target, candidate, &identity, &batch).await?;
+                if for_timeline {
+                    let batch = TimelineBatch {
+                        replaced: vec![candidate.relative.clone()],
+                        files: vec![file],
+                        ..Default::default()
+                    };
+                    if !self.commit_archive(target, candidate, &identity, &batch).await? {
+                        return Ok(());
+                    }
+                }
+                // An archive that cannot be opened is an Entry without contents in the name index.
+                self.commit_archive_names(target, candidate, &identity, names).await?;
                 return Ok(());
             }
         };
@@ -377,9 +467,12 @@ impl TimelineScanner {
                 .filter(|entry| !Self::is_hidden(&entry.path))
                 .map(|entry| (entry.path.clone(), entry))
                 .collect::<HashMap<_, _>>();
+            for entry in entries.values() {
+                names.add(&open.prefix, entry);
+            }
             let wanted = entries
                 .values()
-                .filter(|entry| Self::archive_media(entry).is_some() || (Self::is_archive(entry) && open.depth < max_depth))
+                .filter(|entry| (for_timeline && Self::archive_media(entry).is_some()) || (Self::is_archive(entry) && open.depth < max_depth))
                 .map(|entry| entry.path.clone())
                 .collect::<Vec<_>>();
             for group in open.archive.block_groups(wanted) {
@@ -440,8 +533,26 @@ impl TimelineScanner {
                 }
             }
         }
-        batch.files.push(file);
-        self.commit_archive(target, candidate, &identity, &batch).await?;
+        if for_timeline {
+            batch.files.push(file);
+            if !self.commit_archive(target, candidate, &identity, &batch).await? {
+                return Ok(());
+            }
+        }
+        self.commit_archive_names(target, candidate, &identity, names).await
+    }
+
+    /// Writes what is inside an archive to the name index with its record, after the timeline's rows of the archive are written.
+    /// Nothing is written when the archive changed since it was read, so its record stays missing or old and the next aggregation reads it again.
+    async fn commit_archive_names(&self, target: &TimelineScan<'_>, candidate: &Candidate, identity: &str, names: ArchiveNames) -> Result<()> {
+        let lock = self.lock(&target.library.id);
+        let _guard = lock.lock().await;
+        if Self::version(candidate).await != Some(TimelineFileVersion::Archive(identity.to_string())) {
+            return Ok(());
+        }
+        self.names
+            .replace_archive(&target.library.id, &candidate.relative, identity, &names.into_folders(), target.generation)
+            .await;
         Ok(())
     }
 

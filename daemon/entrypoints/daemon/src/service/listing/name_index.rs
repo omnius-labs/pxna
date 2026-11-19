@@ -351,7 +351,6 @@ enum Work {
         src: String,
         dst: String,
     },
-    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
     Archive {
         library: String,
         path: String,
@@ -616,6 +615,20 @@ impl NameIndex {
         held
     }
 
+    /// The paths of the Library's folder rows that are an archive or inside one, sorted. For tests of the code that feeds the index.
+    #[cfg(test)]
+    pub async fn marked_folders(&self, library: &str) -> Vec<String> {
+        self.flush().await;
+        let db = self.db.as_ref().expect("the index is open");
+        let mut paths: Vec<String> = sqlx::query_scalar("SELECT path FROM name_folders WHERE library_id = ? AND archive = 1")
+            .bind(library)
+            .fetch_all(db)
+            .await
+            .expect("the index can be read");
+        paths.sort();
+        paths
+    }
+
     // ---- State ----
 
     /// Whether a full aggregation of the Library has finished with this index once, and the index has not failed since.
@@ -669,6 +682,13 @@ impl NameIndex {
 
     const MEDIA_KINDS: &'static str = "e.kind IN (3, 4)";
 
+    /// The condition that leaves out the Entries inside archives, for a query over `name_entries e` joined with its folder `f`: those whose folder row
+    /// is an archive or inside one. Every query of the index takes it from here, so that a query for a Scope that reads the insides of archives
+    /// can leave it out in one place.
+    fn outside_archives() -> &'static str {
+        "f.archive = 0"
+    }
+
     async fn run_search(db: &SqlitePool, query: NameQuery, sender: &mpsc::Sender<Result<Vec<NameHit>>>) -> Result<()> {
         let start = EntryPath::clean(&query.start);
         let range = FolderRange::of(&start);
@@ -679,6 +699,8 @@ impl NameIndex {
             "SELECT f.path AS folder, e.name AS name, e.kind AS kind FROM name_fts t JOIN name_entries e ON e.id = t.rowid JOIN name_folders f ON f.id = e.parent_id WHERE name_fts MATCH ? AND ".to_string()
         };
         sql.push_str(&FolderRange::condition(&range).replace("library_id", "f.library_id").replace("path", "f.path"));
+        sql.push_str(" AND ");
+        sql.push_str(Self::outside_archives());
         for _ in &short {
             sql.push_str(" AND instr(COALESCE(e.norm, e.name), ?) > 0");
         }
@@ -713,6 +735,8 @@ impl NameIndex {
 
     async fn run_lookup(db: &SqlitePool, library: &str, paths: &[String], terms: &[String], only_media: bool) -> Result<Vec<NameHit>> {
         let mut sql = "SELECT e.kind AS kind FROM name_entries e JOIN name_folders f ON f.id = e.parent_id WHERE f.library_id = ? AND f.path = ? AND e.name = ?".to_string();
+        sql.push_str(" AND ");
+        sql.push_str(Self::outside_archives());
         for _ in terms {
             sql.push_str(" AND instr(COALESCE(e.norm, e.name), ?) > 0");
         }
@@ -778,8 +802,8 @@ impl NameIndex {
         self.queue(work, true).await;
     }
 
-    /// Stamps the Entries under the folder with `generation` without enumerating it, for a folder aggregation could not read,
-    /// so that the sweep does not delete what is probably still there.
+    /// Stamps the Entries under the folder with `generation` without enumerating it, for a folder aggregation could not read
+    /// and for an archive it skips because its record is unchanged, so that the sweep does not delete what is probably still there.
     pub async fn keep(&self, library: &str, folder: &str, generation: i64) {
         let work = Work::Keep {
             library: library.to_string(),
@@ -823,7 +847,6 @@ impl NameIndex {
     /// (the archive's own path for its direct children) with its direct children, and sets the archive's record to `identity`, in one transaction.
     /// The archive's own folder row exists afterwards even when `folders` is empty, as for an archive that cannot be opened.
     /// This returns after the change is applied.
-    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
     pub async fn replace_archive(&self, library: &str, path: &str, identity: &str, folders: &[(String, Vec<NameRow>)], generation: i64) {
         let work = Work::Archive {
             library: library.to_string(),
@@ -836,7 +859,6 @@ impl NameIndex {
     }
 
     /// The `ArchiveIdentity` the index holds the insides of the archive at `path` for, if any.
-    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
     pub async fn archive_identity(&self, library: &str, path: &str) -> Option<String> {
         let db = self.live()?;
         let found = sqlx::query_scalar::<_, String>("SELECT identity FROM name_archives WHERE library_id = ? AND path = ?")
