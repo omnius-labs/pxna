@@ -168,7 +168,8 @@ Therefore, this request is returned from the cache and playback starts immediate
 ### 3.4 Viewer
 
 An archive opens in the viewer or as a folder by how archives open, resolved from its own folder settings, then those above it, then the display preferences, or in a Shelf from the Shelf first (§3.9).
-Opening it in the viewer moves to folder view of the archive with the viewer open at the first image or video of its listing, so the viewer moves through the archive's Entries, closing it leaves the archive's listing, and the browser's back operation returns to where the archive was opened.
+Opening it in the viewer moves to folder view of the archive and opens the viewer at the first image or video of the archive's listing of direct children, read page by page from the top until one is found, so the viewer moves through the images and videos of that listing without entering its folders or nested archives, closing it leaves the archive's listing, and the browser's back operation returns to where the archive was opened.
+When the archive's direct children have no image or video, the viewer does not open and the archive's listing is shown.
 "フォルダとして開く" (Open as folder) in an archive's context menu moves to folder view of the archive without the viewer.
 It is the viewer of this section as it is, without a reading direction or two-page spreads.
 
@@ -282,6 +283,7 @@ When closing the viewer, it requests the end of the transcode session ([Video Pl
 ### 3.5 Loading Listings
 
 Folder view and every Shelf are read through one paged listing store: folder view with `listFolderEntries`, and a Shelf with `listEntries` ([Listing and Search Design §3](./listing.md#3-sorting-and-filtering)), by `offset` in the grid and the list and by cursor in the timeline Layout (§3.10).
+The rest of this section describes the grid and the list; the timeline Layout reads by cursor as §3.10 describes.
 The web client's listing finds the overall number of rows from the first page's `totalCount`, and reserves that height in advance.
 The position and length of the scrollbar correspond to the whole listing, not to what has been loaded.
 Therefore, even if you jump to the end with the scrollbar, it can be displayed by reading only the page at that position.
@@ -325,7 +327,7 @@ An Unsaved Shelf is at `/search`, whose query carries all of it.
 | --- | --- |
 | `start` | A start, repeated for each: the Library id followed by the Library-relative path with the leading `/` removed. If omitted, the root of every Library |
 | `flat=1` | Do not read the descendants of the starts. If omitted, they are read |
-| `archives=1` | Also read the insides of archives. If omitted, an archive is one Entry |
+| `archives=1` | Also read the insides of archives found under the starts. If omitted, such an archive is one Entry; a start that is an archive always reads its inside |
 | `q` | The name terms |
 | `rating` | Filtering by rating. `good`, `bad`, `none` (unrated) |
 | `tag` | Filtering by tag, repeated for each word. Entries with all the words match |
@@ -338,9 +340,9 @@ Opening an old URL form replaces it with the corresponding `/search` URL: `lib` 
 
 The conditions bar lines up, from the left, the starts, "サブフォルダを含めない" (Do not include subfolders), "アーカイブの中も探す" (Also look inside archives), the field for name terms, the rating choice (すべて (All), 良い (Good), 悪い (Bad), 未評価 (Unrated)), a choice per tag word the user has created, and the kinds.
 It folds into one row that names the conditions in effect.
-The starts are chosen in a popover with the tree of every Library, where each folder and archive has a checkbox, so the starts can be in several Libraries; at least one start is always chosen.
+The starts are chosen in a popover with the tree of every Library, where each folder and archive has a checkbox, so the starts can be in several Libraries; when none is checked, the starts are the roots of every Library, as when `start` is omitted, and saving a Shelf writes those roots as its starts.
 "Shelf に追加…" (Add to Shelf…) in the context menu of a folder or archive, in the tree or the listing, adds it as a start of a Shelf chosen from a list, whose last item, "新しい Shelf…" (New Shelf…), asks for a name and creates a Shelf with that start.
-The Layout, the sort, and the tile size are in the settings menu (§3.9).
+The Layout, the sort, the tile size, the thumbnail shape, and how an archive opens are in the settings menu (§3.9).
 
 Changing a condition of a saved Shelf applies to the listing at once and shows "保存" (Save) and "元に戻す" (Revert) in the bar; "保存" replaces the Shelf whole, and leaving the Shelf without saving asks whether to discard the changes.
 An Unsaved Shelf shows "Shelf として保存" (Save as Shelf), which asks for a name, creates the Shelf, and moves to its URL.
@@ -376,7 +378,7 @@ The server stops the work when all requests waiting for it have been cut ([Listi
 When the response names starts walked because the name index did not answer, "索引を作成中のため、結果が不完全な場合があります。" (The index is being built, so the results may be incomplete.) is displayed above the results.
 When it names starts cut off, it indicates that the result is partial and urges moving those starts down.
 When it names missing starts, it lists them above the results and leads to editing the Shelf ([Listing and Search Design §5.3](./listing.md#53-listing-several-starts)).
-A Shelf that does not read the insides of archives does not look inside them; "アーカイブの中も探す" does.
+A Shelf that does not read the insides of archives does not look inside the archives under its starts; "アーカイブの中も探す" does, and a start that is an archive is always read inside.
 
 Reload and the browser's back operation can return to the same Shelf's listing.
 
@@ -407,7 +409,7 @@ Key operations are not made to work inside input fields and dialogs (including c
 Delete is confirmed with a dialog that shows the number of targets and that they move to the trash, and then sent.
 A deletion that includes folders states in the dialog that the contents move to the trash along with them, and is sent with `recursive=true`.
 A selection mixing files and folders is split into two requests by kind ([design.md §8.1](../design.md#81-namespaces)).
-The trash of each Library is opened from the Library's menu. It lists the Entries in the trash, restores a chosen Entry to its original path, and empties the trash. The trash is not shown in the tree, the listing, the search, or the timeline. Restoring and emptying are confirmed in a dialog, and become Operations when they can take long.
+The trash of each Library is opened from the Library's menu. It lists the Entries in the trash, restores a chosen Entry to its original path, and empties the trash. The trash is not shown in the tree, the listing, or any Shelf. Restoring and emptying are confirmed in a dialog, and become Operations when they can take long.
 
 Cut and copy remember the selected Entries' Library and path in a clipboard inside the web client.
 The OS clipboard is not used.
@@ -490,7 +492,7 @@ When they could not be read, it runs with the defaults and notifies by a toast.
 Even if the display preferences cannot be read, browsing is not stopped.
 The shape and ranges of the set of values are defined by `openapi.yaml` and validated by the server.
 A `PUT` that contains an out-of-range value is rejected with 400, and the saved values do not change.
-`filmstripSize` is required. A set saved before it existed cannot be read, so `GET /preferences` fails with `SerdeError`, the web client runs with the defaults, and the next `PUT` saves the new shape. Deleting only the saved preferences row also resets it; the state directory holds users and ratings and is not deleted.
+How an archive opens is optional, and a set saved before it existed is read with the default, opening as a folder. `filmstripSize` is required. A set saved before it existed cannot be read, so `GET /preferences` fails with `SerdeError`, the web client runs with the defaults, and the next `PUT` saves the new shape. Deleting only the saved preferences row also resets it; the state directory holds users and ratings and is not deleted.
 The ranges are written in the contract, so the generated router rejects when it reads the body. The body of this 400 is not an `ErrorResponse`, and the web client judges the rejection from the status code alone.
 
 The display preferences have two sets: for wide screens and for narrow screens.
@@ -529,8 +531,8 @@ Folder settings hold the same values for a folder and the folders under it, in t
 They are read at startup together with the display preferences.
 In folder view, the settings menu has "このフォルダ以下に保存" (Save for this folder and below). While it is on, the menu's changes are saved as the settings of the current folder instead of the display preferences.
 When the current folder takes a value from a folder above, the menu names that folder, and "リセット" (Reset) removes the current folder's settings.
-A folder's values are resolved value by value: from its own settings, then the nearest folder above that sets the value, then the display preferences.
-In a Shelf, the Layout, the sort, and the tile size are resolved from the display preferences and the Shelf, without folder settings, and how an archive opens from the Shelf, then the folder settings at or above the archive, then the display preferences.
+A folder's values are resolved value by value: from its own settings, then the nearest folder above it that sets the value, then the display preferences.
+In a Shelf, the Layout, the sort, the tile size, and the thumbnail shape are resolved from the display preferences and the Shelf, without folder settings, and how an archive opens from the Shelf, then the folder settings at or above the archive's path, then the display preferences.
 The menu's changes in a saved Shelf become its changes to save (§3.6), and in an Unsaved Shelf they are kept while the tab is open, the Layout in the URL.
 
 ### 3.10 Timeline Layout
@@ -541,7 +543,7 @@ What is listed, the timeline dates, the order across Libraries, and the server's
 
 The month being viewed is carried in the `month` query (`YYYY-MM`), put in the URL by scrolling without pushing onto history.
 The old URL `/timeline` is replaced by the URL of the default Shelf, keeping `month` and `view`, or, when the default Shelf no longer exists, by an Unsaved Shelf over every Library with the insides of archives, images and videos, and the timeline Layout.
-The older `/timeline/{libraryId}` is replaced in the same way, putting that Library in front of `view`.
+The older `/timeline/{libraryId}` is replaced by an Unsaved Shelf whose start is that Library's root, with images and videos, the insides of archives, and the timeline Layout, keeping `month` and putting that Library in front of `view`.
 
 On a wide screen, the row of the open Shelf in the left area's list of Shelves expands to the years and months with counts over its Scope and Filter.
 The years and months take the same shape as the folder tree: rows have the tree's height, a year is a node one level below the Shelf that can be expanded and collapsed, and its months are one level below it, with the counts lined up at the right edge.
@@ -562,7 +564,7 @@ When the continuation above is added and when distant Entries are discarded, the
 When a month is chosen and when opened from the URL's `month`, the range already read is discarded and reread from that month.
 Thumbnails are wanted under the same rules as folder view (§4).
 
-While the server is aggregating any of the Libraries of the Shelf's starts, "集計中" (Aggregating) and the number of files processed, summed over them, are shown, and the per-month counts are reread every 10 seconds.
+While the server is aggregating any of the Libraries of the Shelf's starts, "集計中" (Aggregating) and the number of files processed, summed over them, are shown, and per-month counts held in advance are reread every 10 seconds; counts the server makes on request, for a Scope of folders, a Scope that does not read descendants, or a name, rating, or tag condition, are reread only with the listing ([Timeline Design §7](./timeline.md#7-reading)).
 Entries added by aggregation are not automatically inserted into the already loaded grid. Added Entries appear when "今すぐ更新" (Update now) is pressed and on the reread when a month is chosen again.
 The "今すぐ更新" button makes the server start aggregation of those Libraries.
 
@@ -1491,7 +1493,7 @@ Movement would be the same for images and videos, but a horizontal drag on the s
 **Decision**
 The top-level entrances of every client are the Libraries, the Shelves, and the settings.
 Opening search opens an Unsaved Shelf, and saving it makes it a Shelf; search from a folder opens an Unsaved Shelf whose Scope is that folder.
-A default Shelf named Timeline is created with every Library in its Scope, the insides of archives read, images and videos in its Filter, and the timeline Layout, and it takes over the Libraries chosen in `timelineLibraries`.
+A default Shelf named Timeline is created whose starts are the Libraries chosen in `timelineLibraries` that still exist, or every Library at its creation when none is saved or none remains, with the insides of archives read, images and videos in its Filter, and the timeline Layout ([design.md §6.5](../design.md#65-shelves-and-folder-settings)).
 The owner can edit and delete it like any other Shelf.
 This replaces the switch of three choices between folder view, the timeline, and search mode.
 
@@ -1613,7 +1615,7 @@ Old URLs would stay as they are, but there would be two addresses for one listin
 #### Do Not Apply Folder Settings Inside a Shelf, Except How an Archive Opens
 
 **Decision**
-In a Shelf, the Layout, the sort, and the tile size are resolved from the display preferences and the Shelf, without folder settings; how an archive opens is resolved from the Shelf, then the folder settings at or above the archive, then the display preferences (§3.9).
+In a Shelf, the Layout, the sort, the tile size, and the thumbnail shape are resolved from the display preferences and the Shelf, without folder settings; how an archive opens is resolved from the Shelf, then the folder settings at or above the archive's path, then the display preferences (§3.9).
 
 **Reason**
 A Shelf's listing spans folders, so no one folder's Layout, sort, or tile size could apply to it.
@@ -1813,9 +1815,9 @@ Only the dependencies must be respected.
 | C15 | Put the Libraries and the Shelves in the left area, edit a Shelf in the conditions bar, open search as an Unsaved Shelf, and read every Shelf through one store with `listEntries` (§3.1, §3.5, §3.6) | M28 and M29 of [design.md §12.2](../design.md#122-roadmap) |
 | C16 | Show the timeline Layout with its years and months under its Shelf, and redirect the old timeline URLs to the default Shelf (§3.10) | C15 |
 | C17 | Save folder settings from the settings menu, and open archives as folders or in the viewer by the resolved setting (§3.4, §3.9) | C15 |
-| C18 | Remove search mode, the timeline screen over chosen Libraries, and the three-choice switch | C16, C17 |
+| C18 | Remove the screens and the switch that the Shelves replace ([Keep the Libraries and the Shelves in the Left Area](#keep-the-libraries-and-the-shelves-in-the-left-area)) | C16, C17 |
 
-C11 corresponds to part of M20, C14 to M25, and C15 to C18 to M30 of [design.md §12.2](../design.md#122-roadmap).
+C11 corresponds to part of M20, C14 to M25, and C15 to C18 correspond to M30 of [design.md §12.2](../design.md#122-roadmap).
 M13, which corresponds to C8b, M14, which corresponds to C9a and C9b, M15, which corresponds to C10, M17, which corresponds to the timeline screen, M19, which corresponds to C12, and M24, which corresponds to C13, are complete.
 
 For confirmed defects, see [issues.md](../issues.md).

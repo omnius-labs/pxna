@@ -125,7 +125,7 @@ The index holds the following.
 | --- | --- |
 | Rows for Entries to list in the timeline (Library, Library-relative path, kind, timeline date, timeline date source, original instant, size, modification time, the local file it belongs to) | Reading pages |
 | Rows per local image, video, and archive file (Library, Library-relative path, size and modification time for images and videos, `ArchiveIdentity` for archives, the last-seen aggregation generation) | Determining whether rereading can be skipped in aggregation, and cleaning up vanished files |
-| The number of Entries per month (per Library) | The list of years and months |
+| The number of Entries per month, per Library, kind, and whether the Entry is inside an archive | The list of years and months |
 | The aggregation state per Library (generation, time the last aggregation finished) | Cleanup and the timing of periodic aggregation |
 | The time zone the timeline dates were converted into | Reconversion when the configuration is changed |
 
@@ -239,7 +239,7 @@ Each start is read from the index in one of two ways.
 A start that is the root of a Library follows the rows in the index's order, which puts the timeline date first, not the Library, so that several Libraries are read together.
 A start that is a folder or an archive takes the rows under its path through the primary key and orders them by timeline date, so the cost of a page grows with the Entries under the start, not with the Library.
 When the Scope does not read the descendants of its starts, both kinds of start take the rows under the start's path through the primary key and keep only its direct children, since the date order would skip the whole Library to find them; the insides of an archive among those children are its descendants and are not read.
-When the Scope does not read the insides of archives, only rows whose path is their local file's are read.
+When the Scope does not read the insides of archives, only rows whose path is their local file's are read, except under a start that is an archive or a path inside one, which always reads that archive's inside ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)).
 The per-start sequences are merged in the order above, and an Entry reached from two starts is listed once, as in other listings ([Listing and Search Design §5.3](./listing.md#53-listing-several-starts)).
 
 When the Filter has a name, rating, or tag condition, the candidates are the matches that the name index answers for each start ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), and they are ordered by the timeline dates of their rows.
@@ -250,8 +250,8 @@ The Entries of a page are returned as the same `FileSystemEntry` as listings, wi
 The Entry of a file that vanished externally is also returned until the next aggregation.
 
 The per-month counts take the same Scope and Filter and are returned as a sequence in newest-month-first order.
-When every start is the root of a Library, the Scope reads the insides of archives, and the Filter has no condition and keeps both kinds, they are the sums of the counts held per Library (§5).
-Otherwise they are counted on each request from the rows, or from the matches, that the same reading would return, so their cost grows with the Entries in the Scope.
+When every start is the root of a Library, the Scope reads descendants, and the Filter has no name, rating, or tag condition, they are the sums of the counts held per Library, kind, and whether the Entry is inside an archive (§5), taking the kinds the Filter keeps and leaving out the insides of archives when the Scope does not read them.
+Otherwise they are counted on each request from the rows, or from the matches, that the same reading would return, so their cost grows with the Entries in the Scope (§9.2).
 
 ## 8. Configuration
 
@@ -647,30 +647,40 @@ It would state the fact directly, but it repeats what the two paths already say,
 #### Sum the Per-Month Counts in Advance Only for Whole Libraries
 
 **Decision**
-The per-month counts over a Scope and a Filter are the sums of the counts held per Library when every start is a Library root, the insides of archives are read, and the Filter keeps both kinds with no condition; otherwise they are counted on each request (§7).
+The counts are held per Library, month, kind, and whether the Entry is inside an archive.
+The per-month counts over a Scope and a Filter are their sums when every start is a Library root, descendants are read, and the Filter has no name, rating, or tag condition; otherwise they are counted on each request (§7).
 
 **Reason**
-The counts held per Library are exact only for whole Libraries with everything in them, and a Scope of folders or a Filter narrows them in ways that cannot be summed from them.
-Counting on request costs the Entries in the Scope, which is what reading that Scope costs anyway.
+A timeline of the images alone, or of a whole Library without the insides of archives, is a common Shelf, and four counts per month and Library let it keep the counts held in advance.
+A Scope of folders or a name, rating, or tag condition narrows the counts in ways no count per Library can give, so they are counted from the rows, which costs every Entry in the Scope; that cost is deferred with the cost of ordering a folder start (§9.2).
 
-**Rejected alternative**
+**Rejected alternative 1**
+Holding the counts per Library only, and counting every narrower Filter on request.
+The index would hold one count per month, but a timeline of images only over a whole Library would count millions of rows each time its months are shown, so we rejected it.
+
+**Rejected alternative 2**
 Holding per-month counts for every folder.
 Any Scope of folders could be summed, but the index would grow by every folder and every month in it, and each write would update every ancestor, so we rejected it.
 
 ### 9.2 Deferred
 
-#### Whether Ordering a Large Folder Start Keeps Pages Fast
+#### Whether Timeline-Date Order Stays Fast over Folders and Conditions
 
 **Current state**
-A start at a folder or an archive orders the rows under its path for each page (§7), so the cost of a page grows with the Entries under it.
-It has not been measured.
+Three readings cost in proportion to the Entries they cover, not to a page (§7).
+A start at a folder or an archive orders the rows under its path for each page.
+A name, rating, or tag condition orders the name index's matches, up to the recursion limit per start, for each page.
+The per-month counts of a Scope of folders or of such a condition are counted from all those rows on each request.
+None of them has been measured.
+The client rereads counts held in advance every 10 seconds during aggregation, but counts made on request only when the listing is read again ([Client Design §3.10](./client.md#310-timeline-layout)).
 
 **Why not decide now**
-Folders are usually a small part of their Library, and a folder that holds most of a Library can be named as the Library root instead.
-Whether another path is needed depends on folders in actual use.
+Folders and matches are usually a small part of a Library, and whether a page or a list of months is slow depends on the folders and conditions in actual use.
+Until then the owner can show a large folder or a broad condition in the grid or the list, which cut pages from a snapshot, or narrow the Scope.
+The remedies have costs of their own: a short-lived cache of the ordered sequence per Scope and Filter, dropped when aggregation writes, holds memory like a snapshot, and an index by path and date grows the index by every row.
 
 **Conditions for deciding**
-When a user reports that the timeline of a folder is slow to page. Then measure at that folder's size, and decide whether the order needs an index by path and date.
+When a user reports that the timeline of a folder or of a condition is slow to page or to show its months. Then measure at that size, and choose between the cache and the index.
 
 #### Whether to Use Exif's Time Zone Fields
 
@@ -721,9 +731,9 @@ Only the dependencies must be respected.
 
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
-| TL1 | Read timeline-date order for `listEntries` over a Scope and a Filter, with Library roots by the date order, folder starts by their paths, conditions over the name index's matches, and the insides of archives left out by the local file (§7) | L4 of [Listing and Search Design §9.2](./listing.md#92-roadmap) | Not started |
-| TL2 | Return the per-month counts over a Scope and a Filter, summed in advance only for whole Libraries (§7) | TL1 | Not started |
-| TL3 | Remove `listTimelineEntries` and the month API over chosen Libraries once no client calls them | TL2 | Not started |
+| TL1 | Read timeline-date order for `listEntries` over a Scope and a Filter, with Library roots by the date order, folder starts by their paths, conditions over the name index's matches, and the insides of archives left out by the local file except under an archive start (§7) | L4 of [Listing and Search Design §9.2](./listing.md#92-roadmap) | Not started |
+| TL2 | Hold the per-month counts per kind and whether inside an archive, and return them over a Scope and a Filter, summed in advance for whole Libraries without conditions (§5, §7) | TL1 | Not started |
+| TL3 | Remove the timeline's own page and month APIs, which `listEntries` and the counts over a Scope replace (§9.1), once no client calls them | TL2 | Not started |
 
 TL1 and TL2 correspond to part of M28, and TL3 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
 The web client's current screen is in [Client Design §6.1](./client.md#61-current-code).

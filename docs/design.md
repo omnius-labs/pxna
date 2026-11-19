@@ -64,7 +64,7 @@ Google Photos does not target assets on a home server and presupposes that the f
 Immich is self-hosted, but it works on assets of its own.
 Files enter it by upload, or by a scan of an external library that creates an asset for each photo and video it loads ([Immich: Libraries](https://docs.immich.app/features/libraries)).
 Each uploaded asset starts background jobs that include metadata extraction, thumbnail generation, and machine learning ([Immich: Jobs and Workers](https://docs.immich.app/administration/jobs-workers)).
-The formats it outlines as the most common are images and videos ([Immich: Supported Formats](https://docs.immich.app/features/supported-formats)).
+Its page of supported formats outlines the most common image and video formats and names no archive format ([Immich: Supported Formats](https://docs.immich.app/features/supported-formats)).
 By using the assets on the home server as they are, Pxna lets the owner keep sovereignty over them, avoid capacity limits and cost, and see them without waiting for an import or a batch.
 
 The assumed operation is as follows.
@@ -95,12 +95,12 @@ The owner browses in two ways ([§11.1](#browse-through-the-tree-and-shelves)).
 The tree of Libraries and folders is authoritative and shows the files where they are.
 A Shelf cuts across it with a saved Scope of folders, a Filter, and a Layout such as the timeline, so that books spread over several folders, or the unrated outputs of an image generator, open as one unit.
 Search opens an Unsaved Shelf.
-The Layout, the sort, and how an archive opens are resolved from the display preferences, the folder settings, and the open Shelf ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
+The Layout, the sort, the tile size, the thumbnail shape, and how an archive opens are resolved from the display preferences, the folder settings, and the open Shelf ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
 The web client is where the owner organizes, and the iOS app is where the owner views, reads, and classifies in passing ([§11.1](#organize-on-the-web-client-and-view-on-the-phone)).
 
 What supports the workflow is the implementation behind it.
 One WebSocket per tab carries thumbnails, sprite sheets, and display images, and one decode produces the variants that the listing, the shape switch, and the filmstrip need.
-Listings are paginated by `offset` over a snapshot, and the tree is virtualized, so a large folder does not have to be read in full before it is shown.
+Listings are paginated by `offset` over a snapshot, the timeline Layout by cursor, and the tree is virtualized, so a large folder does not have to be read in full before it is shown.
 The server reads formats a browser may not display, such as HEIC, JXL, and TIFF, and returns a display image instead of the original.
 The daemon is one process and one Docker image with ffmpeg, ffprobe, and heif-dec bundled, built for amd64 and arm64.
 The API is written first in `openapi.yaml`, and the tests, the measurements, and the design documents are kept with the code.
@@ -426,14 +426,14 @@ They are held in three tables.
 | `shelf_starts` | Start of a Shelf | The Shelf, the position among its starts, the Library id, and the Library-relative path |
 | `folder_settings` | Folder that has settings | The user, the Library id, the Library-relative path, and the display values |
 
-The display values are the Layout, the sort, the tile size, and how an archive opens, in the shape of the display preferences: the Layout and the tile size per set of the wide and narrow screens, and the sort and how an archive opens once ([Client Design §3.9](./design/client.md#39-display-preferences)).
+The display values are the Layout, the sort, the tile size, the thumbnail shape, and how an archive opens, in the shape of the display preferences: the Layout, the tile size, and the thumbnail shape per set of the wide and narrow screens, and the sort and how an archive opens once ([Client Design §3.9](./design/client.md#39-display-preferences)).
 Any value can be left unset, which means it is taken from the layer below.
 A folder inside an archive has settings by its joined path, as any other folder ([§11.1](#represent-paths-inside-archives-by-joining-paths)).
 
-The Shelves are read in full, created, replaced whole, and deleted one at a time, and their order is replaced as a whole; the paths and schemas are in `openapi.yaml`.
+The Shelves are read in full, created, replaced whole, and deleted one at a time, and their order is replaced as a whole; the paths and schemas are defined in `openapi.yaml` by M29 of §12.2, which adds them.
 A Shelf is listed by sending its Scope and Filter to `listEntries`, as an Unsaved Shelf is ([Listing and Search Design §8.1](./design/listing.md#carry-a-scope-and-a-filter-in-the-query-of-one-get-request)).
 The folder settings are read in full when a client starts, and written or removed one folder at a time.
-A client resolves a folder's values itself: each unset value is taken from the nearest folder above, the folder itself included, that sets it, and then from the display preferences; an open Shelf's set values win over both, and inside a Shelf only how an archive opens is taken from folder settings ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
+A client resolves a folder's values itself: each unset value is taken from the nearest folder at or above it that sets it, and then from the display preferences; an open Shelf's set values win over both, and inside a Shelf only how an archive opens is taken from folder settings ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
 These requests change no Library, so they respond synchronously and follow, of the conventions of §8, only the `Origin` check of §8.5.
 
 The daemon's own changes keep both in step with the tree.
@@ -441,9 +441,10 @@ At the point where `LibraryMutation` reassigns the rows of the indexes, a rename
 Changes made outside Pxna are not followed, so a folder renamed outside loses its settings, and a Shelf start that no longer names a folder is a missing start.
 `listEntries` lists a Shelf without its missing starts and names them ([Listing and Search Design §5.3](./design/listing.md#53-listing-several-starts)), and the client shows the Shelf with a notice that leads to editing it.
 
-The default Shelf is created once, by the first read of the Shelves of a user who has never had a Shelf, in the same transaction that records the creation, so two clients reading first at the same time create it once.
-It is named Timeline, its starts are the roots of the Libraries in `timelineLibraries` of the display preferences, or of every Library when none is saved, it reads descendants and the insides of archives, its Filter keeps images and videos, and its Layout is the timeline ([Client Design §5.1](./design/client.md#enter-through-the-libraries-and-the-shelves)).
-That it was created is recorded, so it is not created again after the owner deletes it, and `timelineLibraries` is no longer read.
+The default Shelf is created once, by the first read of the Shelves of a user whose row in the `users` table does not yet record it; the same transaction creates the Shelf and sets that record, so two clients reading first at the same time create it once, and a deleted default Shelf is not created again.
+It is named Timeline, it reads descendants and the insides of archives, its Filter keeps images and videos, and its Layout is the timeline ([Client Design §5.1](./design/client.md#enter-through-the-libraries-and-the-shelves)).
+Its starts are the roots of the Libraries in `timelineLibraries` of the display preferences that still exist, or of every Library at that moment when none is saved or none of the saved ones exists, and `timelineLibraries` is not read afterwards.
+A Library added later is therefore not in the default Shelf until the owner adds it (§11.1 "Create the Default Shelf Once from timelineLibraries").
 
 ## 7. Authentication and Sessions
 
@@ -695,7 +696,7 @@ Completed ones are pruned after about an hour.
 ### 8.9 Search
 
 Search opens an Unsaved Shelf: a Scope and a Filter that are not saved, read through `listEntries` like any Shelf ([Listing and Search Design §8.1](./design/listing.md#list-the-entries-of-a-scope-through-one-api)).
-A recursive listing over a Scope is answered from the name index that aggregation updates, and walks the file system only while that index is not usable.
+A recursive listing over a Scope with a name, rating, or tag condition, or one that reads the insides of archives, is answered from the name index that aggregation updates, and walks the file system only while that index is not usable; other recursive listings walk ([Listing and Search Design §5.2](./design/listing.md#52-answering-recursive-listings-with-conditions)).
 The sorting of listings, snapshots, name matching, recursion limits, and the reasons for adopting these are authoritative in [Listing and Search Design](./design/listing.md).
 How the client reads listings and search is covered by [Client Design §3.5](./design/client.md#35-loading-listings) and [§3.6](./design/client.md#36-shelves-and-search).
 
@@ -1352,8 +1353,8 @@ No daemon change would be needed, but a Shelf made on one device would not exist
 #### Resolve Display Settings over the Display Preferences, Folder Settings, and the Shelf
 
 **Decision**
-The Layout, the sort, the tile size, and how an archive opens are resolved from the display preferences, then the folder settings of the nearest folder above that has them, then the open Shelf, the later winning.
-Inside a Shelf, folder settings apply only to how an archive opens, taken from the folder settings at or above the archive, because a Shelf's listing spans folders ([Client Design §5.1](./design/client.md#do-not-apply-folder-settings-inside-a-shelf-except-how-an-archive-opens)).
+The Layout, the sort, the tile size, the thumbnail shape, and how an archive opens are resolved from the display preferences, then the folder settings of the nearest folder at or above that has them, then the open Shelf, the later winning.
+Inside a Shelf, folder settings apply only to how an archive opens, taken from the folder settings at or above the archive's path, because a Shelf's listing spans folders ([Client Design §5.1](./design/client.md#do-not-apply-folder-settings-inside-a-shelf-except-how-an-archive-opens)).
 Folder settings are stored in the daemon's database keyed by the Library and the Library-relative path, follow the daemon's own moves and renames, and are lost when the folder is moved or renamed outside Pxna.
 Every client shares them, as it shares the display preferences.
 
@@ -1407,7 +1408,7 @@ It would need no tables, but every move would rewrite every Shelf and finding th
 #### Replace a Shelf Whole, and Resolve Folder Settings on the Client
 
 **Decision**
-A Shelf is created, replaced whole, deleted, and reordered through its own requests, and the folder settings are read in full at startup and resolved by the client, value by value from the nearest folder above (§6.5).
+A Shelf is created, replaced whole, deleted, and reordered through its own requests, and the folder settings are read in full at startup and resolved by the client, value by value from the nearest folder at or above (§6.5).
 
 **Reason**
 A Shelf is edited on one screen and saved as a whole, as the display preferences are, so replacing it whole needs no rule for merging parts.
@@ -1442,20 +1443,30 @@ Moves would touch one table fewer, but a Shelf would lose a folder the owner onl
 #### Create the Default Shelf Once from timelineLibraries
 
 **Decision**
-The first read of the Shelves of a user who has never had a Shelf creates the default Shelf Timeline from `timelineLibraries`, records that it did so, and does not create it again (§6.5).
+The first read of the Shelves of a user whose row in the `users` table does not record the default Shelf creates the default Shelf Timeline and sets that record in the same transaction, and it is not created again (§6.5).
+Its starts are the roots of the Libraries in `timelineLibraries` that still exist, or of every Library at that moment when none is saved or none remains, and a Library added later is not added to it.
 
 **Reason**
 Creating it at the first read takes over the Libraries the owner chose for the timeline, and it works for a user who is registered after the daemon starts.
-Recording the creation keeps a deleted default Shelf deleted, as an owner who deleted it meant.
+A record on the user's row is one value per user that the creating transaction sets, so a deleted default Shelf stays deleted, as an owner who deleted it meant, and two first reads at once create it once.
+Ids of Libraries removed from the configuration name nothing, and a Shelf names its folders, so it lists what it was made with, like any other Shelf.
 
-**Rejected alternative**
+**Rejected alternative 1**
 Creating it in the migration that adds the tables.
 It would be one step, but the owner may not be registered yet, and there would be no user to key it by, so we rejected it.
+
+**Rejected alternative 2**
+Creating it whenever the user has no Shelf.
+It needs no record, but an owner who deleted every Shelf would get the default one back, so we rejected it.
+
+**Rejected alternative 3**
+A start that means every Library, so that a Library added later joins the default Shelf.
+The earlier timeline behaved so while nothing was saved, but a Shelf would then hold a rule no other Shelf has, and the owner can add the new Library's root in one step, so we rejected it.
 
 #### Hold Folder Settings and Shelves in the Shape of the Display Preferences
 
 **Decision**
-Folder settings and Shelves hold the Layout and the tile size per set of the wide and narrow screens, and the sort and how an archive opens once, each of which can be unset (§6.5).
+Folder settings and Shelves hold the Layout, the tile size, and the thumbnail shape per set of the wide and narrow screens, and the sort and how an archive opens once, each of which can be unset (§6.5).
 
 **Reason**
 The layers are resolved value by value, so each value has to have the same shape in every layer.
@@ -1463,7 +1474,7 @@ A tile size means a width in CSS pixels on a wide screen and a number of columns
 
 **Rejected alternative**
 One set without the tile size, which would stay in the display preferences only.
-The shape would be smaller, but a shelf of books could not ask for larger covers, so we rejected it.
+The shape would be smaller, but a shelf of books could not ask for larger covers, or for covers shown whole rather than cropped, so we rejected it.
 
 ### 11.2 Deferred
 
@@ -1682,14 +1693,14 @@ M7 is a retired number and is not used.
 | M28 | Implement `listEntries` over a Scope and a Filter, with pages by `offset` and by cursor in timeline-date order, the starts cut off, walked, and missing, and the per-month counts over the same Scope and Filter ([Listing and Search Design §4.6](./design/listing.md#46-pages-in-timeline-date-order), [§5.3](./design/listing.md#53-listing-several-starts), [Timeline Design §7](./design/timeline.md#7-reading)) | M24, M27 | Not started |
 | M29 | Implement the storage and API of Shelves and folder settings, their reassignment by the daemon's own changes, and the default Shelf (§6.5) | M2, M3, M11 | Not started |
 | M30 | Rebuild the web client around the Libraries and the Shelves: the left area, the conditions bar and the Unsaved Shelf, the timeline Layout, folder settings, and how archives open ([Client Design §3](./design/client.md#3-screens)) | M28, M29 | Not started |
-| M31 | Remove `listSearchEntries`, `listTimelineEntries`, and the timeline's month API once the web client and the iOS app read `listEntries` | M30 | Not started |
+| M31 | Remove the listing and month APIs that `listEntries` replaces ([Listing and Search Design §8.1](./design/listing.md#list-the-entries-of-a-scope-through-one-api)) once the web client and the iOS app read `listEntries` | M30 | Not started |
 | M32 | Decide and implement the control of background work (§11.2 "Controlling Background Work"), including what the Shelves list before the owner opts in to aggregation | M27, M30 | Not started |
 | M33 | Export ratings and tags in a standard form ([Rating and Tag Design §8.2](./design/rating-tags.md#exporting-ratings-and-tags-in-a-standard-form)), leaving out or marking the Entries in the Trash | M25, M26 | Not started |
 
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
 
-The items that still block the positioning in §2 are the Shelves (M27 to M31), then M32 (control of background work), M25 (library-local trash), M26 (content hash for ratings and tags), and M33 (exporting ratings and tags), in that order; M15 (viewer touch operations) and M19 (name index), which came first, are done.
+The items that still block the positioning in §2 are the Shelves (M27 to M31), then M32 (control of background work), M25 (library-local trash), M26 (content hash for ratings and tags), and M33 (exporting ratings and tags), in that order of priority, which the dependencies of the table do not enforce; M15 (viewer touch operations) and M19 (name index), which came first, are done.
 M31 also needs the iOS app to read `listEntries`, which it does in its own repository.
 
 The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap), of M5 in [Storage Layer Design §10.2](./design/storage.md#102-roadmap), of M8 in [Video Playback Design §8.2](./design/video.md#82-roadmap), of M10 in [Listing and Search Design §9.2](./design/listing.md#92-roadmap), and of M11 only V4 of [Video Playback Design §8.2](./design/video.md#82-roadmap); the thumbnail output and the display preferences API are done and have no remaining work.

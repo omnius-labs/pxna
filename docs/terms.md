@@ -87,7 +87,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | Folder view | client | - | `/browse/{libraryId}/…` | The web screen that lists the direct children of the folder selected in the tree | dir mode |
 | Display preferences | client | `Preferences` | `/preferences` | The set of values for the web client's appearance and behavior that the owner chooses and saves on the server | settings |
 | Layout | client | - | `layout` (a query of `/search`) with `grid`, `list`, `timeline` | How a listing arranges its Entries: as a grid, a list, or the timeline | view, listing display |
-| Unsaved Shelf | client | - | `/search` (web URL) and its query `start`, `flat=1`, `archives=1`, `q`, `rating`, `tag`, `kind`, `layout` | A Shelf being composed that has not been saved, which is what opening search shows | temporary search, search mode |
+| Unsaved Shelf | client | - | `/search` (web URL) and its query `start`, `flat=1`, `archives=1`, `q`, `rating`, `tag`, `kind`, `layout` | A Shelf being composed that has not been saved, which is what opening search shows | temporary search |
 | Folder settings | client | - | "このフォルダ以下に保存" (Save for this folder and below) | Display settings saved for one folder and inherited by the folders under it, applied between the display preferences and a Shelf | per-folder preferences |
 | Image socket client | client | `ImageSocketClient` | - | The web client's one holder per tab of the image wants of every part, which merges them into items, keeps received images in IndexedDB, and talks to the image socket | thumbnail queue |
 | Size steps | thumbnail | - | `[thumbnail] sizes`, `display_sizes` | The fixed set of values to which the server rounds up the width and height of thumbnails and display images | - |

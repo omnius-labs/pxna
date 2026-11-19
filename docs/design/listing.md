@@ -14,7 +14,7 @@ The definitions of words are not in this document.
 | This document | Sorting and filtering of listings, snapshots, Scopes and Filters, name search, the name index, recursion limits, reasons for adoption, deferred items |
 | [design.md](../design.md) | Pxna's overall scope, overall structure, how name order is compared, conventions for mutating APIs |
 | [Storage Layer Design](./storage.md) | The driver operation that enumerates the Entries of folders and archives, archive identity and fingerprint |
-| [Client Design](./client.md) | In what range and when listings are read, the search screen |
+| [Client Design](./client.md) | In what range and when listings are read, the Shelf screen and search |
 | [Timeline Design](./timeline.md) | The aggregation whose walk updates the name index, and when it starts |
 | [Rating and Tag Design](./rating-tags.md) | Conditions on ratings and tags, and the identifier of a filtered listing |
 | [terms.md](../terms.md) | Definitions of terms |
@@ -48,7 +48,7 @@ The boundaries with other concerns are as follows.
 | The operation that enumerates Entries inside folders and archives, and the rule of not following symlinks | [Storage Layer Design §5.1](./storage.md#51-read-operations), [§4.4](./storage.md#44-symlinks-and-special-entries) |
 | How name order is compared | [design.md §11.1](../design.md#compare-name-order-in-natural-order) |
 | Mutating operations the daemon itself performs | [design.md §8](../design.md#8-conventions-for-mutating-apis) |
-| In what range and when listings are read, the search screen | [Client Design §3.5](./client.md#35-loading-listings), [§3.6](./client.md#36-shelves-and-search) |
+| In what range and when listings are read, the Shelf screen and search | [Client Design §3.5](./client.md#35-loading-listings), [§3.6](./client.md#36-shelves-and-search) |
 | Returning a Library's images and videos in timeline-date order from an index built by aggregation | [Timeline Design](./timeline.md) |
 
 ### 2.1 What Is Not Built
@@ -91,14 +91,14 @@ Hidden Entries are always excluded from it.
 At the first request for a listing, the server scans the target and keeps the resulting sequence of Entries in memory as a snapshot.
 For later page requests, it responds from the snapshot without rescanning.
 
-A snapshot is built for each combination of target, `recursive`, and `includeHidden`.
+A snapshot is built for each combination of target, `recursive`, `includeHidden`, and, for `listEntries`, whether the insides of archives are read, because a walk and an answer from the name index hold different Entries for the same start (§5.2).
 The target's version is held to check the freshness of the snapshot (§4.3).
 The order by `sort`, `order`, and `foldersFirst` is computed only once per order inside the snapshot and kept.
 `foldersOnly` and `query` are applied to the order on every request.
 This way, the scan is needed only once even when the sort order is changed or the search terms are retyped.
 
 A recursive listing answered from the name index is the exception.
-Its snapshot holds only the Entries that match the conditions, and the conditions are part of the combination (§5.2).
+Its snapshot holds only the Entries that match the conditions, and the conditions and the Filter's kind are part of the combination (§5.2).
 Retyping the search terms queries the index again instead of rescanning.
 
 Concurrent requests for the snapshot of the same combination are merged into one scan.
@@ -165,13 +165,13 @@ They disappear when the daemon is restarted and are rebuilt at the next request.
 A page request can name an Entry with `locate` in place of `offset`.
 The server finds the Entry's position in the sequence a page is cut from (§4.2), and returns the page that holds it.
 The page starts at the largest multiple of `limit` that is not greater than the position, so a page found by `locate` is the page that the same `limit` and an `offset` would return, and the two kinds of page can be joined.
-Every response of these APIs carries the `offset` it was cut at, which is how the client learns which page it received.
+Every response cut by `offset` carries the `offset` it was cut at, which is how the client learns which page it received.
 
 For `listFolderEntries` and `listFolderSummaries`, `locate` is the path of the Entry relative to the listed folder, so a direct child is its name, and a descendant in a `recursive` listing is its path below the folder.
 For `listEntries`, whose starts can be in several Libraries, `locate` names the Entry in the form of a start: its Library id followed by its Library-relative path without the leading `/`.
 `locate` together with `offset` is `InvalidInput`, and so is `locate` in timeline-date order, where `around` takes its place (§4.6).
 
-The position is the Entry's place after `foldersOnly`, `includeHidden`, `query`, and the rating and tag conditions are applied, so an Entry that these leave out is not in the sequence.
+The position is the Entry's place after `foldersOnly`, `includeHidden`, `query`, and the rating and tag conditions are applied, or after the Filter for `listEntries`, so an Entry that these leave out is not in the sequence.
 A path that names no Entry of the sequence is `NotFound`.
 Over several starts, the position is the number of Entries that precede the Entry in the merged order (§5.3), counted from the per-start listings without cutting the pages before it. The merged sequence is not a snapshot of its own, so the page is the one that the same `offset` returns over the same per-start snapshots, conditions, and order, and its id is the joined id of §5.3.
 The cost is one pass over the matching Entries, as for a page at the end of the listing.
@@ -268,7 +268,7 @@ A listing is answered from the name index when all of the following hold.
 
 These hold for each start of a Scope, so one start can be answered from the index while another is walked.
 Otherwise the listing of the start walks the file system as before.
-A start that is an archive or a path inside one is walked inside that archive, which is small and gives exact results.
+A start that is an archive or a path inside one always reads that archive's inside, whether or not the Scope reads the insides of archives, which applies only to archives found under the starts; in the orders cut from snapshots it is walked inside that archive, which is small and gives exact results, and in timeline-date order it is read from the timeline index ([Timeline Design §7](./timeline.md#7-reading)).
 The response lists, by start value, the starts that were walked because the index of their Library is not usable.
 When only the last condition fails, the walked result may be cut off by the walk's count and has none of the Entries inside archives, so it returns archives like other files, and the client shows that the index is being built ([Client Design §3.6](./client.md#36-shelves-and-search)).
 A walk taken for one of the other reasons is the intended answer and is not marked.
@@ -289,7 +289,7 @@ The version of ratings and tags is part of the combination, so a snapshot with a
 For each start, the listing with the Scope's choices and the Filter is built by the rules of §4, §5, and the two sections above, and the server merges these listings in the order of the sort.
 The starts may be in one Library or in several, and any folder of a Library can be a start.
 An Entry is listed once even when starts overlap: a start that another start already covers adds nothing, and an Entry reached from two starts is kept at its first start.
-A start inside an archive is covered only when the Scope reads the insides of archives.
+A start inside an archive is covered by another start only when the Scope reads the insides of archives, since otherwise the other start lists that archive as one Entry.
 Entries are told apart by Library and path, so two Entries compare as equal only when they have the same path in different Libraries, and those are ordered by the position of their start in the Scope.
 A start whose folder or Library no longer exists is a missing start: it is skipped, the other starts are listed, and the response lists the missing starts by start value, in every sort, the timeline date included.
 When every start is missing, the result is empty and every start is named.
@@ -679,7 +679,7 @@ It keeps the checks of maximum age and version and does not become a cache that 
 
 **Decision**
 The name index also holds the Entries inside archives, down to `max_nested_depth`, and aggregation's walk fills it with them.
-A Scope says whether a listing reads the insides of archives; when it does not, an archive is one Entry.
+A Scope says whether a listing reads the insides of the archives under its starts; when it does not, such an archive is one Entry, while a start that is an archive is always read inside (§5.2).
 This replaces the rule of §2.1 that neither a recursive walk nor the name index descends into archives.
 
 **Reason**
@@ -723,7 +723,7 @@ The timeline date is read newest first only, the order the timeline Layout shows
 The grid and the list therefore reserve the overall height, and the timeline Layout reads the continuation.
 
 **Reason**
-A listing cut from a snapshot is bounded by the recursion limit per start, so its overall height can be reserved and the scrollbar can jump anywhere, which a large folder needs ([Client Design §3.5](./client.md#35-loading-listings)).
+A listing cut from a snapshot is bounded by the folder's size for direct children and by the recursion limit per start for a recursive listing, so its overall height can be reserved and the scrollbar can jump anywhere, which a large folder needs ([Client Design §3.5](./client.md#35-loading-listings)).
 A sequence in timeline-date order can reach millions of Entries with the insides of archives, which exceeds the height a browser can reserve, and a cursor follows its index without skipping rows, at the same cost anywhere for a Library root, while an `offset` costs time in proportion to the rows it skips ([Timeline Design §9.1](./timeline.md#point-at-a-pages-position-with-a-cursor)).
 Jumping in time is done by month, in the web client's list of years and months and in the iOS app's sheet of them.
 The two forms meet in one API, so a client switches a Shelf's Layout by changing the sort and keeps one store that reads either form.
@@ -823,15 +823,22 @@ Fewer rows would be written for a large archive that changed a little, but an ar
 #### Walk a Start That Is an Archive
 
 **Decision**
-A start that is an archive or a path inside one is listed by walking inside that archive, even when the name index holds it (§5.2).
+A start that is an archive or a path inside one reads that archive's inside whether or not the Scope reads the insides of archives (§5.2).
+In the orders cut from snapshots, the grid's and the list's, it is listed by walking inside that archive, even when the name index holds it; in timeline-date order it is read from the timeline index.
 
 **Reason**
+Naming an archive as a start can only mean reading its pages, so the Scope's choice is for the archives found under folder starts.
 One archive is small, and the walk reads its current contents, which the index has only as of the last aggregation.
 It is how a listing of an archive's inside worked before the index held archives.
+Timeline-date order needs the timeline dates, which only aggregation reads by opening each image, so a walk could not order the archive's Entries by them.
 
-**Rejected alternative**
-Answering such a start from the index.
+**Rejected alternative 1**
+Answering such a start from the name index in every order.
 It would need no extraction, but the results would be as old as the last aggregation for a range that is cheap to read now, so we rejected it.
+
+**Rejected alternative 2**
+Requiring the Scope to read the insides of archives before an archive start reads its inside.
+One rule would cover every archive, but an archive start without it would list nothing, which no owner means by naming the archive, so we rejected it.
 
 #### List an Entry Once When Starts Overlap
 
@@ -948,7 +955,7 @@ Only the dependencies must be respected.
 | L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Done |
 | L3 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while it is not usable (§5.1, §5.2) | L1 | Not started |
 | L4 | Implement `listEntries` over a Scope and a Filter with pages by `offset` and by cursor, the starts cut off, walked, and missing, and `locate` in the form of a start (§3, §4.5, §4.6, §5.3) | L2, L3 | Not started |
-| L5 | Remove `listSearchEntries` once no client calls it | L4 | Not started |
+| L5 | Remove the search API that `listEntries` replaces (§8.1) once no client calls it | L4 | Not started |
 
 L1 corresponds to M19, L2 to M24, L3 to M27, L4 to part of M28, and L5 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
 
