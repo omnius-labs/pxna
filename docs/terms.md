@@ -29,13 +29,13 @@ Design rationale, implementation status, defects, and external behavior are each
 | Session | all | `Session` | `AuthSession` | The server-side authentication state created by login or initial setup and referenced by a cookie or a bearer token | login state |
 | Session token | all | `SessionToken` | `accessToken`, `__Host-pxna_session` | The unguessable random string a client sends to refer to its session | access token |
 | Thumbnail | all | `ThumbnailGenerator` | `thumbnail`, `variant=thumbnail` | A reduced image generated from an Entry for a tile in a listing. For a video, it is made from the first frame | preview |
-| [Timeline](#t-timeline) | all | `TimelineService` | `/timeline`, `timeline`, "Timeline" | A listing of the chosen Libraries' images and videos in one sequence in descending order of timeline date without folder hierarchy, and the screen showing it | flat view, chronological view |
+| [Timeline](#t-timeline) | all | `TimelineService` | `timeline` (a Layout), "Timeline" (the default Shelf) | The Layout that shows the images and videos of a Scope through a Filter in one sequence in descending order of timeline date without folder hierarchy | flat view, chronological view |
 | Upload | all | `Upload` | `upload` | A server-side session for sending a large file in parts | transfer |
 | Owner | all | `UserRole::Owner` | `owner` | Pxna's only user, registered once by initial setup | administrator |
 | Natural order | all | - | - | A name ordering that compares runs of digits as numbers and everything else without distinguishing case | - |
 | Folder-like Entry | all | - | `foldersFirst`, `foldersOnly` | A collective name for an Entry whose `kind` is `folder` and an Entry whose file detail `archive` is true | - |
 | Trash | all | - | - | A reserved hidden folder at the root of a Library where deleted Entries are moved, so they can be restored until the owner empties it | deleted folder |
-| Shelf | all | - | - | A saved way to browse the tree that holds a Scope, a Filter, and a Layout. It names folders and rules, never member Entries, and the daemon keeps it for every client | bookmark, album, collection |
+| Shelf | all | - | `/shelves`, `/shelves/{id}` (web URL) | A saved way to browse the tree that holds a Scope, a Filter, and a Layout. It names folders and rules, never member Entries, and the daemon keeps it for every client | bookmark, album, collection |
 | Background work | all | - | - | Work the daemon starts on its own and no request waits for, such as aggregation | job |
 | block | storage | `ArchiveBlockId` | `-` | The unit extracted in one decode. One entry for ZIP and non-solid 7z | - |
 | ResolvedStoragePath | storage | `ResolvedStoragePath` | - | A value that holds the resolved driver, the path within the namespace, and the archive identity for the duration of a request | - |
@@ -60,14 +60,14 @@ Design rationale, implementation status, defects, and external behavior are each
 | Summary listing | listing | `FolderSummaryListing` | `listFolderSummaries` | A listing that returns, page by page, the names, kinds, and archive hints of direct children without waiting for detailed attributes | detail listing |
 | Detail batch | listing | `EntryDetailResult` | `getEntryDetails` | A read operation that returns the current attributes of up to 200 explicitly given paths, with per-item success or failure | attribute index |
 | Browse index | listing | `SummaryIndex` | `[listing] summary_index_capacity_bytes` | Derived state that reuses summary listings of already browsed direct children across restarts after checking their version and expiry | search index |
-| Name index | listing | `NameIndex` | `indexed` (whether a listing was answered from it) | Derived state, updated by aggregation and the daemon's own changes, that holds the normalized names of a Library's non-hidden Entries outside archives and answers recursive listings with conditions | search index |
+| Name index | listing | `NameIndex` | - | Derived state, updated by aggregation and the daemon's own changes, that holds the normalized names of a Library's non-hidden Entries, the insides of archives included, and answers recursive listings with conditions or over the insides of archives | search index |
 | Child probe | listing | `ChildProbe` | `probeFolderChildren` | An operation that checks the expansion hint of a visible row with a shallow enumeration that stops at the first folder-like child | recursive check |
-| Subtree search | listing | - | `recursive=true` with `query`, the default scope of search mode | A listing that covers everything under a starting folder and returns Entries whose names match the condition, from the name index or by walking | global search |
-| Search listing | listing | `SearchListing` | `listSearchEntries`, `libraryIds`, `truncatedLibraryIds` | A listing that applies name, rating, and tag conditions to the listing of each given Library and merges them into one sequence of Entries carrying their Library ids | global search |
-| Locate | listing | - | `locate`, `locateLibraryId` (request parameters) | A listing request parameter that names an Entry and returns the page holding it, in place of the page at an `offset`. It is distinct from the web client's `Listing.locate`, which finds an Entry only among the pages already read | find position, seek |
-| Scope | listing | - | - | The part of a listing request that names what is read: one or more pairs of a Library and a Library-relative path, whether descendants are included, and whether the insides of archives are read | range, source |
-| Filter | listing | - | - | The conditions by which a listing keeps Entries: name, rating, tags, and kind | criteria |
-| Search mode | client | - | `/search`, `lib`, `q`, `path`, `flat=1`, `rating`, `tag` | The web screen where you choose, in its left area, the Libraries, a start (the whole Library or under a folder, only while one Library is chosen), a scope (include descendants or only direct children), and search by name, rating, and tags. The toolbar's switch places it beside folder view and the timeline | search box, search page |
+| Recursive listing | listing | - | `recursive=true` | A listing over a Scope that reads the descendants of its starts and returns the Entries the Filter keeps, from the name index or by walking | subtree search, global search |
+| Locate | listing | - | `locate` (a request parameter) | A listing request parameter that names an Entry and returns the page holding it, in place of the page at an `offset`; in `listEntries` it names the Entry by its Library id and Library-relative path. It is distinct from the web client's `Listing.locate`, which finds an Entry only among the pages already read | find position, seek |
+| Scope | listing | - | `start`, `recursive`, and whether the insides of archives are read (request parameters of `listEntries`) | The part of a listing request that names what is read: one or more starts, whether descendants are included, and whether the insides of archives are read | range, source |
+| Start | listing | - | `start` (the Library id followed by the Library-relative path) | One pair of a Library and a Library-relative path in a Scope, from which a listing reads | root, source folder |
+| Missing start | listing | - | - | A start whose folder or Library no longer exists, which `listEntries` skips and names in its response | broken start |
+| Filter | listing | - | `query`, `rating`, `tag`, `kind` (request parameters of `listEntries`) | The conditions by which a listing keeps Entries: name, rating, tags, and kind | criteria |
 | Activity panel | client | - | - | A list, overlaid at the bottom right of the web client, of the progress and results of Operations and uploads | transfer panel |
 | Info panel | client | - | `pxna.infoPanelOpen` (a `localStorage` key) | The web display, placed to the right of a listing, of the details and media info of the selected Entry | inspector |
 | Narrow screen | client | - | - | A web screen whose width is under 768 CSS px | mobile layout |
@@ -80,15 +80,15 @@ Design rationale, implementation status, defects, and external behavior are each
 | Rate mode | client | - | the viewer's "Rate mode" button, `r` | A state inside the viewer where ← records bad and moves to the next Entry, → records good and moves to the next Entry, ↓ records unrated and moves to the next Entry, and ↑ undoes the last of these | triage mode |
 | [Viewer](./terms/client.md#t-viewer) | client | `Viewer` | `view` | The web screen that displays and plays images and videos in full screen. What it offers around them depends on its display mode | image display mode, slideshow mode |
 | Filmstrip | client | - | `filmstripSize` | A display, placed at the bottom edge of the viewer in standard mode on a wide screen, that lays out the Entries of the current listing horizontally in the same order as the listing. Its item side is chosen from 5 levels | - |
-| Display mode | client | - | `pxna.viewerMode` (a `localStorage` key), "Standard", "Gallery", "Focus" | The way the wide-screen viewer presents Entries, chosen from standard mode, gallery mode, and focus mode. It is distinct from the listing's grid or list display | viewer layout |
+| Display mode | client | - | `pxna.viewerMode` (a `localStorage` key), "Standard", "Gallery", "Focus" | The way the wide-screen viewer presents Entries, chosen from standard mode, gallery mode, and focus mode | viewer layout |
 | Gallery mode | client | - | `gallery` | The viewer's display mode that lays out images and videos horizontally with their own aspect ratios | strip mode |
 | Focus mode | client | - | `focus` | The viewer's display mode that shows one image or video with wide margins and a position meter | margin mode |
 | Position meter | client | `PositionMeter` | - | A row of thin bars at the bottom edge of the viewer in gallery and focus modes, which shows the open Entry's proportional position and moves on a click | scrubber |
-| Folder view | client | - | `/browse/{libraryId}/…`, "Folder" | The web screen that lists the direct children of the folder selected in the tree | dir mode |
+| Folder view | client | - | `/browse/{libraryId}/…` | The web screen that lists the direct children of the folder selected in the tree | dir mode |
 | Display preferences | client | `Preferences` | `/preferences` | The set of values for the web client's appearance and behavior that the owner chooses and saves on the server | settings |
-| Layout | client | - | - | How a listing arranges its Entries: as a grid, a list, or the timeline | view |
-| Unsaved Shelf | client | - | - | A Shelf being composed that has not been saved, which is what opening search shows | temporary search |
-| Folder settings | client | - | - | Display settings saved for one folder and inherited by the folders under it, applied between the display preferences and a Shelf | per-folder preferences |
+| Layout | client | - | `layout` (a query of `/search`) with `grid`, `list`, `timeline` | How a listing arranges its Entries: as a grid, a list, or the timeline | view, listing display |
+| Unsaved Shelf | client | - | `/search` (web URL) and its query `start`, `flat=1`, `archives=1`, `q`, `rating`, `tag`, `kind`, `layout` | A Shelf being composed that has not been saved, which is what opening search shows | temporary search |
+| Folder settings | client | - | "このフォルダ以下に保存" (Save for this folder and below) | Display settings saved for one folder and inherited by the folders under it, applied between the display preferences and a Shelf | per-folder preferences |
 | Image socket client | client | `ImageSocketClient` | - | The web client's one holder per tab of the image wants of every part, which merges them into items, keeps received images in IndexedDB, and talks to the image socket | thumbnail queue |
 | Size steps | thumbnail | - | `[thumbnail] sizes`, `display_sizes` | The fixed set of values to which the server rounds up the width and height of thumbnails and display images | - |
 | Companion | thumbnail | - | - | A thumbnail that one generation makes from the same decode as the requested image and stores as an ordinary cache entry: the smallest three size steps in both shapes, and, for a thumbnail or a sprite sheet request, the other shape at the requested size | - |
@@ -250,6 +250,34 @@ Even when the slideshow is stopped, the viewer stays open.
 **What goes wrong if they are confused**
 If the screen is named "slideshow mode", even the use of looking at one image at a time by hand reads as part of automatic advance, and it becomes impossible to decide whether a new feature belongs to the viewer or to automatic advance.
 
+<a id="t-shelf-vs-album"></a>
+#### Shelf and Album
+
+**Boundary**
+A Shelf names folders and rules and lists whatever Entries they reach now, and an album holds a set of member Entries chosen one by one.
+Pxna has Shelves and no albums ([design.md §2.1](./design.md#21-out-of-scope)).
+
+**What goes wrong if they are confused**
+If a Shelf is read as an album, adding an Entry to a Shelf by hand looks possible, and membership would have to be kept per Entry and follow every move, which is what Pxna avoids by keeping the files where they are.
+
+<a id="t-layout-vs-display-mode"></a>
+#### Layout and Display mode
+
+**Boundary**
+A Layout is how a listing arranges its Entries (grid, list, or timeline), and a display mode is how the wide-screen viewer presents the open Entry (standard, gallery, or focus).
+
+**What goes wrong if they are confused**
+If they are treated as one setting, choosing the timeline would change the viewer, or gallery mode would be offered as a way to list a folder, and the settings menu and the viewer's switch would compete for the same value.
+
+<a id="t-scope-vs-term-scope"></a>
+#### Scope and the Scope column
+
+**Boundary**
+A Scope is the part of a listing request that names what is read, and the Scope column of §2 says which concern a term belongs to (all, listing, client, and so on).
+
+**What goes wrong if they are confused**
+If the column is read as a listing's Scope, a term marked `listing` looks like something a Scope reads, and the starts of a Scope look like a concern.
+
 ## 4. Individual Terms
 
 <a id="t-entry"></a>
@@ -275,7 +303,7 @@ The API uses `RelativePath`, and the daemon uses `LibraryRelativePath`, which is
 #### Timeline
 
 **Names by layer**
-The daemon uses `TimelineService`, the API uses paths under `/timeline/`, and the web client uses the URL `/timeline` and the screen "Timeline".
+The daemon uses `TimelineService`, the API reads it as `listEntries` sorted by timeline date and keeps `/timeline/status` and `/timeline/refresh` for aggregation, and the web client uses the Layout `timeline` and the default Shelf "Timeline", to which the old URL `/timeline` leads.
 
 **Why this name**
 "Flat view" was rejected because it expresses only that folder hierarchy was removed, and the name does not show that Entries are ordered by timeline date.

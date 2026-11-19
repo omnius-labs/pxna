@@ -58,10 +58,14 @@ The client can draw a listing without reading the original files.
 It targets both images and videos, and for videos it extracts multiple frames so they can be flipped through on a tile.
 An opened image is shown as a display image that the server shrinks for the screen, and a video in a format the client cannot play is delivered while the server converts it.
 
-Why this is needed now can be explained by contrast with a NAS and Google Photos.
+Why this is needed now can be explained by contrast with a NAS, Google Photos, and Immich.
 A NAS is heavy and slow with direct access over SMB, and vendor-provided dedicated clients offer a limited viewing experience on phones.
-Google Photos does not target assets on a home server and presupposes that files are entrusted to the cloud.
-By using the assets on the home server as they are, it meets both the demand of not entrusting home files to the cloud and the demand of avoiding capacity limits and cost.
+Google Photos does not target assets on a home server and presupposes that the files are uploaded to Google's cloud.
+Immich is self-hosted, but it works on assets of its own.
+Files enter it by upload, or by a scan of an external library that creates an asset for each photo and video it loads ([Immich: Libraries](https://docs.immich.app/features/libraries)).
+Each uploaded asset starts background jobs that include metadata extraction, thumbnail generation, and machine learning ([Immich: Jobs and Workers](https://docs.immich.app/administration/jobs-workers)).
+Its page of supported formats outlines the most common image and video formats and names no archive format ([Immich: Supported Formats](https://docs.immich.app/features/supported-formats)).
+By using the assets on the home server as they are, Pxna lets the owner keep sovereignty over them, avoid capacity limits and cost, and see them without waiting for an import or a batch.
 
 The assumed operation is as follows.
 
@@ -75,20 +79,28 @@ They do not want to import the files into a library or rename them to fit a sche
 The files stay where they are, with the names and folders the owner already gave them.
 
 Pxna is therefore not a photo app that takes over the storage.
-It reads the folders and archives as they are and adds browsing, classification, and operations on top.
-Classification does not move the files.
+Its foundation is that the owner keeps sovereignty over the files, which includes keeping them unchanged on the owner's disks and letting the owner leave Pxna with them ([§11.1](#judge-scope-by-whether-the-owner-keeps-sovereignty)).
+On that foundation, its main strength is seeing: the owner views the existing folders and archives as they are, without importing them and without waiting for anything to finish first ([§11.1](#keep-background-work-quiet-and-under-the-owners-control)).
+Classifying and acting extend it.
 What it offers is not a list of features but one workflow: the owner can see everything, including inside archives, classify it without changing a file, and then act on the files in the same screen.
 A photo app that imports files does the seeing and classifying well; a file manager does the acting; Pxna does the three on the same existing tree.
 
 The workflow has three parts.
 
-- See: the existing folder tree and archives. ZIP and 7z are read as folders, and nested archives are read up to the configured depth.
+- See, the main strength: the existing folder tree and archives. ZIP and 7z are read as folders, and nested archives are read up to the configured depth.
 - Classify: ratings and tags stored outside the files, so they can be given in a `readonly` Library and inside an archive. They do not change the file's contents, name, or modification time.
 - Act: upload, move, copy, delete, and rename, with asynchronous Operations and a conflict policy. The screen that shows the thumbnail can change the files.
 
+The owner browses in two ways ([§11.1](#browse-through-the-tree-and-shelves)).
+The tree of Libraries and folders is authoritative and shows the files where they are.
+A Shelf cuts across it with a saved Scope of folders, a Filter, and a Layout such as the timeline, so that books spread over several folders, or the unrated outputs of an image generator, open as one unit.
+Search opens an Unsaved Shelf.
+The Layout, the sort, the tile size, the thumbnail shape, and how an archive opens are resolved from the display preferences, the folder settings, and the open Shelf ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
+The web client is where the owner organizes, and the iOS app is where the owner views, reads, and classifies in passing ([§11.1](#organize-on-the-web-client-and-view-on-the-phone)).
+
 What supports the workflow is the implementation behind it.
 One WebSocket per tab carries thumbnails, sprite sheets, and display images, and one decode produces the variants that the listing, the shape switch, and the filmstrip need.
-Listings are paginated by `offset` over a snapshot, and the tree is virtualized, so a large folder does not have to be read in full before it is shown.
+Listings are paginated by `offset` over a snapshot, the timeline Layout by cursor, and the tree is virtualized, so a large folder does not have to be read in full before it is shown.
 The server reads formats a browser may not display, such as HEIC, JXL, and TIFF, and returns a display image instead of the original.
 The daemon is one process and one Docker image with ffmpeg, ffprobe, and heif-dec bundled, built for amd64 and arm64.
 The API is written first in `openapi.yaml`, and the tests, the measurements, and the design documents are kept with the code.
@@ -96,7 +108,7 @@ The API is written first in `openapi.yaml`, and the tests, the measurements, and
 Pxna does not claim to replace a photo app.
 It has no automatic upload from a phone, no sharing, no face recognition, no albums, no image or video editing, and no multi-user permission model.
 Those are out of scope in §2.1, not gaps to be closed in the next release.
-The next bet is organization assistance, not photo-app parity: local-only, opt-in inference, starting with similar and duplicate detection, so that the owner can find what to keep without sending files anywhere.
+The next bet is organization assistance, not photo-app parity: opt-in inference on hosts the owner controls, starting with similar and duplicate detection, so that the owner can find what to keep without sending files to an outside service.
 
 ### 2.1 Out of Scope
 
@@ -116,8 +128,8 @@ The following have been decided not to be built.
 
 By excluding these, we avoid having a permission model, a multi-version history, maintaining search-index consistency, resolving cloud sync conflicts, an SMB compatibility layer, an operation system for editing and processing, and issuing and renewing certificates.
 For the timeline (§6.3), aggregation builds a timeline index that holds only the timeline dates of images and videos.
-The same walk also updates a name index that holds only the names of Entries, for subtree search (§8.9).
-Neither index is used for full-text or metadata search, and external changes are reflected in the next aggregation, so they do not always keep consistency with the actual files.
+The same walk also updates a name index that holds the names of Entries, the Entries inside archives included, for recursive listings over a Scope (§8.9).
+Neither index is used for full-text search, metadata search is deferred ([§11.2](#searching-by-embedded-metadata)), and external changes are reflected in the next aggregation, so the indexes do not always keep consistency with the actual files.
 Ratings and tags use a full hash of the content (§11.1) so that they survive an external move or rename; that hash is not a search index either.
 When deciding to widen the scope, first read the deferred items in §11.2.
 Some of them even state the conditions for "when to decide".
@@ -387,13 +399,13 @@ The transcode sessions, output, concurrency, configuration, and reasons for adop
 
 ### 6.3 Timeline
 
-The timeline lists the images and videos of the chosen Libraries in one sequence in descending order of timeline date, decided from the shooting date and time (or else the modification time), without folder hierarchy.
-The daemon aggregates each Library periodically, writes the timeline dates to the timeline index, and answers page requests from the web client from the index.
+The timeline is the Layout that shows the images and videos of a Scope, through a Filter, in descending order of timeline date, decided from the shooting date and time (or else the modification time), without folder hierarchy (§11.1 "Browse Through the Tree and Shelves").
+The daemon aggregates each Library periodically, writes the timeline dates to the timeline index, and answers `listEntries` in timeline-date order and the per-month counts from the index.
 Images and videos inside archives are also extracted and their timeline dates read, and the extraction for aggregation is done in a concurrency budget separate from browsing.
 The daemon's own mutating operations immediately reflect only the range they changed in the index.
 
 What is listed, the timeline date, the index, aggregation, the configuration, and the reasons for adoption are authoritative in [Timeline Design](./design/timeline.md).
-The screen and how it loads are covered by [Client Design §3.10](./design/client.md#310-timeline).
+The request and paging are covered by [Listing and Search Design §4.6](./design/listing.md#46-pages-in-timeline-date-order), and the screen and how it loads by [Client Design §3.10](./design/client.md#310-timeline-layout).
 
 ### 6.4 Ratings and Tags
 
@@ -402,6 +414,37 @@ Ratings and tags do not change Entries and are saved per user in `sqlite.db`, so
 
 What can be rated or tagged, the value rules, storage, following changes made through Pxna, filtering listings, and the reasons for adoption are authoritative in [Rating and Tag Design](./design/rating-tags.md).
 The operations of rate mode and the info panel are covered by [Client Design §3.4](./design/client.md#34-viewer) and [§3.8](./design/client.md#38-info-panel).
+
+### 6.5 Shelves and Folder Settings
+
+Shelves and folder settings are saved per user in `sqlite.db`, so every client reads and edits the same ones (§11.1 "Browse Through the Tree and Shelves").
+They are held in three tables.
+
+| Table | One row per | Holds |
+| --- | --- | --- |
+| `shelves` | Shelf | The user, the name, the position among the Shelves, the Scope's choices, the Filter, and the display values |
+| `shelf_starts` | Start of a Shelf | The Shelf, the position among its starts, the Library id, and the Library-relative path |
+| `folder_settings` | Folder that has settings | The user, the Library id, the Library-relative path, and the display values |
+
+The display values are the Layout, the sort, the tile size, the thumbnail shape, and how an archive opens, in the shape of the display preferences: the Layout, the tile size, and the thumbnail shape per set of the wide and narrow screens, and the sort and how an archive opens once ([Client Design §3.9](./design/client.md#39-display-preferences)).
+Any value can be left unset, which means it is taken from the layer below.
+A folder inside an archive has settings by its joined path, as any other folder ([§11.1](#represent-paths-inside-archives-by-joining-paths)).
+
+The Shelves are read in full, created, replaced whole, and deleted one at a time, and their order is replaced as a whole; the paths and schemas are defined in `openapi.yaml` by M29 of §12.2, which adds them.
+A Shelf is listed by sending its Scope and Filter to `listEntries`, as an Unsaved Shelf is ([Listing and Search Design §8.1](./design/listing.md#carry-a-scope-and-a-filter-in-the-query-of-one-get-request)).
+The folder settings are read in full when a client starts, and written or removed one folder at a time.
+A client resolves a folder's values itself: each unset value is taken from the nearest folder at or above it that sets it, and then from the display preferences; an open Shelf's set values win over both, and inside a Shelf only how an archive opens is taken from folder settings ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
+These requests change no Library, so they respond synchronously and follow, of the conventions of §8, only the `Origin` check of §8.5.
+
+The daemon's own changes keep both in step with the tree.
+At the point where `LibraryMutation` reassigns the rows of the indexes, a rename or move reassigns the folder settings and the Shelf starts at or under the old path to the new one, and a delete removes the folder settings at or under the path and keeps the Shelf starts.
+Changes made outside Pxna are not followed, so a folder renamed outside loses its settings, and a Shelf start that no longer names a folder is a missing start.
+`listEntries` lists a Shelf without its missing starts and names them ([Listing and Search Design §5.3](./design/listing.md#53-listing-several-starts)), and the client shows the Shelf with a notice that leads to editing it.
+
+The default Shelf is created once, by the first read of the Shelves of a user whose row in the `users` table does not yet record it; the same transaction creates the Shelf and sets that record, so two clients reading first at the same time create it once, and a deleted default Shelf is not created again.
+It is named Timeline, it reads descendants and the insides of archives, its Filter keeps images and videos, and its Layout is the timeline ([Client Design §5.1](./design/client.md#enter-through-the-libraries-and-the-shelves)).
+Its starts are the roots of the Libraries in `timelineLibraries` of the display preferences that still exist, or of every Library at that moment when none is saved or none of the saved ones exists, and `timelineLibraries` is not read afterwards.
+A Library added later is therefore not in the default Shelf until the owner adds it (§11.1 "Create the Default Shelf Once from timelineLibraries").
 
 ## 7. Authentication and Sessions
 
@@ -458,6 +501,7 @@ Even when the username does not exist, a dummy hash is verified, to make it hard
 
 This section gathers the mutating conventions scattered across `openapi.yaml` from the viewpoint of judgment.
 For individual paths and schemas, see `openapi.yaml`.
+Writing the daemon's own state, such as the display preferences, the Shelves, and the folder settings, changes no Library and follows only §8.5 (§6.5).
 API paths in this document are written relative to the server base `/api/v1`, such as `/libraries/{id}/files/...`.
 
 ### 8.1 Namespaces
@@ -475,7 +519,7 @@ If they were combined into one endpoint, which validation to apply would not be 
 When operating on a mixed multiple selection, the client splits it into two requests by kind.
 
 An archive's path points to different things depending on the namespace.
-In the `folders` API (including listings and subtree search) it points to the root inside the archive, and in the `files` API it points to the archive's file itself.
+In the `folders` API (including direct and recursive listings) it points to the root inside the archive, and in the `files` API it points to the archive's file itself.
 This is so that, at the same path, one can both list its contents and download, copy, or delete it as a file.
 
 ### 8.2 Determining Sync and Async
@@ -651,10 +695,10 @@ Completed ones are pruned after about an hour.
 
 ### 8.9 Search
 
-Search is a listing with conditions. The search API applies name, rating, and tag conditions to the listing of each chosen Library, recursive when searching under a folder, and merges them into one sequence.
-A recursive listing with conditions is answered from the name index that aggregation updates, and walks the file system only while that index is not usable.
+Search opens an Unsaved Shelf: a Scope and a Filter that are not saved, read through `listEntries` like any Shelf ([Listing and Search Design §8.1](./design/listing.md#list-the-entries-of-a-scope-through-one-api)).
+A recursive listing over a Scope with a name, rating, or tag condition, or one that reads the insides of archives, is answered from the name index that aggregation updates, and walks the file system only while that index is not usable; other recursive listings walk ([Listing and Search Design §5.2](./design/listing.md#52-answering-recursive-listings-with-conditions)).
 The sorting of listings, snapshots, name matching, recursion limits, and the reasons for adopting these are authoritative in [Listing and Search Design](./design/listing.md).
-How the client reads listings and search is covered by [Client Design §3.5](./design/client.md#35-loading-listings) and [§3.6](./design/client.md#36-search).
+How the client reads listings and search is covered by [Client Design §3.5](./design/client.md#35-loading-listings) and [§3.6](./design/client.md#36-shelves-and-search).
 
 ## 9. Configuration and Persistence
 
@@ -717,7 +761,7 @@ At startup it takes a process lock to prevent multiple instances.
 
 | Location                          | Contents                                                           | Impact when lost                                                   |
 | --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| SQLite (`state_dir/sqlite.db`)    | Users, sessions, display preferences, ratings and tags, content hashes | Setup is needed again. Display preferences return to defaults, ratings and tags are lost, and content hashes are computed again |
+| SQLite (`state_dir/sqlite.db`)    | Users, sessions, display preferences, Shelves, folder settings, ratings and tags, content hashes | Setup is needed again. Display preferences return to defaults, Shelves, folder settings, ratings and tags are lost, the default Shelf is created again, and content hashes are computed again |
 | `state_dir/thumbnail`             | Thumbnail cache                                                    | Regenerated                                                        |
 | `state_dir/storage/archive`       | archive extraction cache                                           | Re-inspect and re-extract are needed                               |
 | `state_dir/video`                 | HLS segments of transcode sessions                                 | Transcoded playback in progress is interrupted                     |
@@ -758,6 +802,7 @@ When using a hardware encoder, the operator passes the device to the container a
 
 The screen structure, the behavior of tiles and the viewer, and how thumbnails are requested are authoritative in [Client Design](./design/client.md).
 This chapter holds only the serving method, the handling of sessions, and constraints common to clients.
+The web client is where the owner organizes, and the iOS app, designed in its own repository, is where the owner views; what each does is decided in [§11.1](#organize-on-the-web-client-and-view-on-the-phone).
 
 ### 10.1 Web
 
@@ -1271,7 +1316,7 @@ Thumbnails are already generated only on request ([Thumbnail Design §10.1](./de
 
 **Rejected alternative 1**
 Having no background work.
-Every heavy job would run only when the owner looks or asks, but the timeline, subtree search, and duplicate detection need an index built in advance, so we rejected it.
+Every heavy job would run only when the owner looks or asks, but the timeline, recursive listings with conditions, and duplicate detection need an index built in advance, so we rejected it.
 
 **Rejected alternative 2**
 Only giving browsing priority over background work.
@@ -1308,7 +1353,8 @@ No daemon change would be needed, but a Shelf made on one device would not exist
 #### Resolve Display Settings over the Display Preferences, Folder Settings, and the Shelf
 
 **Decision**
-The Layout, the sort, the tile size, and how an archive opens are resolved from the display preferences, then the folder settings of the nearest folder above that has them, then the open Shelf, the later winning.
+The Layout, the sort, the tile size, the thumbnail shape, and how an archive opens are resolved from the display preferences, then the folder settings of the nearest folder at or above that has them, then the open Shelf, the later winning.
+Inside a Shelf, folder settings apply only to how an archive opens, taken from the folder settings at or above the archive's path, because a Shelf's listing spans folders ([Client Design §5.1](./design/client.md#do-not-apply-folder-settings-inside-a-shelf-except-how-an-archive-opens)).
 Folder settings are stored in the daemon's database keyed by the Library and the Library-relative path, follow the daemon's own moves and renames, and are lost when the folder is moved or renamed outside Pxna.
 Every client shares them, as it shares the display preferences.
 
@@ -1345,6 +1391,90 @@ Shelves are edited in full on the phone too, because the owner should not have t
 **Rejected alternative**
 Giving both clients the same features.
 Either device would be enough on its own, but every Entry operation would be built twice, so we rejected it.
+
+#### Store Shelves and Folder Settings per User in Tables of the Daemon's Database
+
+**Decision**
+Shelves, their starts, and folder settings are rows of three tables in `sqlite.db`, keyed by the user (§6.5).
+
+**Reason**
+The daemon's own moves have to find the starts and folder settings at or under a path, which a table keyed by Library and path finds by one range, and a start in its own row is rewritten without touching the rest of its Shelf.
+Keying by the user follows ratings and tags, so the values do not mix with others' if users are ever added ([Rating and Tag Design §8.1](./design/rating-tags.md#save-ratings-and-tags-per-user-and-allow-them-in-readonly-libraries)).
+
+**Rejected alternative**
+One JSON value for all Shelves, as the display preferences are stored.
+It would need no tables, but every move would rewrite every Shelf and finding the starts under a path would read them all, so we rejected it.
+
+#### Replace a Shelf Whole, and Resolve Folder Settings on the Client
+
+**Decision**
+A Shelf is created, replaced whole, deleted, and reordered through its own requests, and the folder settings are read in full at startup and resolved by the client, value by value from the nearest folder at or above (§6.5).
+
+**Reason**
+A Shelf is edited on one screen and saved as a whole, as the display preferences are, so replacing it whole needs no rule for merging parts.
+The owner is expected to set only a few folders, so reading them all costs one small response, and resolving on the client lets a folder open with its values without a request per folder.
+Resolving value by value lets a folder set only how its archives open and keep the Layout of the shelf above it.
+
+**Rejected alternative 1**
+Updating parts of a Shelf in place of replacing it whole.
+A request would be smaller, but the merge of parts would need its own rules and tests for a screen that saves the whole, so we rejected it.
+
+**Rejected alternative 2**
+A request per folder that returns the values the server resolved.
+The client would hold no settings, but every move between folders would wait for one more request, so we rejected it.
+
+**Rejected alternative 3**
+Inheriting the whole set of the nearest folder that has settings.
+The rule would be simpler, but a folder that sets one value would hide every value set above it, so we rejected it.
+
+#### Move Folder Settings and Shelf Starts with the Daemon's Own Changes
+
+**Decision**
+A rename or move by the daemon reassigns the folder settings and the Shelf starts at or under the path, and a delete removes the folder settings and keeps the starts, which then are missing (§6.5).
+
+**Reason**
+The daemon knows its own changes, as it does when it reassigns the rows of its indexes, so a Shelf or a folder setting does not break when the owner reorganizes through Pxna.
+A deleted folder's settings have nothing left to apply to, while a missing start tells the owner which part of a Shelf to fix.
+
+**Rejected alternative**
+Leaving the Shelf starts as they are on a move.
+Moves would touch one table fewer, but a Shelf would lose a folder the owner only moved through Pxna, so we rejected it.
+
+#### Create the Default Shelf Once from timelineLibraries
+
+**Decision**
+The first read of the Shelves of a user whose row in the `users` table does not record the default Shelf creates the default Shelf Timeline and sets that record in the same transaction, and it is not created again (§6.5).
+Its starts are the roots of the Libraries in `timelineLibraries` that still exist, or of every Library at that moment when none is saved or none remains, and a Library added later is not added to it.
+
+**Reason**
+Creating it at the first read takes over the Libraries the owner chose for the timeline, and it works for a user who is registered after the daemon starts.
+A record on the user's row is one value per user that the creating transaction sets, so a deleted default Shelf stays deleted, as an owner who deleted it meant, and two first reads at once create it once.
+Ids of Libraries removed from the configuration name nothing, and a Shelf names its folders, so it lists what it was made with, like any other Shelf.
+
+**Rejected alternative 1**
+Creating it in the migration that adds the tables.
+It would be one step, but the owner may not be registered yet, and there would be no user to key it by, so we rejected it.
+
+**Rejected alternative 2**
+Creating it whenever the user has no Shelf.
+It needs no record, but an owner who deleted every Shelf would get the default one back, so we rejected it.
+
+**Rejected alternative 3**
+A start that means every Library, so that a Library added later joins the default Shelf.
+The earlier timeline behaved so while nothing was saved, but a Shelf would then hold a rule no other Shelf has, and the owner can add the new Library's root in one step, so we rejected it.
+
+#### Hold Folder Settings and Shelves in the Shape of the Display Preferences
+
+**Decision**
+Folder settings and Shelves hold the Layout, the tile size, and the thumbnail shape per set of the wide and narrow screens, and the sort and how an archive opens once, each of which can be unset (§6.5).
+
+**Reason**
+The layers are resolved value by value, so each value has to have the same shape in every layer.
+A tile size means a width in CSS pixels on a wide screen and a number of columns on a narrow one ([Client Design §3.9](./design/client.md#39-display-preferences)), so one value could not serve both.
+
+**Rejected alternative**
+One set without the tile size, which would stay in the display preferences only.
+The shape would be smaller, but a shelf of books could not ask for larger covers, or for covers shown whole rather than cropped, so we rejected it.
 
 ### 11.2 Deferred
 
@@ -1452,11 +1582,12 @@ Ratings and tags are manual.
 No model runs in the daemon, and no embedding or duplicate index exists.
 
 **Why not decide now**
-The first bet is similar and duplicate detection with a local embedding model, but the model, its license, the CPU cost, and the shape of the opt-in UI are not chosen.
+The first bet is similar and duplicate detection with an embedding model on a host the owner controls, the daemon's own or another machine at home ([§11.1](#judge-scope-by-whether-the-owner-keeps-sovereignty)), but the model, its license, the CPU cost, where it runs, and the shape of the opt-in UI are not chosen.
+It is background work, so it runs under the control that "Controlling Background Work" below defers, quiet, within a budget, visible, stoppable, and opt-in ([§11.1](#keep-background-work-quiet-and-under-the-owners-control)).
 The content hash used by ratings and tags (§11.1) gives exact duplicates a key; near-duplicates still need an embedding, so the order is fixed even though the model is not.
 
 **Conditions for deciding**
-When the library has enough duplicate or near-duplicate content that manual cleanup is the bottleneck, and a local model can run within the owner's hardware budget.
+When the library has enough duplicate or near-duplicate content that manual cleanup is the bottleneck, a model can run within the budget of a host the owner controls, and the control of background work is decided.
 The first job is similar and duplicate detection; automatic tagging, OCR, and face clustering are decided after that.
 
 #### Controlling Background Work
@@ -1468,7 +1599,7 @@ A running aggregation cannot be stopped, and aggregation is not opt-in, so it do
 
 **Why not decide now**
 The mechanism, such as one list of background work that every client shows and how stopping and opting in are offered, depends on the work it governs, and the second kind of work, the local AI of "Local AI for Organization" above, is not designed.
-Making aggregation opt-in also removes the name index that subtree search answers from, so what happens to search before the owner opts in has to be decided with it.
+Making aggregation opt-in also removes the name index that recursive listings with conditions answer from, so what happens to search before the owner opts in has to be decided with it.
 
 **Conditions for deciding**
 Before the local AI for organization is designed, or when the owner reports aggregation as a burden.
@@ -1521,6 +1652,7 @@ The implementation status of the storage layer, listing and search, thumbnails, 
 The container passes build and smoke tests in native CI for amd64 and arm64.
 
 The library-local trash and the content hash for ratings and tags are not implemented; they are M25 and M26 in §12.2.
+The documents describe browsing through the tree and the Shelves (§2, §6.5), while the code has search mode over `listSearchEntries`, the timeline over chosen Libraries with `listTimelineEntries`, and a name index without the insides of archives; M27 to M31 in §12.2 close that gap.
 The local AI assistance of §2 is a deferred item in §11.2.
 
 ### 12.2 Roadmap
@@ -1552,16 +1684,24 @@ M7 is a retired number and is not used.
 | M19 | Implement the name index of the [Listing and Search Design](./design/listing.md), its update by aggregation, answering recursive listings with conditions from it, and the web client's notice for walked results | M10, M16, M18 | Done |
 | M20 | Have the web client want folder and archive thumbnails again after the daemon's own changes, so that a changed representative appears | M13, M23 | Not started |
 | M21 | Make the address the compose port is published on configurable with `PXNA_BIND` (default `127.0.0.1`) and enable `insecure_cookie` in the bundled configuration (§11.1) | M9 | Done |
-| M22 | Implement the search API across Libraries of the [Listing and Search Design](./design/listing.md#53-searching-across-libraries), and the web client's search mode with its conditions in the left area and the three-choice mode switch | M12, M17, M18 | Done |
+| M22 | Implement the search API across Libraries of the [Listing and Search Design](./design/listing.md#53-listing-several-starts), and the web client's search mode with its conditions in the left area and the three-choice mode switch | M12, M17, M18 | Done |
 | M23 | Merge every want for a source into one source job, carry thumbnails, sprite sheets, and display images over the [image socket](./design/image-socket.md), switch the web client to it with its own image cache, and remove the thumbnail HTTP route | M4, M12, M14 | Done |
 | M24 | Implement `locate` of the [Listing and Search Design](./design/listing.md#45-locating-an-entry) in the three listing APIs, and have the web client's directly opened viewer URL and "Show in folder" use it | M22 | Done |
 | M25 | Implement the library-local Trash: move deleted entries into the Trash, restore and empty them, exclude the Trash from listings, search, the timeline, and the tree, and add the delete confirmation and Trash screen of the web client | M3, M10, M13, M16, M22 | Not started |
 | M26 | Identify ratings and tags by a lazily computed content hash, cache it with the file's metadata or the archive identity and inner path, and share ratings and tags among identical content | M2, M10, M18, M22 | Not started |
+| M27 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while the index is not usable, as in [Listing and Search Design §5.1](./design/listing.md#51-name-index) | M19 | Not started |
+| M28 | Implement `listEntries` over a Scope and a Filter, with pages by `offset` and by cursor in timeline-date order, the starts cut off, walked, and missing, and the per-month counts over the same Scope and Filter ([Listing and Search Design §4.6](./design/listing.md#46-pages-in-timeline-date-order), [§5.3](./design/listing.md#53-listing-several-starts), [Timeline Design §7](./design/timeline.md#7-reading)) | M24, M27 | Not started |
+| M29 | Implement the storage and API of Shelves and folder settings, their reassignment by the daemon's own changes, and the default Shelf (§6.5) | M2, M3, M11 | Not started |
+| M30 | Rebuild the web client around the Libraries and the Shelves: the left area, the conditions bar and the Unsaved Shelf, the timeline Layout, folder settings, and how archives open ([Client Design §3](./design/client.md#3-screens)) | M28, M29 | Not started |
+| M31 | Remove the listing and month APIs that `listEntries` replaces ([Listing and Search Design §8.1](./design/listing.md#list-the-entries-of-a-scope-through-one-api)) once the web client and the iOS app read `listEntries` | M30 | Not started |
+| M32 | Decide and implement the control of background work (§11.2 "Controlling Background Work"), including what the Shelves list before the owner opts in to aggregation | M27, M30 | Not started |
+| M33 | Export ratings and tags in a standard form ([Rating and Tag Design §8.2](./design/rating-tags.md#exporting-ratings-and-tags-in-a-standard-form)), leaving out or marking the Entries in the Trash | M25, M26 | Not started |
 
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
 
-The items that still block the positioning in §2 are M25 (library-local trash) and M26 (content hash for ratings and tags), in that order; M15 (viewer touch operations) and M19 (name index), which came first, are done.
+The items that still block the positioning in §2 are the Shelves (M27 to M31), then M32 (control of background work), M25 (library-local trash), M26 (content hash for ratings and tags), and M33 (exporting ratings and tags), in that order of priority, which the dependencies of the table do not enforce; M15 (viewer touch operations) and M19 (name index), which came first, are done.
+M31 also needs the iOS app to read `listEntries`, which it does in its own repository.
 
 The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap), of M5 in [Storage Layer Design §10.2](./design/storage.md#102-roadmap), of M8 in [Video Playback Design §8.2](./design/video.md#82-roadmap), of M10 in [Listing and Search Design §9.2](./design/listing.md#92-roadmap), and of M11 only V4 of [Video Playback Design §8.2](./design/video.md#82-roadmap); the thumbnail output and the display preferences API are done and have no remaining work.
 The server side of M14 is V5 of the same §8.2.

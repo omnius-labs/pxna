@@ -50,7 +50,7 @@ The boundaries with other concerns are as follows.
   The sorting operation can be narrowed to the three of two choices and "do not rate".
 - Tags do not have hierarchy or attributes.
   They are treated as a set of words, so creating words and attaching and detaching them is enough.
-- Sorting by ratings and tags, and filtering in the timeline, are not included in the scope of this document (§8.2).
+- Sorting by ratings and tags is not included in the scope of this document (§8.2).
 - Following a change to an Entry's content is not included.
   A file whose bytes change has a different content hash and starts unrated and untagged.
 - Cleaning content hashes that no Entry refers to is not included (§8.2).
@@ -161,17 +161,17 @@ The path, parameters, schemas, and status codes of each operation are authoritat
 
 ### 7.1 Filtering Listings
 
-The search API ([Listing and Search Design §5.3](./listing.md#53-searching-across-libraries)) can narrow Entries by conditions on ratings and tags.
+The Filter of a listing over a Scope ([Listing and Search Design §5](./listing.md#5-name-search)) can narrow Entries by conditions on ratings and tags.
 The rating can be one of good, bad, or none (unrated), and tags can be any number of words; an Entry matches only when it has all the given tags and, if a rating is given, that rating.
-It can also be combined with name terms, recursion, the Libraries searched, and sorting.
+It can also be combined with the name condition and the kind of the Filter, the starts and choices of the Scope, and sorting.
 
 - Filtering selects only images and videos. Folders and files that are neither images nor videos cannot be rated or tagged, so they are not included under any condition. Unrated means images and videos that have not been rated, and does not include folders and the like.
 - Filtering is not put into the listing's snapshot, and is done when cutting the page, with the set of content hashes looked up from the user's ratings and tags. The page's Entries are joined to `entry_content` to get their hashes; an Entry whose path has no cached hash, or whose fingerprint no longer matches, is treated as unrated and untagged for that page. It is hashed when it is read or written, and a later page reflects the result. Giving a rating or tag does not rescan, and the snapshot can be shared independently of the filtering conditions, as with names and sort order.
 - A recursive listing answered from the name index is the exception. It starts from the paths in `entry_content` whose hashes match the condition (for unrated, from the images and videos of the index minus the paths whose hash has a rating), keeps those the name index holds, and puts only the result in the snapshot, together with the conditions and the version of ratings and tags ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)). Writing a rating or tag rebuilds that snapshot from the index without walking the file system. A path that the index no longer holds does not appear there after the next aggregation.
-- The sets of content hashes are looked up once per user, and each Library's listing is filtered with the paths in `entry_content` that carry them.
+- The sets of content hashes are looked up once per user, and each start's listing is filtered with the paths in `entry_content` that carry them.
 - During filtering, the version of ratings and tags is added to the listing's identifier. The version advances inside the daemon each time ratings or tags are written. If a rating were given in the middle of reading pages in succession, the preceding and following pages would be cut from different sets, so the identifier is changed to make the client reread. The identifier of an unfiltered listing does not change.
-- Only the search API accepts the conditions. The folder listing and the summary listing do not.
-- The timeline does not accept conditions (§8.2).
+- Only `listEntries` accepts the conditions, as part of the Filter. The folder listing and the summary listing do not.
+- In timeline-date order, the conditions are applied over the matches of the name index, ordered by timeline date ([Timeline Design §7](./timeline.md#7-reading)).
 
 ## 8. Design Decisions
 
@@ -247,15 +247,15 @@ The vocabulary is small, so keeping them costs nothing.
 A method that automatically deletes words attached to no Entry.
 The vocabulary would be tidy, but words one tried attaching and detaching would disappear from completion, so we rejected it.
 
-#### Do Filtering in Search Mode and Apply It When Cutting the Page
+#### Filter by Ratings and Tags in the Filter and Apply It When Cutting the Page
 
 **Decision**
-Filtering by ratings and tags is done as a condition of search mode. The server does not change the snapshot, and at page cutting, matches against the set looked up from the user's ratings and tags (§7.1).
+Filtering by ratings and tags is done as a condition of the Filter, which every listing over a Scope takes, a Shelf and an Unsaved Shelf alike. The server does not change the snapshot, and at page cutting, matches against the set looked up from the user's ratings and tags (§7.1).
 The version of ratings and tags is added to the identifier of a listing during filtering.
 A recursive listing answered from the name index starts from the set of rated or tagged paths, or for unrated from the index's images and videos minus the rated paths, and its snapshot holds only the result (§7.1).
 
 **Reason**
-Search mode is a screen for choosing a start and a scope and searching, so "only good in this folder" and "tagged videos across the whole Library" can be expressed with the same operation.
+A Scope and a Filter express "only good in this folder" and "tagged videos across the whole Library" with the same operation, and a Shelf can keep them.
 Ratings and tags change each time they are given, so if they were put in the snapshot's conditions, each time a rating is given it would rescan.
 If matched at page cutting, the scan result can be shared as with name conditions.
 Ratings and tags are a set of paths that can be looked up one by one per Entry, so at the scale of personal use, reading the set on every request is cheap.
@@ -263,12 +263,16 @@ Matching at page cutting needs a snapshot of all Entries under the start, which 
 Rated and tagged Entries are a small part of a Library, so starting from them and rebuilding when a rating is written costs one lookup in the index. Only the unrated condition starts from the index's images and videos, and is bounded by the count limit of listings.
 
 **Rejected alternative 1**
-A method that also places filtering in the folder view.
-Search entrances would be two, and the way of choosing the start and scope would not match, so we rejected it.
+A method that also places filtering in the folder listing.
+There would be two ways of choosing the range and the conditions, while opening an Unsaved Shelf from a folder already narrows that folder, so we rejected it.
 
 **Rejected alternative 2**
 A method that has each Entry of the listing snapshot hold its rating and tags.
 Filtering matching would be faster, but the snapshot would have to be rebuilt each time a rating is given, so we rejected it.
+
+**Rejected alternative 3**
+Keeping the conditions only in search mode.
+It was the earlier form, but a Shelf, which has a Filter of its own, could not narrow by ratings and tags, so it gave way to the Filter.
 
 #### Combine Several Tag Conditions as All of Them
 
@@ -304,18 +308,17 @@ The rows are small.
 **Conditions for deciding**
 When the rows have grown enough to matter, or when the user asks to forget a content.
 
-#### Filtering in the Timeline, and Sorting by Ratings and Tags
+#### Sorting by Ratings and Tags, and Any of Several Tags
 
 **Current state**
-Filtering is only in the search API (search mode), and the timeline API does not accept conditions.
-In neither listing is sorting in the order of ratings or tags possible. Several tags combine only as all of them, not as any of them.
+No listing sorts in the order of ratings or tags. Several tags combine only as all of them, not as any of them.
+Filtering in the timeline is decided ([Timeline Design §9.1](./timeline.md#apply-name-rating-and-tag-conditions-over-the-matches-of-the-name-index)).
 
 **Why not decide now**
-The timeline index is in a separate SQLite and pages are cut by the index's cursor, so adding conditions would change the count per page and the meaning of the cursor.
 Sorting would be a design that adds ratings and tags to the listing's sort order, and would affect the sharing of the snapshot's order.
 
 **Conditions for deciding**
-When the need to view the timeline narrowed by ratings or tags actually arises, or when the need to search for Entries that have any one of several tags actually arises.
+When the need to sort by ratings or tags actually arises, or when the need to search for Entries that have any one of several tags actually arises.
 
 #### Organizing the Vocabulary, and Completion for a Large Vocabulary
 
@@ -327,6 +330,21 @@ In personal use, the vocabulary is expected to stay within a few hundred words, 
 
 **Conditions for deciding**
 When words have grown to the point that organizing the vocabulary is needed, or when the vocabulary response becomes noticeable as a delay in completion.
+
+#### Exporting Ratings and Tags in a Standard Form
+
+**Current state**
+Ratings and tags exist only in `sqlite.db`, keyed by content hash and user (§6.1), and there is no way to take them out.
+The sovereignty decision requires that the owner can leave Pxna with ratings and tags in a standard form ([design.md §11.1](../design.md#judge-scope-by-whether-the-owner-keeps-sovereignty)), so this is not yet met.
+
+**Why not decide now**
+The standard form is not chosen: XMP sidecar files next to the Entries would be read by other photo tools but would write into the owner's tree, which Pxna does not change, while a file of paths and values that the owner downloads leaves the tree alone but is read by no other tool.
+Entries inside archives and in `readonly` Libraries can have no sidecar, so a sidecar form would still need a second form for them.
+Exporting reads the content hash of every rated or tagged Entry, so it needs the content hash identity of §6.1 first.
+An Entry moved into the library-local Trash keeps its ratings and tags, so the export has to decide whether such Entries are left out or marked, which needs the Trash (M25 of [design.md §12.2](../design.md#122-roadmap)) to exist.
+
+**Conditions for deciding**
+After the content hash identity of §6.1 and the library-local Trash are built, or when the owner wants to move ratings and tags to another tool.
 
 ## 9. Current State and Remaining Work
 
@@ -344,6 +362,7 @@ The web client has ratings of images and videos (display only) and attaching and
 ### 9.2 Roadmap
 
 The content hash identity of §6.1 and §6.2 is M26 of [design.md §12.2](../design.md#122-roadmap).
+Exporting ratings and tags, once its deferred item in §8.2 is decided, is M33 of the same roadmap.
 The deferred issues are covered by §8.2.
 
 For confirmed defects, see [issues.md](../issues.md).

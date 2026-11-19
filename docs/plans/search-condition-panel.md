@@ -9,10 +9,10 @@ This work adds a search API that spans Libraries, and rebuilds the web client's 
 | Document | What it covers |
 | --- | --- |
 | This document | The steps and acceptance checks of the search API across Libraries and the new search mode |
-| [Listing and Search Design §5.3](../design/listing.md#53-searching-across-libraries) | How the search API merges per-Library listings, its start, its snapshot id, and its limit |
+| [Listing and Search Design §5.3](../design/listing.md#53-listing-several-starts) | How the search API merges per-Library listings, its start, its snapshot id, and its limit |
 | [Rating and Tag Design §7.1](../design/rating-tags.md#71-filtering-listings) | Rating and tag conditions, accepted only by the search API, with several tags combined as all of them |
-| [Client Design §3.6](../design/client.md#36-search) | The URL, the left area, the entrances, the narrow-screen layout, and the operations of search mode |
-| [Client Design §3.1](../design/client.md#31-web) | The three-choice switch |
+| [Client Design §3.6](../design/client.md#36-shelves-and-search) | The URL, the entrances, the narrow-screen layout, and the operations of search, now a Shelf |
+| [Client Design §5.1](../design/client.md#keep-the-libraries-and-the-shelves-in-the-left-area) | The three-choice switch, now a rejected alternative |
 | [daemon/openapi.yaml#L558](../../daemon/openapi.yaml#L558) | The listing contract that `listSearchEntries` sits beside |
 
 [design.md](../design.md#11-division-of-responsibility-between-documents) holds the map of the document family.
@@ -65,15 +65,15 @@ In the web client, give the paged listing store a search source alongside the fo
 
 | Decision | Source |
 | --- | --- |
-| Merging per-Library listings on the server, the start, the snapshot id, and the per-Library limit | [Listing and Search Design §8.1](../design/listing.md#search-several-libraries-by-merging-per-library-listings-on-the-server) |
+| Merging per-Library listings on the server, the start, the snapshot id, and the per-Library limit | [Listing and Search Design §8.1](../design/listing.md#list-several-starts-by-merging-per-start-listings-on-the-server) |
 | Name search as a listing condition | [Listing and Search Design §8.1](../design/listing.md#treat-name-search-as-a-listing-condition) |
 | Several tags combined as all of them | [Rating and Tag Design §8.1](../design/rating-tags.md#combine-several-tag-conditions-as-all-of-them) |
-| Conditions in the left area | [Client Design §5.1](../design/client.md#put-the-search-conditions-in-the-left-area-in-place-of-the-tree) |
-| The three-choice switch | [Client Design §5.1](../design/client.md#switch-folder-view-the-timeline-and-search-mode-with-one-switch-of-three-choices) |
-| The start chosen only for one Library, from a popover tree | [Client Design §5.1](../design/client.md#choose-the-start-only-while-one-library-is-searched-with-a-tree-in-a-popover) |
-| Opening with the last conditions, and the folder entrances | [Client Design §5.1](../design/client.md#open-search-mode-with-the-conditions-last-used) |
-| The timeline's operations in search results | [Client Design §5.1](../design/client.md#search-results-allow-the-same-operations-as-the-timeline) |
-| The narrow-screen layout | [Client Design §5.1](../design/client.md#search-on-narrow-screens-puts-only-the-terms-field-under-the-header) |
+| Conditions in the left area | [Client Design §5.1](../design/client.md#edit-a-shelfs-conditions-in-a-bar-above-the-listing) |
+| The three-choice switch | [Client Design §5.1](../design/client.md#keep-the-libraries-and-the-shelves-in-the-left-area) |
+| The start chosen only for one Library, from a popover tree | [Client Design §5.1](../design/client.md#choose-starts-from-a-tree-of-every-library-and-add-a-folder-from-its-menu) |
+| Opening with the last conditions, and the folder entrances | [Client Design §5.1](../design/client.md#open-search-with-the-unsaved-shelf-last-used) |
+| The timeline's operations in search results | [Client Design §5.1](../design/client.md#shelves-allow-operations-up-to-renaming) |
+| The narrow-screen layout | [Client Design §5.1](../design/client.md#edit-a-shelfs-conditions-in-a-bar-above-the-listing) |
 | `view` as the Library id and Library-relative path | [Client Design §5.1](../design/client.md#put-the-entry-open-in-the-viewer-in-the-url-as-a-path-relative-to-the-current-folder) |
 
 ### 4.2 Scope of Impact

@@ -2,7 +2,7 @@
 
 ## 1. About This Document
 
-This document covers the mechanism that sorts and filters the contents of folders and archives and returns them in pages, and name search, and defines snapshots, how freshness is kept, search matching, the name index, recursion limits, and the reasons for adopting them.
+This document covers the mechanism that sorts and filters the contents of folders and archives and returns them in pages, recursive listings over a Scope and a Filter, and name search, and defines snapshots, how freshness is kept, search matching, the name index, recursion limits, and the reasons for adopting them.
 The intended readers are developers and AI agents who implement or review this concern.
 It assumes the vocabulary of [terms.md](../terms.md).
 The definitions of words are not in this document.
@@ -11,10 +11,10 @@ The definitions of words are not in this document.
 
 | Document | What it covers |
 | --- | --- |
-| This document | Sorting and filtering of listings, snapshots, name search, the name index, recursion limits, reasons for adoption, deferred items |
+| This document | Sorting and filtering of listings, snapshots, Scopes and Filters, name search, the name index, recursion limits, reasons for adoption, deferred items |
 | [design.md](../design.md) | Pxna's overall scope, overall structure, how name order is compared, conventions for mutating APIs |
 | [Storage Layer Design](./storage.md) | The driver operation that enumerates the Entries of folders and archives, archive identity and fingerprint |
-| [Client Design](./client.md) | In what range and when listings are read, the search screen |
+| [Client Design](./client.md) | In what range and when listings are read, the Shelf screen and search |
 | [Timeline Design](./timeline.md) | The aggregation whose walk updates the name index, and when it starts |
 | [Rating and Tag Design](./rating-tags.md) | Conditions on ratings and tags, and the identifier of a filtered listing |
 | [terms.md](../terms.md) | Definitions of terms |
@@ -33,8 +33,8 @@ If you want to know what works now, read §9 first.
 
 This document covers the span from receiving the inside of a folder or archive that a checked `NestedPath` points to, to returning the Entries of the requested range as a response.
 `listFolderEntries` returns detail listings. The advance display of direct children's names and kinds uses the summary listing.
-Search is handled as a listing with conditions (§5), and `listSearchEntries` merges the listings of one or more Libraries into one sequence (§5.3).
-A recursive listing with conditions is answered from the name index without walking the file system (§5.1, §5.2).
+`listEntries` reads a Scope through a Filter (§5), and merges the listings of its starts into one sequence (§5.3); search is such a listing whose Filter has a name condition.
+A recursive listing with conditions, or one whose Scope reads the insides of archives, is answered from the name index without walking the file system (§5.1, §5.2).
 
 The client jumps to any position by the scrollbar even for a large folder, and reads only the page at that position ([Client Design §3.5](./client.md#35-loading-listings)).
 For that reason, the server does not rescan every time a page is requested, and has a form in which a page at any position can be returned at the same cost.
@@ -48,17 +48,17 @@ The boundaries with other concerns are as follows.
 | The operation that enumerates Entries inside folders and archives, and the rule of not following symlinks | [Storage Layer Design §5.1](./storage.md#51-read-operations), [§4.4](./storage.md#44-symlinks-and-special-entries) |
 | How name order is compared | [design.md §11.1](../design.md#compare-name-order-in-natural-order) |
 | Mutating operations the daemon itself performs | [design.md §8](../design.md#8-conventions-for-mutating-apis) |
-| In what range and when listings are read, the search screen | [Client Design §3.5](./client.md#35-loading-listings), [§3.6](./client.md#36-search) |
+| In what range and when listings are read, the Shelf screen and search | [Client Design §3.5](./client.md#35-loading-listings), [§3.6](./client.md#36-shelves-and-search) |
 | Returning a Library's images and videos in timeline-date order from an index built by aggregation | [Timeline Design](./timeline.md) |
 
 ### 2.1 What Is Not Built
 
 - The name index has no scan of its own and does not watch file system notifications.
   It is updated by the walk of aggregation and by the daemon's own changes, so external changes appear in search at the next aggregation (§5.1).
-- Neither a recursive walk nor the name index descends into archives.
-  This avoids building the indexes of all archives in the range of the walk or the aggregation.
-  Only when the path of an archive is specified as the starting point does a listing walk the inside of that archive.
-- Search by file contents and metadata (such as EXIF) is not done.
+- A recursive walk does not descend into archives.
+  The insides of the archives in a Scope come from the name index, which aggregation fills (§5.1), so a request never opens every archive in its range.
+  Only when an archive or a path inside one is a start does a listing walk the inside of that archive (§5.2).
+- Search by file contents is not done, and search by metadata (such as EXIF) is deferred ([design.md §11.2](../design.md#searching-by-embedded-metadata)).
   Matching is by name alone, so the walk does not need to read Entry contents.
 - The continuation of a cut-off recursive walk is not returned.
   This avoids holding the mid-walk state across requests (§6).
@@ -79,7 +79,10 @@ A listing is a sequence of Entries determined by the target (Library and `path`)
 `totalCount` is the count after applying `foldersOnly`, `includeHidden`, and `query`.
 With this value the client decides the overall height of the listing from the first page.
 
-The search API takes the same specifications except `includeHidden` and `foldersOnly`, applies them to the listing of each Library, and also takes rating and tag conditions (§5.3).
+`listEntries` takes a Scope in place of the target, and a Filter in place of `query` and `foldersOnly`, whose kind chooses the kinds of Entries and which also carries the rating and tag conditions (§5).
+It is one GET request whose query carries everything: each start is a repeated `start` whose value is the Library id followed by the Library-relative path without its leading `/` (`photos/2025`, or `photos` for the root), `recursive` and whether the insides of archives are read give the Scope's choices, and the Filter's tags and kinds are repeated values.
+`sort` also takes the timeline date, which is read in descending order only; an ascending `order` with it is `InvalidInput`.
+Hidden Entries are always excluded from it.
 
 ## 4. Snapshots
 
@@ -88,14 +91,14 @@ The search API takes the same specifications except `includeHidden` and `folders
 At the first request for a listing, the server scans the target and keeps the resulting sequence of Entries in memory as a snapshot.
 For later page requests, it responds from the snapshot without rescanning.
 
-A snapshot is built for each combination of target, `recursive`, and `includeHidden`.
+A snapshot is built for each combination of target, `recursive`, `includeHidden`, and, for `listEntries`, whether the insides of archives are read, because a walk and an answer from the name index hold different Entries for the same start (§5.2).
 The target's version is held to check the freshness of the snapshot (§4.3).
 The order by `sort`, `order`, and `foldersFirst` is computed only once per order inside the snapshot and kept.
 `foldersOnly` and `query` are applied to the order on every request.
 This way, the scan is needed only once even when the sort order is changed or the search terms are retyped.
 
 A recursive listing answered from the name index is the exception.
-Its snapshot holds only the Entries that match the conditions, and the conditions are part of the combination (§5.2).
+Its snapshot holds only the Entries that match the conditions, and the conditions and the Filter's kind are part of the combination (§5.2).
 Retyping the search terms queries the index again instead of rescanning.
 
 Concurrent requests for the snapshot of the same combination are merged into one scan.
@@ -107,11 +110,14 @@ A page is specified by `offset` and `limit`, and cut out from the sequence after
 If `offset` exceeds the count, an empty page is returned.
 
 The response has the page's Entries, the `offset` the page was cut at, `totalCount`, the snapshot's id, and whether the recursion was cut off (`truncated`, §6).
+A response of `listEntries` lists the starts that were cut off in place of `truncated`, and also the starts that were walked and the missing starts (§5.3).
 The snapshot's id is a value newly assigned each time a snapshot is built, and it changes if rebuilt even when the version is the same.
 
 The client learns that the listing has changed by comparing the id of each page.
 When the id changes, it discards the other pages read so far and reads again.
 As long as only pages of the same id are joined together, Entries are neither duplicated nor missing between pages.
+
+`listEntries` cuts pages this way for every sort except the timeline date, which §4.6 covers.
 
 ### 4.3 Freshness
 
@@ -159,21 +165,43 @@ They disappear when the daemon is restarted and are rebuilt at the next request.
 A page request can name an Entry with `locate` in place of `offset`.
 The server finds the Entry's position in the sequence a page is cut from (§4.2), and returns the page that holds it.
 The page starts at the largest multiple of `limit` that is not greater than the position, so a page found by `locate` is the page that the same `limit` and an `offset` would return, and the two kinds of page can be joined.
-Every response of these APIs carries the `offset` it was cut at, which is how the client learns which page it received.
+Every response cut by `offset` carries the `offset` it was cut at, which is how the client learns which page it received.
 
-`locate` is the path of the Entry relative to the start of the listing.
-For `listFolderEntries` and `listFolderSummaries` the start is the listed folder, so a direct child is its name, and a descendant in a `recursive` listing is its path below the folder.
-For `listSearchEntries` the start is the start of the search (§5.3), so with several Libraries it is the root of the Library, and `locate` and `locateLibraryId` are given together: `locateLibraryId` names the Library of the Entry, because the same path can be in several Libraries, and must be one of `libraryIds`.
-`locate` together with `offset`, `locateLibraryId` without `locate`, `locate` without `locateLibraryId` in a search, and a `locateLibraryId` that is not in `libraryIds` are `InvalidInput`.
+For `listFolderEntries` and `listFolderSummaries`, `locate` is the path of the Entry relative to the listed folder, so a direct child is its name, and a descendant in a `recursive` listing is its path below the folder.
+For `listEntries`, whose starts can be in several Libraries, `locate` names the Entry in the form of a start: its Library id followed by its Library-relative path without the leading `/`.
+`locate` together with `offset` is `InvalidInput`, and so is `locate` in timeline-date order, where `around` takes its place (§4.6).
 
-The position is the Entry's place after `foldersOnly`, `includeHidden`, `query`, and the rating and tag conditions are applied, so an Entry that these leave out is not in the sequence.
+The position is the Entry's place after `foldersOnly`, `includeHidden`, `query`, and the rating and tag conditions are applied, or after the Filter for `listEntries`, so an Entry that these leave out is not in the sequence.
 A path that names no Entry of the sequence is `NotFound`.
-In a search, the position is the number of Entries that precede the Entry in the merged order (§5.3), counted from the per-Library listings without cutting the pages before it. The merged sequence is not a snapshot of its own, so the page is the one that the same `offset` returns over the same per-Library snapshots, conditions, and order, and its id is the joined id of §5.3.
+Over several starts, the position is the number of Entries that precede the Entry in the merged order (§5.3), counted from the per-start listings without cutting the pages before it. The merged sequence is not a snapshot of its own, so the page is the one that the same `offset` returns over the same per-start snapshots, conditions, and order, and its id is the joined id of §5.3.
 The cost is one pass over the matching Entries, as for a page at the end of the listing.
 
 A `locate` request checks freshness as any request does (§4.3), so it may be answered from a rebuilt snapshot, and the client sees that from the id (§4.2).
 
+### 4.6 Pages in Timeline-Date Order
+
+When `listEntries` is sorted by timeline date, its pages are not cut from a snapshot but read from the timeline index, which holds that order ([Timeline Design §7](./timeline.md#7-reading)).
+A page is pointed at by a cursor, the timeline date, Library id, and Library-relative path of the Entry at its edge, and the Entries after or before it are returned; the response carries the cursors of the pages on both sides, and a side with nothing further has none.
+In place of a cursor, `month` starts at the newest Entry of that month, or of the next older month that has Entries, and `around` returns a page with the named Entry near its middle, named in the same form as `locate`.
+Without any of them the page starts at the newest Entry.
+`month`, `around`, and the cursors are accepted only in this order.
+A cursor keeps its meaning only with the same Scope and Filter.
+
+The response has neither `totalCount` nor `offset`, so the client does not reserve the overall height and reads the continuation as it scrolls ([Client Design §5.1](./client.md#the-timeline-does-not-reserve-the-overall-height-and-reads-the-continuation)).
+Its Entries come from the index as of the last aggregation, and an Entry added by aggregation within the range already read appears when the client reads again.
+In this order the kinds are images and videos only: a Filter that names no kind reads both, and one that names another kind is `InvalidInput`.
+The missing starts are named in this order too (§5.3).
+Without a name, rating, or tag condition, the response names no starts cut off or walked, because the timeline index has no recursion limit and no walk; while aggregation runs, it returns what the finished part holds, and the progress comes from the timeline's status ([Timeline Design §9.1](./timeline.md#show-results-from-the-part-where-aggregation-has-finished)).
+With one, the candidates are the matches of the name index, so the starts cut off or walked are named as in §5.3 ([Timeline Design §7](./timeline.md#7-reading)).
+
 ## 5. Name Search
+
+A recursive listing reads a Scope through a Filter.
+The Scope is one or more starts, each a Library and a Library-relative path, together with whether the descendants of the starts are read and whether the insides of archives are read.
+When the insides are read, an archive is read like a folder, down to `max_nested_depth` ([Storage Layer Design §7.2](./storage.md#72-defaults)).
+The Filter is a name condition, a rating condition, tag conditions, and a kind that chooses among folders, archives, images, videos, and other files.
+A recursive listing whose Filter names no kind returns every kind except folders, and, when the Scope reads the insides of archives, except archives too, since they are then read like folders (§8.1).
+The rating and tag conditions are described in [Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings).
 
 When `query` is specified, only Entries whose names match the condition are returned.
 An Entry matches if its name contains all of the terms obtained by splitting `query` on whitespace.
@@ -185,21 +213,24 @@ If the "が" in a name is decomposed (か of U+304B and the voiced mark of U+309
 NFKC also unifies full-width and half-width alphanumerics into the same characters.
 
 Only the Entry's name is matched, and the parent's path is not included.
-When searching underneath, `recursive=true` and `query` are combined.
-When a subtree search walks the file system, Entries that do not match the condition are also walked, so the time it takes is decided by the number of Entries underneath regardless of the condition.
+The name condition applies to a listing of direct children and to a recursive listing alike.
+When a recursive listing with a name condition walks the file system, Entries that do not match the condition are also walked, so the time it takes is decided by the number of Entries underneath regardless of the condition.
 The walked snapshot is built in the combination that does not include `query` (§4.1), so retyping search terms does not rescan.
 
 ### 5.1 Name Index
 
-The name index holds, per Library, the kind and the normalized name of every Entry outside archives, and the Library-relative path of every folder, so the path of an Entry is its folder's path and its own name.
+The name index holds, per Library, the kind and the normalized name of every Entry, the Entries inside archives down to `max_nested_depth` included, and the Library-relative path of every folder, so the path of an Entry is its folder's path and its own name.
 Each folder's path is held once and its Entries refer to the folder, so the index grows by the Entries' names and not by repeating their paths.
 Hidden Entries whose names start with `.`, and the Entries inside them, are not held, by the same rule as aggregation ([Timeline Design §3](./timeline.md#3-what-is-listed)).
-An archive is held as one Entry, and its contents are not.
+An archive is held as an Entry, and the folders and Entries inside it are held under it with their paths joined to the archive's path ([design.md §11.1](../design.md#represent-paths-inside-archives-by-joining-paths)).
+An archive that cannot be opened because it is password-protected, of unknown format, or exceeds limits is held as an Entry without contents, as aggregation records it ([Timeline Design §6.2](./timeline.md#62-archive-extraction)).
 It is derived state in SQLite under the listing state directory, separate from the authentication DB.
 
 The index is updated at the same points as the timeline index.
 Each time aggregation enumerates a folder, the rows of that folder's direct children are replaced with the enumerated names ([Timeline Design §6.1](./timeline.md#61-scanning-and-skipping-rereads)).
+When aggregation rereads an archive because its `ArchiveIdentity` changed, all the rows under the archive are replaced with what it enumerates, as the timeline's rows of that archive are ([Timeline Design §9.1](./timeline.md#decide-archive-rereading-by-archiveidentity)).
 A full aggregation records its generation in the rows it saw, and when the scan finishes, removes the rows in the scanned range that do not have it.
+The rows under an archive that it skips because the `ArchiveIdentity` is unchanged count as seen, so they are kept.
 The daemon's own changes delete the rows of a path that no longer exists and everything under it, and reassign the rows under a renamed or moved path to the destination, before the response ([Timeline Design §6.4](./timeline.md#64-the-daemons-own-changes)).
 A rename or move to a hidden name or into a hidden folder deletes the rows instead, because the index holds no hidden Entries.
 The index records the generation of each full aggregation. A generation that is not above the last one means the timeline index was recreated and the rows can no longer be compared with it, so the Library's rows are deleted and it waits for the aggregation that began.
@@ -218,7 +249,7 @@ A missing, corrupt, or unknown-format index is discarded and rebuilt by the next
 
 The index holds the whole range above and has no capacity limit or LRU.
 An index that has dropped part of a Library cannot tell a missing Entry from an Entry that does not match, so it could not answer a search.
-Its size is proportional to the number of Entries.
+Its size is proportional to the number of Entries, the Entries inside archives included.
 
 A term of 3 or more characters is matched against a trigram index of the normalized names, and a shorter term is matched by comparing the normalized names of the candidates directly.
 SQLite's trigram tokenizer matches no rows for a substring shorter than 3 characters ([SQLite FTS5 trigram](../knowledge/sqlite-fts5-trigram.md) in [knowledge.md](../knowledge.md)).
@@ -231,13 +262,15 @@ The meaning of a match is the same as in a walk.
 A listing is answered from the name index when all of the following hold.
 
 - `recursive` is true and `includeHidden` is false
-- At least one of a name condition, a rating condition, or a tag condition is given
+- At least one of a name condition, a rating condition, or a tag condition is given, or the Scope reads the insides of archives
 - The start is a local folder, not an archive or a path inside one
 - The index of that Library is usable (§5.1)
 
-Otherwise the listing walks the file system as before.
-The response tells whether the name index answered it.
-When only the last condition fails, the walked result may be cut off by the walk's count, and the client shows that the index is being built ([Client Design §3.6](./client.md#36-search)).
+These hold for each start of a Scope, so one start can be answered from the index while another is walked.
+Otherwise the listing of the start walks the file system as before.
+A start that is an archive or a path inside one always reads that archive's inside, whether or not the Scope reads the insides of archives, which applies only to archives found under the starts; in the orders cut from snapshots it is walked inside that archive, which is small and gives exact results, and in timeline-date order it is read from the timeline index ([Timeline Design §7](./timeline.md#7-reading)).
+The response lists, by start value, the starts that were walked because the index of their Library is not usable.
+When only the last condition fails, the walked result may be cut off by the walk's count and has none of the Entries inside archives, so it returns archives like other files, and the client shows that the index is being built ([Client Design §3.6](./client.md#36-shelves-and-search)).
 A walk taken for one of the other reasons is the intended answer and is not marked.
 
 The snapshot holds only the matching Entries, sorted by the same rules as other snapshots.
@@ -250,44 +283,46 @@ With the unrated condition, the candidates are the image and video rows of the i
 A rated path whose Entry has been deleted externally is not in the index and does not appear in the results.
 The version of ratings and tags is part of the combination, so a snapshot with a rating or tag condition is rebuilt from the index when they are written ([Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings)).
 
-### 5.3 Searching Across Libraries
+### 5.3 Listing Several Starts
 
-`listSearchEntries` searches the Libraries named by `libraryIds` and returns their matching Entries as one sequence, each with its Library id.
-For each Library, the listing of its start with the given `recursive`, `query`, rating, and tag conditions is built by the rules of §4, §5, and the two sections above, and the server merges these listings in the order of `sort`, `order`, and `foldersFirst`.
-Entries are told apart by path within a Library, so two Entries compare as equal only when they have the same path in different Libraries, and those are ordered by the position of their Library in `libraryIds`.
-
-The start is given by `path` only when `libraryIds` names one Library.
-With several Libraries, the root of each Library is the start, and a `path` other than `/` is `InvalidInput`.
-Hidden Entries are always excluded, and `includeHidden` and `foldersOnly` are not accepted.
-An id that names no Library is `NotFound`.
-`locate` and `locateLibraryId`, given together, find an Entry's page in the merged sequence (§4.5).
+`listEntries` returns the Entries of every start of a Scope as one sequence, each with its Library id.
+For each start, the listing with the Scope's choices and the Filter is built by the rules of §4, §5, and the two sections above, and the server merges these listings in the order of the sort.
+The starts may be in one Library or in several, and any folder of a Library can be a start.
+An Entry is listed once even when starts overlap: a start that another start already covers adds nothing, and an Entry reached from two starts is kept at its first start.
+A start inside an archive is covered by another start only when the Scope reads the insides of archives, since otherwise the other start lists that archive as one Entry.
+Entries are told apart by Library and path, so two Entries compare as equal only when they have the same path in different Libraries, and those are ordered by the position of their start in the Scope.
+A start whose folder or Library no longer exists is a missing start: it is skipped, the other starts are listed, and the response lists the missing starts by start value, in every sort, the timeline date included.
+When every start is missing, the result is empty and every start is named.
+A start goes missing when its folder is deleted, through Pxna or outside it, or moved or renamed outside Pxna, or when its Library no longer exists ([design.md §6.5](../design.md#65-shelves-and-folder-settings)).
 
 The merged sequence is not kept as a snapshot of its own.
-Each Library's listing comes from the snapshot of §4.1 for that combination, which is shared with folder listings of the same target, and each page request merges the per-Library orders again from the head.
-The cost of cutting a page therefore grows with `offset` and the number of Libraries, but no memory beyond the per-Library snapshots is held.
-The response's snapshot id joins the identifiers of the per-Library listings, including the version of ratings and tags while a rating or tag condition is given ([Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings)).
+Each start's listing comes from the snapshot of §4.1 for that combination, which is shared with folder listings of the same target.
+The response's snapshot id joins the identifiers of the per-start listings, including the version of ratings and tags while a rating or tag condition is given ([Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings)).
 When any one of them is rebuilt, the id changes, and the client rereads as with other listings (§4.2).
+Each page request merges the per-start orders again from the head, so the cost of cutting a page grows with `offset` and the number of starts, but no memory beyond the per-start snapshots is held.
+In timeline-date order the pages come from the timeline index instead (§4.6).
 
-`totalCount` is the sum of the per-Library counts.
-The recursion limit of §6 applies to each Library separately, and the response lists the Libraries whose listing was cut off in `truncatedLibraryIds`.
+`totalCount` is the number of Entries in the merged sequence.
+The recursion limit of §6 applies to each start separately, and the response lists, by start value, the starts that were cut off.
 
 ## 6. Recursion Limit
 
 A recursive walk is cut off when the Entries put in the snapshot reach `recursive_max_entries`.
-A cut-off snapshot lists only the Entries already walked and sets `truncated` in the response.
+A cut-off snapshot lists only the Entries already walked and sets `truncated` in the response, or, for `listEntries`, names its start among the starts cut off (§5.3).
 Which Entries become already walked is decided by the storage layer's walk order and has nothing to do with the sort order.
 
 The limit is there to hold down memory and the wait until the first page.
-In a subtree search from the Library root, the snapshot would hold the Entries of the whole Library.
+In a recursive listing from the Library root, the snapshot would hold the Entries of the whole Library.
 Without the limit, one search would use memory and wait time proportional to the size of the Library.
 
-In a search across Libraries, the limit is counted for each Library separately, so the memory and the wait until the first page can reach as many times the single-Library amount as there are Libraries (§5.3).
+In a Scope of several starts, the limit is counted for each start separately, so the memory and the wait until the first page can reach as many times the single-start amount as there are starts (§5.3).
+The Entries inside archives count toward the limit like any other Entries.
 
 For a listing answered from the name index, the same `recursive_max_entries` limits the number of matching Entries put in the snapshot (§5.2).
 Matching Entries are a part of the Entries underneath, so a search from the Library root is not cut off unless the conditions themselves match that many.
 There is no walk to bound, and the query is stopped when all requests waiting for it disconnect, as with a scan (§4.1).
 
-When the client receives `truncated`, or a non-empty `truncatedLibraryIds` from the search API, it indicates that the result is partial and urges narrowing the Libraries or moving the start down ([Client Design §3.6](./client.md#36-search)).
+When the client receives `truncated`, or a start that was cut off from `listEntries`, it indicates that the result is partial and urges narrowing the Libraries or moving the start down ([Client Design §3.6](./client.md#36-shelves-and-search)).
 
 ## 7. Configuration
 
@@ -299,7 +334,7 @@ Counts and times allow only positive values and are validated at daemon startup.
 | `[listing] snapshot_idle_secs` | 600 | Time until an unused snapshot is discarded |
 | `[listing] snapshot_max_age_secs` | 300 | Time from building a snapshot until it is considered stale |
 | `[listing] snapshot_capacity_entries` | 500000 | Upper limit on the total number of Entries held by all snapshots |
-| `[listing] recursive_max_entries` | 200000 | The count at which a recursive walk is cut off |
+| `[listing] recursive_max_entries` | 200000 | The count at which the recursive listing of one start is cut off (§6) |
 | `[listing] summary_index_capacity_bytes` | 268435456 | Upper limit on the total persistent payload of the browse index |
 
 `recursive_max_entries` must be smaller than `snapshot_capacity_entries`.
@@ -364,7 +399,7 @@ The per-page scan goes away, but as with rejected alternative 2, one cannot jump
 #### Locate an Entry from Its Position in the Snapshot
 
 **Decision**
-A page request can name an Entry with `locate` in place of `offset`. The server returns the page of the same snapshot that holds it, with the `offset` the page was cut at (§4.5). `listFolderEntries`, `listFolderSummaries`, and `listSearchEntries` accept it, and every response of these APIs carries `offset`.
+A page request can name an Entry with `locate` in place of `offset`. The server returns the page of the same snapshot that holds it, with the `offset` the page was cut at (§4.5). `listFolderEntries`, `listFolderSummaries`, and `listEntries` outside timeline-date order accept it, and every response cut by `offset` carries `offset`.
 
 **Reason**
 The position of an Entry is a property of the snapshot's sequence, which only the server holds, so asking for it costs one request however far down the Entry is.
@@ -381,7 +416,7 @@ It is faster, but the number of requests still grows with the position, and requ
 
 **Rejected alternative 3**
 A separate API that returns only the position, `totalCount`, and the snapshot's id.
-The listing responses would not change, but the client needs a second request for the page, which can come from a rebuilt snapshot in between, and every listing parameter (sorting, filters, Libraries) would have to be defined twice, so we rejected it.
+The listing responses would not change, but the client needs a second request for the page, which can come from a rebuilt snapshot in between, and every listing parameter (sorting, filters, starts) would have to be defined twice, so we rejected it.
 
 #### Check Snapshot Freshness by the Target's Version and Our Own Changes
 
@@ -407,8 +442,8 @@ It also needs no stat on every request, but external changes would not be visibl
 #### Treat Name Search as a Listing Condition
 
 **Decision**
-Name search is a condition on listings, and search underneath is the combination with `recursive=true`.
-`listFolderEntries` accepts `query`, and `listSearchEntries`, which search mode uses, applies the same conditions to the listing of each Library and merges them (§5.3).
+Name search is the name condition of a Filter, and search underneath is a Scope whose descendants are read.
+`listFolderEntries` accepts `query`, and `listEntries` applies the same condition to the listing of each start of a Scope and merges them (§5.3); search opens an Unsaved Shelf over it.
 Search has no mechanism of its own apart from listings.
 
 **Reason**
@@ -426,31 +461,45 @@ The first results appear immediately, but the order changes as they arrive, so v
 Keeping a search API (`searchEntries`) that waits until the scan finishes or `limit` items are reached and returns in scan order.
 The previous implementation took this form, and no server change is needed, but there is no way to fetch the continuation and sorting is left to the client, so we rejected it.
 
-#### Search Several Libraries by Merging Per-Library Listings on the Server
+#### List Several Starts by Merging Per-Start Listings on the Server
 
 **Decision**
-`listSearchEntries` accepts several Libraries, builds the listing of each with the snapshots of §4.1, and merges them on the server for every page.
-The recursion limit is counted for each Library (§5.3, §6).
+`listEntries` accepts a Scope of several starts in one or several Libraries, builds the listing of each start with the snapshots of §4.1, and merges them on the server.
+The recursion limit is counted for each start (§5.3, §6).
+The merged sequence has no snapshot of its own, and the response lists by value the starts that were cut off, the starts that were walked because the index was not usable, and the missing starts.
 
 **Reason**
-The client's virtual scrolling needs one sequence with `totalCount` and pages at any `offset` ([Client Design §3.5](./client.md#35-loading-listings)), and only the server can cut such a page out of several Libraries without reading all of them.
-Per-Library snapshots are shared with folder listings, and the name index also answers per Library (§5.2), so building the merged search on them needs no second kind of snapshot.
-Counting the limit per Library keeps each Library's result the same as when it is searched alone.
-The cost is that a search across many large Libraries can hold as many truncated snapshots and wait as many walks as there are Libraries while the name index is not usable.
+The client's virtual scrolling needs one sequence with `totalCount` and pages at any position ([Client Design §3.5](./client.md#35-loading-listings)), and only the server can cut such a page out of several starts without reading all of them.
+Per-start snapshots are shared with folder listings, and the name index also answers per Library (§5.2), so building the merged sequence on them needs no second kind of snapshot.
+Counting the limit per start keeps each start's result the same as when it is listed alone.
+The cost is that a Scope of many large starts can hold as many truncated snapshots and wait as many walks as there are starts while the name index is not usable.
+Merging again for every page keeps the memory that of the per-start snapshots, and the starts named in the response tell the client which part of the result is partial, so it can say which folder to narrow or which Library is still being indexed.
 
 **Rejected alternative 1**
-A method in which the client calls the single-Library listing of each Library and joins the results.
+A method in which the client calls the single-start listing of each start and joins the results.
 No server change would be needed, but there is no overall order or `totalCount` for the joined sequence, so a page in the middle could not be read without reading everything before it, and we rejected it.
 
 **Rejected alternative 2**
-A method that counts the recursion limit over all the Libraries together.
-The memory bound would stay that of one search, but a Library walked later would lose its results depending on the order of the walk, so we rejected it.
+A method that counts the recursion limit over all the starts together.
+The memory bound would stay that of one listing, but a start walked later would lose its results depending on the order of the walk, so we rejected it.
+
+**Rejected alternative 3**
+Choosing several Libraries with the root of each as the start, and a folder as the start only for one Library, as `listSearchEntries` did.
+The request was simpler, but a Shelf names folders spread over several Libraries, such as the output folders of an image generator next to a shelf of books, so it gave way to a Scope of starts.
+
+**Rejected alternative 4**
+Keeping the merged sequence as a snapshot of its own.
+A page deep in the sequence would cost no more than the first, but every Entry would be held twice, in the per-start snapshots and in the merged one, so we rejected it.
+
+**Rejected alternative 5**
+Telling only whether any start was cut off or walked.
+The response would be smaller, but the client could not say which start made the result partial, so we rejected it.
 
 <a id="name-index"></a>
 #### Answer Recursive Searches from a Library-Wide Name Index Updated by Aggregation
 
 **Decision**
-A recursive listing with name, rating, or tag conditions is answered from the name index, which aggregation's walk and the daemon's own changes update (§5.1, §5.2).
+A recursive listing with name, rating, or tag conditions, or one whose Scope reads the insides of archives, is answered from the name index, which aggregation's walk and the daemon's own changes update (§5.1, §5.2).
 External changes appear in search at the next aggregation.
 The browse index keeps holding only already-browsed summary listings of direct children, and the timeline index is not substituted for name listings.
 
@@ -518,10 +567,12 @@ It would be fast for every term, but at the assumed scale it keeps 400 MB or mor
 
 **Decision**
 While the index of a Library is not usable, recursive listings with conditions walk the file system as before, and the response tells that the index did not answer (§5.2).
+The walk does not descend into archives, so until the index is usable a Scope that reads the insides of archives lists none of them.
 
 **Reason**
 It follows the same rule as the browse index: when derived state cannot be used, the listing returns to enumeration.
 The first full aggregation of a large Library can take hours, and search keeps working during that time.
+The insides of archives are what the index adds, and the notice that the index is being built already tells the owner that the result is partial.
 
 **Rejected alternative 1**
 A method that refuses recursive search until the index is usable.
@@ -530,6 +581,10 @@ The results would always come from one source, but search would be unavailable f
 **Rejected alternative 2**
 A method that answers from the part of the index built so far.
 It would be fast, but the user could not tell which part of the Library the results cover, so we rejected it.
+
+**Rejected alternative 3**
+A walk that also opens the archives in its range while the index is not usable.
+The results would include the insides of archives, but the walk would extract every archive in the range, which the index exists to avoid, and would be cut off by count sooner, so we rejected it.
 
 #### Normalize Names with NFKC and Match in Lowercase
 
@@ -554,9 +609,10 @@ Pairs that do not become the same under lowercase mapping, like German ß and ss
 **Decision**
 A recursive walk is cut off when the Entries put in the snapshot reach `recursive_max_entries`, and responds with only the Entries already walked and sets `truncated` (§6).
 For a listing answered from the name index, the same limit counts matching Entries.
+The limit is counted per start of a Scope, and the Entries inside archives count like any other.
 
 **Reason**
-Even in a subtree search from the Library root, memory and the wait until the first page stay within the limit.
+Even in a recursive listing from the Library root, memory and the wait until the first page stay within the limit.
 Even when cut off, the results for the range already walked are returned, so the user can move the starting point down and search again.
 A snapshot from the name index holds only the matching Entries, so counting matches bounds the same memory without cutting off a search merely because the Library is large.
 
@@ -623,7 +679,7 @@ It keeps the checks of maximum age and version and does not become a cache that 
 
 **Decision**
 The name index also holds the Entries inside archives, down to `max_nested_depth`, and aggregation's walk fills it with them.
-A Scope says whether a listing reads the insides of archives; when it does not, an archive is one Entry.
+A Scope says whether a listing reads the insides of the archives under its starts; when it does not, such an archive is one Entry, while a start that is an archive is always read inside (§5.2).
 This replaces the rule of §2.1 that neither a recursive walk nor the name index descends into archives.
 
 **Reason**
@@ -644,7 +700,7 @@ No index would be needed, but a recursive listing would open every archive in it
 **Decision**
 One listing API, `listEntries`, takes a Scope, a Filter, and a sort that includes the timeline date, and replaces `listSearchEntries` and `listTimelineEntries`.
 The per-month counts of the timeline become a separate aggregate that takes the same Scope and Filter.
-How `listEntries` cuts pages is deferred (§8.2).
+Its pages are cut by `offset` from snapshots, and by cursor in timeline-date order ("Cut Pages by Offset, and by Cursor in Timeline-Date Order" below).
 
 **Reason**
 Switching a Shelf between the grid and the timeline then changes only the sort, so a client keeps one store for every Shelf.
@@ -657,6 +713,52 @@ Their paging could stay as it is, but each client would keep two stores and call
 **Rejected alternative 2**
 Adding `listEntries` and keeping the old APIs for a while.
 Moving over would be gradual, but there is no outside client to keep them for, so we rejected it.
+
+#### Cut Pages by Offset, and by Cursor in Timeline-Date Order
+
+**Decision**
+`listEntries` cuts pages by `offset` from snapshots for every sort except the timeline date, with `totalCount` and `locate` (§4.2, §4.5).
+In timeline-date order it reads the timeline index by cursor, starts at a month or around an Entry, and returns no `totalCount` (§4.6).
+The timeline date is read newest first only, the order the timeline Layout shows.
+The grid and the list therefore reserve the overall height, and the timeline Layout reads the continuation.
+
+**Reason**
+A listing cut from a snapshot is bounded by the folder's size for direct children and by the recursion limit per start for a recursive listing, so its overall height can be reserved and the scrollbar can jump anywhere, which a large folder needs ([Client Design §3.5](./client.md#35-loading-listings)).
+A sequence in timeline-date order can reach millions of Entries with the insides of archives, which exceeds the height a browser can reserve, and a cursor follows its index without skipping rows, at the same cost anywhere for a Library root, while an `offset` costs time in proportion to the rows it skips ([Timeline Design §9.1](./timeline.md#point-at-a-pages-position-with-a-cursor)).
+Jumping in time is done by month, in the web client's list of years and months and in the iOS app's sheet of them.
+The two forms meet in one API, so a client switches a Shelf's Layout by changing the sort and keeps one store that reads either form.
+
+**Rejected alternative 1**
+Cutting every page by cursor.
+The paging would be one form, but a large folder could no longer be jumped through by the scrollbar, so we rejected it.
+
+**Rejected alternative 2**
+Cutting every page by `offset`, the timeline included.
+The client's loading would be one form, but positions in the timeline index shift while aggregation adds rows, skipping rows costs more time the further the position, and the height of millions of Entries cannot be reserved, so we rejected it.
+
+#### Carry a Scope and a Filter in the Query of One GET Request
+
+**Decision**
+`listEntries` is a GET request whose query carries the starts, as repeated values of a Library id followed by a Library-relative path, the Scope's choices, the Filter, the sort, and the page (§3).
+`locate` and `around` name an Entry in the same form, with no separate parameter for its Library.
+A saved Shelf is read by sending its Scope and Filter, not its id.
+
+**Reason**
+A listing is a read, and a GET keeps it outside the checks of mutating requests ([design.md §8.5](../design.md#85-csrf)) and in the form of the other listing APIs.
+A Library id cannot contain `/` ([openapi.yaml](../../daemon/openapi.yaml), `LibraryId`), so one value names a Library and a path without ambiguity, as the web client's timeline already does in its URL ([Client Design §3.10](./client.md#310-timeline-layout)).
+Sending the Scope and the Filter reads a saved Shelf and an Unsaved Shelf the same way, so the server has one path and a Shelf being edited can be read before it is saved.
+
+**Rejected alternative 1**
+A POST request with the Scope and the Filter in a JSON body.
+A long Scope would fit without care for URL length, but a read would become a request that the `Origin` check, which exempts only GET and HEAD, applies to, so we rejected it.
+
+**Rejected alternative 2**
+Reading a saved Shelf by its id.
+The request would be short, but there would be two ways to read a Shelf, and a Shelf being edited could not be read until saved, so we rejected it.
+
+**Rejected alternative 3**
+Naming the Library of `locate` and `around` in separate parameters, as `listSearchEntries` and `listTimelineEntries` did.
+It needs no parsing of the value, but every Entry and start would be named in two forms, so we rejected it.
 
 #### List Only Files Recursively Unless the Filter Asks for Folders
 
@@ -676,6 +778,105 @@ Folders could be found by name without asking, but every flat set would carry th
 **Rejected alternative 2**
 Never returning folders from a recursive listing.
 The rule would be simpler, but a folder could no longer be found by name, so we rejected it.
+
+#### Read Archives Like Folders When a Scope Reads Their Insides
+
+**Decision**
+When a Scope reads the insides of archives, an archive is read like a folder: a recursive listing returns it only when the Filter's kind names archives, and returns the Entries inside it.
+When the Scope does not read the insides, an archive is one Entry and is returned by default like other files.
+While such a Scope is walked because the name index is not usable, archives are returned like other files, since the walk reads none of their insides (§5.2).
+
+**Reason**
+Reading the insides makes the archive a container of the flat set, as a folder is, so listing it beside its own pages would interrupt the set in the same way as folders would.
+Naming archives in the kind still finds an archive by its name.
+
+**Rejected alternative**
+Always returning the archive itself as well.
+An archive could be found without asking, but every book's archive would sit among its pages, so we rejected it.
+
+#### Hold an Archive That Cannot Be Opened as an Entry Without Contents
+
+**Decision**
+The name index holds an archive that cannot be opened, because it is password-protected, of unknown format, or exceeds limits, as an Entry without contents, and a listing does not tell that some archives could not be read (§5.1).
+
+**Reason**
+Aggregation already records such an archive without inner Entries and does not reread it until its `ArchiveIdentity` changes ([Timeline Design §6.2](./timeline.md#62-archive-extraction)), so the name index follows the same record.
+The archive itself still appears and can be opened from the tree, where the error is shown.
+
+**Rejected alternative**
+Telling in the response that some archives in the Scope could not be read.
+The owner would know the result is partial, but the response would need a list that grows with the Scope, for archives the owner cannot open anyway, so we rejected it.
+
+#### Replace the Rows Under an Archive When Its ArchiveIdentity Changes
+
+**Decision**
+When aggregation rereads an archive because its `ArchiveIdentity` changed, the name index replaces all the rows under the archive, and the daemon's own renames and moves reassign them without rereading (§5.1).
+
+**Reason**
+It is the rule of the timeline index ([Timeline Design §9.1](./timeline.md#decide-archive-rereading-by-archiveidentity)), and the same walk writes both, so the two indexes agree on what an archive holds.
+Replacing leaves no rows of Entries removed from the archive.
+
+**Rejected alternative**
+Updating only the rows that changed.
+Fewer rows would be written for a large archive that changed a little, but an archive changes as a whole file and is enumerated in full anyway, so we rejected it.
+
+#### Walk a Start That Is an Archive
+
+**Decision**
+A start that is an archive or a path inside one reads that archive's inside whether or not the Scope reads the insides of archives (§5.2).
+In the orders cut from snapshots, the grid's and the list's, it is listed by walking inside that archive, even when the name index holds it; in timeline-date order it is read from the timeline index.
+
+**Reason**
+Naming an archive as a start can only mean reading its pages, so the Scope's choice is for the archives found under folder starts.
+One archive is small, and the walk reads its current contents, which the index has only as of the last aggregation.
+It is how a listing of an archive's inside worked before the index held archives.
+Timeline-date order needs the timeline dates, which only aggregation reads by opening each image, so a walk could not order the archive's Entries by them.
+
+**Rejected alternative 1**
+Answering such a start from the name index in every order.
+It would need no extraction, but the results would be as old as the last aggregation for a range that is cheap to read now, so we rejected it.
+
+**Rejected alternative 2**
+Requiring the Scope to read the insides of archives before an archive start reads its inside.
+One rule would cover every archive, but an archive start without it would list nothing, which no owner means by naming the archive, so we rejected it.
+
+#### List an Entry Once When Starts Overlap
+
+**Decision**
+An Entry reached from several starts of a Scope is listed once, and a start that another start already covers adds nothing (§5.3).
+
+**Reason**
+A Shelf is a set of Entries, and the owner may name a folder and one of its subfolders without thinking about the overlap; listing an Entry twice would count it twice in `totalCount` and show it twice.
+
+**Rejected alternative**
+Rejecting a Scope whose starts overlap as `InvalidInput`.
+The rule would be explicit, but a Shelf could break when a folder is moved under another of its starts, so we rejected it.
+
+#### List a Shelf Without Its Missing Starts
+
+**Decision**
+`listEntries` skips a start whose folder or Library no longer exists, returns the rest, and names the missing starts in the response (§5.3).
+
+**Reason**
+A Shelf of several folders is still useful when one of them is gone, and naming the missing ones lets the client lead the owner to fix the Shelf.
+
+**Rejected alternative**
+Answering `NotFound` when any start is missing.
+The failure would be plain, but one folder renamed outside Pxna would make the whole Shelf unreadable, so we rejected it.
+
+#### Count the Entries Inside Archives Toward the Name Index's Targets
+
+**Decision**
+The Entries inside archives count toward the 10 million Entries the design assumes and toward the name index's targets per Entry, and the targets do not change (§8.2).
+The index with archives is not measured before a user meets a slow case.
+
+**Reason**
+An Entry inside an archive is held in the same rows, with a folder row for each folder inside, as an Entry outside (§5.1), so the bytes per Entry and the cost of a query do not depend on where the Entry is.
+Aggregation already enumerates every archive it opens, so the index adds writes, not extractions, to the first full aggregation.
+
+**Rejected alternative**
+Measuring a fixture of archives before the change.
+It would confirm the targets with archives, but the 1-million-Entry measurement already holds per Entry, and the scripts would have to be written again, so we rejected it, as the deferred item on 10 million Entries does.
 
 ### 8.2 Deferred
 
@@ -710,6 +911,8 @@ When `locate` requests on a Library in real operation repeatedly take long enoug
 The targets set for the name index are a first full aggregation at most 20% longer than without the index, an index file of at most 200 bytes per Entry, and, for a search from the Library root whose terms match at most 1,000 Entries, a p95 of the first page within 1 second for a term of 3 or more characters and within 5 seconds for terms of 2 characters or fewer, with a following page within 100 ms.
 They were measured only at about 1 million Entries ([2026-11-07-name-index](../measurements/2026-11-07-name-index.md)), where all of them held: the aggregation took 1.07 times as long, the file was 167 bytes per Entry, and the p95 of the first page was 0.019 seconds for 4-character terms and 2.8 seconds for rare 2-character terms.
 They have not been measured at the 10 million Entries the design assumes.
+The Entries inside archives count toward those 10 million and toward the targets per Entry, because they are held in the same rows as other Entries (§5.1).
+How many Entries the archives add depends on the owner's Library; as an estimate, 5,000 books of 200 pages add 1 million Entries, which at the measured 167 bytes per Entry is about 170 MB.
 A search with only terms of 2 characters or fewer compares every row under the start (§5.1), so the record estimates that a cold one from the root of a 10-million-Entry Library takes longer than 5 seconds.
 
 **Why not decide now**
@@ -719,18 +922,6 @@ We spend that only once a user meets a slow case.
 
 **Conditions for deciding**
 When a user reports that a search or the first full aggregation of a Library is slow. Then measure at that Library's size against the targets above, and decide whether short terms need another way of matching.
-
-#### How listEntries Cuts Pages
-
-**Current state**
-Listings and search cut pages by `offset` from a snapshot and find an Entry's page with `locate` (§4).
-The timeline cuts pages with cursors and starts from a month or from around an Entry ([Timeline Design §7](./timeline.md#7-reading)).
-
-**Why not decide now**
-The choice depends on whether a sequence in timeline-date order can be cut at any `offset` at the assumed scale, and on whether the clients reserve the overall height for every Layout, which the timeline does not do.
-
-**Conditions for deciding**
-Before the contract of `listEntries` is written in `openapi.yaml`.
 
 ## 9. Current State and Remaining Work
 
@@ -762,7 +953,10 @@ Only the dependencies must be respected.
 | --- | --- | --- | --- |
 | L1 | Implement the name index, its update by aggregation and by the daemon's own changes, and answering recursive listings with name, rating, and tag conditions from it (§5.1, §5.2) | None | Done |
 | L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Done |
+| L3 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while it is not usable (§5.1, §5.2) | L1 | Not started |
+| L4 | Implement `listEntries` over a Scope and a Filter with pages by `offset` and by cursor, the starts cut off, walked, and missing, and `locate` in the form of a start (§3, §4.5, §4.6, §5.3) | L2, L3 | Not started |
+| L5 | Remove the search API that `listEntries` replaces (§8.1) once no client calls it | L4 | Not started |
 
-L1 corresponds to M19 and L2 to M24 of [design.md §12.2](../design.md#122-roadmap).
+L1 corresponds to M19, L2 to M24, L3 to M27, L4 to part of M28, and L5 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
 
 For confirmed defects, see [issues.md](../issues.md).
