@@ -224,11 +224,17 @@ Each folder's path is held once and its Entries refer to the folder, so the inde
 Hidden Entries whose names start with `.`, and the Entries inside them, are not held, by the same rule as aggregation ([Timeline Design §3](./timeline.md#3-what-is-listed)).
 An archive is held as an Entry, and the folders and Entries inside it are held under it with their paths joined to the archive's path ([design.md §11.1](../design.md#represent-paths-inside-archives-by-joining-paths)).
 An archive that cannot be opened because it is password-protected, of unknown format, or exceeds limits is held as an Entry without contents, as aggregation records it ([Timeline Design §6.2](./timeline.md#62-archive-extraction)).
+An archive keeps its kind as an Entry and also has a folder row at its own path, under which its folders and Entries are held, as a folder's are.
+Each folder row records whether it is an archive or a folder inside one, so a listing that does not read the insides of archives leaves out the Entries under such folders.
+The index records the `ArchiveIdentity` of each archive file of the Library whose entries it holds, apart from the timeline index, so that it can tell for itself which archives it still has to enumerate; a nested archive has no record of its own, because the identity of the archive file that holds it covers it ([Storage Layer Design §7.3](./storage.md#73-cache-identity)).
+A record is removed with the archive's rows, whether a sweep, a delete, a change of kind, or a move to a hidden name removes them, and moves with the rows on a rename or a move.
 It is derived state in SQLite under the listing state directory, separate from the authentication DB.
 
 The index is updated at the same points as the timeline index.
 Each time aggregation enumerates a folder, the rows of that folder's direct children are replaced with the enumerated names ([Timeline Design §6.1](./timeline.md#61-scanning-and-skipping-rereads)).
 When aggregation rereads an archive because its `ArchiveIdentity` changed, all the rows under the archive are replaced with what it enumerates, as the timeline's rows of that archive are ([Timeline Design §9.1](./timeline.md#decide-archive-rereading-by-archiveidentity)).
+When the timeline index skips an archive but the name index has no record of it or a different `ArchiveIdentity`, as after the name index is rebuilt, aggregation enumerates the archive's entries for the name index alone, which reads the archive's listing and extracts only the nested archives down to `max_nested_depth`, never an image or a video.
+The rows and the record of an archive are written in one transaction of the name index after the timeline's rows of the archive are written, and not at all when the archive changed while it was read; an aggregation stopped between the two leaves the record missing, so the next aggregation enumerates the archive again.
 A full aggregation records its generation in the rows it saw, and when the scan finishes, removes the rows in the scanned range that do not have it.
 The rows under an archive that it skips because the `ArchiveIdentity` is unchanged count as seen, so they are kept.
 The daemon's own changes delete the rows of a path that no longer exists and everything under it, and reassign the rows under a renamed or moved path to the destination, before the response ([Timeline Design §6.4](./timeline.md#64-the-daemons-own-changes)).
@@ -811,14 +817,34 @@ The owner would know the result is partial, but the response would need a list t
 
 **Decision**
 When aggregation rereads an archive because its `ArchiveIdentity` changed, the name index replaces all the rows under the archive, and the daemon's own renames and moves reassign them without rereading (§5.1).
+The name index keeps its own record of the `ArchiveIdentity` of each archive it holds, and an archive it has no record of, or a different one, is enumerated for it even when the timeline index skips the archive.
 
 **Reason**
-It is the rule of the timeline index ([Timeline Design §9.1](./timeline.md#decide-archive-rereading-by-archiveidentity)), and the same walk writes both, so the two indexes agree on what an archive holds.
+It is the rule of the timeline index ([Timeline Design §9.1](./timeline.md#decide-archive-rereading-by-archiveidentity)), and both indexes decide by the same `ArchiveIdentity`, so they agree on what an archive holds.
 Replacing leaves no rows of Entries removed from the archive.
 
-**Rejected alternative**
+Each index is derived state that can be discarded and rebuilt alone (§5.1), so a name index rebuilt beside a timeline index that skips every unchanged archive would otherwise never hold their insides.
+Enumerating an archive reads its listing and extracts only its nested archives, so filling the name index costs far less than rereading the timeline dates, which extracts every image and video.
+
+**Rejected alternative 1**
 Updating only the rows that changed.
 Fewer rows would be written for a large archive that changed a little, but an archive changes as a whole file and is enumerated in full anyway, so we rejected it.
+
+**Rejected alternative 2**
+Relying on the timeline index's record alone, and raising the version of the extraction rules when the name index needs the insides again.
+No second record would be kept, but every archive would be extracted again to reread timeline dates that have not changed, so we rejected it.
+
+#### Mark the Folders of Archives in the Name Index
+
+**Decision**
+Each folder row of the name index records whether it is an archive or a folder inside one, and a listing that does not read the insides of archives leaves out the Entries under such folders (§5.1).
+
+**Reason**
+A Scope chooses whether a listing reads the insides of archives (§5), so every query of the index needs the choice, and a mark on the folder row answers it in the same query without reading anything else.
+
+**Rejected alternative**
+Telling the insides apart by the timeline index, where an Entry inside an archive has a path that differs from its local file.
+No column would be added, but the two indexes are separate files, and only images and videos have timeline rows, so we rejected it.
 
 #### Walk a Start That Is an Archive
 
