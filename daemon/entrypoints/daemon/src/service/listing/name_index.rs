@@ -22,7 +22,7 @@ const DATABASE_FILE_NAME: &str = "names.db";
 /// Left next to the database when it failed while running, so that the next startup discards it.
 const BROKEN_MARKER_NAME: &str = "names.db.broken";
 /// Bump this when the schema changes. A file with another version is derived state and is discarded.
-const FORMAT_VERSION: i64 = 1;
+const FORMAT_VERSION: i64 = 2;
 /// The number of stale Entries a sweep deletes in one transaction.
 const SWEEP_BATCH: i64 = 2000;
 /// How many queued changes wait for the writer. Aggregation waits when the queue is full, so memory stays bounded.
@@ -43,6 +43,9 @@ type SqliteQuery<'q> = Query<'q, Sqlite, SqliteArguments>;
 /// `name_entries` holds every Entry by its parent folder's id and its own name, and `name_folders` holds the path of each folder once,
 /// so a path is not repeated for every Entry under it. A folder's id in `name_folders` is the id of its own row in `name_entries`.
 /// A Library's root has a row of its own with parent 0 and the Library's id as its name.
+/// An archive keeps its kind as an Entry and also has a folder row, under which its folders and Entries are held. `name_folders.archive` is 1 for the
+/// folder row of an archive and of every folder under one, so a query that does not read the insides of archives can leave them out.
+/// `name_archives` records the `ArchiveIdentity` of each archive file whose insides the index holds, apart from the timeline index.
 /// `norm` is the normalized name, or NULL when it equals `name`. The trigram table is contentless: it holds only the trigrams of the normalized names.
 const SCHEMA: &[&str] = &[
     r#"
@@ -60,10 +63,19 @@ CREATE TABLE IF NOT EXISTS name_entries (
 CREATE TABLE IF NOT EXISTS name_folders (
     id INTEGER PRIMARY KEY,
     library_id TEXT NOT NULL,
-    path TEXT NOT NULL
+    path TEXT NOT NULL,
+    archive INTEGER NOT NULL DEFAULT 0
 )
 "#,
     "CREATE UNIQUE INDEX IF NOT EXISTS name_folders_path ON name_folders (library_id, path)",
+    r#"
+CREATE TABLE IF NOT EXISTS name_archives (
+    library_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    PRIMARY KEY (library_id, path)
+) WITHOUT ROWID
+"#,
     r#"
 CREATE TABLE IF NOT EXISTS name_libraries (
     library_id TEXT NOT NULL PRIMARY KEY,
@@ -98,6 +110,11 @@ impl NameKind {
             Self::Image => 3,
             Self::Video => 4,
         }
+    }
+
+    /// Whether the index holds Entries under an Entry of this kind: a folder, and an archive, which is read like one.
+    fn has_contents(self) -> bool {
+        matches!(self, Self::Folder | Self::Archive)
     }
 
     fn from_code(code: i64) -> Self {
@@ -334,6 +351,25 @@ enum Work {
         src: String,
         dst: String,
     },
+    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
+    Archive {
+        library: String,
+        path: String,
+        identity: String,
+        folders: Vec<(String, Vec<NameRow>)>,
+        generation: i64,
+    },
+    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
+    ArchiveIdentity {
+        library: String,
+        path: String,
+        identity: String,
+    },
+    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
+    ForgetArchive {
+        library: String,
+        path: String,
+    },
     Usable {
         library: String,
         generation: i64,
@@ -499,6 +535,7 @@ impl NameIndex {
         sqlx::query("SELECT 1 FROM name_entries LIMIT 1").fetch_optional(db).await?;
         sqlx::query("SELECT 1 FROM name_folders LIMIT 1").fetch_optional(db).await?;
         sqlx::query("SELECT 1 FROM name_libraries LIMIT 1").fetch_optional(db).await?;
+        sqlx::query("SELECT 1 FROM name_archives LIMIT 1").fetch_optional(db).await?;
         Ok(())
     }
 
@@ -782,6 +819,57 @@ impl NameIndex {
         self.queue(work, true).await;
     }
 
+    /// Replaces everything the index holds under the archive at `path` with `folders`, each a Library-relative folder path under the archive
+    /// (the archive's own path for its direct children) with its direct children, and sets the archive's record to `identity`, in one transaction.
+    /// The archive's own folder row exists afterwards even when `folders` is empty, as for an archive that cannot be opened.
+    /// This returns after the change is applied.
+    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
+    pub async fn replace_archive(&self, library: &str, path: &str, identity: &str, folders: &[(String, Vec<NameRow>)], generation: i64) {
+        let work = Work::Archive {
+            library: library.to_string(),
+            path: EntryPath::clean(path),
+            identity: identity.to_string(),
+            folders: folders.iter().map(|(folder, rows)| (EntryPath::clean(folder), rows.clone())).collect(),
+            generation,
+        };
+        self.queue(work, true).await;
+    }
+
+    /// The `ArchiveIdentity` the index holds the insides of the archive at `path` for, if any.
+    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
+    pub async fn archive_identity(&self, library: &str, path: &str) -> Option<String> {
+        let db = self.live()?;
+        let found = sqlx::query_scalar::<_, String>("SELECT identity FROM name_archives WHERE library_id = ? AND path = ?")
+            .bind(library)
+            .bind(EntryPath::clean(path))
+            .fetch_optional(db)
+            .await
+            .map_err(Error::from);
+        self.settle_read(found).flatten()
+    }
+
+    /// Updates the record of the archive at `path` to `identity` when a record exists at that path, as after a rename,
+    /// and does nothing when none exists, so that an archive whose insides the index does not hold is still read.
+    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
+    pub async fn set_archive_identity(&self, library: &str, path: &str, identity: &str) {
+        let work = Work::ArchiveIdentity {
+            library: library.to_string(),
+            path: EntryPath::clean(path),
+            identity: identity.to_string(),
+        };
+        self.queue(work, true).await;
+    }
+
+    /// Removes the record of the archive at `path`, leaving its rows, so the next aggregation reads it again.
+    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
+    pub async fn forget_archive(&self, library: &str, path: &str) {
+        let work = Work::ForgetArchive {
+            library: library.to_string(),
+            path: EntryPath::clean(path),
+        };
+        self.queue(work, true).await;
+    }
+
     async fn begin(db: &SqlitePool) -> Result<Transaction<'static, Sqlite>> {
         // Several Libraries write at once, so take the write lock from the start and wait for the others instead of failing.
         Ok(db.begin_with("BEGIN IMMEDIATE").await?)
@@ -842,12 +930,91 @@ impl NameIndex {
             Work::Sweep { library, scope, generation } => Self::delete_stale(db, &library, &scope, generation).await,
             Work::Remove { library, path } => Self::delete_path(db, &library, &path).await,
             Work::Rename { library, src, dst } => Self::move_path(db, &library, &src, &dst).await,
+            Work::Archive {
+                library,
+                path,
+                identity,
+                folders,
+                generation,
+            } => Self::write_archive(db, &library, &path, &identity, folders, generation).await,
+            Work::ArchiveIdentity { library, path, identity } => Self::write_archive_identity(db, &library, &path, &identity).await,
+            Work::ForgetArchive { library, path } => Self::write_forget_archive(db, &library, &path).await,
             Work::Usable { library, generation } => Self::write_usable(db, &library, generation).await,
             Work::Begin { library, generation } => Self::write_begin(db, &library, generation).await,
             Work::Children { .. } => Ok(()),
             #[cfg(test)]
             Work::Barrier => Ok(()),
         }
+    }
+
+    /// Replaces what is under the archive at `path` and sets its record, in one transaction.
+    async fn write_archive(db: &SqlitePool, library: &str, path: &str, identity: &str, mut folders: Vec<(String, Vec<NameRow>)>, generation: i64) -> Result<()> {
+        // A Library's root is not an archive.
+        let Some((parent, name)) = EntryPath::split(path) else {
+            return Ok(());
+        };
+        // A folder's path starts with its parent's, so sorting writes every folder after the one it is in.
+        folders.sort_by(|a, b| a.0.cmp(&b.0));
+        let inside = format!("{path}/");
+        let mut tx = Self::begin(db).await?;
+        let parent_id = Self::ensure_folder(&mut tx, library, &parent, generation).await?;
+        let row = NameRow::new(&name, NameKind::Archive);
+        let existing: Option<(i64, i64)> = sqlx::query_as("SELECT id, kind FROM name_entries WHERE parent_id = ? AND name = ?")
+            .bind(parent_id)
+            .bind(&name)
+            .fetch_optional(&mut *tx)
+            .await?;
+        match existing {
+            None => {
+                Self::insert_entry(&mut tx, library, parent_id, &parent, &row, generation).await?;
+            }
+            Some((id, old)) => {
+                let old = NameKind::from_code(old);
+                if old == NameKind::Archive {
+                    Self::delete_inside(&mut tx, library, path).await?;
+                    Self::insert_folder_row(&mut tx, library, id, path, true).await?;
+                } else {
+                    Self::change_kind(&mut tx, library, id, old, &parent, &row).await?;
+                }
+                sqlx::query("UPDATE name_entries SET generation = MAX(generation, ?) WHERE id = ?")
+                    .bind(generation)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        for (folder, rows) in &folders {
+            if folder == path || folder.starts_with(&inside) {
+                Self::write_children(&mut tx, library, folder, rows, generation).await?;
+            }
+        }
+        sqlx::query("INSERT INTO name_archives (library_id, path, identity) VALUES (?, ?, ?) ON CONFLICT (library_id, path) DO UPDATE SET identity = excluded.identity")
+            .bind(library)
+            .bind(path)
+            .bind(identity)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn write_archive_identity(db: &SqlitePool, library: &str, path: &str, identity: &str) -> Result<()> {
+        sqlx::query("UPDATE name_archives SET identity = ? WHERE library_id = ? AND path = ?")
+            .bind(identity)
+            .bind(library)
+            .bind(path)
+            .execute(db)
+            .await?;
+        Ok(())
+    }
+
+    async fn write_forget_archive(db: &SqlitePool, library: &str, path: &str) -> Result<()> {
+        sqlx::query("DELETE FROM name_archives WHERE library_id = ? AND path = ?")
+            .bind(library)
+            .bind(path)
+            .execute(db)
+            .await?;
+        Ok(())
     }
 
     async fn write_usable(db: &SqlitePool, library: &str, generation: i64) -> Result<()> {
@@ -924,7 +1091,7 @@ impl NameIndex {
         Ok(())
     }
 
-    /// Adds Entries that are not in the index with three multi-row INSERTs: the Entries, their trigrams, and the folder rows of the folders among them.
+    /// Adds Entries that are not in the index with three multi-row INSERTs: the Entries, their trigrams, and the folder rows of the folders and archives among them.
     async fn insert_entries(tx: &mut Transaction<'_, Sqlite>, library: &str, parent_id: i64, parent: &str, rows: &[&NameRow], generation: i64) -> Result<()> {
         let normalized = rows.iter().map(|row| row.normalized()).collect::<Vec<_>>();
         let sql = format!(
@@ -953,15 +1120,23 @@ impl NameIndex {
             statement = statement.bind(*id).bind(text.as_str());
         }
         statement.execute(&mut **tx).await?;
-        let folders = rows.iter().filter(|row| row.kind == NameKind::Folder).collect::<Vec<_>>();
+        let folders = rows.iter().filter(|row| row.kind.has_contents()).collect::<Vec<_>>();
         if !folders.is_empty() {
-            let sql = format!("INSERT INTO name_folders (id, library_id, path) VALUES {}", vec!["(?, ?, ?)"; folders.len()].join(", "));
+            let inside_archive = Self::folder_marked(tx, parent_id).await?;
+            let sql = format!(
+                "INSERT INTO name_folders (id, library_id, path, archive) VALUES {}",
+                vec!["(?, ?, ?, ?)"; folders.len()].join(", ")
+            );
             let mut statement = sqlx::query(sqlx::AssertSqlSafe(sql));
             for folder in folders {
                 let id = ids
                     .get(&folder.name)
                     .ok_or_else(|| Error::new(ErrorKind::UnexpectedError).with_message("an inserted name index row was not returned"))?;
-                statement = statement.bind(*id).bind(library).bind(EntryPath::join(parent, &folder.name));
+                statement = statement
+                    .bind(*id)
+                    .bind(library)
+                    .bind(EntryPath::join(parent, &folder.name))
+                    .bind(inside_archive || folder.kind == NameKind::Archive);
             }
             statement.execute(&mut **tx).await?;
         }
@@ -1020,11 +1195,7 @@ impl NameIndex {
                 .bind(NameKind::Folder.code())
                 .fetch_one(&mut **tx)
                 .await?;
-                sqlx::query("INSERT INTO name_folders (id, library_id, path) VALUES (?, ?, '/')")
-                    .bind(id)
-                    .bind(library)
-                    .execute(&mut **tx)
-                    .await?;
+                Self::insert_folder_row(tx, library, id, "/", false).await?;
                 id
             }
         };
@@ -1042,6 +1213,11 @@ impl NameIndex {
                         .await?;
                     match existing {
                         None => Self::insert_entry(tx, library, parent_id, &folder, &row, generation).await?,
+                        // An archive on the path is the folder it is, and keeps its kind.
+                        Some((id, old)) if NameKind::from_code(old) == NameKind::Archive => {
+                            Self::insert_folder_row(tx, library, id, &child, true).await?;
+                            id
+                        }
                         Some((id, old)) => {
                             Self::change_kind(tx, library, id, NameKind::from_code(old), &folder, &row).await?;
                             id
@@ -1062,7 +1238,38 @@ impl NameIndex {
             .await?)
     }
 
-    /// Adds an Entry that is not in the index, with its trigrams, and with its folder row when it is a folder.
+    /// Writes the folder row of the Entry `id`. `archive` is whether it is an archive or inside one.
+    async fn insert_folder_row(tx: &mut Transaction<'_, Sqlite>, library: &str, id: i64, path: &str, archive: bool) -> Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO name_folders (id, library_id, path, archive) VALUES (?, ?, ?, ?)")
+            .bind(id)
+            .bind(library)
+            .bind(path)
+            .bind(archive)
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Whether the folder with this id is an archive or inside one. A folder the index does not hold is not.
+    async fn folder_marked(tx: &mut Transaction<'_, Sqlite>, id: i64) -> Result<bool> {
+        let marked: Option<i64> = sqlx::query_scalar("SELECT archive FROM name_folders WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?;
+        Ok(marked.is_some_and(|marked| marked != 0))
+    }
+
+    /// Like `folder_marked`, for the folder at `path`.
+    async fn path_marked(tx: &mut Transaction<'_, Sqlite>, library: &str, path: &str) -> Result<bool> {
+        let marked: Option<i64> = sqlx::query_scalar("SELECT archive FROM name_folders WHERE library_id = ? AND path = ?")
+            .bind(library)
+            .bind(path)
+            .fetch_optional(&mut **tx)
+            .await?;
+        Ok(marked.is_some_and(|marked| marked != 0))
+    }
+
+    /// Adds an Entry that is not in the index, with its trigrams, and with its folder row when it is a folder or an archive.
     async fn insert_entry(tx: &mut Transaction<'_, Sqlite>, library: &str, parent_id: i64, parent: &str, row: &NameRow, generation: i64) -> Result<i64> {
         let (normalized, stored) = row.normalized();
         let id: i64 = sqlx::query_scalar("INSERT INTO name_entries (parent_id, name, norm, kind, generation) VALUES (?, ?, ?, ?, ?) RETURNING id")
@@ -1078,13 +1285,9 @@ impl NameIndex {
             .bind(normalized)
             .execute(&mut **tx)
             .await?;
-        if row.kind == NameKind::Folder {
-            sqlx::query("INSERT INTO name_folders (id, library_id, path) VALUES (?, ?, ?)")
-                .bind(id)
-                .bind(library)
-                .bind(EntryPath::join(parent, &row.name))
-                .execute(&mut **tx)
-                .await?;
+        if row.kind.has_contents() {
+            let inside_archive = row.kind == NameKind::Archive || Self::folder_marked(tx, parent_id).await?;
+            Self::insert_folder_row(tx, library, id, &EntryPath::join(parent, &row.name), inside_archive).await?;
         }
         Ok(id)
     }
@@ -1096,13 +1299,9 @@ impl NameIndex {
         {
             Self::delete_inside(tx, library, &path).await?;
         }
-        if row.kind == NameKind::Folder {
-            sqlx::query("INSERT OR REPLACE INTO name_folders (id, library_id, path) VALUES (?, ?, ?)")
-                .bind(id)
-                .bind(library)
-                .bind(EntryPath::join(parent, &row.name))
-                .execute(&mut **tx)
-                .await?;
+        if row.kind.has_contents() {
+            let inside_archive = row.kind == NameKind::Archive || Self::path_marked(tx, library, parent).await?;
+            Self::insert_folder_row(tx, library, id, &EntryPath::join(parent, &row.name), inside_archive).await?;
         }
         sqlx::query("UPDATE name_entries SET kind = ? WHERE id = ?")
             .bind(row.kind.code())
@@ -1606,6 +1805,177 @@ mod tests {
         let reopened = open(&dir).await;
         assert!(!reopened.is_usable(LIB).await);
         assert!(held(&reopened, LIB).await?.is_empty());
+        Ok(())
+    }
+
+    /// The paths of the folder rows that are an archive or inside one.
+    async fn marked(index: &NameIndex, library: &str) -> TestResult<BTreeSet<String>> {
+        index.flush().await;
+        let paths: Vec<String> = sqlx::query_scalar("SELECT path FROM name_folders WHERE library_id = ? AND archive = 1")
+            .bind(library)
+            .fetch_all(pool(index))
+            .await?;
+        Ok(paths.into_iter().collect())
+    }
+
+    fn archives(names: &[&str]) -> Vec<NameRow> {
+        names.iter().map(|name| NameRow::new(name, NameKind::Archive)).collect()
+    }
+
+    /// An archive with a folder, a file, and a nested archive, each with what is inside it.
+    fn pack_contents() -> Vec<(String, Vec<NameRow>)> {
+        vec![
+            ("/pack.zip".to_string(), [folders(&["dir"]), files(&["a.txt"]), archives(&["inner.zip"])].concat()),
+            ("/pack.zip/dir".to_string(), files(&["b.txt"])),
+            ("/pack.zip/inner.zip".to_string(), files(&["c.txt"])),
+        ]
+    }
+
+    #[tokio::test]
+    async fn a_file_of_format_1_is_discarded_and_a_file_of_format_2_is_created_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        index.replace_children(LIB, "/", &files(&["a.txt"]), 1).await;
+        index.mark_usable(LIB, 1).await;
+        index.flush().await;
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version").fetch_one(pool(&index)).await?;
+        assert_eq!(version, 2);
+        sqlx::query("PRAGMA user_version = 1").execute(pool(&index)).await?;
+        pool(&index).close().await;
+
+        let reopened = open(&dir).await;
+        assert!(!reopened.is_usable(LIB).await, "what a file of format 1 held is gone");
+        assert!(held(&reopened, LIB).await?.is_empty());
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version").fetch_one(pool(&reopened)).await?;
+        assert_eq!(version, 2);
+        // The new file has the mark and the record.
+        sqlx::query("SELECT archive FROM name_folders LIMIT 1").fetch_optional(pool(&reopened)).await?;
+        sqlx::query("SELECT library_id, path, identity FROM name_archives LIMIT 1")
+            .fetch_optional(pool(&reopened))
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_archive_keeps_its_kind_and_has_a_folder_row_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        index
+            .replace_children(LIB, "/", &[archives(&["a.zip"]), folders(&["plain"]), files(&["f.txt"])].concat(), 1)
+            .await;
+        assert_eq!(held(&index, LIB).await?, set(&["/a.zip:2", "/plain:0", "/f.txt:1"]), "an archive keeps its kind");
+        assert_eq!(marked(&index, LIB).await?, set(&["/a.zip"]), "only the archive's folder row is marked");
+        let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM name_folders WHERE library_id = ? AND path = '/a.zip'")
+            .bind(LIB)
+            .fetch_one(pool(&index))
+            .await?;
+        assert_eq!(rows, 1);
+
+        // Entries written under the archive's path find the archive as the folder it is, and are marked as it is.
+        index.replace_children(LIB, "/a.zip/x/y", &[files(&["z.txt"]), archives(&["n.zip"])].concat(), 1).await;
+        assert_eq!(
+            held(&index, LIB).await?,
+            set(&["/a.zip:2", "/plain:0", "/f.txt:1", "/a.zip/x:0", "/a.zip/x/y:0", "/a.zip/x/y/z.txt:1", "/a.zip/x/y/n.zip:2"])
+        );
+        assert_eq!(marked(&index, LIB).await?, set(&["/a.zip", "/a.zip/x", "/a.zip/x/y", "/a.zip/x/y/n.zip"]));
+
+        // A file that becomes an archive, and a folder that becomes one, gain the mark; an archive that becomes a folder at the same path
+        // keeps its folder row but loses the mark.
+        index.replace_children(LIB, "/", &[archives(&["f.txt", "plain"])].concat(), 2).await;
+        assert_eq!(
+            marked(&index, LIB).await?,
+            set(&["/a.zip", "/a.zip/x", "/a.zip/x/y", "/a.zip/x/y/n.zip", "/f.txt", "/plain"])
+        );
+        index.replace_children(LIB, "/", &folders(&["f.txt"]), 3).await;
+        assert!(!marked(&index, LIB).await?.contains("/f.txt"));
+        assert_consistent(&index).await
+    }
+
+    #[tokio::test]
+    async fn replace_archive_replaces_the_rows_under_an_archive_and_sets_its_record_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        index.replace_children(LIB, "/", &[archives(&["pack.zip"]), folders(&["plain"])].concat(), 1).await;
+        index.replace_children(LIB, "/plain", &files(&["p.txt"]), 1).await;
+        index.replace_archive(LIB, "/pack.zip", "id-1", &pack_contents(), 1).await;
+        assert_eq!(
+            held(&index, LIB).await?,
+            set(&[
+                "/pack.zip:2",
+                "/plain:0",
+                "/plain/p.txt:1",
+                "/pack.zip/dir:0",
+                "/pack.zip/a.txt:1",
+                "/pack.zip/inner.zip:2",
+                "/pack.zip/dir/b.txt:1",
+                "/pack.zip/inner.zip/c.txt:1"
+            ])
+        );
+        assert_eq!(marked(&index, LIB).await?, set(&["/pack.zip", "/pack.zip/dir", "/pack.zip/inner.zip"]));
+        assert_eq!(index.archive_identity(LIB, "/pack.zip").await.as_deref(), Some("id-1"));
+        assert_eq!(matches(&index, "c.txt").await?, vec!["/pack.zip/inner.zip/c.txt"]);
+
+        // The next contents replace the old ones whole, whatever order they come in.
+        let next = vec![
+            ("/pack.zip/new/deeper".to_string(), files(&["d.txt"])),
+            ("/pack.zip".to_string(), [folders(&["new"]), files(&["e.txt"])].concat()),
+            ("/pack.zip/new".to_string(), folders(&["deeper"])),
+        ];
+        index.replace_archive(LIB, "/pack.zip", "id-2", &next, 2).await;
+        assert_eq!(
+            held(&index, LIB).await?,
+            set(&[
+                "/pack.zip:2",
+                "/plain:0",
+                "/plain/p.txt:1",
+                "/pack.zip/new:0",
+                "/pack.zip/e.txt:1",
+                "/pack.zip/new/deeper:0",
+                "/pack.zip/new/deeper/d.txt:1"
+            ])
+        );
+        assert_eq!(marked(&index, LIB).await?, set(&["/pack.zip", "/pack.zip/new", "/pack.zip/new/deeper"]));
+        assert_eq!(index.archive_identity(LIB, "/pack.zip").await.as_deref(), Some("id-2"));
+        assert!(matches(&index, "c.txt").await?.is_empty(), "the old rows leave the trigram table");
+
+        // An archive that cannot be opened is an Entry without contents, and still has its folder row.
+        index.replace_archive(LIB, "/pack.zip", "id-3", &[], 3).await;
+        assert_eq!(held(&index, LIB).await?, set(&["/pack.zip:2", "/plain:0", "/plain/p.txt:1"]));
+        assert_eq!(marked(&index, LIB).await?, set(&["/pack.zip"]));
+        assert_eq!(index.archive_identity(LIB, "/pack.zip").await.as_deref(), Some("id-3"));
+
+        // An archive the index did not hold yet is added, with the folders above it.
+        index
+            .replace_archive(LIB, "/new/place/other.zip", "id-4", &[("/new/place/other.zip".to_string(), files(&["o.txt"]))], 3)
+            .await;
+        assert!(
+            held(&index, LIB)
+                .await?
+                .is_superset(&set(&["/new:0", "/new/place:0", "/new/place/other.zip:2", "/new/place/other.zip/o.txt:1"]))
+        );
+        assert_eq!(marked(&index, LIB).await?, set(&["/pack.zip", "/new/place/other.zip"]));
+        assert_consistent(&index).await
+    }
+
+    #[tokio::test]
+    async fn the_record_of_an_archive_is_read_set_and_forgotten_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        index.replace_children(LIB, "/", &archives(&["a.zip", "b.zip"]), 1).await;
+        assert_eq!(index.archive_identity(LIB, "/a.zip").await, None, "an archive is held before its record is");
+
+        index.replace_archive(LIB, "/a.zip", "one", &[("/a.zip".to_string(), files(&["x.txt"]))], 1).await;
+        assert_eq!(index.archive_identity(LIB, "/a.zip").await.as_deref(), Some("one"));
+        assert_eq!(index.archive_identity("other", "/a.zip").await, None, "a record belongs to a Library");
+
+        index.set_archive_identity(LIB, "/a.zip", "two").await;
+        assert_eq!(index.archive_identity(LIB, "/a.zip").await.as_deref(), Some("two"));
+        index.set_archive_identity(LIB, "/b.zip", "three").await;
+        assert_eq!(index.archive_identity(LIB, "/b.zip").await, None, "setting creates no record");
+
+        index.forget_archive(LIB, "/a.zip").await;
+        assert_eq!(index.archive_identity(LIB, "/a.zip").await, None);
+        assert_eq!(held(&index, LIB).await?.contains("/a.zip/x.txt:1"), true, "forgetting leaves the rows");
         Ok(())
     }
 
