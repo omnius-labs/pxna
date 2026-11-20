@@ -16,8 +16,8 @@ use crate::{
     config::LibraryConfig,
     prelude::*,
     service::listing::{
-        ArchiveWalk, ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, NameIndex, SearchResults, SearchSource, SnapshotKey, SnapshotVersion, SummaryData, SummaryKey,
-        SummaryOptions, SummarySnapshot,
+        ArchiveWalk, ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, NameIndex, ResolvedScope, ResolvedStart, Scope, ScopeStart, SearchResults, SearchSource,
+        SnapshotKey, SnapshotVersion, StartResolution, SummaryData, SummaryKey, SummaryOptions, SummarySnapshot,
     },
 };
 
@@ -295,10 +295,17 @@ impl LibraryBrowser {
 
     /// folder 系の endpoint では、archive file を指す path を archive の root として解釈する。
     async fn resolve_folder(&self, library: &LibraryConfig, path: &str) -> Result<(ResolvedStoragePath, NestedFsEntry)> {
+        self.locate_folder(library, path)
+            .await?
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput).with_message(format!("not a folder: {path}")))
+    }
+
+    /// Resolves `path` as `resolve_folder` does, and tells a file that is neither a folder nor an archive, which is `None`, from an error.
+    async fn locate_folder(&self, library: &LibraryConfig, path: &str) -> Result<Option<(ResolvedStoragePath, NestedFsEntry)>> {
         let nested = self.resolve(library, path).await?;
         let entry = nested.get_entry(WorkClass::Foreground).await?;
         match entry.detail {
-            FsEntryDetail::Dir { .. } => Ok((nested, entry)),
+            FsEntryDetail::Dir { .. } => Ok(Some((nested, entry))),
             FsEntryDetail::File { archive: true } => {
                 let mut path = nested.path().to_nested_path_buf();
                 path.push_archive_root().map_err(|error| Error::from_error(error, ErrorKind::InvalidInput))?;
@@ -306,9 +313,55 @@ impl LibraryBrowser {
                 let mut root = nested.get_entry(WorkClass::Foreground).await?;
                 // archive の root は file 自体の path と名前で見せ、metadata だけを root のものにする。
                 root.path = entry.path;
-                Ok((nested, root))
+                Ok(Some((nested, root)))
             }
-            _ => Err(Error::new(ErrorKind::InvalidInput).with_message(format!("not a folder: {path}"))),
+            _ => Ok(None),
+        }
+    }
+}
+
+impl LibraryBrowser {
+    /// Whether an ancestor of the start's path is a file that is not an archive, judged as listings judge it, by the name.
+    async fn passes_through_plain_file(&self, library: &LibraryConfig, start: &ScopeStart) -> bool {
+        let segments = start.path().segments();
+        for end in 1..segments.len() {
+            let ancestor = format!("/{}", segments[..end].join("/"));
+            let Ok(nested) = self.resolve(library, &ancestor).await else {
+                return false;
+            };
+            match nested.get_entry(WorkClass::Foreground).await.map(|entry| entry.detail) {
+                Ok(FsEntryDetail::Dir { .. }) => {}
+                Ok(FsEntryDetail::File { archive: false }) => return true,
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// Resolves every start of the Scope as `resolve_folder` does, in parallel, then drops the starts that other starts cover.
+    ///
+    /// An unknown Library, a path that does not exist, and a path that names a file that is neither a folder nor an archive are missing starts, and
+    /// any other error fails the request.
+    #[cfg_attr(not(test), expect(dead_code, reason = "listEntries resolves its Scope with it from step 5 of list-entries"))]
+    pub async fn resolve_scope(&self, scope: &Scope) -> Result<ResolvedScope> {
+        let resolutions = futures::future::try_join_all(scope.starts().iter().map(|start| self.resolve_start(start))).await?;
+        Ok(ResolvedScope::new(resolutions, scope))
+    }
+
+    #[cfg_attr(not(test), expect(dead_code, reason = "listEntries resolves its Scope with it from step 5 of list-entries"))]
+    async fn resolve_start(&self, start: &ScopeStart) -> Result<StartResolution> {
+        let missing = || StartResolution::Missing(start.value().to_string());
+        let Ok(library) = self.library(start.library_id()) else {
+            return Ok(missing());
+        };
+        match self.locate_folder(library, &start.path().absolute()).await {
+            Ok(Some((folder, entry))) => Ok(StartResolution::Found(Box::new(ResolvedStart::new(start.clone(), folder, entry, &library.path)?))),
+            Ok(None) => Ok(missing()),
+            Err(error) if error.kind() == &ErrorKind::NotFound => Ok(missing()),
+            // A path through a plain file cannot be read as an archive, which is `UnsupportedType`, as an archive start that cannot be opened is too,
+            // so only a plain file among the ancestors makes the start missing.
+            Err(error) if error.kind() == &ErrorKind::UnsupportedType && self.passes_through_plain_file(library, start).await => Ok(missing()),
+            Err(error) => Err(error),
         }
     }
 }
@@ -317,5 +370,153 @@ impl From<&LibraryConfig> for models::Library {
     /// host の path は API に出さず、id、名前、readonly だけを写す。
     fn from(library: &LibraryConfig) -> Self {
         models::Library::new(library.id.clone(), library.name.clone(), library.readonly)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use testresult::TestResult;
+
+    use super::*;
+    use crate::{
+        service::{listing::tests::write_nested_archives, mutation::tests::state},
+        state::DaemonState,
+    };
+
+    /// A Library with the folders `a`, `a/b`, and `c`, a plain file, and `pack.7z`, which holds `dir` and the archive `nested.7z`.
+    async fn library() -> TestResult<(tempfile::TempDir, Arc<DaemonState>)> {
+        let (dir, state) = state().await?;
+        let root = &state.conf.libraries[0].path;
+        std::fs::create_dir_all(root.join("a/b"))?;
+        std::fs::create_dir(root.join("c"))?;
+        std::fs::write(root.join("file.txt"), b"plain")?;
+        write_nested_archives(root)?;
+        Ok((dir, state))
+    }
+
+    /// The starts that remain and the starts that are missing, by start value, for a Scope of `values`.
+    async fn resolved(state: &DaemonState, values: &[&str], recursive: bool, inside_archives: bool) -> TestResult<(Vec<String>, Vec<String>)> {
+        let values = values.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+        let resolved = state.library.resolve_scope(&Scope::parse(&values, recursive, inside_archives)?).await?;
+        Ok((
+            resolved.starts().iter().map(|start| start.start().value().to_string()).collect(),
+            resolved.missing().to_vec(),
+        ))
+    }
+
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn the_three_kinds_of_missing_start_are_named_and_the_others_resolve_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        let (starts, missing) = resolved(&state, &["unknown/a", "test/a", "test/gone", "test/file.txt", "test/pack.7z/gone", "test"], false, false).await?;
+        assert_eq!(starts, ["test/a", "test"]);
+        assert_eq!(missing, ["unknown/a", "test/gone", "test/file.txt", "test/pack.7z/gone"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_start_whose_path_passes_through_a_plain_file_is_missing_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        // The resolution fails with `UnsupportedType` there, and the folder listing APIs keep failing with it.
+        let options = crate::service::listing::ListOptions::from_query(&crate::service::listing::tests::query(None, None))?;
+        let error = state.library.list_folder_entries("test", "/file.txt/x", &options).await.unwrap_err();
+        assert_eq!(*error.kind(), ErrorKind::UnsupportedType);
+        let (starts, missing) = resolved(&state, &["test/a", "test/file.txt/x", "test/file.txt/x/y", "test/c"], true, false).await?;
+        assert_eq!(starts, ["test/a", "test/c"]);
+        assert_eq!(missing, ["test/file.txt/x", "test/file.txt/x/y"]);
+        // An archive that cannot be opened is not a plain file, so its start, and a start inside it, still fail the request.
+        std::fs::write(state.conf.libraries[0].path.join("broken.7z"), b"not an archive")?;
+        for value in ["test/broken.7z", "test/broken.7z/x"] {
+            let scope = Scope::parse(&strings(&[value]), true, false)?;
+            assert!(state.library.resolve_scope(&scope).await.is_err(), "{value}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_scope_with_every_start_missing_has_no_start_and_names_them_all_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        let (starts, missing) = resolved(&state, &["test/gone", "unknown", "test/file.txt"], true, true).await?;
+        assert!(starts.is_empty());
+        assert_eq!(missing, ["test/gone", "unknown", "test/file.txt"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_missing_start_covers_nothing_and_is_named_though_a_start_covers_its_path_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        let (starts, missing) = resolved(&state, &["test/a/b", "test/a/gone/deeper", "test/a"], true, false).await?;
+        assert_eq!(starts, ["test/a"]);
+        assert_eq!(missing, ["test/a/gone/deeper"], "a start under a covering start is still named when it is missing");
+        // The same missing start twice is named once.
+        let (_, missing) = resolved(&state, &["test/gone", "test/gone"], true, false).await?;
+        assert_eq!(missing, ["test/gone"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn starts_that_another_start_covers_are_dropped_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        // The covering start keeps its own position, and an identical start is kept at its first place.
+        let (starts, _) = resolved(&state, &["test/a/b", "test/c", "test/a", "test/a/b/", "test/c"], true, false).await?;
+        assert_eq!(starts, ["test/c", "test/a"]);
+        let (starts, _) = resolved(&state, &["test/c", "test/a", "test/c", "test/a"], true, false).await?;
+        assert_eq!(starts, ["test/c", "test/a"]);
+        // The root covers everything in the Library that is not behind an archive.
+        let (starts, _) = resolved(&state, &["test/a", "test", "test/c"], true, false).await?;
+        assert_eq!(starts, ["test"]);
+        // A start whose path is only written differently is the same start.
+        let (starts, _) = resolved(&state, &["test/a/b", "test/a/../a/./b"], true, false).await?;
+        assert_eq!(starts, ["test/a/b"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn without_recursion_only_the_same_start_is_dropped_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        let (starts, _) = resolved(&state, &["test", "test/a", "test", "test/a/b", "test/a"], false, false).await?;
+        assert_eq!(starts, ["test", "test/a", "test/a/b"]);
+        let (starts, _) = resolved(&state, &["test", "test/a", "test"], false, true).await?;
+        assert_eq!(starts, ["test", "test/a"], "the insides change nothing without recursion");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_archive_start_and_a_start_inside_one_are_covered_only_with_the_insides_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        let values = ["test", "test/pack.7z", "test/pack.7z/dir", "test/pack.7z/nested.7z", "test/a"];
+        // Without the insides the root lists the archive as one Entry, so the archive start adds what is inside it, and a start inside the archive is covered
+        // by the archive start unless a nested archive lies between them.
+        let (starts, missing) = resolved(&state, &values, true, false).await?;
+        assert_eq!(starts, ["test", "test/pack.7z", "test/pack.7z/nested.7z"]);
+        assert!(missing.is_empty());
+        // With them the root covers all of it.
+        let (starts, _) = resolved(&state, &values, true, true).await?;
+        assert_eq!(starts, ["test"]);
+        // Without the root, the archive start covers what is inside it, and the nested archive too only with the insides.
+        let (starts, _) = resolved(&state, &["test/pack.7z/nested.7z", "test/pack.7z/dir", "test/pack.7z"], true, true).await?;
+        assert_eq!(starts, ["test/pack.7z"]);
+        let (starts, _) = resolved(&state, &["test/pack.7z/nested.7z", "test/pack.7z/dir", "test/pack.7z"], true, false).await?;
+        assert_eq!(starts, ["test/pack.7z/nested.7z", "test/pack.7z"]);
+        // The same archive twice is one start, whatever the Scope reads.
+        for inside_archives in [false, true] {
+            let (starts, _) = resolved(&state, &["test/pack.7z", "test/pack.7z"], true, inside_archives).await?;
+            assert_eq!(starts, ["test/pack.7z"]);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_error_that_is_not_a_missing_start_fails_the_request_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        let values = strings(&["test", "test/a"]);
+        let scope = Scope::parse(&values, true, false)?;
+        assert!(state.library.resolve_scope(&scope).await.is_ok());
+        // A start that cannot be represented never reaches the resolution.
+        assert_eq!(*Scope::parse(&strings(&["test/../.."]), true, false).unwrap_err().kind(), ErrorKind::InvalidInput);
+        Ok(())
     }
 }

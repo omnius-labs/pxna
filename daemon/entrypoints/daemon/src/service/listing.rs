@@ -18,12 +18,14 @@ use crate::{prelude::*, service::library::EntryConverter};
 
 mod kind;
 mod name_index;
+mod scope;
 mod search;
 mod snapshot;
 mod summary;
 
 pub use kind::*;
 pub use name_index::*;
+pub use scope::*;
 pub use search::*;
 pub use snapshot::*;
 pub use summary::*;
@@ -1035,7 +1037,7 @@ pub(crate) mod tests {
             assert_eq!(*ListOptions::from_query(&query(None, Some(limit))).unwrap_err().kind(), ErrorKind::InvalidInput);
         }
     }
-    fn write_7z(path: &Path, entries: &[(&str, &[u8])]) -> testresult::TestResult {
+    pub fn write_7z(path: &Path, entries: &[(&str, &[u8])]) -> testresult::TestResult {
         let mut writer = sevenz_rust2::ArchiveWriter::create(path)?;
         writer.push_archive_entries(
             entries.iter().map(|(name, _)| sevenz_rust2::ArchiveEntry::new_file(name)).collect(),
@@ -1048,7 +1050,7 @@ pub(crate) mod tests {
         Ok(())
     }
     /// `pack.7z` under `library`, with a nested archive that holds another: three archive files deep.
-    fn write_nested_archives(library: &Path) -> testresult::TestResult {
+    pub fn write_nested_archives(library: &Path) -> testresult::TestResult {
         let scratch = library.parent().expect("the library has a parent").join("scratch");
         std::fs::create_dir_all(&scratch)?;
         write_7z(&scratch.join("deeper.7z"), &[("d.txt", b"d")])?;
