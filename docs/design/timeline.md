@@ -243,13 +243,14 @@ When the Scope does not read the insides of archives, only rows whose path is th
 The per-start sequences are merged in the order above, and an Entry reached from two starts is listed once, as in other listings ([Listing and Search Design §5.3](./listing.md#53-listing-several-starts)).
 
 When the Filter has a name, rating, or tag condition, the candidates are the matches that the name index answers for each start ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), and they are ordered by the timeline dates of their rows.
+That order is computed once from the rows of the matches and kept in the start's snapshot, as the other orders of a snapshot are ([Listing and Search Design §4.1](./listing.md#41-the-unit-that-is-built)), and pages and per-month counts are cut from it.
 A match without a row, which is not an image or video or has not been aggregated yet, is not listed.
 The matches are bounded per start by the recursion limit and are walked while the name index is not usable, so in this case the response names the starts cut off or walked, as other listings over a Scope do.
 
 The Entries of a page are returned as the same `FileSystemEntry` as listings, with the Library, the timeline date, and the timeline date source added.
 The Entry of a file that vanished externally is also returned until the next aggregation.
 
-The per-month counts take the same Scope and Filter and are returned as a sequence in newest-month-first order.
+The per-month counts take the same Scope and Filter and are returned by `listEntryMonths` as a sequence in newest-month-first order ([Listing and Search Design §8.1](./listing.md#serve-the-listing-at-entries-and-its-per-month-counts-at-entriesmonths)).
 When every start is the root of a Library, the Scope reads descendants, and the Filter has no name, rating, or tag condition, they are the sums of the counts held per Library, kind, and whether the Entry is inside an archive (§5), taking the kinds the Filter keeps and leaving out the insides of archives when the Scope does not read them.
 Otherwise they are counted on each request from the rows, or from the matches, that the same reading would return, so their cost grows with the Entries in the Scope (§9.2).
 
@@ -661,6 +662,33 @@ The index would hold one count per month, but a timeline of images only over a w
 **Rejected alternative 2**
 Holding per-month counts for every folder.
 Any Scope of folders could be summed, but the index would grow by every folder and every month in it, and each write would update every ancestor, so we rejected it.
+
+#### Order the Matches of a Condition Once per Snapshot
+
+**Decision**
+In timeline-date order, the matches of a start with a name, rating, or tag condition are ordered by the timeline dates of their rows once, when the order is first asked of the start's snapshot, and the order is kept in the snapshot (§7).
+Pages are cut from it by cursor, and the per-month counts are counted from it.
+
+**Reason**
+The matches are bounded by the recursion limit, and reading their rows costs as much as the matches, so doing it once per snapshot leaves each page with the cost of its own size, while doing it per request would repeat the whole cost for every page.
+It is the rule the other orders of a snapshot follow ([Listing and Search Design §4.1](./listing.md#41-the-unit-that-is-built)).
+A snapshot is rebuilt after `snapshot_max_age_secs`, so the dates that aggregation writes later appear then.
+
+**Rejected alternative**
+Reading the matches' rows on every request.
+The order would always follow the latest aggregation, but each page would cost the whole set of matches, up to `recursive_max_entries`, so we rejected it.
+
+#### Recount the Per-Month Counts from the Rows When Their Columns Change
+
+**Decision**
+When the per-month counts gain the kind and whether the Entry is inside an archive (§5), a migration of the index rebuilds them by counting the existing rows, and replaces the triggers that keep them, without aggregating again.
+
+**Reason**
+The counts always equal the rows counted by month (§5), so the rows already hold everything the new columns need.
+
+**Rejected alternative**
+Discarding the index and aggregating again.
+No migration would be written, but every image and video, those inside archives included, would be read again for dates the rows already hold, so we rejected it.
 
 ### 9.2 Deferred
 
