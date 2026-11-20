@@ -64,6 +64,72 @@ pub fn check_xss_map<T>(v: &std::collections::HashMap<String, T>) -> std::result
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct ListEntriesQueryParams {
+    /// Starts of the Scope, repeated as `start=photos/2025&start=videos`. Each is a Library id, `/`, and the path relative to the Library without its leading `/`; the path is the root when there is none. At most 64.
+    #[serde(rename = "start")]
+    #[validate(length(min = 1, max = 64))]
+    pub start: Vec<String>,
+    /// Whether to include descendants below the requested folder.
+    #[serde(rename = "recursive")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recursive: Option<bool>,
+    /// Whether the Scope reads the archives found under its starts like folders, down to the nesting limit. It changes nothing without `recursive`.
+    #[serde(rename = "insideArchives")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inside_archives: Option<bool>,
+    /// Whitespace-separated terms that must all occur in an entry name. Names and terms are normalized with NFKC and converted to lowercase.
+    #[serde(rename = "query")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    /// Return only images and videos with this rating of the current user. `none` selects the images and videos that have not been rated. Folders and other files never match. `totalCount` counts the entries after this filter.
+    /// Note: inline enums are not fully supported by openapi-generator
+    #[serde(rename = "rating")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<String>,
+    /// Return only images and videos that have all of these tags of the current user, repeated as `tag=a&tag=b`. Each word is trimmed like a tag being set; a word the user has never used selects nothing. `totalCount` counts the entries after this filter.
+    #[serde(rename = "tag")]
+    #[validate(length(max = 32))]
+    #[serde(default)]
+    pub tag: Vec<models::TagName>,
+    /// Return only Entries of these kinds, repeated as `kind=image&kind=video`. A symbolic link is `other`.
+    /// Note: inline enums are not fully supported by openapi-generator
+    #[serde(rename = "kind")]
+    #[validate(length(max = 5))]
+    #[serde(default)]
+    pub kind: Vec<String>,
+    /// Sort key for folder entries.
+    /// Note: inline enums are not fully supported by openapi-generator
+    #[serde(rename = "sort")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    /// Sort direction.
+    /// Note: inline enums are not fully supported by openapi-generator
+    #[serde(rename = "order")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<String>,
+    /// Place folders, and files whose `file.archive` hint is true, before the other entries. `sort` and `order` apply within each of the two groups.
+    #[serde(rename = "foldersFirst")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folders_first: Option<bool>,
+    /// Offset in the sorted and filtered listing.
+    #[serde(rename = "offset")]
+    #[validate(range(min = 0u64))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+    /// The Entry to find, in the form of a start: its Library id, `/`, and its path relative to the Library without the leading `/`. Not with `offset`.
+    #[serde(rename = "locate")]
+    #[validate(length(min = 1, max = 4096))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locate: Option<String>,
+    /// Maximum number of entries to return.
+    #[serde(rename = "limit")]
+    #[validate(range(min = 1u32, max = 1000u32))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct CopyFilesPathParams {
     /// Opaque identifier of a Library owned by the owner.
     #[validate(
@@ -2978,6 +3044,192 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<EntryList> {
             std::result::Result::Ok(value) => match <EntryList as std::str::FromStr>::from_str(value) {
                 std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
                 std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into EntryList - {err}"#)),
+            },
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct EntryListing {
+    #[serde(rename = "entries")]
+    #[validate(nested)]
+    pub entries: Vec<models::ScopedEntry>,
+
+    /// Number of Entries in the merged sequence after the Filter.
+    #[serde(rename = "totalCount")]
+    #[validate(range(min = 0u64))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_count: Option<u64>,
+
+    /// Offset of this page in the merged sequence.
+    #[serde(rename = "offset")]
+    #[validate(range(min = 0u64))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+
+    /// Opaque identifier of the merged listing. It changes when the listing of any start is rebuilt.
+    #[serde(rename = "snapshot")]
+    #[validate(custom(function = "check_xss_string"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<String>,
+
+    /// Starts, by the value given, whose recursive traversal reached the entry limit.
+    #[serde(rename = "cutOffStarts")]
+    #[validate(custom(function = "check_xss_vec_string"))]
+    pub cut_off_starts: Vec<String>,
+
+    /// Starts, by the value given, that the name index would answer from a local folder but that were walked because the index of their Library is not usable.
+    #[serde(rename = "walkedStarts")]
+    #[validate(custom(function = "check_xss_vec_string"))]
+    pub walked_starts: Vec<String>,
+
+    /// Starts, by the value given, that were skipped because their folder or Library does not exist or they name a file that is neither a folder nor an archive.
+    #[serde(rename = "missingStarts")]
+    #[validate(custom(function = "check_xss_vec_string"))]
+    pub missing_starts: Vec<String>,
+}
+
+impl EntryListing {
+    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
+    pub fn new(entries: Vec<models::ScopedEntry>, cut_off_starts: Vec<String>, walked_starts: Vec<String>, missing_starts: Vec<String>) -> EntryListing {
+        EntryListing {
+            entries,
+            total_count: None,
+            offset: None,
+            snapshot: None,
+            cut_off_starts,
+            walked_starts,
+            missing_starts,
+        }
+    }
+}
+
+/// Converts the EntryListing value to the Query Parameters representation (style=form, explode=false)
+/// specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde serializer
+impl std::fmt::Display for EntryListing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<Option<String>> = vec![
+            // Skipping entries in query parameter serialization
+            self.total_count.as_ref().map(|total_count| ["totalCount".to_string(), total_count.to_string()].join(",")),
+            self.offset.as_ref().map(|offset| ["offset".to_string(), offset.to_string()].join(",")),
+            self.snapshot.as_ref().map(|snapshot| ["snapshot".to_string(), snapshot.to_string()].join(",")),
+            Some("cutOffStarts".to_string()),
+            Some(self.cut_off_starts.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+            Some("walkedStarts".to_string()),
+            Some(self.walked_starts.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+            Some("missingStarts".to_string()),
+            Some(self.missing_starts.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+        ];
+
+        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
+    }
+}
+
+/// Converts Query Parameters representation (style=form, explode=false) to a EntryListing value
+/// as specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde deserializer
+impl std::str::FromStr for EntryListing {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        /// An intermediate representation of the struct to use for parsing.
+        #[derive(Default)]
+        #[allow(dead_code)]
+        struct IntermediateRep {
+            pub entries: Vec<Vec<models::ScopedEntry>>,
+            pub total_count: Vec<u64>,
+            pub offset: Vec<u64>,
+            pub snapshot: Vec<String>,
+            pub cut_off_starts: Vec<Vec<String>>,
+            pub walked_starts: Vec<Vec<String>>,
+            pub missing_starts: Vec<Vec<String>>,
+        }
+
+        let mut intermediate_rep = IntermediateRep::default();
+
+        // Parse into intermediate representation
+        let mut string_iter = s.split(',');
+        let mut key_result = string_iter.next();
+
+        while key_result.is_some() {
+            let val = match string_iter.next() {
+                Some(x) => x,
+                None => return std::result::Result::Err("Missing value while parsing EntryListing".to_string()),
+            };
+
+            if let Some(key) = key_result {
+                #[allow(clippy::match_single_binding)]
+                match key {
+                    "entries" => return std::result::Result::Err("Parsing a container in this style is not supported in EntryListing".to_string()),
+                    #[allow(clippy::redundant_clone)]
+                    "totalCount" => intermediate_rep.total_count.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "offset" => intermediate_rep.offset.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "snapshot" => intermediate_rep.snapshot.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    "cutOffStarts" => return std::result::Result::Err("Parsing a container in this style is not supported in EntryListing".to_string()),
+                    "walkedStarts" => return std::result::Result::Err("Parsing a container in this style is not supported in EntryListing".to_string()),
+                    "missingStarts" => return std::result::Result::Err("Parsing a container in this style is not supported in EntryListing".to_string()),
+                    _ => return std::result::Result::Err("Unexpected key while parsing EntryListing".to_string()),
+                }
+            }
+
+            // Get the next key
+            key_result = string_iter.next();
+        }
+
+        // Use the intermediate representation to return the struct
+        std::result::Result::Ok(EntryListing {
+            entries: intermediate_rep.entries.into_iter().next().ok_or_else(|| "entries missing in EntryListing".to_string())?,
+            total_count: intermediate_rep.total_count.into_iter().next(),
+            offset: intermediate_rep.offset.into_iter().next(),
+            snapshot: intermediate_rep.snapshot.into_iter().next(),
+            cut_off_starts: intermediate_rep
+                .cut_off_starts
+                .into_iter()
+                .next()
+                .ok_or_else(|| "cutOffStarts missing in EntryListing".to_string())?,
+            walked_starts: intermediate_rep
+                .walked_starts
+                .into_iter()
+                .next()
+                .ok_or_else(|| "walkedStarts missing in EntryListing".to_string())?,
+            missing_starts: intermediate_rep
+                .missing_starts
+                .into_iter()
+                .next()
+                .ok_or_else(|| "missingStarts missing in EntryListing".to_string())?,
+        })
+    }
+}
+
+// Methods for converting between header::IntoHeaderValue<EntryListing> and HeaderValue
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<header::IntoHeaderValue<EntryListing>> for HeaderValue {
+    type Error = String;
+
+    fn try_from(hdr_value: header::IntoHeaderValue<EntryListing>) -> std::result::Result<Self, Self::Error> {
+        let hdr_value = hdr_value.to_string();
+        match HeaderValue::from_str(&hdr_value) {
+            std::result::Result::Ok(value) => std::result::Result::Ok(value),
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for EntryListing - value: {hdr_value} is invalid {e}"#)),
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<EntryListing> {
+    type Error = String;
+
+    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
+        match hdr_value.to_str() {
+            std::result::Result::Ok(value) => match <EntryListing as std::str::FromStr>::from_str(value) {
+                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
+                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into EntryListing - {err}"#)),
             },
             std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
         }
@@ -7804,6 +8056,135 @@ impl std::ops::Deref for RelativePath {
 impl std::ops::DerefMut for RelativePath {
     fn deref_mut(&mut self) -> &mut String {
         &mut self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct ScopedEntry {
+    /// Library identifier chosen by the operator in the daemon configuration file. Unlike the daemon-issued identifiers in this API it is a readable name, not a generated token. It is what the API uses in place of a host path, so the physical location of a Library is never exposed.  Because the value is used as a URL path segment, the character set is restricted. The daemon rejects a configuration that violates it at startup.
+    #[serde(rename = "libraryId")]
+    #[validate(
+            length(min = 1, max = 64),
+            regex(path = *RE_SCOPEDENTRY_LIBRARY_ID),
+          custom(function = "check_xss_string"),
+    )]
+    pub library_id: String,
+
+    #[serde(rename = "entry")]
+    #[validate(nested)]
+    pub entry: models::FileSystemEntry,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_SCOPEDENTRY_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+impl ScopedEntry {
+    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
+    pub fn new(library_id: String, entry: models::FileSystemEntry) -> ScopedEntry {
+        ScopedEntry { library_id, entry }
+    }
+}
+
+/// Converts the ScopedEntry value to the Query Parameters representation (style=form, explode=false)
+/// specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde serializer
+impl std::fmt::Display for ScopedEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<Option<String>> = vec![
+            Some("libraryId".to_string()),
+            Some(self.library_id.to_string()),
+            // Skipping entry in query parameter serialization
+        ];
+
+        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
+    }
+}
+
+/// Converts Query Parameters representation (style=form, explode=false) to a ScopedEntry value
+/// as specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde deserializer
+impl std::str::FromStr for ScopedEntry {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        /// An intermediate representation of the struct to use for parsing.
+        #[derive(Default)]
+        #[allow(dead_code)]
+        struct IntermediateRep {
+            pub library_id: Vec<String>,
+            pub entry: Vec<models::FileSystemEntry>,
+        }
+
+        let mut intermediate_rep = IntermediateRep::default();
+
+        // Parse into intermediate representation
+        let mut string_iter = s.split(',');
+        let mut key_result = string_iter.next();
+
+        while key_result.is_some() {
+            let val = match string_iter.next() {
+                Some(x) => x,
+                None => return std::result::Result::Err("Missing value while parsing ScopedEntry".to_string()),
+            };
+
+            if let Some(key) = key_result {
+                #[allow(clippy::match_single_binding)]
+                match key {
+                    #[allow(clippy::redundant_clone)]
+                    "libraryId" => intermediate_rep.library_id.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "entry" => intermediate_rep
+                        .entry
+                        .push(<models::FileSystemEntry as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    _ => return std::result::Result::Err("Unexpected key while parsing ScopedEntry".to_string()),
+                }
+            }
+
+            // Get the next key
+            key_result = string_iter.next();
+        }
+
+        // Use the intermediate representation to return the struct
+        std::result::Result::Ok(ScopedEntry {
+            library_id: intermediate_rep
+                .library_id
+                .into_iter()
+                .next()
+                .ok_or_else(|| "libraryId missing in ScopedEntry".to_string())?,
+            entry: intermediate_rep.entry.into_iter().next().ok_or_else(|| "entry missing in ScopedEntry".to_string())?,
+        })
+    }
+}
+
+// Methods for converting between header::IntoHeaderValue<ScopedEntry> and HeaderValue
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<header::IntoHeaderValue<ScopedEntry>> for HeaderValue {
+    type Error = String;
+
+    fn try_from(hdr_value: header::IntoHeaderValue<ScopedEntry>) -> std::result::Result<Self, Self::Error> {
+        let hdr_value = hdr_value.to_string();
+        match HeaderValue::from_str(&hdr_value) {
+            std::result::Result::Ok(value) => std::result::Result::Ok(value),
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for ScopedEntry - value: {hdr_value} is invalid {e}"#)),
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<ScopedEntry> {
+    type Error = String;
+
+    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
+        match hdr_value.to_str() {
+            std::result::Result::Ok(value) => match <ScopedEntry as std::str::FromStr>::from_str(value) {
+                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
+                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into ScopedEntry - {err}"#)),
+            },
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
     }
 }
 

@@ -1,5 +1,3 @@
-#![expect(dead_code, reason = "listEntries lists a Scope from step 5 of list-entries")]
-
 use std::path::Path;
 
 use omnius_pxna_engine::service::{NestedFsEntry, ResolvedStoragePath};

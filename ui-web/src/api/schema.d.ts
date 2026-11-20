@@ -382,6 +382,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the Entries of a Scope
+         * @description Lists the Entries of a Scope, the starts given as `start` with
+         *     `recursive` and `insideArchives`, through a Filter of `query`,
+         *     `rating`, `tag`, and `kind`, as one sequence ordered by `sort`,
+         *     `order`, and `foldersFirst`. Each Entry comes with its Library
+         *     id. Entries that compare equal, which only happens for the same
+         *     path in different Libraries, follow the order of the starts.
+         *
+         *     A `start` is the Library id, then `/` and the path relative to
+         *     the Library without its leading `/` (`photos/2025`, or `photos`
+         *     for the root). A start that another start covers adds nothing,
+         *     the same start given twice included. A start inside an archive
+         *     is covered by a recursive start above it only with
+         *     `insideArchives`.
+         *
+         *     A start whose folder was deleted, whose Library is not
+         *     configured, or that names a file that is neither a folder nor an
+         *     archive is skipped and named in `missingStarts`; the other
+         *     starts are listed. A start that is an archive, or inside one, is
+         *     walked inside that archive, and reads the archives nested in it
+         *     only with `insideArchives`.
+         *
+         *     A recursive listing without `kind` returns no folder, and, with
+         *     `insideArchives`, none of the archives it reads like folders. A
+         *     start that is walked because the name index of its Library is not
+         *     usable returns its archives like other files and is named in
+         *     `walkedStarts`. With `kind` it returns exactly the named kinds,
+         *     symbolic links counted as `other`. A listing of direct children
+         *     without `kind` returns every kind. Hidden entries are never
+         *     returned.
+         *
+         *     `rating` and `tag` keep only the images and videos that the
+         *     current user has rated or tagged that way. While one of them is
+         *     set, `snapshot` also changes whenever the user rates or tags
+         *     anything.
+         *
+         *     Recursive traversal is cut off per start at the configured entry
+         *     limit, and the starts cut off are listed in `cutOffStarts`.
+         *
+         *     `locate` names an Entry in the form of a start, in place of
+         *     `offset`. The server returns the page that holds it, with the
+         *     `offset` it was cut at. `locate` together with `offset` is 400,
+         *     and an Entry that is not in the sequence is 404.
+         */
+        get: operations["listEntries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capabilities": {
         parameters: {
             query?: never;
@@ -1426,6 +1487,42 @@ export interface components {
              *     in an archive).
              */
             indexed: boolean;
+        };
+        ScopedEntry: {
+            libraryId: components["schemas"]["LibraryId"];
+            entry: components["schemas"]["FileSystemEntry"];
+        };
+        EntryListing: {
+            entries: components["schemas"]["ScopedEntry"][];
+            /**
+             * Format: int64
+             * @description Number of Entries in the merged sequence after the Filter.
+             */
+            totalCount?: number;
+            /**
+             * Format: int64
+             * @description Offset of this page in the merged sequence.
+             */
+            offset?: number;
+            /**
+             * @description Opaque identifier of the merged listing. It changes when
+             *     the listing of any start is rebuilt.
+             */
+            snapshot?: string;
+            /** @description Starts, by the value given, whose recursive traversal reached the entry limit. */
+            cutOffStarts: string[];
+            /**
+             * @description Starts, by the value given, that the name index would
+             *     answer from a local folder but that were walked because
+             *     the index of their Library is not usable.
+             */
+            walkedStarts: string[];
+            /**
+             * @description Starts, by the value given, that were skipped because
+             *     their folder or Library does not exist or they name a
+             *     file that is neither a folder nor an archive.
+             */
+            missingStarts: string[];
         };
         Capabilities: {
             summaryListing: boolean;
@@ -2664,6 +2761,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchListing"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listEntries: {
+        parameters: {
+            query: {
+                /**
+                 * @description Starts of the Scope, repeated as `start=photos/2025&start=videos`.
+                 *     Each is a Library id, `/`, and the path relative to the
+                 *     Library without its leading `/`; the path is the root when
+                 *     there is none. At most 64.
+                 */
+                start: string[];
+                /** @description Whether to include descendants below the requested folder. */
+                recursive?: components["parameters"]["RecursiveQuery"];
+                /**
+                 * @description Whether the Scope reads the archives found under its starts
+                 *     like folders, down to the nesting limit. It changes nothing
+                 *     without `recursive`.
+                 */
+                insideArchives?: boolean;
+                /**
+                 * @description Whitespace-separated terms that must all occur in an entry name.
+                 *     Names and terms are normalized with NFKC and converted to lowercase.
+                 */
+                query?: components["parameters"]["NameFilterQuery"];
+                /**
+                 * @description Return only images and videos with this rating of the current
+                 *     user. `none` selects the images and videos that have not been
+                 *     rated. Folders and other files never match. `totalCount` counts
+                 *     the entries after this filter.
+                 */
+                rating?: components["parameters"]["RatingFilterQuery"];
+                /**
+                 * @description Return only images and videos that have all of these tags of the
+                 *     current user, repeated as `tag=a&tag=b`. Each word is trimmed
+                 *     like a tag being set; a word the user has never used selects
+                 *     nothing. `totalCount` counts the entries after this filter.
+                 */
+                tag?: components["parameters"]["TagFiltersQuery"];
+                /**
+                 * @description Return only Entries of these kinds, repeated as
+                 *     `kind=image&kind=video`. A symbolic link is `other`.
+                 */
+                kind?: ("folder" | "archive" | "image" | "video" | "other")[];
+                /** @description Sort key for folder entries. */
+                sort?: components["parameters"]["SortQuery"];
+                /** @description Sort direction. */
+                order?: components["parameters"]["OrderQuery"];
+                /**
+                 * @description Place folders, and files whose `file.archive` hint is true,
+                 *     before the other entries. `sort` and `order` apply within each
+                 *     of the two groups.
+                 */
+                foldersFirst?: components["parameters"]["FoldersFirstQuery"];
+                /** @description Offset in the sorted and filtered listing. */
+                offset?: components["parameters"]["ListOffsetQuery"];
+                /**
+                 * @description The Entry to find, in the form of a start: its Library id,
+                 *     `/`, and its path relative to the Library without the
+                 *     leading `/`. Not with `offset`.
+                 */
+                locate?: string;
+                /** @description Maximum number of entries to return. */
+                limit?: components["parameters"]["ListLimitQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Entries of the Scope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryListing"];
                 };
             };
             400: components["responses"]["InvalidRequest"];

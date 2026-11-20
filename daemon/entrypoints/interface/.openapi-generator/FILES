@@ -3,6 +3,7 @@
 Cargo.toml
 README.md
 src/apis/auth.rs
+src/apis/entries.rs
 src/apis/files.rs
 src/apis/folders.rs
 src/apis/health.rs

@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), expect(dead_code, reason = "the route of listEntries answers with it in step 6 of list-entries"))]
-
 use omnius_pxna_interface::models;
 
 use crate::service::listing::{ListOptions, ListingSource, MergedPage, MergedSources};

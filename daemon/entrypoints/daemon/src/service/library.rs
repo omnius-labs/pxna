@@ -111,13 +111,11 @@ impl LibraryBrowser {
 
     /// The page of `options` of the Entries of the starts of `scope`, merged in the order of the sort. `selections` holds, by Library id, the rating and tag selection
     /// that `options`' rating and tag conditions came to for the requesting user in that Library.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the route of listEntries calls it in step 6 of list-entries"))]
     pub async fn list_entries(&self, scope: &Scope, selections: &HashMap<String, MarkSelection>, options: &ListOptions) -> Result<ScopeListing> {
         Ok(self.scope_results(scope, selections, options).await?.page(options))
     }
 
     /// The page that holds the Entry at the Library-relative `path` of `library_id` in the sequence of `list_entries`, or `NotFound` when it is not in it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the route of listEntries calls it in step 6 of list-entries"))]
     pub async fn list_entries_located(
         &self,
         scope: &Scope,
@@ -395,13 +393,11 @@ impl LibraryBrowser {
     ///
     /// An unknown Library, a path that does not exist, and a path that names a file that is neither a folder nor an archive are missing starts, and
     /// any other error fails the request.
-    #[cfg_attr(not(test), expect(dead_code, reason = "listEntries resolves its Scope with it from step 5 of list-entries"))]
     pub async fn resolve_scope(&self, scope: &Scope) -> Result<ResolvedScope> {
         let resolutions = futures::future::try_join_all(scope.starts().iter().map(|start| self.resolve_start(start))).await?;
         Ok(ResolvedScope::new(resolutions, scope))
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "listEntries resolves its Scope with it from step 5 of list-entries"))]
     async fn resolve_start(&self, start: &ScopeStart) -> Result<StartResolution> {
         let missing = || StartResolution::Missing(start.value().to_string());
         let Ok(library) = self.library(start.library_id()) else {

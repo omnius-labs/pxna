@@ -1,6 +1,8 @@
 use omnius_pxna_engine::service::MediaKind;
 use omnius_pxna_interface::{models, types::Nullable};
 
+use crate::prelude::*;
+
 /// The kind of an Entry that a Filter chooses by, as the name index holds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EntryKind {
@@ -14,6 +16,18 @@ pub enum EntryKind {
 
 impl EntryKind {
     pub const ALL: [Self; 5] = [Self::Folder, Self::Archive, Self::Image, Self::Video, Self::Other];
+
+    /// The kind named by a `kind` value of the request.
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "folder" => Ok(Self::Folder),
+            "archive" => Ok(Self::Archive),
+            "image" => Ok(Self::Image),
+            "video" => Ok(Self::Video),
+            "other" => Ok(Self::Other),
+            _ => Err(Error::new(ErrorKind::InvalidInput).with_message(format!("kind must be folder, archive, image, video or other: {value}"))),
+        }
+    }
 
     /// A folder, an archive (a file whose `archive` is true), an image or a video (by name, for a file that is not an archive), or other.
     pub fn of(entry: &models::FileSystemEntry) -> Self {

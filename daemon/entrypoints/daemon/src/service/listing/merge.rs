@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), expect(dead_code, reason = "listEntries merges the listings of its starts from step 6 of list-entries"))]
-
 use std::sync::Arc;
 
 use omnius_pxna_interface::models;

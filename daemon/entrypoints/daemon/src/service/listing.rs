@@ -94,12 +94,32 @@ impl ListOptions {
         })
     }
 
+    /// The conditions of `listEntries`. Hidden Entries are never included, as in the search API, and the Filter's kinds and the Scope's reading of archives apply.
+    pub fn from_entries(query: &models::ListEntriesQueryParams) -> Result<Self> {
+        let tags = query.tag.iter().map(|tag| tag.0.as_str()).collect::<Vec<_>>();
+        let kinds = query.kind.iter().map(|kind| EntryKind::parse(kind)).collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            recursive: query.recursive.unwrap_or(false),
+            include_hidden: false,
+            folders_only: false,
+            sort: ListSort::parse(query.sort.as_deref(), query.order.as_deref(), query.folders_first.unwrap_or(false))?,
+            filter: NameFilter::new(query.query.as_deref().unwrap_or_default()),
+            marks: MarkFilter::parse(query.rating.as_deref(), &tags)?,
+            selection: MarkSelection::default(),
+            kinds: EntryKinds::default(),
+            inside_archives: false,
+            scoped: false,
+            offset: query.offset.unwrap_or(0),
+            limit: Self::parse_limit(query.limit)?,
+        }
+        .with_scope(EntryKinds::of(kinds), query.inside_archives.unwrap_or(false)))
+    }
+
     pub fn recursive(&self) -> bool {
         self.recursive
     }
 
     /// Turns the listing into a `listEntries` one: the Filter's kinds and whether the Scope reads the insides of archives apply from here on.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the route of listEntries builds its options with it (step 6 of list-entries)"))]
     pub fn with_scope(mut self, kinds: EntryKinds, inside_archives: bool) -> Self {
         self.kinds = kinds;
         self.inside_archives = inside_archives;
