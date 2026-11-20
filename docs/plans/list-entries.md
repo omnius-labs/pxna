@@ -95,7 +95,7 @@ The existing APIs, the configuration, and the stored formats do not change, and 
 | --- | --- | --- | --- |
 | [1](#s-1) | Give listings a kind and the choice of reading the insides of archives | - | Done |
 | [2](#s-2) | Let the name index answer with kinds and the insides of archives | 1 | Done |
-| [3](#s-3) | Walk the archives nested in an archive start | 1 | Not started |
+| [3](#s-3) | Walk the archives nested in an archive start | 1 | Done |
 | [4](#s-4) | Parse a Scope and resolve its starts | - | Not started |
 | [5](#s-5) | Merge the listings of the starts | 2, 3, 4 | Not started |
 | [6](#s-6) | Serve `listEntries` | 5 | Not started |

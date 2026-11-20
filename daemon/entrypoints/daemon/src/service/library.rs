@@ -16,7 +16,7 @@ use crate::{
     config::LibraryConfig,
     prelude::*,
     service::listing::{
-        ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, NameIndex, SearchResults, SearchSource, SnapshotKey, SnapshotVersion, SummaryData, SummaryKey,
+        ArchiveWalk, ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, NameIndex, SearchResults, SearchSource, SnapshotKey, SnapshotVersion, SummaryData, SummaryKey,
         SummaryOptions, SummarySnapshot,
     },
 };
@@ -235,6 +235,16 @@ impl LibraryBrowser {
         let recursive = options.recursive();
         let include_hidden = options.include_hidden();
         let max_entries = self.snapshots.recursive_max_entries();
+        // The walk of an archive start reads the archives nested in it like folders when the Scope reads their insides. A walk under a local folder reads none,
+        // since the insides of the archives there come from the name index.
+        let archives = if options.recursive() && options.inside_archives() && folder.archive_identity().is_some() {
+            ArchiveWalk::Descend {
+                storage: self.storage.clone(),
+                max_nested_depth: self.storage.archive_options().max_nested_depth,
+            }
+        } else {
+            ArchiveWalk::Skip
+        };
         // A recursive listing with conditions from a local folder is answered from the name index while it is usable, and walks otherwise.
         let mut from_index = None;
         if folder.archive_identity().is_none()
@@ -256,7 +266,7 @@ impl LibraryBrowser {
                 {
                     return Ok(entries);
                 }
-                ListingEntries::scan(&folder, &root, recursive, include_hidden, max_entries).await
+                ListingEntries::scan(&folder, &root, recursive, include_hidden, max_entries, &archives).await
             })
             .await
     }

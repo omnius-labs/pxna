@@ -5,12 +5,12 @@ use futures::StreamExt as _;
 use tracing::{Instrument as _, Span, field::Empty};
 use unicode_normalization::UnicodeNormalization as _;
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use omnius_pxna_engine::{
     model::{FsEntryDetail, NaturalOrder, Rating},
     perf_span,
-    service::{MediaKind, RatingTagService, ResolvedStoragePath},
+    service::{MediaKind, RatingTagService, ResolvedStoragePath, StorageService},
 };
 use omnius_pxna_interface::{models, types::Nullable};
 
@@ -452,8 +452,47 @@ pub struct ListingEntries {
     read_archives: bool,
 }
 
+/// Whether a recursive walk reads the archives it meets like folders, which only the walk of an archive start does, for a Scope that reads their insides.
+pub enum ArchiveWalk {
+    /// An archive is one Entry and nothing inside it is listed.
+    Skip,
+    /// An archive is walked like a folder through its root, while the number of archive files on the path of its Entries is under `max_nested_depth`.
+    Descend { storage: Arc<StorageService>, max_nested_depth: usize },
+}
+
+impl ArchiveWalk {
+    /// The root of the archive `entry`, if the walk reads it. An archive that cannot be opened has no root here, and the walk goes on without it.
+    async fn root_of(&self, entry: &omnius_pxna_engine::service::NestedFsEntry) -> Option<ResolvedStoragePath> {
+        let Self::Descend { storage, max_nested_depth } = self else {
+            return None;
+        };
+        if !matches!(entry.detail, FsEntryDetail::File { archive: true }) || entry.path.rank() >= *max_nested_depth {
+            return None;
+        }
+        let mut path = entry.path.to_nested_path_buf();
+        path.push_archive_root().ok()?;
+        match storage.resolve_entry(&path, WorkClass::Foreground).await {
+            Ok(root) => Some(root),
+            Err(error) => {
+                debug!(path = %entry.path, ?error, "listing walk: skipped an archive that cannot be opened");
+                None
+            }
+        }
+    }
+
+    fn reads_archives(&self) -> bool {
+        matches!(self, Self::Descend { .. })
+    }
+}
+
+/// A folder the walk still has to read, and whether it is the root of an archive that the walk found, so that one that cannot be read is skipped and not an error.
+struct WalkFolder {
+    folder: ResolvedStoragePath,
+    found_archive: bool,
+}
+
 impl ListingEntries {
-    pub async fn scan(folder: &ResolvedStoragePath, library_root: &Path, recursive: bool, include_hidden: bool, max_entries: usize) -> Result<Self> {
+    pub async fn scan(folder: &ResolvedStoragePath, library_root: &Path, recursive: bool, include_hidden: bool, max_entries: usize, archives: &ArchiveWalk) -> Result<Self> {
         let span = perf_span!(
             "listing_scan",
             recursive,
@@ -463,18 +502,38 @@ impl ListingEntries {
             conversion_sec = Empty,
             truncated = Empty
         );
-        Self::scan_traced(folder, library_root, recursive, include_hidden, max_entries).instrument(span).await
+        Self::scan_traced(folder, library_root, recursive, include_hidden, max_entries, archives)
+            .instrument(span)
+            .await
     }
 
-    async fn scan_traced(folder: &ResolvedStoragePath, library_root: &Path, recursive: bool, include_hidden: bool, max_entries: usize) -> Result<Self> {
+    async fn scan_traced(folder: &ResolvedStoragePath, library_root: &Path, recursive: bool, include_hidden: bool, max_entries: usize, archives: &ArchiveWalk) -> Result<Self> {
         let mut conversion_sec = 0.0;
         let converter = EntryConverter::new(library_root);
         let mut entries = Vec::new();
-        let mut folders = vec![folder.clone()];
-        while let Some(folder) = folders.pop() {
-            let mut stream = folder.find_entries(false, WorkClass::Foreground).await?;
+        let mut folders = vec![WalkFolder {
+            folder: folder.clone(),
+            found_archive: false,
+        }];
+        let read_archives = recursive && archives.reads_archives();
+        while let Some(WalkFolder { folder, found_archive }) = folders.pop() {
+            let mut stream = match folder.find_entries(false, WorkClass::Foreground).await {
+                Ok(stream) => stream,
+                Err(error) if found_archive => {
+                    debug!(path = %folder.path(), ?error, "listing walk: skipped an archive that cannot be read");
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
             while let Some(nested) = stream.next().await {
-                let nested = nested?;
+                let nested = match nested {
+                    Ok(nested) => nested,
+                    Err(error) if found_archive => {
+                        debug!(path = %folder.path(), ?error, "listing walk: stopped reading an archive that failed");
+                        break;
+                    }
+                    Err(error) => return Err(error.into()),
+                };
                 let conversion_started = Instant::now();
                 let entry = converter.convert(&nested)?;
                 if !include_hidden && entry.name.starts_with('.') {
@@ -482,7 +541,15 @@ impl ListingEntries {
                     continue;
                 }
                 if recursive && matches!(nested.detail, FsEntryDetail::Dir { .. }) {
-                    folders.push(folder.at(nested.path.iter().last().unwrap_or_default())?);
+                    folders.push(WalkFolder {
+                        folder: folder.at(nested.path.iter().last().unwrap_or_default())?,
+                        found_archive,
+                    });
+                } else if read_archives && let Some(root) = archives.root_of(&nested).await {
+                    folders.push(WalkFolder {
+                        folder: root,
+                        found_archive: true,
+                    });
                 }
                 entries.push(ListedEntry::new(entry));
                 conversion_sec += conversion_started.elapsed().as_secs_f64();
@@ -495,7 +562,7 @@ impl ListingEntries {
                         entries,
                         truncated: true,
                         indexed: false,
-                        read_archives: false,
+                        read_archives,
                     });
                 }
             }
@@ -508,7 +575,7 @@ impl ListingEntries {
             entries,
             truncated: false,
             indexed: false,
-            read_archives: false,
+            read_archives,
         })
     }
 
@@ -968,6 +1035,139 @@ pub(crate) mod tests {
             assert_eq!(*ListOptions::from_query(&query(None, Some(limit))).unwrap_err().kind(), ErrorKind::InvalidInput);
         }
     }
+    fn write_7z(path: &Path, entries: &[(&str, &[u8])]) -> testresult::TestResult {
+        let mut writer = sevenz_rust2::ArchiveWriter::create(path)?;
+        writer.push_archive_entries(
+            entries.iter().map(|(name, _)| sevenz_rust2::ArchiveEntry::new_file(name)).collect(),
+            entries
+                .iter()
+                .map(|(_, bytes)| sevenz_rust2::SourceReader::new(std::io::Cursor::new(bytes.to_vec())))
+                .collect(),
+        )?;
+        writer.finish()?;
+        Ok(())
+    }
+    /// `pack.7z` under `library`, with a nested archive that holds another: three archive files deep.
+    fn write_nested_archives(library: &Path) -> testresult::TestResult {
+        let scratch = library.parent().expect("the library has a parent").join("scratch");
+        std::fs::create_dir_all(&scratch)?;
+        write_7z(&scratch.join("deeper.7z"), &[("d.txt", b"d")])?;
+        write_7z(&scratch.join("nested.7z"), &[("c.png", b"c"), ("deeper.7z", &std::fs::read(scratch.join("deeper.7z"))?)])?;
+        write_7z(
+            &library.join("pack.7z"),
+            &[("a.txt", b"a"), ("dir/b.png", b"b"), ("nested.7z", &std::fs::read(scratch.join("nested.7z"))?)],
+        )?;
+        Ok(())
+    }
+    /// Walks the archive `pack.7z` of `root/library` as an archive start is walked, and returns every path it lists and whether it read archives like folders.
+    async fn walk_archive_start(root: &Path, max_nested_depth: usize, descend: bool) -> Result<(Vec<String>, bool)> {
+        let rng = ChaCha20Rng::seed_from_u64(1);
+        let provider = Arc::new(Mutex::new(TsidProviderImpl::new(ClockUtc, rng, 16)));
+        let options = ArchiveOptions {
+            max_nested_depth,
+            ..ArchiveOptions::default()
+        };
+        let runtime = Arc::new(ArchiveRuntime::open(options, &root.join("cache")).await?);
+        let storage = Arc::new(StorageService::new(Arc::new(LocalStorageDriver::new(provider)), runtime));
+        let library_root = root.join("library");
+        let mut nested =
+            omnius_pxna_engine::model::NestedPathBuf::try_from(library_root.join("pack.7z").as_path()).map_err(|error| Error::from_error(error, ErrorKind::InvalidInput))?;
+        nested.push_archive_root().map_err(|error| Error::from_error(error, ErrorKind::InvalidInput))?;
+        let folder = storage.resolve_entry(&nested, WorkClass::Foreground).await?;
+        let walk = if descend {
+            ArchiveWalk::Descend { storage, max_nested_depth }
+        } else {
+            ArchiveWalk::Skip
+        };
+        let scanned = ListingEntries::scan(&folder, &library_root, true, false, 1000, &walk).await?;
+        let mut paths = scanned.entries.iter().map(|listed| listed.entry.path.clone()).collect::<Vec<_>>();
+        paths.sort();
+        Ok((paths, scanned.read_archives))
+    }
+    #[tokio::test]
+    async fn a_walk_of_an_archive_start_lists_a_nested_archive_as_one_entry_without_the_insides_test() -> testresult::TestResult {
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir(dir.path().join("library"))?;
+        write_nested_archives(&dir.path().join("library"))?;
+        let (paths, read_archives) = walk_archive_start(dir.path(), 4, false).await?;
+        assert_eq!(paths, ["/pack.7z/a.txt", "/pack.7z/dir", "/pack.7z/dir/b.png", "/pack.7z/nested.7z"]);
+        assert!(!read_archives);
+        Ok(())
+    }
+    #[tokio::test]
+    async fn a_walk_of_an_archive_start_reads_nested_archives_with_the_insides_test() -> testresult::TestResult {
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir(dir.path().join("library"))?;
+        write_nested_archives(&dir.path().join("library"))?;
+        let (paths, read_archives) = walk_archive_start(dir.path(), 4, true).await?;
+        assert_eq!(
+            paths,
+            [
+                "/pack.7z/a.txt",
+                "/pack.7z/dir",
+                "/pack.7z/dir/b.png",
+                "/pack.7z/nested.7z",
+                "/pack.7z/nested.7z/c.png",
+                "/pack.7z/nested.7z/deeper.7z",
+                "/pack.7z/nested.7z/deeper.7z/d.txt"
+            ]
+        );
+        assert!(read_archives, "archives are read like folders, so they are not returned as Entries of their own");
+        Ok(())
+    }
+    #[tokio::test]
+    async fn a_walk_that_reads_nested_archives_stops_at_the_depth_limit_test() -> testresult::TestResult {
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir(dir.path().join("library"))?;
+        write_nested_archives(&dir.path().join("library"))?;
+        // `pack.7z` is the first archive file and `nested.7z` the second, so `deeper.7z` would be the third.
+        let (paths, _) = walk_archive_start(dir.path(), 2, true).await?;
+        assert!(paths.contains(&"/pack.7z/nested.7z/c.png".to_string()));
+        assert!(paths.contains(&"/pack.7z/nested.7z/deeper.7z".to_string()), "the archive at the limit is an Entry");
+        assert!(!paths.contains(&"/pack.7z/nested.7z/deeper.7z/d.txt".to_string()), "and is not read: {paths:?}");
+        let (paths, _) = walk_archive_start(dir.path(), 1, true).await?;
+        assert!(paths.contains(&"/pack.7z/nested.7z".to_string()));
+        assert!(!paths.contains(&"/pack.7z/nested.7z/c.png".to_string()), "{paths:?}");
+        Ok(())
+    }
+    async fn listed_paths(state: &crate::state::DaemonState, path: &str, inside_archives: bool) -> Result<Vec<String>> {
+        let mut q = recursive_query();
+        q.path = path.to_string();
+        let options = scoped(&q, &[], inside_archives);
+        let mut paths = state
+            .library
+            .list_folder_entries("test", path, &options)
+            .await?
+            .entries
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>();
+        paths.sort();
+        Ok(paths)
+    }
+    #[tokio::test]
+    async fn a_walk_under_a_local_folder_reads_no_archive_and_an_archive_start_reads_its_insides_test() -> testresult::TestResult {
+        let (_dir, state) = crate::service::mutation::tests::state().await?;
+        let library = &state.conf.libraries[0].path;
+        write_nested_archives(library)?;
+        std::fs::write(library.join("top.txt"), b"t")?;
+
+        // The index is not usable, so a walk answers, and it reads no archive whatever the Scope reads. An archive is a file to it.
+        for inside_archives in [false, true] {
+            assert_eq!(listed_paths(&state, "/", inside_archives).await?, ["/pack.7z", "/top.txt"], "insides {inside_archives}");
+        }
+        // An archive start is always walked inside, and reads the archives nested in it only with the insides.
+        assert_eq!(
+            listed_paths(&state, "/pack.7z", false).await?,
+            ["/pack.7z/a.txt", "/pack.7z/dir/b.png", "/pack.7z/nested.7z"]
+        );
+        assert_eq!(
+            listed_paths(&state, "/pack.7z", true).await?,
+            ["/pack.7z/a.txt", "/pack.7z/dir/b.png", "/pack.7z/nested.7z/c.png", "/pack.7z/nested.7z/deeper.7z/d.txt"],
+            "an archive read like a folder is not an Entry of its own"
+        );
+        Ok(())
+    }
     async fn scan_test(root: &Path, include_hidden: bool, limit: usize) -> Result<models::FolderListing> {
         let rng = ChaCha20Rng::seed_from_u64(1);
         let provider = Arc::new(Mutex::new(TsidProviderImpl::new(ClockUtc, rng, 16)));
@@ -976,7 +1176,7 @@ pub(crate) mod tests {
         let library_root = root.join("library");
         let nested = omnius_pxna_engine::model::NestedPathBuf::try_from(library_root.as_path()).map_err(|error| Error::from_error(error, ErrorKind::InvalidInput))?;
         let folder = storage.resolve_entry(&nested, WorkClass::Foreground).await?;
-        let scanned = ListingEntries::scan(&folder, &library_root, true, include_hidden, limit).await?;
+        let scanned = ListingEntries::scan(&folder, &library_root, true, include_hidden, limit, &ArchiveWalk::Skip).await?;
         let mut q = query(None, None);
         q.recursive = Some(true);
         q.include_hidden = Some(include_hidden);
