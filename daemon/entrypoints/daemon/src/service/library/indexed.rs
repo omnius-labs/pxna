@@ -317,7 +317,7 @@ mod tests {
         assert!(!no_condition.indexed);
 
         let in_archive = search(&state, Some("inside"), None, &[], true, "/pack.7z").await?;
-        assert!(!in_archive.indexed, "the index holds no archive contents");
+        assert!(!in_archive.indexed, "a start that is an archive is always walked");
         assert_eq!(paths(&in_archive), set(&["/pack.7z/inside.txt"]));
 
         let below = search(&state, Some("inner"), None, &[], true, "/sub").await?;
@@ -524,6 +524,56 @@ mod tests {
         assert_eq!(paths(&after), set(&["/a.png", "/c.png"]));
         let unrated = search(&state, None, Some("none"), &[], true, "/").await?;
         assert_eq!(paths(&unrated), set(&["/sub/d.png"]));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_recursive_listing_from_the_index_returns_nothing_inside_an_archive_test() -> TestResult {
+        let (_dir, state) = state().await?;
+        let root = root(&state);
+        write(&root, "report.txt", b"1")?;
+        write(&root, "pics/report.png", b"2")?;
+        write(&root, "pics/plain.png", b"3")?;
+        write_7z(
+            &root.join("pack.7z"),
+            &[("report.txt", b"x"), ("dir/report.png", b"y"), ("dir/plain.png", b"z"), ("dir/deeper/ab.txt", b"w")],
+        )?;
+        write_7z(&root.join("report.7z"), &[("note.txt", b"n")])?;
+        state.rating_tags.set_rating(USER, LIBRARY, "/pics/report.png", Some(Rating::Good)).await?;
+        state.rating_tags.set_rating(USER, LIBRARY, "/pack.7z/dir/report.png", Some(Rating::Good)).await?;
+        state.rating_tags.set_entry_tags(USER, LIBRARY, "/pack.7z/dir/plain.png", &["trip".to_string()]).await?;
+        state.rating_tags.set_entry_tags(USER, LIBRARY, "/pics/plain.png", &["trip".to_string()]).await?;
+
+        // A walk does not descend into archives, so what it returns is what the index must return.
+        let cases: [(Option<&str>, Option<&str>, &[&str]); 7] = [
+            (Some("report"), None, &[]),
+            (Some("ab"), None, &[]),
+            (Some("a"), None, &[]),
+            (Some("png"), Some("none"), &[]),
+            (None, Some("good"), &[]),
+            (None, None, &["trip"]),
+            (Some("plain"), Some("none"), &["trip"]),
+        ];
+        let mut walked = Vec::new();
+        for (query, rating, tags) in cases {
+            let listing = search(&state, query, rating, tags, true, "/").await?;
+            assert!(!listing.indexed);
+            walked.push(paths(&listing));
+        }
+        aggregate(&state).await?;
+        for ((query, rating, tags), expected) in cases.iter().zip(&walked) {
+            let listing = search(&state, *query, *rating, tags, true, "/").await?;
+            assert!(listing.indexed, "{query:?} {rating:?} {tags:?}");
+            assert!(
+                !paths(&listing).iter().any(|path| path.starts_with("/pack.7z/") || path.starts_with("/report.7z/")),
+                "{query:?}: {:?}",
+                paths(&listing)
+            );
+            assert_eq!(&paths(&listing), expected, "{query:?} {rating:?} {tags:?}");
+        }
+        // The archive itself is found like any other file.
+        let found = find(&state, "report").await?;
+        assert_eq!(paths(&found), set(&["/report.txt", "/pics/report.png", "/report.7z"]));
         Ok(())
     }
 

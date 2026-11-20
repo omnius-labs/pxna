@@ -224,11 +224,17 @@ Each folder's path is held once and its Entries refer to the folder, so the inde
 Hidden Entries whose names start with `.`, and the Entries inside them, are not held, by the same rule as aggregation ([Timeline Design §3](./timeline.md#3-what-is-listed)).
 An archive is held as an Entry, and the folders and Entries inside it are held under it with their paths joined to the archive's path ([design.md §11.1](../design.md#represent-paths-inside-archives-by-joining-paths)).
 An archive that cannot be opened because it is password-protected, of unknown format, or exceeds limits is held as an Entry without contents, as aggregation records it ([Timeline Design §6.2](./timeline.md#62-archive-extraction)).
+An archive keeps its kind as an Entry and also has a folder row at its own path, under which its folders and Entries are held, as a folder's are.
+Each folder row records whether it is an archive or a folder inside one, so a listing that does not read the insides of archives leaves out the Entries under such folders.
+The index records the `ArchiveIdentity` of each archive file of the Library whose entries it holds, apart from the timeline index, so that it can tell for itself which archives it still has to enumerate; a nested archive has no record of its own, because the identity of the archive file that holds it covers it ([Storage Layer Design §7.3](./storage.md#73-cache-identity)).
+A record is removed with the archive's rows, whether a sweep, a delete, a change of kind, or a move to a hidden name removes them, and moves with the rows on a rename or a move.
 It is derived state in SQLite under the listing state directory, separate from the authentication DB.
 
 The index is updated at the same points as the timeline index.
 Each time aggregation enumerates a folder, the rows of that folder's direct children are replaced with the enumerated names ([Timeline Design §6.1](./timeline.md#61-scanning-and-skipping-rereads)).
 When aggregation rereads an archive because its `ArchiveIdentity` changed, all the rows under the archive are replaced with what it enumerates, as the timeline's rows of that archive are ([Timeline Design §9.1](./timeline.md#decide-archive-rereading-by-archiveidentity)).
+When the timeline index skips an archive but the name index has no record of it or a different `ArchiveIdentity`, as after the name index is rebuilt, aggregation enumerates the archive's entries for the name index alone, which reads the archive's listing and extracts only the nested archives down to `max_nested_depth`, never an image or a video.
+The rows and the record of an archive are written in one transaction of the name index after the timeline's rows of the archive are written, and not at all when the archive changed while it was read; an aggregation stopped between the two leaves the record missing, so the next aggregation enumerates the archive again.
 A full aggregation records its generation in the rows it saw, and when the scan finishes, removes the rows in the scanned range that do not have it.
 The rows under an archive that it skips because the `ArchiveIdentity` is unchanged count as seen, so they are kept.
 The daemon's own changes delete the rows of a path that no longer exists and everything under it, and reassign the rows under a renamed or moved path to the destination, before the response ([Timeline Design §6.4](./timeline.md#64-the-daemons-own-changes)).
@@ -811,14 +817,34 @@ The owner would know the result is partial, but the response would need a list t
 
 **Decision**
 When aggregation rereads an archive because its `ArchiveIdentity` changed, the name index replaces all the rows under the archive, and the daemon's own renames and moves reassign them without rereading (§5.1).
+The name index keeps its own record of the `ArchiveIdentity` of each archive it holds, and an archive it has no record of, or a different one, is enumerated for it even when the timeline index skips the archive.
 
 **Reason**
-It is the rule of the timeline index ([Timeline Design §9.1](./timeline.md#decide-archive-rereading-by-archiveidentity)), and the same walk writes both, so the two indexes agree on what an archive holds.
+It is the rule of the timeline index ([Timeline Design §9.1](./timeline.md#decide-archive-rereading-by-archiveidentity)), and both indexes decide by the same `ArchiveIdentity`, so they agree on what an archive holds.
 Replacing leaves no rows of Entries removed from the archive.
 
-**Rejected alternative**
+Each index is derived state that can be discarded and rebuilt alone (§5.1), so a name index rebuilt beside a timeline index that skips every unchanged archive would otherwise never hold their insides.
+Enumerating an archive reads its listing and extracts only its nested archives, so filling the name index costs far less than rereading the timeline dates, which extracts every image and video.
+
+**Rejected alternative 1**
 Updating only the rows that changed.
 Fewer rows would be written for a large archive that changed a little, but an archive changes as a whole file and is enumerated in full anyway, so we rejected it.
+
+**Rejected alternative 2**
+Relying on the timeline index's record alone, and raising the version of the extraction rules when the name index needs the insides again.
+No second record would be kept, but every archive would be extracted again to reread timeline dates that have not changed, so we rejected it.
+
+#### Mark the Folders of Archives in the Name Index
+
+**Decision**
+Each folder row of the name index records whether it is an archive or a folder inside one, and a listing that does not read the insides of archives leaves out the Entries under such folders (§5.1).
+
+**Reason**
+A Scope chooses whether a listing reads the insides of archives (§5), so every query of the index needs the choice, and a mark on the folder row answers it in the same query without reading anything else.
+
+**Rejected alternative**
+Telling the insides apart by the timeline index, where an Entry inside an archive has a path that differs from its local file.
+No column would be added, but the two indexes are separate files, and only images and videos have timeline rows, so we rejected it.
 
 #### Walk a Start That Is an Archive
 
@@ -940,7 +966,9 @@ The `[listing]` configuration, checking freshness by the target's version and el
 
 `locate` and the response's `offset` of §4.5 are implemented in [listing.rs](../../daemon/entrypoints/daemon/src/service/listing.rs) for the detail listing, in [summary.rs](../../daemon/entrypoints/daemon/src/service/listing/summary.rs) for the summary listing, and in [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) for the search. The page is cut at a multiple of `limit` after the conditions are applied. The routes answer `InvalidInput` for `locate` with `offset`, for `locate` and `locateLibraryId` not given together in a search, and for a `locateLibraryId` outside `libraryIds`, and `NotFound` for an Entry outside the sequence. The web client asks with `locate` when the viewer URL or "Show in folder" names an Entry it has not read (Client Design §3.5).
 
-The name index of §5.1 is implemented by `NameIndex` in [name_index.rs](../../daemon/entrypoints/daemon/src/service/listing/name_index.rs), one SQLite file `listing/names.db` under the listing state directory. It holds a row for every Entry outside archives by its folder's id and its own name, a row for each folder with its path, so a path is stored once per folder, and a contentless trigram table of the normalized names. `TimelineScanner` passes the direct children of every folder it enumerates with the scan's generation, sweeps what a scan did not see, and marks the Library usable after a full aggregation; `LibraryMutation` removes and moves rows before the response. A file that is corrupt, of another version, or marked broken by a failure while running is discarded at startup.
+The name index of §5.1 is implemented by `NameIndex` in [name_index.rs](../../daemon/entrypoints/daemon/src/service/listing/name_index.rs), one SQLite file `listing/names.db` under the listing state directory. It holds a row for every Entry, the Entries inside archives included, by its folder's id and its own name, a row for each folder and for each archive with its path, so a path is stored once per folder, and a contentless trigram table of the normalized names. A folder row has a column that is set when the folder is an archive or inside one, and a table records the `ArchiveIdentity` of each archive whose insides are held. `TimelineScanner` passes the direct children of every folder it enumerates with the scan's generation, sweeps what a scan did not see, and marks the Library usable after a full aggregation; `LibraryMutation` removes and moves rows before the response. A file that is corrupt, of another version, or marked broken by a failure while running is discarded at startup.
+While `read_archive` reads an archive for the timeline it collects the folders and Entries inside it that are not hidden, nested archives down to `max_nested_depth` included, and writes them with the archive's record in one transaction after the timeline's rows, so an archive that cannot be opened is an Entry without contents. When the timeline skips an archive, the scanner keeps the rows under it if the name index's record has the same `ArchiveIdentity`, and otherwise reads the archive for the name index alone. A sweep, a delete, a change of kind, and a move to a hidden name remove the rows and records of an archive, and a rename moves them and updates the record with the identity the timeline recomputes. A file of an earlier format is discarded at startup and rebuilt by the next full aggregation.
+The queries of the index leave out every Entry whose folder row is an archive or inside one, with the condition in `NameIndex::outside_archives`, which M28 turns off for a Scope that reads the insides of archives. The size of the index with archives is not measured ([§8.1](#count-the-entries-inside-archives-toward-the-name-indexs-targets)).
 Changes go through one writer task in the order they are made: the folders of a scan are queued without waiting and written together in one transaction, while a rename, a delete, the sweep at the end of a scan, and the mark of usability return after they are applied.
 `LibraryBrowser::snapshot` answers a recursive listing of §5.2 through [indexed.rs](../../daemon/entrypoints/daemon/src/service/library/indexed.rs), keys its snapshot by the conditions and the version of ratings and tags, reads the attributes of the matches from the file system, and drops those that have gone. The search API's `indexed` tells whether every searched Library was answered this way. Ratings and tags are still keyed by path here, so the candidates of §5.2 are paths; the content hash (M26) changes how they are found.
 
@@ -953,7 +981,7 @@ Only the dependencies must be respected.
 | --- | --- | --- | --- |
 | L1 | Implement the name index, its update by aggregation and by the daemon's own changes, and answering recursive listings with name, rating, and tag conditions from it (§5.1, §5.2) | None | Done |
 | L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Done |
-| L3 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while it is not usable (§5.1, §5.2) | L1 | Not started |
+| L3 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while it is not usable (§5.1, §5.2) | L1 | Done |
 | L4 | Implement `listEntries` over a Scope and a Filter with pages by `offset` and by cursor, the starts cut off, walked, and missing, and `locate` in the form of a start (§3, §4.5, §4.6, §5.3) | L2, L3 | Not started |
 | L5 | Remove the search API that `listEntries` replaces (§8.1) once no client calls it | L4 | Not started |
 
