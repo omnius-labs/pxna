@@ -17,15 +17,19 @@ use omnius_pxna_interface::{models, types::Nullable};
 use crate::{prelude::*, service::library::EntryConverter};
 
 mod kind;
+mod merge;
 mod name_index;
 mod scope;
+mod scope_results;
 mod search;
 mod snapshot;
 mod summary;
 
 pub use kind::*;
+pub use merge::*;
 pub use name_index::*;
 pub use scope::*;
+pub use scope_results::*;
 pub use search::*;
 pub use snapshot::*;
 pub use summary::*;

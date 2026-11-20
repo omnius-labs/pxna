@@ -1,5 +1,8 @@
 use omnius_pxna_engine::service::WorkClass;
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use futures::StreamExt as _;
 use tokio::sync::Semaphore;
@@ -16,8 +19,8 @@ use crate::{
     config::LibraryConfig,
     prelude::*,
     service::listing::{
-        ArchiveWalk, ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, NameIndex, ResolvedScope, ResolvedStart, Scope, ScopeStart, SearchResults, SearchSource,
-        SnapshotKey, SnapshotVersion, StartResolution, SummaryData, SummaryKey, SummaryOptions, SummarySnapshot,
+        ArchiveWalk, ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, ListingSource, MarkSelection, NameIndex, ResolvedScope, ResolvedStart, Scope, ScopeListing,
+        ScopeResults, ScopeStart, SearchResults, SearchSource, SnapshotKey, SnapshotVersion, StartResolution, SummaryData, SummaryKey, SummaryOptions, SummarySnapshot,
     },
 };
 
@@ -104,6 +107,50 @@ impl LibraryBrowser {
             .await?
             .locate(options, library_id, entry)
             .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message(format!("entry not found in the listing: {entry}")))
+    }
+
+    /// The page of `options` of the Entries of the starts of `scope`, merged in the order of the sort. `selections` holds, by Library id, the rating and tag selection
+    /// that `options`' rating and tag conditions came to for the requesting user in that Library.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the route of listEntries calls it in step 6 of list-entries"))]
+    pub async fn list_entries(&self, scope: &Scope, selections: &HashMap<String, MarkSelection>, options: &ListOptions) -> Result<ScopeListing> {
+        Ok(self.scope_results(scope, selections, options).await?.page(options))
+    }
+
+    /// The page that holds the Entry at the Library-relative `path` of `library_id` in the sequence of `list_entries`, or `NotFound` when it is not in it.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the route of listEntries calls it in step 6 of list-entries"))]
+    pub async fn list_entries_located(
+        &self,
+        scope: &Scope,
+        selections: &HashMap<String, MarkSelection>,
+        options: &ListOptions,
+        library_id: &str,
+        path: &str,
+    ) -> Result<ScopeListing> {
+        self.scope_results(scope, selections, options)
+            .await?
+            .locate(options, library_id, path)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message(format!("entry not found in the listing: {library_id}{path}")))
+    }
+
+    /// Builds the listing of each start that adds Entries, from the snapshot of that start with the rating and tag selection of its Library.
+    async fn scope_results(&self, scope: &Scope, selections: &HashMap<String, MarkSelection>, options: &ListOptions) -> Result<ScopeResults> {
+        let resolved = self.resolve_scope(scope).await?;
+        let sources = futures::future::try_join_all(resolved.starts().iter().map(|start| async move {
+            let library_id = start.start().library_id();
+            let library = self.library(library_id)?;
+            let options = options.clone().with_selection(selections.get(library_id).cloned().unwrap_or_default());
+            let path = start.start().path().absolute();
+            let snapshot = self.snapshot_of(library, &path, start.folder().clone(), start.entry(), &options).await?;
+            Ok::<_, Error>(ListingSource::for_start(
+                start.start().value(),
+                library_id,
+                snapshot,
+                options,
+                start.folder().archive_identity().is_none(),
+            ))
+        }))
+        .await?;
+        Ok(ScopeResults::new(sources, resolved.missing().to_vec()))
     }
 
     async fn search_results(&self, libraries: Vec<(String, ListOptions)>, path: &str) -> Result<SearchResults> {
@@ -229,8 +276,14 @@ impl LibraryBrowser {
     async fn snapshot(&self, library_id: &str, path: &str, options: &ListOptions) -> Result<Arc<ListingSnapshot>> {
         let library = self.library(library_id)?;
         let (folder, entry) = self.resolve_folder(library, path).await?;
+        self.snapshot_of(library, path, folder, &entry, options).await
+    }
+
+    /// The snapshot of the listing of the folder `folder`, which is what `path` of `library` resolved to.
+    async fn snapshot_of(&self, library: &LibraryConfig, path: &str, folder: ResolvedStoragePath, entry: &NestedFsEntry, options: &ListOptions) -> Result<Arc<ListingSnapshot>> {
+        let library_id = library.id.as_str();
         let mut key = SnapshotKey::new(library_id, path, options)?;
-        let version = SnapshotVersion::for_folder(&folder, &entry, options.recursive());
+        let version = SnapshotVersion::for_folder(&folder, entry, options.recursive());
         let root = library.path.clone();
         let recursive = options.recursive();
         let include_hidden = options.include_hidden();
@@ -517,6 +570,117 @@ mod tests {
         assert!(state.library.resolve_scope(&scope).await.is_ok());
         // A start that cannot be represented never reaches the resolution.
         assert_eq!(*Scope::parse(&strings(&["test/../.."]), true, false).unwrap_err().kind(), ErrorKind::InvalidInput);
+        Ok(())
+    }
+
+    /// A listing of the Entries of `starts` as `listEntries` builds it: a recursive one that reads the insides of archives when `inside_archives`.
+    async fn list(state: &DaemonState, starts: &[&str], name: Option<&str>, inside_archives: bool, limit: u32, offset: u64) -> TestResult<ScopeListing> {
+        let values = strings(starts);
+        let scope = Scope::parse(&values, true, inside_archives)?;
+        let mut q = crate::service::listing::tests::query(Some(offset), Some(limit));
+        q.recursive = Some(true);
+        q.query = name.map(str::to_string);
+        let options = crate::service::listing::tests::scoped(&q, &[], inside_archives);
+        Ok(state.library.list_entries(&scope, &HashMap::new(), &options).await?)
+    }
+
+    fn paths(listing: &ScopeListing) -> Vec<String> {
+        listing.entries.iter().map(|scoped| format!("{}:{}", scoped.library_id, scoped.entry.path)).collect()
+    }
+
+    /// Runs a full aggregation of the test Library and waits for it, which makes its name index usable.
+    async fn aggregate(state: &DaemonState) -> TestResult {
+        state.names.verified().await;
+        state.timeline.refresh("test").await?;
+        for _ in 0..400 {
+            let status = state.timeline.status("test").await?;
+            if !status.running && status.completed_at.is_some() {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        Err("the aggregation did not finish".into())
+    }
+
+    #[tokio::test]
+    async fn the_starts_of_a_scope_are_listed_as_one_sequence_with_the_missing_ones_named_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        let root = &state.conf.libraries[0].path;
+        std::fs::write(root.join("a/one.txt"), b"1")?;
+        std::fs::write(root.join("a/b/three.txt"), b"3")?;
+        std::fs::write(root.join("c/two.txt"), b"2")?;
+
+        let listing = list(&state, &["test/c", "test/gone", "test/a", "test/a/b", "unknown/x"], None, false, 100, 0).await?;
+        assert_eq!(
+            paths(&listing),
+            ["test:/a/one.txt", "test:/a/b/three.txt", "test:/c/two.txt"],
+            "sorted by name in natural order, the covered start adding nothing"
+        );
+        assert_eq!(listing.total_count, 3);
+        assert_eq!(listing.missing_starts, ["test/gone", "unknown/x"]);
+        assert!(listing.cut_off_starts.is_empty() && listing.walked_starts.is_empty());
+
+        let all_missing = list(&state, &["test/gone", "unknown"], None, false, 100, 0).await?;
+        assert!(all_missing.entries.is_empty() && all_missing.total_count == 0);
+        assert_eq!(all_missing.missing_starts, ["test/gone", "unknown"]);
+
+        // Pages of one limit joined in order neither repeat nor skip an Entry, and `locate` returns the page of the offset it gives.
+        let mut joined = Vec::new();
+        for offset in 0..3 {
+            joined.extend(paths(&list(&state, &["test/c", "test/a"], None, false, 1, offset).await?));
+        }
+        assert_eq!(joined, ["test:/a/one.txt", "test:/a/b/three.txt", "test:/c/two.txt"]);
+        let values = strings(&["test/c", "test/a"]);
+        let scope = Scope::parse(&values, true, false)?;
+        let mut q = crate::service::listing::tests::query(Some(0), Some(2));
+        q.recursive = Some(true);
+        let options = crate::service::listing::tests::scoped(&q, &[], false);
+        let located = state.library.list_entries_located(&scope, &HashMap::new(), &options, "test", "/c/two.txt").await?;
+        assert_eq!(located.offset, 2);
+        assert_eq!(paths(&located), ["test:/c/two.txt"]);
+        let missing = state.library.list_entries_located(&scope, &HashMap::new(), &options, "test", "/c/none.txt").await;
+        assert_eq!(*missing.unwrap_err().kind(), ErrorKind::NotFound);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_start_walked_because_the_index_is_not_usable_is_named_test() -> TestResult {
+        let (_dir, state) = library().await?;
+        let root = &state.conf.libraries[0].path;
+        std::fs::write(root.join("a/one.txt"), b"1")?;
+        std::fs::write(root.join("c/one.txt"), b"1")?;
+
+        // The index is not usable yet, so a recursive listing with a name condition is walked, from a local folder and not from an archive.
+        let before = list(&state, &["test/a", "test/pack.7z"], Some("one"), false, 100, 0).await?;
+        assert_eq!(before.walked_starts, ["test/a"]);
+        assert_eq!(paths(&before), ["test:/a/one.txt"]);
+        // Without a condition a walk is the intended answer and is not named.
+        assert!(list(&state, &["test/a"], None, false, 100, 0).await?.walked_starts.is_empty());
+
+        aggregate(&state).await?;
+        let after = list(&state, &["test/a", "test/c"], Some("one"), false, 100, 0).await?;
+        assert!(after.walked_starts.is_empty());
+        assert_eq!(paths(&after), ["test:/a/one.txt", "test:/c/one.txt"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_start_whose_listing_reaches_the_limit_is_named_cut_off_test() -> TestResult {
+        let listing = crate::config::ListingConfig {
+            recursive_max_entries: 3,
+            ..Default::default()
+        };
+        let (_dir, state) = crate::service::mutation::tests::state_with_clock(listing, Arc::new(omnius_core_base::clock::ClockUtc)).await?;
+        let root = &state.conf.libraries[0].path;
+        std::fs::create_dir_all(root.join("big"))?;
+        std::fs::create_dir_all(root.join("small"))?;
+        for number in 0..6 {
+            std::fs::write(root.join(format!("big/{number}.txt")), b"x")?;
+        }
+        std::fs::write(root.join("small/only.txt"), b"x")?;
+        let listing = list(&state, &["test/big", "test/small"], None, false, 100, 0).await?;
+        assert_eq!(listing.cut_off_starts, ["test/big"]);
+        assert_eq!(listing.total_count, 4, "three of the big folder, which stops at the limit, and the small one");
         Ok(())
     }
 }
