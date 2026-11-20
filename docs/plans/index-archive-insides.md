@@ -87,7 +87,7 @@ The name index file changes format, so the first startup discards it and recursi
 | [1](#s-1) | Give archives folder rows, the mark, and the record | - | Done |
 | [2](#s-2) | Write the insides of archives from aggregation | 1 | Done |
 | [3](#s-3) | Keep the insides and the records with every removal and move | 2 | Done |
-| [4](#s-4) | Leave the insides out of the queries | 2 | Not started |
+| [4](#s-4) | Leave the insides out of the queries | 2 | Done |
 | [5](#s-5) | Describe the state | 3, 4 | Not started |
 
 <a id="s-1"></a>
