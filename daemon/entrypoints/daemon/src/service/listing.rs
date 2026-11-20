@@ -16,11 +16,13 @@ use omnius_pxna_interface::{models, types::Nullable};
 
 use crate::{prelude::*, service::library::EntryConverter};
 
+mod kind;
 mod name_index;
 mod search;
 mod snapshot;
 mod summary;
 
+pub use kind::*;
 pub use name_index::*;
 pub use search::*;
 pub use snapshot::*;
@@ -39,6 +41,12 @@ pub struct ListOptions {
     filter: NameFilter,
     marks: MarkFilter,
     selection: MarkSelection,
+    /// The kinds the Filter names. Empty for the folder listing and the search API, and when a `listEntries` Filter names none.
+    kinds: EntryKinds,
+    /// Whether the Scope reads the insides of archives, which a listing of direct children does not use.
+    inside_archives: bool,
+    /// Whether this is a `listEntries` listing, which applies the kinds of a Filter. The folder listing and the search API return every kind.
+    scoped: bool,
     offset: u64,
     limit: usize,
 }
@@ -53,6 +61,9 @@ impl ListOptions {
             filter: NameFilter::new(query.query.as_deref().unwrap_or_default()),
             marks: MarkFilter::default(),
             selection: MarkSelection::default(),
+            kinds: EntryKinds::default(),
+            inside_archives: false,
+            scoped: false,
             offset: query.offset.unwrap_or(0),
             limit: Self::parse_limit(query.limit)?,
         })
@@ -69,6 +80,9 @@ impl ListOptions {
             filter: NameFilter::new(query.query.as_deref().unwrap_or_default()),
             marks: MarkFilter::parse(query.rating.as_deref(), &tags)?,
             selection: MarkSelection::default(),
+            kinds: EntryKinds::default(),
+            inside_archives: false,
+            scoped: false,
             offset: query.offset.unwrap_or(0),
             limit: Self::parse_limit(query.limit)?,
         })
@@ -78,16 +92,51 @@ impl ListOptions {
         self.recursive
     }
 
+    /// Turns the listing into a `listEntries` one: the Filter's kinds and whether the Scope reads the insides of archives apply from here on.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the route of listEntries builds its options with it (step 6 of list-entries)"))]
+    pub fn with_scope(mut self, kinds: EntryKinds, inside_archives: bool) -> Self {
+        self.kinds = kinds;
+        self.inside_archives = inside_archives;
+        self.scoped = true;
+        self
+    }
+
+    /// Whether the Scope reads the insides of archives. Without `recursive` it changes nothing, so it is false then.
+    pub fn inside_archives(&self) -> bool {
+        self.inside_archives && self.recursive
+    }
+
+    /// The kinds this listing keeps, when its Entries `read_archives` like folders or not.
+    ///
+    /// A Filter that names kinds keeps exactly those. Without any, a recursive `listEntries` listing keeps every kind except folders, and also except archives that it read like
+    /// folders, and a listing of direct children keeps every kind. The folder listing and the search API keep every kind.
+    pub fn kept_kinds(&self, read_archives: bool) -> EntryKinds {
+        if !self.scoped {
+            return EntryKinds::all();
+        }
+        if !self.kinds.is_empty() {
+            return self.kinds;
+        }
+        if !self.recursive {
+            return EntryKinds::all();
+        }
+        let kept = EntryKinds::all().without(EntryKind::Folder);
+        if read_archives { kept.without(EntryKind::Archive) } else { kept }
+    }
+
     /// The conditions the name index answers this listing from, if it is a listing the index can answer: a recursive one without hidden Entries,
-    /// with a name, rating, or tag condition. Whether the start is local and the index is usable is for the caller to check.
+    /// with a name, rating, or tag condition, or whose Scope reads the insides of archives. Whether the start is local and the index is usable is for the caller to check.
     pub fn index_conditions(&self) -> Option<IndexConditions> {
-        if !self.recursive || self.include_hidden || (self.filter.terms.is_empty() && !self.marks.is_active()) {
+        if !self.recursive || self.include_hidden || (self.filter.terms.is_empty() && !self.marks.is_active() && !self.inside_archives()) {
             return None;
         }
         Some(IndexConditions {
             terms: self.filter.terms.clone(),
             marks: format!("{:?}", self.marks),
             selection: self.selection.clone(),
+            // An answer from the index with the insides reads archives like folders, and one without does not.
+            kinds: self.kept_kinds(self.inside_archives()),
+            inside_archives: self.inside_archives(),
         })
     }
 
@@ -123,11 +172,12 @@ impl ListOptions {
     }
 
     pub fn page(&self, entries: &ListingEntries, indices: &[usize], snapshot: String) -> models::FolderListing {
+        let kept = self.kept_kinds(entries.read_archives);
         let mut total = 0_u64;
         let mut page = Vec::new();
         for &index in indices {
             let listed = &entries.entries[index];
-            if !self.matches(listed) {
+            if !self.matches(listed, kept) {
                 continue;
             }
             if total >= self.offset && page.len() < self.limit {
@@ -162,11 +212,15 @@ impl ListOptions {
 
     /// 並べ方の順の位置のうち、絞り込みの条件に合うものだけを、順を保って返す。
     pub fn matching(&self, entries: &ListingEntries, indices: &[usize]) -> Vec<usize> {
-        indices.iter().copied().filter(|&index| self.matches(&entries.entries[index])).collect()
+        let kept = self.kept_kinds(entries.read_archives);
+        indices.iter().copied().filter(|&index| self.matches(&entries.entries[index], kept)).collect()
     }
 
-    fn matches(&self, listed: &ListedEntry) -> bool {
-        (!self.folders_only || EntryPosition::is_folder_like(&listed.entry)) && self.filter.matches(&listed.name) && self.selection.matches(&listed.entry)
+    fn matches(&self, listed: &ListedEntry, kept: EntryKinds) -> bool {
+        (!self.folders_only || EntryPosition::is_folder_like(&listed.entry))
+            && kept.contains(listed.kind)
+            && self.filter.matches(&listed.name)
+            && self.selection.matches(&listed.entry)
     }
 }
 
@@ -186,6 +240,8 @@ pub struct IndexKey {
     terms: Vec<String>,
     marks: String,
     version: Option<u64>,
+    kinds: EntryKinds,
+    inside_archives: bool,
 }
 
 /// The conditions of a listing that the name index answers.
@@ -194,6 +250,8 @@ pub struct IndexConditions {
     terms: Vec<String>,
     marks: String,
     selection: MarkSelection,
+    kinds: EntryKinds,
+    inside_archives: bool,
 }
 
 impl IndexConditions {
@@ -202,7 +260,14 @@ impl IndexConditions {
             terms: self.terms.clone(),
             marks: self.marks.clone(),
             version: self.selection.active,
+            kinds: self.kinds,
+            inside_archives: self.inside_archives,
         }
+    }
+
+    /// Whether the Entries inside archives are returned, nested archives included.
+    pub fn inside_archives(&self) -> bool {
+        self.inside_archives
     }
 
     /// The normalized name terms.
@@ -359,12 +424,14 @@ impl NameFilter {
 struct ListedEntry {
     entry: models::FileSystemEntry,
     name: String,
+    kind: EntryKind,
 }
 
 impl ListedEntry {
     fn new(entry: models::FileSystemEntry) -> Self {
         Self {
             name: NameFilter::normalize(&entry.name),
+            kind: EntryKind::of(&entry),
             entry,
         }
     }
@@ -376,6 +443,8 @@ pub struct ListingEntries {
     truncated: bool,
     /// The name index answered it, so `entries` holds only the matches.
     indexed: bool,
+    /// The insides of archives are among `entries`, because the index answered with them or the walk descended into archives, so an archive is not listed as one Entry of its own.
+    read_archives: bool,
 }
 
 impl ListingEntries {
@@ -421,6 +490,7 @@ impl ListingEntries {
                         entries,
                         truncated: true,
                         indexed: false,
+                        read_archives: false,
                     });
                 }
             }
@@ -433,15 +503,17 @@ impl ListingEntries {
             entries,
             truncated: false,
             indexed: false,
+            read_archives: false,
         })
     }
 
-    /// The Entries that the name index found, with their attributes read from the file system.
-    pub fn from_index(entries: Vec<models::FileSystemEntry>, truncated: bool) -> Self {
+    /// The Entries that the name index found, with their attributes read from the file system. `read_archives` is whether they include the insides of archives.
+    pub fn from_index(entries: Vec<models::FileSystemEntry>, truncated: bool, read_archives: bool) -> Self {
         Self {
             entries: entries.into_iter().map(ListedEntry::new).collect(),
             truncated,
             indexed: true,
+            read_archives,
         }
     }
 
@@ -459,7 +531,13 @@ impl ListingEntries {
             entries: entries.into_iter().map(ListedEntry::new).collect(),
             truncated: false,
             indexed: false,
+            read_archives: false,
         }
+    }
+
+    #[cfg(test)]
+    pub fn reading_archives(self) -> Self {
+        Self { read_archives: true, ..self }
     }
 
     #[cfg(test)]
@@ -601,12 +679,12 @@ pub(crate) mod tests {
             models::FileSystemEntryKind::File,
         )
     }
-    fn folder(name: &str) -> models::FileSystemEntry {
+    pub fn folder(name: &str) -> models::FileSystemEntry {
         let mut e = entry(name);
         e.kind = models::FileSystemEntryKind::Folder;
         e
     }
-    fn file(name: &str, archive: bool) -> models::FileSystemEntry {
+    pub fn file(name: &str, archive: bool) -> models::FileSystemEntry {
         let mut e = entry(name);
         e.file = Some(Nullable::Present(models::FileSystemEntryFileDetail::new(archive)));
         e
@@ -674,7 +752,7 @@ pub(crate) mod tests {
                             let options = ListOptions::from_query(&q)?;
                             let entries = ListingEntries::from_entries(entries());
                             let indices = options.sort.indices(&entries);
-                            for listed in entries.entries.iter().filter(|listed| options.matches(listed)) {
+                            for listed in entries.entries.iter().filter(|listed| options.matches(listed, options.kept_kinds(false))) {
                                 let found = options
                                     .locate(&entries, &indices, &listed.entry.path, "test".to_string())
                                     .expect("a matching Entry has a position");
@@ -719,6 +797,132 @@ pub(crate) mod tests {
         assert!(options.locate(&entries, &indices, "/c.zip", "test".to_string()).is_none());
         assert!(options.locate(&entries, &indices, "/a.txt", "test".to_string()).is_some());
         Ok(())
+    }
+    /// The options of a `listEntries` listing over `query`, with the Filter's kinds and the Scope's choice of reading the insides of archives.
+    pub fn scoped(query: &models::ListFolderEntriesQueryParams, kinds: &[EntryKind], inside_archives: bool) -> ListOptions {
+        ListOptions::from_query(query).unwrap().with_scope(EntryKinds::of(kinds.iter().copied()), inside_archives)
+    }
+    fn mixed() -> Vec<models::FileSystemEntry> {
+        vec![folder("dir"), file("pack.zip", true), entry("notes.txt"), entry("a.png"), entry("clip.mp4")]
+    }
+    fn recursive_query() -> models::ListFolderEntriesQueryParams {
+        let mut q = query(None, Some(100));
+        q.recursive = Some(true);
+        q
+    }
+    fn kept(options: &ListOptions, entries: ListingEntries) -> Vec<String> {
+        let mut names = names(&options.paginate(&entries, "test".to_string())).into_iter().map(str::to_string).collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_recursive_listing_without_kinds_returns_no_folder_test() {
+        let options = scoped(&recursive_query(), &[], false);
+        assert_eq!(
+            kept(&options, ListingEntries::from_entries(mixed())),
+            ["a.png", "clip.mp4", "notes.txt", "pack.zip"],
+            "an archive that was not read is a file"
+        );
+    }
+    #[test]
+    fn a_recursive_listing_that_read_archives_returns_no_archive_test() {
+        for inside_archives in [false, true] {
+            let options = scoped(&recursive_query(), &[], inside_archives);
+            assert_eq!(kept(&options, ListingEntries::from_entries(mixed()).reading_archives()), ["a.png", "clip.mp4", "notes.txt"]);
+        }
+    }
+    #[test]
+    fn named_kinds_return_exactly_those_kinds_test() {
+        for read_archives in [false, true] {
+            let entries = || {
+                let entries = ListingEntries::from_entries(mixed());
+                if read_archives { entries.reading_archives() } else { entries }
+            };
+            assert_eq!(kept(&scoped(&recursive_query(), &[EntryKind::Folder], true), entries()), ["dir"]);
+            assert_eq!(kept(&scoped(&recursive_query(), &[EntryKind::Archive], true), entries()), ["pack.zip"]);
+            assert_eq!(
+                kept(&scoped(&recursive_query(), &[EntryKind::Image, EntryKind::Video], false), entries()),
+                ["a.png", "clip.mp4"]
+            );
+            assert_eq!(kept(&scoped(&recursive_query(), &[EntryKind::Other], false), entries()), ["notes.txt"]);
+            assert_eq!(
+                kept(&scoped(&recursive_query(), &[EntryKind::Other, EntryKind::Folder], false), entries()),
+                ["dir", "notes.txt"]
+            );
+        }
+    }
+    #[test]
+    fn a_listing_of_direct_children_returns_every_kind_test() {
+        for inside_archives in [false, true] {
+            for read_archives in [false, true] {
+                let entries = ListingEntries::from_entries(mixed());
+                let entries = if read_archives { entries.reading_archives() } else { entries };
+                let options = scoped(&query(None, Some(100)), &[], inside_archives);
+                assert_eq!(kept(&options, entries), ["a.png", "clip.mp4", "dir", "notes.txt", "pack.zip"]);
+            }
+        }
+        let options = scoped(&query(None, Some(100)), &[EntryKind::Video], true);
+        assert_eq!(
+            kept(&options, ListingEntries::from_entries(mixed())),
+            ["clip.mp4"],
+            "named kinds apply to direct children too"
+        );
+    }
+    #[test]
+    fn the_folder_listing_and_the_search_api_keep_every_kind_test() -> testresult::TestResult {
+        let all = ["a.png", "clip.mp4", "dir", "notes.txt", "pack.zip"];
+        assert_eq!(kept(&ListOptions::from_query(&recursive_query())?, ListingEntries::from_entries(mixed())), all);
+        assert_eq!(
+            kept(&ListOptions::from_query(&recursive_query())?, ListingEntries::from_entries(mixed()).reading_archives()),
+            all
+        );
+        Ok(())
+    }
+    #[test]
+    fn only_a_scope_reading_the_insides_gets_index_conditions_without_a_condition_test() -> testresult::TestResult {
+        assert!(scoped(&recursive_query(), &[], false).index_conditions().is_none());
+        let inside = scoped(&recursive_query(), &[], true)
+            .index_conditions()
+            .expect("the insides alone are answered from the index");
+        assert!(inside.inside_archives());
+        assert!(inside.terms().is_empty());
+        assert!(
+            scoped(&query(None, None), &[], true).index_conditions().is_none(),
+            "direct children are never answered from the index"
+        );
+        let mut hidden = recursive_query();
+        hidden.include_hidden = Some(true);
+        assert!(scoped(&hidden, &[], true).index_conditions().is_none());
+        // The search API and the folder listing do not read the insides.
+        assert!(ListOptions::from_query(&recursive_query())?.index_conditions().is_none());
+        // With a name condition, the insides are the only difference between the two answers.
+        let mut named = recursive_query();
+        named.query = Some("pic".to_string());
+        assert!(
+            !scoped(&named, &[], false)
+                .index_conditions()
+                .expect("a name condition is answered from the index")
+                .inside_archives()
+        );
+        Ok(())
+    }
+    #[test]
+    fn index_conditions_differ_by_the_kinds_and_the_insides_test() {
+        let key = |kinds: &[EntryKind], inside_archives: bool| scoped(&recursive_query(), kinds, inside_archives).index_conditions().unwrap().key();
+        assert_eq!(key(&[], true), key(&[], true));
+        assert_ne!(key(&[], true), key(&[EntryKind::Image], true));
+        assert_ne!(key(&[EntryKind::Image], true), key(&[EntryKind::Image, EntryKind::Video], true));
+        assert_eq!(key(&[EntryKind::Image], true), key(&[EntryKind::Image], true));
+        let mut named = recursive_query();
+        named.query = Some("pic".to_string());
+        let named_key = |inside_archives: bool| scoped(&named, &[], inside_archives).index_conditions().unwrap().key();
+        assert_ne!(named_key(false), named_key(true));
+        // Without the insides the default kinds keep archives, and with them they do not, so the two answers differ in their kinds too.
+        let default_kinds = |inside_archives: bool| scoped(&named, &[], inside_archives).index_conditions().unwrap().kinds;
+        assert!(default_kinds(false).contains(EntryKind::Archive));
+        assert!(!default_kinds(true).contains(EntryKind::Archive));
+        assert!(!default_kinds(false).contains(EntryKind::Folder));
     }
     #[test]
     fn sorts_names_in_natural_order_test() -> testresult::TestResult {

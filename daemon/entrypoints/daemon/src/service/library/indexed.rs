@@ -87,7 +87,7 @@ impl IndexedListing {
             }
         };
         // The index may have failed while the attributes were read, and then its answer is not to be trusted.
-        Ok((answered && self.names.is_serving()).then(|| ListingEntries::from_index(found.entries, found.truncated)))
+        Ok((answered && self.names.is_serving()).then(|| ListingEntries::from_index(found.entries, found.truncated, conditions.inside_archives())))
     }
 
     /// Reads a search batch by batch until the limit is passed or the matches run out. Returns whether the index answered.

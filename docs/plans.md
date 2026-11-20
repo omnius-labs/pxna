@@ -31,7 +31,7 @@ During implementation, advance the state of the child and of this document, and 
 | [search-condition-panel](./plans/search-condition-panel.md) | Every Library, or chosen ones, can be searched by name, rating, and several tags with the conditions in the left area | Done | - |
 | [viewer-display-modes](./plans/viewer-display-modes.md) | A work can be viewed in the wide-screen viewer's gallery and focus modes, and the mode returns on the next opening | Done | - |
 | [index-archive-insides](./plans/index-archive-insides.md) | After a full aggregation the name index holds the insides of archives, kept while the archives do not change, and its queries leave them out until M28 | Done | - |
-| [list-entries](./plans/list-entries.md) | A client reads any Scope of starts in one or more Libraries through a Filter, with or without the insides of archives, as one sequence cut by `offset` or `locate`, and learns which starts were cut off, walked, or missing | Not started | index-archive-insides |
+| [list-entries](./plans/list-entries.md) | A client reads any Scope of starts in one or more Libraries through a Filter, with or without the insides of archives, as one sequence cut by `offset` or `locate`, and learns which starts were cut off, walked, or missing | In progress | index-archive-insides |
 
 The thumbnail and image socket plans form a chain: `thumbnail-store-batching` and `source-jobs` follow `thumbnail-fanout-and-viewer-settings`, and `image-socket-server` follows `source-jobs`.
 The `viewer-touch-gestures`, `restore-last-folder`, `viewer-display-modes`, and `index-archive-insides` plans are independent of each other and of them.
