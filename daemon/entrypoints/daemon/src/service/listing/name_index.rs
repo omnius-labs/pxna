@@ -15,7 +15,7 @@ use sqlx::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
-use super::NameFilter;
+use super::{EntryKind, EntryKinds, NameFilter};
 use crate::prelude::*;
 
 const DATABASE_FILE_NAME: &str = "names.db";
@@ -117,6 +117,17 @@ impl NameKind {
         matches!(self, Self::Folder | Self::Archive)
     }
 
+    /// What the index holds for an Entry of this kind: a symbolic link is held as a file, so it is the index's file.
+    fn of(kind: EntryKind) -> Self {
+        match kind {
+            EntryKind::Folder => Self::Folder,
+            EntryKind::Archive => Self::Archive,
+            EntryKind::Image => Self::Image,
+            EntryKind::Video => Self::Video,
+            EntryKind::Other => Self::File,
+        }
+    }
+
     fn from_code(code: i64) -> Self {
         match code {
             0 => Self::Folder,
@@ -193,8 +204,10 @@ pub struct NameQuery {
     pub start: String,
     /// Normalized terms. An Entry matches when its normalized name contains all of them.
     pub terms: Vec<String>,
-    /// Only images and videos, which are the only Entries that can have ratings and tags.
-    pub only_media: bool,
+    /// The kinds to return. Rating and tag conditions keep only images and videos, which are the only Entries that can have them, and the caller narrows the kinds to those.
+    pub kinds: EntryKinds,
+    /// Whether the Entries inside archives, nested archives included, are returned.
+    pub inside_archives: bool,
 }
 
 /// The matches of a search, handed over in batches while the query runs.
@@ -671,20 +684,30 @@ impl NameIndex {
         })
     }
 
-    /// Of `paths`, those the index holds as images or videos (or any kind, unless `only_media`) whose names contain all the terms.
-    pub async fn lookup(&self, library: &str, paths: &[String], terms: &[String], only_media: bool) -> Option<Vec<NameHit>> {
+    /// Of `paths`, those the index holds as one of `kinds`, outside archives unless `inside_archives`, whose names contain all the terms.
+    pub async fn lookup(&self, library: &str, paths: &[String], terms: &[String], kinds: EntryKinds, inside_archives: bool) -> Option<Vec<NameHit>> {
         let db = self.live()?;
-        let result = Self::run_lookup(db, library, paths, terms, only_media).await;
+        let result = Self::run_lookup(db, library, paths, terms, kinds, inside_archives).await;
         self.settle_read(result)
     }
 
-    const MEDIA_KINDS: &'static str = "e.kind IN (3, 4)";
+    /// The condition on the kind of an Entry `e`, which is every kind when `kinds` holds them all and none when it is empty.
+    fn kind_condition(kinds: EntryKinds) -> String {
+        if kinds == EntryKinds::all() {
+            return "1".to_string();
+        }
+        let codes = kinds.iter().map(|kind| NameKind::of(kind).code().to_string()).collect::<Vec<_>>();
+        if codes.is_empty() {
+            "0".to_string()
+        } else {
+            format!("e.kind IN ({})", codes.join(", "))
+        }
+    }
 
     /// The condition that leaves out the Entries inside archives, for a query over `name_entries e` joined with its folder `f`: those whose folder row
-    /// is an archive or inside one. Every query of the index takes it from here, so that a query for a Scope that reads the insides of archives
-    /// can leave it out in one place.
-    fn outside_archives() -> &'static str {
-        "f.archive = 0"
+    /// is an archive or inside one. Every query of the index takes it from here, and a query for a Scope that reads the insides of archives leaves it out.
+    fn archive_condition(inside_archives: bool) -> &'static str {
+        if inside_archives { "1" } else { "f.archive = 0" }
     }
 
     async fn run_search(db: &SqlitePool, query: NameQuery, sender: &mpsc::Sender<Result<Vec<NameHit>>>) -> Result<()> {
@@ -698,14 +721,12 @@ impl NameIndex {
         };
         sql.push_str(&FolderRange::condition(&range).replace("library_id", "f.library_id").replace("path", "f.path"));
         sql.push_str(" AND ");
-        sql.push_str(Self::outside_archives());
+        sql.push_str(Self::archive_condition(query.inside_archives));
         for _ in &short {
             sql.push_str(" AND instr(COALESCE(e.norm, e.name), ?) > 0");
         }
-        if query.only_media {
-            sql.push_str(" AND ");
-            sql.push_str(Self::MEDIA_KINDS);
-        }
+        sql.push_str(" AND ");
+        sql.push_str(&Self::kind_condition(query.kinds));
         let mut statement = sqlx::query(sqlx::AssertSqlSafe(sql));
         if !long.is_empty() {
             statement = statement.bind(long.iter().map(|term| format!("\"{}\"", term.replace('"', "\"\""))).collect::<Vec<_>>().join(" AND "));
@@ -731,17 +752,15 @@ impl NameIndex {
         Ok(())
     }
 
-    async fn run_lookup(db: &SqlitePool, library: &str, paths: &[String], terms: &[String], only_media: bool) -> Result<Vec<NameHit>> {
+    async fn run_lookup(db: &SqlitePool, library: &str, paths: &[String], terms: &[String], kinds: EntryKinds, inside_archives: bool) -> Result<Vec<NameHit>> {
         let mut sql = "SELECT e.kind AS kind FROM name_entries e JOIN name_folders f ON f.id = e.parent_id WHERE f.library_id = ? AND f.path = ? AND e.name = ?".to_string();
         sql.push_str(" AND ");
-        sql.push_str(Self::outside_archives());
+        sql.push_str(Self::archive_condition(inside_archives));
         for _ in terms {
             sql.push_str(" AND instr(COALESCE(e.norm, e.name), ?) > 0");
         }
-        if only_media {
-            sql.push_str(" AND ");
-            sql.push_str(Self::MEDIA_KINDS);
-        }
+        sql.push_str(" AND ");
+        sql.push_str(&Self::kind_condition(kinds));
         let mut hits = Vec::new();
         for path in paths {
             let Some((parent, name)) = EntryPath::split(path) else {
@@ -1863,6 +1882,163 @@ mod tests {
         ]
     }
 
+    /// A Library with a folder, an archive that holds a folder, an image, and a nested archive, and the same kinds outside archives.
+    async fn library_with_archives(index: &NameIndex) {
+        index
+            .replace_children(
+                LIB,
+                "/",
+                &[
+                    folders(&["plain"]),
+                    archives(&["pack.zip"]),
+                    files(&["top.txt"]),
+                    vec![NameRow::new("top.png", NameKind::Image), NameRow::new("top.mp4", NameKind::Video)],
+                ]
+                .concat(),
+                1,
+            )
+            .await;
+        index.replace_children(LIB, "/plain", &files(&["p.txt"]), 1).await;
+        let contents = vec![
+            (
+                "/pack.zip".to_string(),
+                [folders(&["dir"]), files(&["a.txt"]), archives(&["inner.zip"]), vec![NameRow::new("a.png", NameKind::Image)]].concat(),
+            ),
+            ("/pack.zip/dir".to_string(), [files(&["b.txt"]), vec![NameRow::new("b.mp4", NameKind::Video)]].concat()),
+            ("/pack.zip/inner.zip".to_string(), vec![NameRow::new("c.png", NameKind::Image)]),
+        ];
+        index.replace_archive(LIB, "/pack.zip", "id-1", &contents, 1).await;
+        index.mark_usable(LIB, 1).await;
+    }
+
+    async fn searched(index: &NameIndex, start: &str, terms: &[&str], kinds: EntryKinds, inside_archives: bool) -> TestResult<BTreeSet<String>> {
+        index.flush().await;
+        let mut cursor = index
+            .search(NameQuery {
+                library: LIB.to_string(),
+                start: start.to_string(),
+                terms: terms.iter().map(|term| term.to_string()).collect(),
+                kinds,
+                inside_archives,
+            })
+            .expect("the index can search");
+        let mut found = BTreeSet::new();
+        while let Some(batch) = cursor.next().await? {
+            found.extend(batch.into_iter().map(|hit| hit.path));
+        }
+        Ok(found)
+    }
+
+    async fn looked_up(index: &NameIndex, paths: &[&str], terms: &[&str], kinds: EntryKinds, inside_archives: bool) -> TestResult<BTreeSet<String>> {
+        let paths = paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
+        let terms = terms.iter().map(|term| term.to_string()).collect::<Vec<_>>();
+        let hits = index.lookup(LIB, &paths, &terms, kinds, inside_archives).await.expect("the index can answer");
+        Ok(hits.into_iter().map(|hit| hit.path).collect())
+    }
+
+    #[tokio::test]
+    async fn a_search_returns_the_insides_of_archives_only_when_they_are_read_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        library_with_archives(&index).await;
+        let all = EntryKinds::all();
+
+        let outside = set(&["/plain", "/pack.zip", "/top.txt", "/top.png", "/top.mp4", "/plain/p.txt"]);
+        assert_eq!(searched(&index, "/", &[], all, false).await?, outside);
+        let inside = [
+            "/pack.zip/dir",
+            "/pack.zip/a.txt",
+            "/pack.zip/inner.zip",
+            "/pack.zip/a.png",
+            "/pack.zip/dir/b.txt",
+            "/pack.zip/dir/b.mp4",
+            "/pack.zip/inner.zip/c.png",
+        ];
+        assert_eq!(
+            searched(&index, "/", &[], all, true).await?,
+            outside.iter().map(String::as_str).chain(inside).map(str::to_string).collect()
+        );
+
+        // A term is matched in the names inside archives too, whatever its length, and the start still limits the search.
+        assert_eq!(
+            searched(&index, "/", &["png"], all, true).await?,
+            set(&["/top.png", "/pack.zip/a.png", "/pack.zip/inner.zip/c.png"])
+        );
+        assert_eq!(searched(&index, "/", &["png"], all, false).await?, set(&["/top.png"]));
+        assert_eq!(searched(&index, "/", &["c."], all, true).await?, set(&["/pack.zip/inner.zip/c.png"]));
+        assert_eq!(searched(&index, "/plain", &[], all, true).await?, set(&["/plain/p.txt"]));
+        // A start inside an archive finds what is under it when the insides are read.
+        assert_eq!(
+            searched(&index, "/pack.zip/dir", &[], all, true).await?,
+            set(&["/pack.zip/dir/b.txt", "/pack.zip/dir/b.mp4"])
+        );
+        assert!(searched(&index, "/pack.zip/dir", &[], all, false).await?.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_search_returns_only_the_kinds_asked_for_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        library_with_archives(&index).await;
+        let kinds = |kinds: &[EntryKind]| EntryKinds::of(kinds.iter().copied());
+
+        assert_eq!(searched(&index, "/", &[], kinds(&[EntryKind::Folder]), true).await?, set(&["/plain", "/pack.zip/dir"]));
+        assert_eq!(searched(&index, "/", &[], kinds(&[EntryKind::Folder]), false).await?, set(&["/plain"]));
+        assert_eq!(
+            searched(&index, "/", &[], kinds(&[EntryKind::Archive]), true).await?,
+            set(&["/pack.zip", "/pack.zip/inner.zip"])
+        );
+        assert_eq!(searched(&index, "/", &[], kinds(&[EntryKind::Archive]), false).await?, set(&["/pack.zip"]));
+        assert_eq!(
+            searched(&index, "/", &[], kinds(&[EntryKind::Image, EntryKind::Video]), true).await?,
+            set(&["/top.png", "/top.mp4", "/pack.zip/a.png", "/pack.zip/dir/b.mp4", "/pack.zip/inner.zip/c.png"])
+        );
+        assert_eq!(searched(&index, "/", &[], kinds(&[EntryKind::Video]), false).await?, set(&["/top.mp4"]));
+        assert_eq!(
+            searched(&index, "/", &[], kinds(&[EntryKind::Other]), true).await?,
+            set(&["/top.txt", "/plain/p.txt", "/pack.zip/a.txt", "/pack.zip/dir/b.txt"])
+        );
+        assert_eq!(
+            searched(&index, "/", &["txt"], kinds(&[EntryKind::Other, EntryKind::Folder]), false).await?,
+            set(&["/top.txt", "/plain/p.txt"])
+        );
+        assert!(searched(&index, "/", &[], EntryKinds::default(), true).await?.is_empty(), "no kind is no match");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_lookup_by_path_takes_the_kinds_and_the_insides_into_account_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        library_with_archives(&index).await;
+        let paths = [
+            "/top.png",
+            "/top.txt",
+            "/pack.zip/a.png",
+            "/pack.zip/dir/b.mp4",
+            "/pack.zip/inner.zip/c.png",
+            "/missing.png",
+        ];
+
+        assert_eq!(looked_up(&index, &paths, &[], EntryKinds::media(), false).await?, set(&["/top.png"]));
+        assert_eq!(
+            looked_up(&index, &paths, &[], EntryKinds::media(), true).await?,
+            set(&["/top.png", "/pack.zip/a.png", "/pack.zip/dir/b.mp4", "/pack.zip/inner.zip/c.png"])
+        );
+        assert_eq!(
+            looked_up(&index, &paths, &[], EntryKinds::of([EntryKind::Video]), true).await?,
+            set(&["/pack.zip/dir/b.mp4"])
+        );
+        assert_eq!(
+            looked_up(&index, &paths, &["png"], EntryKinds::media(), true).await?,
+            set(&["/top.png", "/pack.zip/a.png", "/pack.zip/inner.zip/c.png"])
+        );
+        assert_eq!(looked_up(&index, &paths, &[], EntryKinds::all(), false).await?, set(&["/top.png", "/top.txt"]));
+        assert!(looked_up(&index, &paths, &[], EntryKinds::default(), true).await?.is_empty());
+        Ok(())
+    }
+
     #[tokio::test]
     async fn a_file_of_format_1_is_discarded_and_a_file_of_format_2_is_created_test() -> TestResult {
         let dir = tempfile::tempdir()?;
@@ -2262,7 +2438,8 @@ mod tests {
             library: LIB.to_string(),
             start: "/".to_string(),
             terms: vec!["match".to_string()],
-            only_media: false,
+            kinds: EntryKinds::all(),
+            inside_archives: false,
         };
         let mut cursor = index.search(query()).expect("the index can search");
         let first = cursor.next().await?.expect("there are matches");
@@ -2339,16 +2516,20 @@ mod tests {
             library: LIB.to_string(),
             start: "/".to_string(),
             terms: vec!["a.t".to_string()],
-            only_media: false,
+            kinds: EntryKinds::all(),
+            inside_archives: false,
         };
         assert!(!index.is_usable(LIB).await, "an unchecked file is not trusted");
         assert!(index.search(query()).is_none());
-        assert!(index.lookup(LIB, &["/a.txt".to_string()], &[], false).await.is_none());
+        assert!(index.lookup(LIB, &["/a.txt".to_string()], &[], EntryKinds::all(), false).await.is_none());
 
         index.verify_now().await;
         assert!(index.is_usable(LIB).await);
         assert!(index.search(query()).is_some());
-        assert_eq!(index.lookup(LIB, &["/a.txt".to_string()], &[], false).await.map(|hits| hits.len()), Some(1));
+        assert_eq!(
+            index.lookup(LIB, &["/a.txt".to_string()], &[], EntryKinds::all(), false).await.map(|hits| hits.len()),
+            Some(1)
+        );
         Ok(())
     }
 

@@ -57,12 +57,27 @@ impl EntryKinds {
         Self(kinds.into_iter().fold(0, |bits, kind| bits | kind.bit()))
     }
 
+    /// The kinds that can have a rating or a tag: images and videos.
+    pub fn media() -> Self {
+        Self::of([EntryKind::Image, EntryKind::Video])
+    }
+
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
 
     pub fn contains(self, kind: EntryKind) -> bool {
         self.0 & kind.bit() != 0
+    }
+
+    /// The kinds in both sets.
+    pub fn intersect(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
+    /// The kinds in the set, in the order of `EntryKind::ALL`.
+    pub fn iter(self) -> impl Iterator<Item = EntryKind> {
+        EntryKind::ALL.into_iter().filter(move |kind| self.contains(*kind))
     }
 
     pub fn without(self, kind: EntryKind) -> Self {
@@ -103,6 +118,8 @@ mod tests {
         assert!(set.contains(EntryKind::Image) && set.contains(EntryKind::Other));
         assert!(!set.contains(EntryKind::Folder) && !set.contains(EntryKind::Video) && !set.contains(EntryKind::Archive));
         assert!(EntryKinds::default().is_empty());
+        assert_eq!(set.intersect(EntryKinds::media()), EntryKinds::of([EntryKind::Image]));
+        assert!(EntryKinds::media().intersect(EntryKinds::of([EntryKind::Folder, EntryKind::Other])).is_empty());
         assert!(EntryKind::ALL.iter().all(|kind| EntryKinds::all().contains(*kind)));
         assert!(!EntryKinds::all().without(EntryKind::Folder).contains(EntryKind::Folder));
         assert!(EntryKinds::all().without(EntryKind::Folder).contains(EntryKind::Archive));

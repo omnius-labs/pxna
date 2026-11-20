@@ -265,6 +265,11 @@ impl IndexConditions {
         }
     }
 
+    /// The kinds of Entries to return. A rating or tag condition keeps images and videos among them, which the caller narrows them to.
+    pub fn kinds(&self) -> EntryKinds {
+        self.kinds
+    }
+
     /// Whether the Entries inside archives are returned, nested archives included.
     pub fn inside_archives(&self) -> bool {
         self.inside_archives
