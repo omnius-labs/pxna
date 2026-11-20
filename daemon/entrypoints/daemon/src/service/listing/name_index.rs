@@ -358,13 +358,11 @@ enum Work {
         folders: Vec<(String, Vec<NameRow>)>,
         generation: i64,
     },
-    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
     ArchiveIdentity {
         library: String,
         path: String,
         identity: String,
     },
-    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
     ForgetArchive {
         library: String,
         path: String,
@@ -872,7 +870,6 @@ impl NameIndex {
 
     /// Updates the record of the archive at `path` to `identity` when a record exists at that path, as after a rename,
     /// and does nothing when none exists, so that an archive whose insides the index does not hold is still read.
-    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
     pub async fn set_archive_identity(&self, library: &str, path: &str, identity: &str) {
         let work = Work::ArchiveIdentity {
             library: library.to_string(),
@@ -883,7 +880,6 @@ impl NameIndex {
     }
 
     /// Removes the record of the archive at `path`, leaving its rows, so the next aggregation reads it again.
-    #[cfg_attr(not(test), expect(dead_code, reason = "aggregation and the daemon's changes call it in the next steps"))]
     pub async fn forget_archive(&self, library: &str, path: &str) {
         let work = Work::ForgetArchive {
             library: library.to_string(),
@@ -1314,9 +1310,10 @@ impl NameIndex {
         Ok(id)
     }
 
-    /// An Entry of the same name became another kind, such as a file replaced by a folder: what was under the old folder is gone.
+    /// An Entry of the same name became another kind, such as a file replaced by a folder: what was under the old folder or archive is gone,
+    /// and so are the records of the archives under it.
     async fn change_kind(tx: &mut Transaction<'_, Sqlite>, library: &str, id: i64, old: NameKind, parent: &str, row: &NameRow) -> Result<()> {
-        if old == NameKind::Folder
+        if old.has_contents()
             && let Some(path) = Self::folder_path(tx, id).await?
         {
             Self::delete_inside(tx, library, &path).await?;
@@ -1447,10 +1444,15 @@ impl NameIndex {
             .bind(normalized)
             .execute(&mut *tx)
             .await?;
-        if kind == NameKind::Folder {
+        if kind.has_contents() {
             let range = FolderRange::of(src);
             let offset = i64::try_from(src.chars().count() + 1)?;
             let sql = format!("UPDATE name_folders SET path = ? || substr(path, ?) WHERE {}", FolderRange::condition(&range));
+            let query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(dst).bind(offset);
+            FolderRange::bind(&range, library, query).execute(&mut *tx).await?;
+            // The records at or under the source follow the rows. Nothing is left at the destination, since what was there is deleted above.
+            Self::delete_records(&mut tx, library, dst).await?;
+            let sql = format!("UPDATE name_archives SET path = ? || substr(path, ?) WHERE {}", FolderRange::condition(&range));
             let query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(dst).bind(offset);
             FolderRange::bind(&range, library, query).execute(&mut *tx).await?;
         }
@@ -1461,7 +1463,7 @@ impl NameIndex {
                 .bind(running)
                 .execute(&mut *tx)
                 .await?;
-            if kind == NameKind::Folder {
+            if kind.has_contents() {
                 Self::stamp_in(&mut tx, library, dst, running).await?;
             }
         }
@@ -1469,9 +1471,9 @@ impl NameIndex {
         Ok(())
     }
 
-    /// Deletes an Entry and, for a folder, everything inside it.
+    /// Deletes an Entry and, for a folder or an archive, everything inside it and the records of the archives at or under it.
     async fn delete_entry(tx: &mut Transaction<'_, Sqlite>, library: &str, id: i64, kind: NameKind) -> Result<()> {
-        if kind == NameKind::Folder
+        if kind.has_contents()
             && let Some(path) = Self::folder_path(tx, id).await?
         {
             Self::delete_inside(tx, library, &path).await?;
@@ -1481,8 +1483,8 @@ impl NameIndex {
         Ok(())
     }
 
-    /// Deletes everything inside the folder at `path`, and the folder rows of that range, including the folder's own row.
-    /// The folder's own Entry is not deleted.
+    /// Deletes everything inside the folder at `path`, the folder rows of that range, including the folder's own row, and the records of the archives
+    /// at or under `path`. The folder's own Entry is not deleted.
     async fn delete_inside(tx: &mut Transaction<'_, Sqlite>, library: &str, path: &str) -> Result<()> {
         let range = FolderRange::of(path);
         let condition = FolderRange::condition(&range);
@@ -1493,6 +1495,14 @@ impl NameIndex {
             FolderRange::bind(&range, library, sqlx::query(sqlx::AssertSqlSafe(sql))).execute(&mut **tx).await?;
         }
         let sql = format!("DELETE FROM name_folders WHERE {condition}");
+        FolderRange::bind(&range, library, sqlx::query(sqlx::AssertSqlSafe(sql))).execute(&mut **tx).await?;
+        Self::delete_records(tx, library, path).await
+    }
+
+    /// Deletes the records of the archives at or under `path`.
+    async fn delete_records(tx: &mut Transaction<'_, Sqlite>, library: &str, path: &str) -> Result<()> {
+        let range = FolderRange::of(path);
+        let sql = format!("DELETE FROM name_archives WHERE {}", FolderRange::condition(&range));
         FolderRange::bind(&range, library, sqlx::query(sqlx::AssertSqlSafe(sql))).execute(&mut **tx).await?;
         Ok(())
     }
@@ -1998,6 +2008,183 @@ mod tests {
         index.forget_archive(LIB, "/a.zip").await;
         assert_eq!(index.archive_identity(LIB, "/a.zip").await, None);
         assert_eq!(held(&index, LIB).await?.contains("/a.zip/x.txt:1"), true, "forgetting leaves the rows");
+        Ok(())
+    }
+
+    /// The paths of the archives the index holds a record of.
+    async fn records(index: &NameIndex, library: &str) -> TestResult<BTreeSet<String>> {
+        index.flush().await;
+        let paths: Vec<String> = sqlx::query_scalar("SELECT path FROM name_archives WHERE library_id = ?")
+            .bind(library)
+            .fetch_all(pool(index))
+            .await?;
+        Ok(paths.into_iter().collect())
+    }
+
+    /// Holds the archive at `path` (in the folder above it, which must exist or be made) with a record and the given files directly inside it.
+    async fn hold_archive(index: &NameIndex, path: &str, identity: &str, inside: &[&str]) {
+        let (parent, name) = EntryPath::split(path).expect("an archive has a name");
+        index.upsert(LIB, &parent, NameKind::Folder, 1).await;
+        index.replace_children(LIB, &parent, &archives(&[&name]), 1).await;
+        index.replace_archive(LIB, path, identity, &[(path.to_string(), files(inside))], 1).await;
+    }
+
+    #[tokio::test]
+    async fn deleting_an_archive_or_a_folder_that_holds_one_removes_its_rows_and_record_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        index.replace_children(LIB, "/", &folders(&["shelf"]), 1).await;
+        hold_archive(&index, "/a.zip", "a", &["a.txt"]).await;
+        hold_archive(&index, "/b.zip", "b", &["b.txt"]).await;
+        hold_archive(&index, "/shelf/c.zip", "c", &["c.txt"]).await;
+        index
+            .replace_archive(
+                LIB,
+                "/shelf/c.zip",
+                "c",
+                &[("/shelf/c.zip".to_string(), [files(&["c.txt"]), archives(&["n.zip"])].concat())],
+                1,
+            )
+            .await;
+        assert_eq!(records(&index, LIB).await?, set(&["/a.zip", "/b.zip", "/shelf/c.zip"]));
+
+        index.remove(LIB, "/a.zip").await;
+        assert_eq!(records(&index, LIB).await?, set(&["/b.zip", "/shelf/c.zip"]));
+        assert!(
+            !held(&index, LIB).await?.iter().any(|entry| entry.starts_with("/a.zip")),
+            "the Entry and what is inside it are gone"
+        );
+        assert!(!marked(&index, LIB).await?.contains("/a.zip"));
+
+        index.remove(LIB, "/shelf").await;
+        assert_eq!(records(&index, LIB).await?, set(&["/b.zip"]));
+        assert_eq!(held(&index, LIB).await?, set(&["/b.zip:2", "/b.zip/b.txt:1"]));
+        assert_eq!(marked(&index, LIB).await?, set(&["/b.zip"]));
+        assert_consistent(&index).await
+    }
+
+    #[tokio::test]
+    async fn a_sweep_removes_the_rows_and_record_of_an_archive_it_did_not_see_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        hold_archive(&index, "/gone.zip", "g", &["g.txt"]).await;
+        hold_archive(&index, "/kept.zip", "k", &["k.txt"]).await;
+        // The next aggregation sees only `kept.zip`, and skips it because its record is unchanged.
+        index.replace_children(LIB, "/", &archives(&["kept.zip"]), 2).await;
+        index.keep(LIB, "/kept.zip", 2).await;
+        index.sweep(LIB, "/", 2).await;
+        assert_eq!(held(&index, LIB).await?, set(&["/kept.zip:2", "/kept.zip/k.txt:1"]));
+        assert_eq!(records(&index, LIB).await?, set(&["/kept.zip"]));
+        assert_eq!(marked(&index, LIB).await?, set(&["/kept.zip"]));
+        assert_consistent(&index).await
+    }
+
+    #[tokio::test]
+    async fn changing_the_kind_of_an_archive_removes_its_rows_and_record_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        hold_archive(&index, "/a.zip", "a", &["a.txt"]).await;
+        hold_archive(&index, "/b.zip", "b", &["b.txt"]).await;
+
+        // An archive replaced by a plain file, and by a folder.
+        index.replace_children(LIB, "/", &[files(&["a.zip"]), folders(&["b.zip"])].concat(), 2).await;
+        assert_eq!(held(&index, LIB).await?, set(&["/a.zip:1", "/b.zip:0"]));
+        assert!(records(&index, LIB).await?.is_empty());
+        assert!(marked(&index, LIB).await?.is_empty(), "a folder that replaced an archive is not marked");
+        assert_consistent(&index).await
+    }
+
+    #[tokio::test]
+    async fn a_move_to_a_hidden_name_removes_the_rows_and_record_of_an_archive_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        hold_archive(&index, "/a.zip", "a", &["a.txt"]).await;
+        hold_archive(&index, "/b.zip", "b", &["b.txt"]).await;
+        index.rename(LIB, "/a.zip", "/.a.zip").await;
+        index.rename(LIB, "/b.zip", "/.hidden/b.zip").await;
+        assert_eq!(held(&index, LIB).await?, set(&[]));
+        assert!(records(&index, LIB).await?.is_empty());
+        assert!(marked(&index, LIB).await?.is_empty());
+        assert_consistent(&index).await
+    }
+
+    #[tokio::test]
+    async fn rename_moves_the_rows_marks_and_records_of_archives_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        index.replace_children(LIB, "/", &folders(&["shelf", "dest"]), 1).await;
+        hold_archive(&index, "/a.zip", "a", &["a.txt"]).await;
+        index
+            .replace_archive(
+                LIB,
+                "/a.zip",
+                "a",
+                &[
+                    ("/a.zip".to_string(), [folders(&["d"]), archives(&["n.zip"])].concat()),
+                    ("/a.zip/d".to_string(), files(&["x.txt"])),
+                ],
+                1,
+            )
+            .await;
+        hold_archive(&index, "/shelf/b.zip", "b", &["b.txt"]).await;
+        hold_archive(&index, "/dest/over.zip", "over", &["old.txt"]).await;
+
+        // An archive moves with its rows, marks, and record.
+        index.rename(LIB, "/a.zip", "/dest/moved.zip").await;
+        assert_eq!(
+            held(&index, LIB).await?,
+            set(&[
+                "/shelf:0",
+                "/dest:0",
+                "/shelf/b.zip:2",
+                "/shelf/b.zip/b.txt:1",
+                "/dest/over.zip:2",
+                "/dest/over.zip/old.txt:1",
+                "/dest/moved.zip:2",
+                "/dest/moved.zip/d:0",
+                "/dest/moved.zip/n.zip:2",
+                "/dest/moved.zip/d/x.txt:1"
+            ])
+        );
+        assert_eq!(
+            marked(&index, LIB).await?,
+            set(&["/shelf/b.zip", "/dest/over.zip", "/dest/moved.zip", "/dest/moved.zip/d", "/dest/moved.zip/n.zip"])
+        );
+        assert_eq!(records(&index, LIB).await?, set(&["/shelf/b.zip", "/dest/over.zip", "/dest/moved.zip"]));
+        assert_eq!(index.archive_identity(LIB, "/dest/moved.zip").await.as_deref(), Some("a"));
+
+        // A folder that holds an archive moves with the archive's rows and record.
+        index.rename(LIB, "/shelf", "/dest/shelf2").await;
+        assert_eq!(records(&index, LIB).await?, set(&["/dest/shelf2/b.zip", "/dest/over.zip", "/dest/moved.zip"]));
+        assert!(held(&index, LIB).await?.contains("/dest/shelf2/b.zip/b.txt:1"));
+        assert!(marked(&index, LIB).await?.contains("/dest/shelf2/b.zip"));
+
+        // An archive that replaces another takes its place with its own record.
+        index.rename(LIB, "/dest/moved.zip", "/dest/over.zip").await;
+        assert_eq!(records(&index, LIB).await?, set(&["/dest/shelf2/b.zip", "/dest/over.zip"]));
+        assert_eq!(index.archive_identity(LIB, "/dest/over.zip").await.as_deref(), Some("a"));
+        assert!(!held(&index, LIB).await?.contains("/dest/over.zip/old.txt:1"), "what the destination held is gone");
+        assert!(held(&index, LIB).await?.contains("/dest/over.zip/d/x.txt:1"));
+        assert_consistent(&index).await
+    }
+
+    #[tokio::test]
+    async fn a_moved_archive_survives_the_sweep_of_a_running_aggregation_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = open(&dir).await;
+        hold_archive(&index, "/a.zip", "a", &["a.txt"]).await;
+        index.replace_children(LIB, "/", &folders(&["dest"]), 1).await;
+        // An aggregation of generation 5 has begun and has listed the destination's folder, but not the source's.
+        index.begin_scan(LIB, 5).await;
+        index.replace_children(LIB, "/", &folders(&["dest"]), 5).await;
+        index.rename(LIB, "/a.zip", "/dest/a.zip").await;
+        index.sweep(LIB, "/", 5).await;
+        assert_eq!(
+            held(&index, LIB).await?,
+            set(&["/dest:0", "/dest/a.zip:2", "/dest/a.zip/a.txt:1"]),
+            "the rows inside the moved archive are kept"
+        );
+        assert_eq!(records(&index, LIB).await?, set(&["/dest/a.zip"]));
         Ok(())
     }
 

@@ -323,10 +323,13 @@ impl TimelineService {
         for archive in self.index.rename(&library.id, src, dst).await? {
             let local = Self::local(library, &archive);
             let Ok(fingerprint) = SourceFingerprint::read(&local).await else {
+                // The record of the name index is of the identity at the old path, so it is dropped and the archive is read again.
+                self.names.forget_archive(&library.id, &archive).await;
                 continue;
             };
             let identity = ArchiveIdentity::from_local(&local.to_string_lossy(), &fingerprint).to_hex();
             self.index.set_archive_identity(&library.id, &archive, &identity).await?;
+            self.names.set_archive_identity(&library.id, &archive, &identity).await;
         }
         Ok(())
     }
@@ -1363,6 +1366,145 @@ mod tests {
         // With the records in place, the next aggregation reads nothing.
         wait_scan(&service).await?;
         assert_eq!(service.scanner.take_archive_reads(), (0, 0));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn deleting_an_archive_or_a_folder_that_holds_one_removes_its_rows_and_record_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        archive_library(&fixture)?;
+        std::fs::create_dir(fixture.path("shelf"))?;
+        write_zip(&fixture.path("shelf/in.zip"), &[("s.txt", b"s".to_vec())])?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        wait_scan(&service).await?;
+        assert!(names.held(LIBRARY).await.contains(&"/shelf/in.zip/s.txt:1".to_string()));
+
+        std::fs::remove_file(fixture.path("nested.zip"))?;
+        std::fs::remove_dir_all(fixture.path("shelf"))?;
+        service.changed(&changes(&["/nested.zip", "/shelf"])).await;
+        let held = names.held(LIBRARY).await;
+        assert!(!held.iter().any(|entry| entry.starts_with("/nested.zip") || entry.starts_with("/shelf")), "{held:?}");
+        for gone in ["/nested.zip", "/shelf/in.zip"] {
+            assert!(names.archive_identity(LIBRARY, gone).await.is_none(), "{gone} keeps no record");
+        }
+        assert!(
+            names
+                .marked_folders(LIBRARY)
+                .await
+                .iter()
+                .all(|path| !path.starts_with("/nested.zip") && !path.starts_with("/shelf"))
+        );
+        assert!(names.archive_identity(LIBRARY, "/pack.7z").await.is_some(), "the other archives keep theirs");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn renaming_or_moving_archives_reassigns_their_rows_and_records_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        archive_library(&fixture)?;
+        std::fs::create_dir_all(fixture.path("shelf"))?;
+        std::fs::create_dir_all(fixture.path("dest"))?;
+        write_zip(&fixture.path("shelf/in.zip"), &[("s.txt", b"s".to_vec())])?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        wait_scan(&service).await?;
+        service.scanner.take_archive_reads();
+
+        // An archive renamed, and a folder that holds an archive moved.
+        std::fs::rename(fixture.path("nested.zip"), fixture.path("renamed.zip"))?;
+        service.renamed(LIBRARY, "/nested.zip", "/renamed.zip").await?;
+        std::fs::rename(fixture.path("shelf"), fixture.path("dest/shelf"))?;
+        service.renamed(LIBRARY, "/shelf", "/dest/shelf").await?;
+
+        let held = names.held(LIBRARY).await;
+        for moved in ["/renamed.zip/a/b/c.jpg:3", "/renamed.zip/top.txt:1", "/dest/shelf/in.zip/s.txt:1"] {
+            assert!(held.contains(&moved.to_string()), "{moved} in {held:?}");
+        }
+        assert!(!held.iter().any(|entry| entry.starts_with("/nested.zip") || entry.starts_with("/shelf/")), "{held:?}");
+        assert!(names.archive_identity(LIBRARY, "/nested.zip").await.is_none());
+        let marked = names.marked_folders(LIBRARY).await;
+        assert!(
+            marked.contains(&"/renamed.zip/a/b".to_string()) && marked.contains(&"/dest/shelf/in.zip".to_string()),
+            "{marked:?}"
+        );
+
+        // The records follow with the identities of the new paths, so the next aggregation reads no archive.
+        service.changed(&changes(&["/nested.zip", "/renamed.zip", "/shelf", "/dest/shelf"])).await;
+        tokio::time::sleep(StdDuration::from_millis(500)).await;
+        wait_scan(&service).await?;
+        assert_eq!(service.scanner.take_archive_reads(), (0, 0));
+        let held = names.held(LIBRARY).await;
+        assert!(held.contains(&"/renamed.zip/a/b/c.jpg:3".to_string()) && held.contains(&"/dest/shelf/in.zip/s.txt:1".to_string()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn renaming_an_archive_the_index_holds_no_record_of_creates_none_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        archive_library(&fixture)?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        wait_scan(&service).await?;
+        names.forget_archive(LIBRARY, "/pack.7z").await;
+
+        std::fs::rename(fixture.path("pack.7z"), fixture.path("pack2.7z"))?;
+        service.renamed(LIBRARY, "/pack.7z", "/pack2.7z").await?;
+        assert!(names.archive_identity(LIBRARY, "/pack2.7z").await.is_none(), "renaming creates no record");
+
+        // So the next aggregation reads it for the name index, and for it alone.
+        service.scanner.take_archive_reads();
+        wait_scan(&service).await?;
+        assert_eq!(service.scanner.take_archive_reads(), (0, 1));
+        assert!(names.archive_identity(LIBRARY, "/pack2.7z").await.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_rename_whose_archive_cannot_be_read_forgets_its_record_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        archive_library(&fixture)?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        wait_scan(&service).await?;
+
+        // The file is not at the destination, so its identity cannot be recomputed.
+        service.renamed(LIBRARY, "/pack.7z", "/missing.7z").await?;
+        assert!(names.held(LIBRARY).await.contains(&"/missing.7z/x.jpg:3".to_string()), "the rows moved");
+        assert!(names.archive_identity(LIBRARY, "/missing.7z").await.is_none(), "the record of the old identity is dropped");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_archive_that_a_sweep_or_a_hidden_name_removed_is_read_again_when_it_returns_test() -> TestResult {
+        let fixture = Fixture::new()?;
+        archive_library(&fixture)?;
+        let names = fixture.names().await;
+        let service = fixture.service_with_names("UTC", 0, Vec::new(), names.clone()).await?;
+        wait_scan(&service).await?;
+        let original = std::fs::read(fixture.path("pack.7z"))?;
+
+        // An external delete is swept by the next full aggregation, with the record.
+        std::fs::remove_file(fixture.path("pack.7z"))?;
+        wait_scan(&service).await?;
+        assert!(!names.held(LIBRARY).await.iter().any(|entry| entry.starts_with("/pack.7z")));
+        assert!(names.archive_identity(LIBRARY, "/pack.7z").await.is_none());
+        std::fs::write(fixture.path("pack.7z"), &original)?;
+        service.scanner.take_archive_reads();
+        wait_scan(&service).await?;
+        assert!(names.held(LIBRARY).await.contains(&"/pack.7z/x.jpg:3".to_string()), "the returned archive is read again");
+        assert!(names.archive_identity(LIBRARY, "/pack.7z").await.is_some());
+
+        // A move to a hidden name removes them too, and the archive is read when it comes back.
+        std::fs::rename(fixture.path("pack.7z"), fixture.path(".pack.7z"))?;
+        service.renamed(LIBRARY, "/pack.7z", "/.pack.7z").await?;
+        assert!(!names.held(LIBRARY).await.iter().any(|entry| entry.starts_with("/pack.7z")));
+        assert!(names.archive_identity(LIBRARY, "/pack.7z").await.is_none() && names.archive_identity(LIBRARY, "/.pack.7z").await.is_none());
+        std::fs::rename(fixture.path(".pack.7z"), fixture.path("pack.7z"))?;
+        service.renamed(LIBRARY, "/.pack.7z", "/pack.7z").await?;
+        wait_scan(&service).await?;
+        assert!(names.held(LIBRARY).await.contains(&"/pack.7z/x.jpg:3".to_string()));
+        assert!(names.archive_identity(LIBRARY, "/pack.7z").await.is_some());
         Ok(())
     }
 
