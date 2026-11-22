@@ -99,7 +99,7 @@ The existing APIs, the configuration, and the stored formats do not change, and 
 | [4](#s-4) | Parse a Scope and resolve its starts | - | Done |
 | [5](#s-5) | Merge the listings of the starts | 2, 3, 4 | Done |
 | [6](#s-6) | Serve `listEntries` | 5 | Done |
-| [7](#s-7) | Describe the state | 6 | Not started |
+| [7](#s-7) | Describe the state | 6 | Done |
 
 <a id="s-1"></a>
 ### Step 1. Give Listings a Kind and the Choice of Reading the Insides of Archives
