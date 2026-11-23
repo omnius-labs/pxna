@@ -82,7 +82,8 @@ With this value the client decides the overall height of the listing from the fi
 `listEntries` takes a Scope in place of the target, and a Filter in place of `query` and `foldersOnly`, whose kind chooses the kinds of Entries and which also carries the rating and tag conditions (§5).
 It is one GET request to `/entries` whose query carries everything: each start is a repeated `start` whose value is the Library id followed by the Library-relative path without its leading `/` (`photos/2025`, or `photos` for the root), `recursive` and `insideArchives` give the Scope's choices, and the Filter's tags and kinds are repeated values, each kind one of `folder`, `archive`, `image`, `video`, and `other`.
 A Scope has at most 64 starts, and more, or a start whose value is not of this form, is `InvalidInput`.
-`sort` also takes the timeline date, which is read in descending order only; an ascending `order` with it is `InvalidInput`.
+`sort` also takes the timeline date, `timeline_date`, which is read in descending order only: without `order` it is descending, and an ascending `order` with it is `InvalidInput`.
+The sort of `listEntries` is a parameter of its own, so the sorts of the folder listings do not gain the timeline date.
 Hidden Entries are always excluded from it.
 
 ## 4. Snapshots
@@ -183,10 +184,11 @@ A `locate` request checks freshness as any request does (§4.3), so it may be an
 ### 4.6 Pages in Timeline-Date Order
 
 When `listEntries` is sorted by timeline date, its pages are not cut by `offset` but read in the order of the timeline index, from its rows, or, for a start with a name, rating, or tag condition, from the order of its matches that the start's snapshot keeps ([Timeline Design §7](./timeline.md#7-reading)).
-A page is pointed at by a cursor, the timeline date, Library id, and Library-relative path of the Entry at its edge, and the Entries after or before it are returned; the response carries the cursors of the pages on both sides, and a side with nothing further has none.
+A page is pointed at by a cursor, the timeline date, Library id, and Library-relative path of the Entry at its edge, given as `after` or `before`, and the Entries after or before it are returned; the response carries the cursors of the pages on both sides, and a side with nothing further has none.
 In place of a cursor, `month` starts at the newest Entry of that month, or of the next older month that has Entries, and `around` returns a page with the named Entry near its middle, named in the same form as `locate`.
 Without any of them the page starts at the newest Entry.
-`month`, `around`, and the cursors are accepted only in this order.
+At most one of `after`, `before`, `month`, and `around` is given, and they are accepted only in this order, where `offset`, `locate`, and `foldersFirst` are not.
+An archive start reads every row under it in this order, the archives nested in it included ([Timeline Design §9.1](./timeline.md#read-every-row-under-an-archive-start)).
 A cursor keeps its meaning only with the same Scope and Filter.
 
 The response has neither `totalCount` nor `offset`, so the client does not reserve the overall height and reads the continuation as it scrolls ([Client Design §5.1](./client.md#the-timeline-does-not-reserve-the-overall-height-and-reads-the-continuation)).
@@ -962,6 +964,18 @@ The starts of a Shelf are folders the owner picks one by one, and 64 leaves room
 **Rejected alternative**
 No limit.
 A Shelf would never meet one, but one request could build as many snapshots as it names, so we rejected it.
+
+#### Give `listEntries` a Sort Parameter of Its Own
+
+**Decision**
+The sort of `listEntries` is a parameter of its own, which takes the sorts of the folder listings and `timeline_date`, and the folder listings keep theirs without the timeline date (§3).
+
+**Reason**
+A folder listing is cut from a snapshot in every order, and only `listEntries` reads the timeline index, so a shared parameter would offer the folder listings a value they could only reject.
+
+**Rejected alternative**
+Adding `timeline_date` to the shared sort parameter and rejecting it in the folder listings.
+The contract would have one sort parameter, but it would promise the folder listings an order they do not have, so we rejected it.
 
 #### Do Not Announce `listEntries` in the Capabilities
 
