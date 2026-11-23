@@ -18,29 +18,39 @@ type SqliteQuery<'q> = Query<'q, Sqlite, SqliteArguments>;
 /// 1 つの問い合わせに並べる値の数。SQLite の上限より十分小さくする。
 const CHUNK: usize = 500;
 
-/// 月ごとの件数を、Entry の行の追加、削除、日時の変更と同じトランザクションで増減する。
+/// Keep the per-month counts in step with the rows of `timeline_entries` in the same transaction that adds, removes, or changes them.
 ///
-/// migrator は `;` で文を分けるため、本体に複数の文を持つ trigger は migration の外で作る。
+/// A count is held per Library, month, kind, and whether the Entry is inside an archive, that is, whether its path differs from its
+/// local file's. A count is raised by an upsert, since a conflict clause of a statement that fires a trigger overrides `INSERT OR IGNORE` in its
+/// body, and the upsert of a row is such a statement. The migrator splits statements on `;`, so triggers, whose bodies hold several statements,
+/// are created outside the migrations. They are created with `IF NOT EXISTS` after the migrations, and the migration that changed the key dropped the old ones.
 const TRIGGERS: &[&str] = &[
     r#"
 CREATE TRIGGER IF NOT EXISTS timeline_entries_insert AFTER INSERT ON timeline_entries BEGIN
-    INSERT OR IGNORE INTO timeline_months (library_id, month, count) VALUES (NEW.library_id, substr(NEW.date, 1, 7), 0);
-    UPDATE timeline_months SET count = count + 1 WHERE library_id = NEW.library_id AND month = substr(NEW.date, 1, 7);
+    INSERT INTO timeline_months (library_id, month, kind, inside_archive, count)
+    VALUES (NEW.library_id, substr(NEW.date, 1, 7), NEW.kind, NEW.path <> NEW.file_path, 1)
+    ON CONFLICT (library_id, month, kind, inside_archive) DO UPDATE SET count = count + 1;
 END
 "#,
     r#"
 CREATE TRIGGER IF NOT EXISTS timeline_entries_delete AFTER DELETE ON timeline_entries BEGIN
-    UPDATE timeline_months SET count = count - 1 WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7);
-    DELETE FROM timeline_months WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7) AND count <= 0;
+    UPDATE timeline_months SET count = count - 1
+    WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7) AND kind = OLD.kind AND inside_archive = (OLD.path <> OLD.file_path);
+    DELETE FROM timeline_months
+    WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7) AND kind = OLD.kind AND inside_archive = (OLD.path <> OLD.file_path) AND count <= 0;
 END
 "#,
     r#"
-CREATE TRIGGER IF NOT EXISTS timeline_entries_update AFTER UPDATE OF library_id, date ON timeline_entries
-WHEN OLD.library_id <> NEW.library_id OR substr(OLD.date, 1, 7) <> substr(NEW.date, 1, 7) BEGIN
-    UPDATE timeline_months SET count = count - 1 WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7);
-    DELETE FROM timeline_months WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7) AND count <= 0;
-    INSERT OR IGNORE INTO timeline_months (library_id, month, count) VALUES (NEW.library_id, substr(NEW.date, 1, 7), 0);
-    UPDATE timeline_months SET count = count + 1 WHERE library_id = NEW.library_id AND month = substr(NEW.date, 1, 7);
+CREATE TRIGGER IF NOT EXISTS timeline_entries_update AFTER UPDATE OF library_id, path, file_path, kind, date ON timeline_entries
+WHEN OLD.library_id <> NEW.library_id OR substr(OLD.date, 1, 7) <> substr(NEW.date, 1, 7) OR OLD.kind <> NEW.kind
+    OR (OLD.path <> OLD.file_path) <> (NEW.path <> NEW.file_path) BEGIN
+    UPDATE timeline_months SET count = count - 1
+    WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7) AND kind = OLD.kind AND inside_archive = (OLD.path <> OLD.file_path);
+    DELETE FROM timeline_months
+    WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7) AND kind = OLD.kind AND inside_archive = (OLD.path <> OLD.file_path) AND count <= 0;
+    INSERT INTO timeline_months (library_id, month, kind, inside_archive, count)
+    VALUES (NEW.library_id, substr(NEW.date, 1, 7), NEW.kind, NEW.path <> NEW.file_path, 1)
+    ON CONFLICT (library_id, month, kind, inside_archive) DO UPDATE SET count = count + 1;
 END
 "#,
 ];
@@ -292,7 +302,15 @@ impl TimelineIndex {
     }
 
     async fn migrate(db: &SqlitePool) -> Result<()> {
-        let requests = vec![
+        SqliteMigrator::migrate(db, Self::migrations()).await?;
+        for trigger in TRIGGERS {
+            sqlx::query(sqlx::AssertSqlSafe(*trigger)).execute(db).await?;
+        }
+        Ok(())
+    }
+
+    fn migrations() -> Vec<MigrationRequest> {
+        vec![
             MigrationRequest {
                 name: "2026-10-14_timeline_index".to_string(),
                 queries: r#"
@@ -347,12 +365,32 @@ CREATE INDEX timeline_entries_date ON timeline_entries (date DESC, library_id, p
 "#
                 .to_string(),
             },
-        ];
-        SqliteMigrator::migrate(db, requests).await?;
-        for trigger in TRIGGERS {
-            sqlx::query(sqlx::AssertSqlSafe(*trigger)).execute(db).await?;
-        }
-        Ok(())
+            MigrationRequest {
+                // Hold the per-month counts per kind and whether the Entry is inside an archive, recounted from the rows without
+                // aggregating again. The triggers of the old key are dropped here, including on a new file, which has none yet,
+                // and `TRIGGERS` creates the new ones after the migrations.
+                name: "2026-11-23_timeline_month_counts_by_kind".to_string(),
+                queries: r#"
+DROP TRIGGER IF EXISTS timeline_entries_insert;
+DROP TRIGGER IF EXISTS timeline_entries_delete;
+DROP TRIGGER IF EXISTS timeline_entries_update;
+CREATE TABLE timeline_month_counts (
+    library_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    inside_archive INTEGER NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (library_id, month, kind, inside_archive)
+) WITHOUT ROWID;
+INSERT INTO timeline_month_counts (library_id, month, kind, inside_archive, count)
+SELECT library_id, substr(date, 1, 7), kind, path <> file_path, COUNT(*) FROM timeline_entries
+GROUP BY library_id, substr(date, 1, 7), kind, path <> file_path;
+DROP TABLE timeline_months;
+ALTER TABLE timeline_month_counts RENAME TO timeline_months;
+"#
+                .to_string(),
+            },
+        ]
     }
 
     /// 書き込みのトランザクションを始める。
@@ -1358,6 +1396,231 @@ mod tests {
 
         assert_eq!(index.months(&both).await?, [("2024-03".to_string(), 1), ("2024-02".to_string(), 3)]);
         assert!(index.page(&[], &TimelineAnchor::Newest, 10).await.is_err());
+        Ok(())
+    }
+
+    /// The triggers of the counts as they were before the counts were held per kind and inside-archive.
+    const OLD_TRIGGERS: &[&str] = &[
+        r#"
+CREATE TRIGGER timeline_entries_insert AFTER INSERT ON timeline_entries BEGIN
+    INSERT OR IGNORE INTO timeline_months (library_id, month, count) VALUES (NEW.library_id, substr(NEW.date, 1, 7), 0);
+    UPDATE timeline_months SET count = count + 1 WHERE library_id = NEW.library_id AND month = substr(NEW.date, 1, 7);
+END
+"#,
+        r#"
+CREATE TRIGGER timeline_entries_delete AFTER DELETE ON timeline_entries BEGIN
+    UPDATE timeline_months SET count = count - 1 WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7);
+    DELETE FROM timeline_months WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7) AND count <= 0;
+END
+"#,
+        r#"
+CREATE TRIGGER timeline_entries_update AFTER UPDATE OF library_id, date ON timeline_entries
+WHEN OLD.library_id <> NEW.library_id OR substr(OLD.date, 1, 7) <> substr(NEW.date, 1, 7) BEGIN
+    UPDATE timeline_months SET count = count - 1 WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7);
+    DELETE FROM timeline_months WHERE library_id = OLD.library_id AND month = substr(OLD.date, 1, 7) AND count <= 0;
+    INSERT OR IGNORE INTO timeline_months (library_id, month, count) VALUES (NEW.library_id, substr(NEW.date, 1, 7), 0);
+    UPDATE timeline_months SET count = count + 1 WHERE library_id = NEW.library_id AND month = substr(NEW.date, 1, 7);
+END
+"#,
+    ];
+
+    type MonthCount = (String, String, String, i64, i64);
+
+    /// The counts the index holds, as (library, month, kind, inside-archive, count).
+    async fn held_counts(index: &TimelineIndex) -> Result<Vec<MonthCount>> {
+        let rows = sqlx::query("SELECT library_id, month, kind, inside_archive, count FROM timeline_months ORDER BY library_id, month, kind, inside_archive")
+            .fetch_all(&index.db)
+            .await?;
+        rows.iter()
+            .map(|row| {
+                Ok((
+                    row.try_get("library_id")?,
+                    row.try_get("month")?,
+                    row.try_get("kind")?,
+                    row.try_get("inside_archive")?,
+                    row.try_get("count")?,
+                ))
+            })
+            .collect()
+    }
+
+    /// The rows counted by Library, month, kind, and whether their path differs from their local file's.
+    async fn counted_counts(index: &TimelineIndex) -> Result<Vec<MonthCount>> {
+        let rows = sqlx::query(
+            "SELECT library_id, substr(date, 1, 7) AS month, kind, path <> file_path AS inside_archive, COUNT(*) AS count FROM timeline_entries GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4",
+        )
+        .fetch_all(&index.db)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                Ok((
+                    row.try_get("library_id")?,
+                    row.try_get("month")?,
+                    row.try_get("kind")?,
+                    row.try_get("inside_archive")?,
+                    row.try_get("count")?,
+                ))
+            })
+            .collect()
+    }
+
+    async fn assert_counts_equal_rows(index: &TimelineIndex) -> Result<()> {
+        assert_eq!(held_counts(index).await?, counted_counts(index).await?);
+        Ok(())
+    }
+
+    fn video(path: &str, file_path: &str, date: &str) -> TimelineRow {
+        TimelineRow {
+            kind: TimelineKind::Video,
+            ..row(path, file_path, date)
+        }
+    }
+
+    /// Writes one row of Library `lib` as the upsert of aggregation does, without deleting the rows of its local file first.
+    async fn upsert(index: &TimelineIndex, row: TimelineRow) -> Result<()> {
+        let mut tx = index.write().await?;
+        TimelineIndex::insert_row(&mut tx, "lib", &row).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    fn mixed_rows() -> Vec<TimelineRow> {
+        vec![
+            row("/a.jpg", "/a.jpg", "2024-01-01T00:00:00"),
+            row("/b.jpg", "/b.jpg", "2024-01-02T00:00:00"),
+            video("/c.mp4", "/c.mp4", "2024-01-03T00:00:00"),
+            row("/x.zip/1.jpg", "/x.zip", "2024-01-04T00:00:00"),
+            video("/x.zip/2.mp4", "/x.zip", "2024-02-05T00:00:00"),
+            row("/x.zip/3.jpg", "/x.zip", "2024-02-06T00:00:00"),
+            row("/d.jpg", "/d.jpg", "2024-02-07T00:00:00"),
+        ]
+    }
+
+    #[tokio::test]
+    async fn an_index_with_the_old_counts_is_migrated_to_counts_equal_to_the_rows_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        // An index created by the code before the counts held the kind and inside-archive: the first two migrations and the old triggers.
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join(DATABASE_FILE_NAME))
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal);
+        let old = SqlitePool::connect_with(options).await?;
+        SqliteMigrator::migrate(&old, TimelineIndex::migrations().into_iter().take(2).collect()).await?;
+        for trigger in OLD_TRIGGERS {
+            sqlx::query(sqlx::AssertSqlSafe(*trigger)).execute(&old).await?;
+        }
+        for (library, row) in [("a", mixed_rows()), ("b", vec![row("/e.jpg", "/e.jpg", "2024-02-08T00:00:00")])]
+            .into_iter()
+            .flat_map(|(library, rows)| rows.into_iter().map(move |row| (library, row)))
+        {
+            sqlx::query("INSERT INTO timeline_entries (library_id, path, file_path, kind, date, date_source, size, readonly) VALUES (?, ?, ?, ?, ?, 'exif', 1, 0)")
+                .bind(library)
+                .bind(&row.path)
+                .bind(&row.file_path)
+                .bind(row.kind.as_str())
+                .bind(row.date.text())
+                .execute(&old)
+                .await?;
+        }
+        let before: Vec<(String, i64)> = sqlx::query_as("SELECT month, SUM(count) FROM timeline_months GROUP BY month ORDER BY month DESC")
+            .fetch_all(&old)
+            .await?;
+        assert_eq!(before, [("2024-02".to_string(), 4), ("2024-01".to_string(), 4)]);
+        old.close().await;
+
+        let index = TimelineIndex::open(dir.path()).await?;
+        assert_counts_equal_rows(&index).await?;
+        assert_eq!(held_counts(&index).await?.len(), 7, "per Library, month, kind, and inside-archive");
+        assert_eq!(
+            index.months(&["a".to_string(), "b".to_string()]).await?,
+            [("2024-02".to_string(), 4), ("2024-01".to_string(), 4)],
+            "listTimelineMonths returns what it returned before the migration"
+        );
+        assert_eq!(index.months(&["a".to_string()]).await?, [("2024-02".to_string(), 3), ("2024-01".to_string(), 4)]);
+
+        // The new triggers replaced the old ones and keep the counts afterwards.
+        insert_into(&index, "a", &[video("/y.zip/1.mp4", "/y.zip", "2024-03-01T00:00:00")]).await?;
+        index.remove("a", "/x.zip").await?;
+        assert_counts_equal_rows(&index).await?;
+        let triggers: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
+            .fetch_all(&index.db)
+            .await?;
+        assert_eq!(triggers, ["timeline_entries_delete", "timeline_entries_insert", "timeline_entries_update"]);
+
+        // Opening it again does not migrate again.
+        drop(index);
+        let index = TimelineIndex::open(dir.path()).await?;
+        assert_counts_equal_rows(&index).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_new_index_holds_counts_per_kind_and_inside_archive_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = index(&dir).await?;
+        insert(&index, &mixed_rows()).await?;
+        assert_counts_equal_rows(&index).await?;
+        assert_eq!(
+            held_counts(&index).await?,
+            [
+                ("lib".to_string(), "2024-01".to_string(), "image".to_string(), 0, 2),
+                ("lib".to_string(), "2024-01".to_string(), "image".to_string(), 1, 1),
+                ("lib".to_string(), "2024-01".to_string(), "video".to_string(), 0, 1),
+                ("lib".to_string(), "2024-02".to_string(), "image".to_string(), 0, 1),
+                ("lib".to_string(), "2024-02".to_string(), "image".to_string(), 1, 1),
+                ("lib".to_string(), "2024-02".to_string(), "video".to_string(), 1, 1),
+            ]
+        );
+        assert_eq!(index.months(&lib()).await?, [("2024-02".to_string(), 3), ("2024-01".to_string(), 4)]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn counts_follow_deletes_redating_and_upserts_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = index(&dir).await?;
+        insert(&index, &mixed_rows()).await?;
+
+        // Re-dating moves a count to another month, whose count may exist already.
+        upsert(&index, row("/a.jpg", "/a.jpg", "2024-02-20T00:00:00")).await?;
+        assert_counts_equal_rows(&index).await?;
+        // An upsert that changes only the kind moves a count to the other kind.
+        upsert(&index, video("/b.jpg", "/b.jpg", "2024-01-02T00:00:00")).await?;
+        assert_counts_equal_rows(&index).await?;
+        // An upsert that changes only the local file moves a count between outside and inside an archive, in both directions.
+        upsert(&index, row("/d.jpg", "/d.zip", "2024-02-07T00:00:00")).await?;
+        assert_counts_equal_rows(&index).await?;
+        upsert(&index, row("/x.zip/1.jpg", "/x.zip/1.jpg", "2024-01-04T00:00:00")).await?;
+        assert_counts_equal_rows(&index).await?;
+        // Changing the date, kind, and local file at once, and changing nothing, both keep the counts.
+        upsert(&index, video("/c.mp4", "/c.zip", "2023-12-31T23:59:59")).await?;
+        upsert(&index, row("/x.zip/3.jpg", "/x.zip", "2024-02-06T00:00:00")).await?;
+        assert_counts_equal_rows(&index).await?;
+        // Rows that a re-read replaces through the batch are counted too.
+        insert(&index, &[row("/a.jpg", "/a.jpg", "2024-01-20T00:00:00"), video("/b.jpg", "/b.jpg", "2024-03-02T00:00:00")]).await?;
+        assert_counts_equal_rows(&index).await?;
+
+        // A rename keeps the Library, month, kind, and inside-archive of every row, and a Library change moves its rows.
+        index.rename("lib", "/x.zip", "/z.zip").await?;
+        assert_counts_equal_rows(&index).await?;
+        sqlx::query("UPDATE timeline_entries SET library_id = 'other' WHERE path = '/e.jpg' OR path = '/a.jpg'")
+            .execute(&index.db)
+            .await?;
+        assert_counts_equal_rows(&index).await?;
+
+        // A replaced archive and removed paths take their counts away, and a count that reaches 0 leaves no row.
+        let batch = TimelineBatch {
+            replaced: vec!["/z.zip".to_string()],
+            files: vec![("/z.zip".to_string(), TimelineFileVersion::Archive("id".to_string()))],
+            rows: vec![video("/z.zip/9.mp4", "/z.zip", "2022-05-05T00:00:00")],
+            ..Default::default()
+        };
+        index.apply("lib", 1, &batch).await?;
+        index.remove("lib", "/b.jpg").await?;
+        assert_counts_equal_rows(&index).await?;
+        assert!(held_counts(&index).await?.iter().all(|count| count.4 > 0));
+        index.remove("lib", "/").await?;
+        assert_counts_equal_rows(&index).await?;
         Ok(())
     }
 

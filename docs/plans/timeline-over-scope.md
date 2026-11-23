@@ -86,7 +86,7 @@ The timeline index's stored format changes by a migration at startup that cannot
 
 | No. | Content | Depends on | Status |
 | --- | --- | --- | --- |
-| [1](#s-1) | Hold the per-month counts per kind and inside-archive | - | Not started |
+| [1](#s-1) | Hold the per-month counts per kind and inside-archive | - | Done |
 | [2](#s-2) | Read rows over starts in timeline-date order | - | Not started |
 | [3](#s-3) | Count the months over starts | 1, 2 | Not started |
 | [4](#s-4) | Keep the timeline-date order of a snapshot's matches | - | Not started |
