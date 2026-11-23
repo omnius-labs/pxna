@@ -296,6 +296,11 @@ impl TimelineReading {
         }
     }
 
+    /// Whether every start is the root of a Library and the descendants are read, so that the counts held per Library can answer.
+    fn is_whole_libraries(&self) -> bool {
+        self.recursive && self.starts.iter().all(TimelineStart::is_root)
+    }
+
     /// The queries that read this: the Library roots together, which the date order serves, and every other start by its path.
     ///
     /// A start that is a root reads by the date order only when the descendants are read, since direct children are found by the path.
@@ -1103,6 +1108,48 @@ ON CONFLICT (library_id, path) DO UPDATE SET
                 Ok((row.try_get("month")?, u64::try_from(count)?))
             })
             .collect()
+    }
+
+    /// The number of rows of `reading` in each month, newest month first, without the months that have none. `reading` has at least one start.
+    ///
+    /// When every start is a Library root and the descendants are read, these are the sums of the counts held per Library, month, kind, and
+    /// inside-archive, over the kinds kept and, unless the insides of archives are read, over rows outside archives. Otherwise the rows that
+    /// the same reading returns are counted, which costs the rows under the starts, so the starts must not overlap, since a row two starts read
+    /// would be counted twice.
+    #[cfg_attr(not(test), expect(dead_code, reason = "listEntryMonths counts the months of a Scope through this from step 5"))]
+    pub async fn count_months(&self, reading: &TimelineReading) -> Result<Vec<(String, u64)>> {
+        let sources = reading.sources()?;
+        let rows = if reading.is_whole_libraries() {
+            let [source] = sources.as_slice() else {
+                return Err(Error::new(ErrorKind::UnexpectedError).with_message("the roots of a reading are one source"));
+            };
+            let mut conditions = vec![format!("library_id IN ({})", vec!["?"; source.libraries.len()].join(", ")), "count > 0".to_string()];
+            if let [kind] = source.kinds.as_slice() {
+                conditions.push(format!("kind = '{}'", kind.as_str()));
+            }
+            if source.outside_only {
+                conditions.push("inside_archive = 0".to_string());
+            }
+            let sql = format!("SELECT month, SUM(count) AS count FROM timeline_months WHERE {} GROUP BY month", conditions.join(" AND "));
+            let query = source.libraries.iter().fold(sqlx::query(sqlx::AssertSqlSafe(sql)), |query, id| query.bind(id.as_str()));
+            query.fetch_all(&self.db).await?
+        } else {
+            let mut rows = Vec::new();
+            for source in &sources {
+                let sql = format!(
+                    "SELECT substr(date, 1, 7) AS month, COUNT(*) AS count FROM timeline_entries WHERE {} GROUP BY substr(date, 1, 7)",
+                    source.condition()
+                );
+                rows.extend(source.bind(sqlx::query(sqlx::AssertSqlSafe(sql))).fetch_all(&self.db).await?);
+            }
+            rows
+        };
+        let mut months = std::collections::BTreeMap::<String, u64>::new();
+        for row in &rows {
+            let count: i64 = row.try_get("count")?;
+            *months.entry(row.try_get("month")?).or_default() += u64::try_from(count)?;
+        }
+        Ok(months.into_iter().rev().filter(|(_, count)| *count > 0).collect())
     }
 
     const COLUMNS: &'static str = "library_id, path, file_path, kind, date, date_source, date_instant, size, modified_ns, readonly";
@@ -2084,6 +2131,100 @@ END
         }
         let archive = reading(vec![archive_start("a", "/f/pack.zip")], true, false, vec![]);
         assert_eq!(index.read(&archive, &around("a", "/f/pack.zip/nested.7z/n1.jpg"), 1).await?.rows.len(), 1);
+        Ok(())
+    }
+
+    /// The number of rows of each month, counted from the rows that `reading` returns.
+    async fn months_of_rows(index: &TimelineIndex, reading: &TimelineReading) -> Result<Vec<(String, u64)>> {
+        let page = index.read(reading, &TimelineAnchor::Newest, 1000).await?;
+        let mut months = Vec::<(String, u64)>::new();
+        for listed in &page.rows {
+            let month = listed.row.date.text()[..7].to_string();
+            match months.last_mut() {
+                Some((last, count)) if *last == month => *count += 1,
+                _ => months.push((month, 1)),
+            }
+        }
+        Ok(months)
+    }
+
+    #[tokio::test]
+    async fn the_months_over_starts_equal_the_rows_every_way_of_reading_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = scope_index(&dir).await?;
+        let kinds = [vec![], vec![TimelineKind::Image], vec![TimelineKind::Video], vec![TimelineKind::Image, TimelineKind::Video]];
+        let start_sets = [
+            vec![start("a", "/"), start("b", "/")],
+            vec![start("b", "/")],
+            vec![start("a", "/f")],
+            vec![start("a", "/f"), start("a", "/g"), start("b", "/f")],
+            vec![start("b", "/"), start("a", "/f")],
+            vec![archive_start("a", "/f/pack.zip")],
+            vec![archive_start("a", "/f/pack.zip/dir"), start("b", "/")],
+        ];
+        let mut distinct = std::collections::HashSet::new();
+        for starts in &start_sets {
+            for recursive in [true, false] {
+                for inside_archives in [false, true] {
+                    for kinds in &kinds {
+                        let reading = reading(starts.clone(), recursive, inside_archives, kinds.clone());
+                        let months = index.count_months(&reading).await?;
+                        assert_eq!(months, months_of_rows(&index, &reading).await?, "{starts:?} {recursive} {inside_archives} {kinds:?}");
+                        distinct.insert(months);
+                    }
+                }
+            }
+        }
+        assert!(distinct.len() > 6, "the readings differ in what they count");
+        // A folder start and an archive start under it are disjoint only when the insides of archives are not read, which is when neither covers the other.
+        for recursive in [true, false] {
+            let reading = reading(vec![start("a", "/f"), archive_start("a", "/f/pack.zip")], recursive, false, vec![]);
+            assert_eq!(index.count_months(&reading).await?, months_of_rows(&index, &reading).await?);
+        }
+        assert_eq!(
+            index.count_months(&reading(vec![start("a", "/"), start("b", "/")], true, true, vec![])).await?,
+            [("2024-03".to_string(), 12), ("2024-02".to_string(), 1)]
+        );
+        assert_eq!(
+            index.count_months(&reading(vec![start("a", "/f")], false, false, vec![])).await?,
+            [("2024-03".to_string(), 2)],
+            "the direct children of a folder"
+        );
+        assert!(index.count_months(&reading(vec![], true, true, vec![])).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_months_of_whole_libraries_are_summed_from_the_held_counts_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = scope_index(&dir).await?;
+        // Make the held count of one month differ from its rows to see which reading takes it.
+        sqlx::query("UPDATE timeline_months SET count = count + 100 WHERE library_id = 'b' AND month = '2024-02'")
+            .execute(&index.db)
+            .await?;
+
+        let roots = reading(vec![start("b", "/")], true, true, vec![]);
+        assert_eq!(
+            index.count_months(&roots).await?,
+            [("2024-03".to_string(), 2), ("2024-02".to_string(), 101)],
+            "summed, not counted"
+        );
+        let images = reading(vec![start("b", "/")], true, true, vec![TimelineKind::Image]);
+        assert_eq!(index.count_months(&images).await?, [("2024-03".to_string(), 2), ("2024-02".to_string(), 101)]);
+        let videos = reading(vec![start("b", "/")], true, true, vec![TimelineKind::Video]);
+        assert!(index.count_months(&videos).await?.is_empty(), "b has no video");
+        let outside = reading(vec![start("b", "/")], true, false, vec![]);
+        assert_eq!(
+            index.count_months(&outside).await?,
+            [("2024-03".to_string(), 2)],
+            "the insides of archives are left out by their count"
+        );
+        // A folder start of the same Library is counted from the rows.
+        let folder = reading(vec![start("b", "/f")], true, true, vec![]);
+        assert_eq!(index.count_months(&folder).await?, [("2024-03".to_string(), 1)]);
+        // Direct children of a root are counted from the rows as well.
+        let direct = reading(vec![start("b", "/")], false, true, vec![]);
+        assert_eq!(index.count_months(&direct).await?, [("2024-03".to_string(), 1)]);
         Ok(())
     }
 
