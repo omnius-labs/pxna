@@ -24,6 +24,7 @@ mod scope_results;
 mod search;
 mod snapshot;
 mod summary;
+mod timeline_order;
 
 pub use kind::*;
 pub use merge::*;
@@ -33,6 +34,7 @@ pub use scope_results::*;
 pub use search::*;
 pub use snapshot::*;
 pub use summary::*;
+pub use timeline_order::*;
 
 const DEFAULT_LIST_LIMIT: u32 = 200;
 const MAX_LIST_LIMIT: u32 = 1000;
@@ -164,6 +166,19 @@ impl ListOptions {
             kinds: self.kept_kinds(self.inside_archives()),
             inside_archives: self.inside_archives(),
         })
+    }
+
+    /// What decides which Entries of a snapshot match this listing, for the order in timeline-date order that the snapshot keeps: the name terms, the rating and tag
+    /// condition with the version of ratings and tags its selection was read at, the kinds, and the insides choice, as the key of an answer from the name index holds them.
+    /// `read_archives` is whether the snapshot's Entries include the insides of archives.
+    pub fn timeline_key(&self, read_archives: bool) -> IndexKey {
+        IndexKey {
+            terms: self.filter.terms.clone(),
+            marks: format!("{:?}", self.marks),
+            version: self.selection.active,
+            kinds: self.kept_kinds(read_archives),
+            inside_archives: self.inside_archives(),
+        }
     }
 
     /// 評価とタグでの絞り込みの指定。

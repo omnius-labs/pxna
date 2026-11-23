@@ -19,7 +19,8 @@ use crate::{
     prelude::*,
     service::{
         library::LibraryRelativePath,
-        listing::{IndexConditions, IndexKey, ListOptions, ListSort, ListingEntries, SummaryIndex},
+        listing::{IndexConditions, IndexKey, ListOptions, ListSort, ListingEntries, SnapshotTimeline, SummaryIndex, TimelineOrder},
+        timeline::TimelineIndex,
     },
 };
 
@@ -126,6 +127,8 @@ pub struct ListingSnapshot {
     created_at: DateTime<Utc>,
     refresh_next: bool,
     orders: Mutex<HashMap<ListSort, Arc<Vec<usize>>>>,
+    /// The order of the matching Entries in timeline-date order, built at the first request for it. One is kept, and a request with another key replaces it.
+    timeline: TokioMutex<Option<Arc<TimelineOrder>>>,
 }
 
 impl ListingSnapshot {
@@ -148,6 +151,20 @@ impl ListingSnapshot {
 
     pub fn entries(&self) -> &ListingEntries {
         &self.entries
+    }
+
+    /// The timeline-date order of the Entries that match `options`, as the rows of `index` date them, built when it is first asked for and kept while the key of `options`
+    /// stays the same. An Entry without a row, which is not an image or video or has not been aggregated yet, is left out. `library` is the Library of the snapshot's start.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the Scope reads a snapshot in timeline-date order from step 5"))]
+    pub async fn timeline(self: &Arc<Self>, library: &str, options: &ListOptions, index: &TimelineIndex) -> Result<SnapshotTimeline> {
+        let key = options.timeline_key(self.entries.read_archives);
+        let mut kept = self.timeline.lock().await;
+        if let Some(order) = kept.as_ref().filter(|order| order.is_for(library, &key)) {
+            return Ok(SnapshotTimeline::new(self.clone(), order.clone()));
+        }
+        let order = Arc::new(TimelineOrder::build(&self.entries, &self.matching(options), library, key, index).await?);
+        *kept = Some(order.clone());
+        Ok(SnapshotTimeline::new(self.clone(), order))
     }
 
     fn order(&self, sort: ListSort) -> Arc<Vec<usize>> {
@@ -305,6 +322,7 @@ impl ListingSnapshots {
                             version: scan_version,
                             created_at,
                             orders: Mutex::new(HashMap::new()),
+                            timeline: TokioMutex::new(None),
                         });
                         let mut store = owner.store.lock();
                         // 破棄や版の変更で別の走査が始まった場合、古い走査の結果は保持しない。

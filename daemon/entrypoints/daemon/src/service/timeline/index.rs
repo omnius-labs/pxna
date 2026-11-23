@@ -1152,6 +1152,30 @@ ON CONFLICT (library_id, path) DO UPDATE SET
         Ok(months.into_iter().rev().filter(|(_, count)| *count > 0).collect())
     }
 
+    /// The rows of `paths` in `library`, found by the primary key in batches. A path without a row is not in the result.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the timeline-date order of a snapshot reads its matches' rows through this from step 5")
+    )]
+    pub async fn rows_of(&self, library: &str, paths: &[String]) -> Result<HashMap<String, TimelineRow>> {
+        let mut rows = HashMap::with_capacity(paths.len());
+        for chunk in paths.chunks(CHUNK) {
+            let sql = format!(
+                "SELECT {} FROM timeline_entries WHERE library_id = ? AND path IN ({})",
+                Self::COLUMNS,
+                vec!["?"; chunk.len()].join(", ")
+            );
+            let query = chunk
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(sql)).bind(library), |query, path| query.bind(path.as_str()));
+            for row in query.fetch_all(&self.db).await? {
+                let row = TimelineRow::from_row(&row)?;
+                rows.insert(row.path.clone(), row);
+            }
+        }
+        Ok(rows)
+    }
+
     const COLUMNS: &'static str = "library_id, path, file_path, kind, date, date_source, date_instant, size, modified_ns, readonly";
 
     /// 並びの順。索引 `timeline_entries_date` の順と同じにする。
@@ -1198,7 +1222,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
     }
 
     /// `YYYY-MM` の翌月の 1 日 0 時。その月の Entry はすべてこれより前に並ぶ。
-    fn month_end(month: &str) -> Result<String> {
+    pub fn month_end(month: &str) -> Result<String> {
         let invalid = || Error::new(ErrorKind::InvalidInput).with_message("month must be YYYY-MM");
         let first = NaiveDate::parse_from_str(&format!("{month}-01"), "%Y-%m-%d").map_err(|_| invalid())?;
         if month.len() != 7 {
