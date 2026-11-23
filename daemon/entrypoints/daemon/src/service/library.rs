@@ -133,7 +133,13 @@ impl LibraryBrowser {
     /// Builds the listing of each start that adds Entries, from the snapshot of that start with the rating and tag selection of its Library.
     async fn scope_results(&self, scope: &Scope, selections: &HashMap<String, MarkSelection>, options: &ListOptions) -> Result<ScopeResults> {
         let resolved = self.resolve_scope(scope).await?;
-        let sources = futures::future::try_join_all(resolved.starts().iter().map(|start| async move {
+        let sources = self.scope_sources(&resolved, selections, options).await?;
+        Ok(ScopeResults::new(sources, resolved.missing().to_vec()))
+    }
+
+    /// The listing of each start of `resolved`, from the snapshot of that start with the rating and tag selection of its Library.
+    pub async fn scope_sources(&self, resolved: &ResolvedScope, selections: &HashMap<String, MarkSelection>, options: &ListOptions) -> Result<Vec<ListingSource>> {
+        futures::future::try_join_all(resolved.starts().iter().map(|start| async move {
             let library_id = start.start().library_id();
             let library = self.library(library_id)?;
             let options = options.clone().with_selection(selections.get(library_id).cloned().unwrap_or_default());
@@ -147,8 +153,7 @@ impl LibraryBrowser {
                 start.folder().archive_identity().is_none(),
             ))
         }))
-        .await?;
-        Ok(ScopeResults::new(sources, resolved.missing().to_vec()))
+        .await
     }
 
     async fn search_results(&self, libraries: Vec<(String, ListOptions)>, path: &str) -> Result<SearchResults> {

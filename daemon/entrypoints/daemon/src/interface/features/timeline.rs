@@ -3,8 +3,7 @@ use axum_extra::extract::CookieJar;
 use headers::Host;
 use http::Method;
 
-use omnius_pxna_engine::service::MediaKind;
-use omnius_pxna_interface::{apis, models, types::Nullable};
+use omnius_pxna_interface::{apis, models};
 
 use crate::{
     error::{ApiError, ApiStatus},
@@ -155,14 +154,12 @@ impl ApiServer {
 
     /// 索引の行を、フォルダの一覧と同じ形の Entry に Library と並びの日時を足した応答にする。
     fn entry(listed: &TimelineListedRow) -> models::TimelineEntry {
-        let row = &listed.row;
-        let name = row.path.rsplit('/').next().unwrap_or_default().to_string();
-        let mut metadata = models::FileSystemMetadata::new(row.size, row.readonly);
-        metadata.modified_at = row.modified.map(Nullable::Present);
-        metadata.content_type = MediaKind::content_type(&name).map(|content_type| Nullable::Present(content_type.to_string()));
-        let mut entry = models::FileSystemEntry::new(row.path.clone(), name, metadata, models::FileSystemEntryKind::File);
-        entry.file = Some(Nullable::Present(models::FileSystemEntryFileDetail::new(false)));
-        models::TimelineEntry::new(listed.library.clone(), entry, row.date.text(), row.date.source.as_str().to_string())
+        models::TimelineEntry::new(
+            listed.library.clone(),
+            listed.file_system_entry(),
+            listed.row.date.text(),
+            listed.row.date.source.as_str().to_string(),
+        )
     }
 }
 

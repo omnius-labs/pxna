@@ -181,6 +181,16 @@ impl ListOptions {
         }
     }
 
+    /// The kinds the Filter names, which are none when it names none.
+    pub fn kinds(&self) -> EntryKinds {
+        self.kinds
+    }
+
+    /// Whether the Filter has a name, rating, or tag condition.
+    pub fn has_conditions(&self) -> bool {
+        !self.filter.terms.is_empty() || self.marks.is_active()
+    }
+
     /// 評価とタグでの絞り込みの指定。
     pub fn marks(&self) -> &MarkFilter {
         &self.marks

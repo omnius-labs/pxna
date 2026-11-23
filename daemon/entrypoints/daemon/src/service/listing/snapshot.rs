@@ -155,7 +155,6 @@ impl ListingSnapshot {
 
     /// The timeline-date order of the Entries that match `options`, as the rows of `index` date them, built when it is first asked for and kept while the key of `options`
     /// stays the same. An Entry without a row, which is not an image or video or has not been aggregated yet, is left out. `library` is the Library of the snapshot's start.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the Scope reads a snapshot in timeline-date order from step 5"))]
     pub async fn timeline(self: &Arc<Self>, library: &str, options: &ListOptions, index: &TimelineIndex) -> Result<SnapshotTimeline> {
         let key = options.timeline_key(self.entries.read_archives);
         let mut kept = self.timeline.lock().await;

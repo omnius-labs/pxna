@@ -12,7 +12,6 @@ use crate::{
 
 /// An Entry of a snapshot with the timeline date of its row, which is what a start with a name, rating, or tag condition lists in timeline-date order.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(not(test), expect(dead_code, reason = "the Scope reads a snapshot in timeline-date order from step 5"))]
 pub struct TimelineMatch {
     pub library: String,
     pub date: TimelineDate,
@@ -20,8 +19,16 @@ pub struct TimelineMatch {
     pub entry: models::FileSystemEntry,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "the Scope reads a snapshot in timeline-date order from step 5"))]
 impl TimelineMatch {
+    /// Puts `matches` in the order of the sequence, newest timeline date first and then by Library id and path, keeps a match that several sources listed once,
+    /// and keeps at most `limit` matches.
+    pub fn merge(mut matches: Vec<Self>, limit: usize) -> Vec<Self> {
+        matches.sort_by_cached_key(|found| (Reverse(found.date.text()), found.library.clone(), found.entry.path.clone()));
+        matches.dedup_by(|later, earlier| later.library == earlier.library && later.entry.path == earlier.entry.path);
+        matches.truncate(limit);
+        matches
+    }
+
     pub fn cursor(&self) -> TimelineCursor {
         TimelineCursor {
             date: self.date.text(),
@@ -40,14 +47,12 @@ struct OrderedMatch {
 /// The Entries of a snapshot that match a listing's conditions and have a row in the timeline index, newest timeline date first, with ties by path.
 ///
 /// Within one Library, which is a snapshot's, this is the order of the sequence of `listEntries` in timeline-date order, whose ties go by Library id and then by path.
-#[cfg_attr(not(test), expect(dead_code, reason = "the Scope reads a snapshot in timeline-date order from step 5"))]
 pub struct TimelineOrder {
     library: String,
     key: IndexKey,
     items: Vec<OrderedMatch>,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "the Scope reads a snapshot in timeline-date order from step 5"))]
 impl TimelineOrder {
     /// Orders `positions`, the matches among `entries`, by the dates of their rows in `index`, and leaves out the matches without a row.
     pub async fn build(entries: &ListingEntries, positions: &[usize], library: &str, key: IndexKey, index: &TimelineIndex) -> Result<Self> {
@@ -77,10 +82,14 @@ pub struct SnapshotTimeline {
     order: Arc<TimelineOrder>,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "the Scope reads a snapshot in timeline-date order from step 5"))]
 impl SnapshotTimeline {
     pub fn new(snapshot: Arc<ListingSnapshot>, order: Arc<TimelineOrder>) -> Self {
         Self { snapshot, order }
+    }
+
+    /// The Library of the snapshot's start.
+    pub fn library(&self) -> &str {
+        &self.order.library
     }
 
     /// The matches older than `cursor`, or the newest without one, newest first, at most `limit`.

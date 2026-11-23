@@ -46,6 +46,14 @@ impl ListingSource {
         &self.library_id
     }
 
+    pub fn snapshot(&self) -> &Arc<ListingSnapshot> {
+        &self.snapshot
+    }
+
+    pub fn options(&self) -> &ListOptions {
+        &self.options
+    }
+
     /// The identifier of the listing, with the version of ratings and tags while a rating or tag condition is given.
     pub fn snapshot_id(&self) -> String {
         self.options.selection.snapshot_id(self.snapshot.id().to_string())

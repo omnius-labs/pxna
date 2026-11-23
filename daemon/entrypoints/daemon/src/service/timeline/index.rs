@@ -258,6 +258,12 @@ impl TimelineStart {
     fn is_root(&self) -> bool {
         self.path == "/"
     }
+
+    /// Whether this start is an archive or inside one and `other` is in the same Library at or under its path, so that reading this start with the descendants
+    /// reads every row of `other` too.
+    pub fn reads_every_row_under(&self, other: &Self) -> bool {
+        self.in_archive && self.library == other.library && (other.path == self.path || other.path.starts_with(&format!("{}/", self.path)))
+    }
 }
 
 /// What a reading of the index keeps from the starts' rows: the Scope's starts and choices, and the kinds of the Filter.
@@ -276,7 +282,6 @@ pub struct TimelineReading {
 }
 
 impl TimelineReading {
-    #[cfg_attr(not(test), expect(dead_code, reason = "listEntries reads a Scope in timeline-date order through this from step 5"))]
     pub fn new(starts: Vec<TimelineStart>, recursive: bool, inside_archives: bool, kinds: Vec<TimelineKind>) -> Self {
         Self {
             starts,
@@ -294,6 +299,11 @@ impl TimelineReading {
             inside_archives: true,
             kinds: Vec::new(),
         }
+    }
+
+    /// The Libraries of the starts, which may repeat.
+    pub fn libraries(&self) -> impl Iterator<Item = &str> {
+        self.starts.iter().map(|start| start.library.as_str())
     }
 
     /// Whether every start is the root of a Library and the descendants are read, so that the counts held per Library can answer.
@@ -1116,7 +1126,6 @@ ON CONFLICT (library_id, path) DO UPDATE SET
     /// inside-archive, over the kinds kept and, unless the insides of archives are read, over rows outside archives. Otherwise the rows that
     /// the same reading returns are counted, which costs the rows under the starts, so the starts must not overlap, since a row two starts read
     /// would be counted twice.
-    #[cfg_attr(not(test), expect(dead_code, reason = "listEntryMonths counts the months of a Scope through this from step 5"))]
     pub async fn count_months(&self, reading: &TimelineReading) -> Result<Vec<(String, u64)>> {
         let sources = reading.sources()?;
         let rows = if reading.is_whole_libraries() {
@@ -1153,10 +1162,6 @@ ON CONFLICT (library_id, path) DO UPDATE SET
     }
 
     /// The rows of `paths` in `library`, found by the primary key in batches. A path without a row is not in the result.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the timeline-date order of a snapshot reads its matches' rows through this from step 5")
-    )]
     pub async fn rows_of(&self, library: &str, paths: &[String]) -> Result<HashMap<String, TimelineRow>> {
         let mut rows = HashMap::with_capacity(paths.len());
         for chunk in paths.chunks(CHUNK) {
@@ -1186,6 +1191,45 @@ ON CONFLICT (library_id, path) DO UPDATE SET
     const OLDER_THAN_CURSOR: &'static str = "(date < ? OR (date = ? AND (library_id, path) > (?, ?)))";
     /// cursor より新しい Entry の条件。引数は `OLDER_THAN_CURSOR` と同じ順に bind する。
     const NEWER_THAN_CURSOR: &'static str = "(date > ? OR (date = ? AND (library_id, path) < (?, ?)))";
+
+    /// The rows of `reading` older than `cursor`, or the newest rows without one, newest first, at most `limit`. `reading` has at least one start.
+    pub async fn older_rows(&self, reading: &TimelineReading, cursor: Option<&TimelineCursor>, limit: usize) -> Result<Vec<TimelineListedRow>> {
+        self.older(&reading.sources()?, cursor, limit).await
+    }
+
+    /// The `limit` rows of `reading` newer than `cursor` that are nearest to it, newest first.
+    pub async fn newer_rows(&self, reading: &TimelineReading, cursor: &TimelineCursor, limit: usize) -> Result<Vec<TimelineListedRow>> {
+        self.newer(&reading.sources()?, cursor, limit).await
+    }
+
+    /// The rows of `reading` dated before `date`, newest first, at most `limit`.
+    pub async fn older_than_date_rows(&self, reading: &TimelineReading, date: &str, limit: usize) -> Result<Vec<TimelineListedRow>> {
+        let mut rows = Vec::new();
+        for source in reading.sources()? {
+            rows.extend(source.older_than_date(&self.db, date, limit).await?);
+        }
+        Ok(TimelineListedRow::merge(rows, limit))
+    }
+
+    /// The row at `path` of `library` when `reading` reads it.
+    pub async fn row_of(&self, reading: &TimelineReading, library: &str, path: &str) -> Result<Option<TimelineListedRow>> {
+        for source in reading.sources()? {
+            if let Some(row) = source.row(&self.db, library, path).await? {
+                return Ok(Some(row));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Whether `reading` has a row newer than `cursor`.
+    pub async fn exists_newer(&self, reading: &TimelineReading, cursor: &TimelineCursor) -> Result<bool> {
+        self.exists(&reading.sources()?, Self::NEWER_THAN_CURSOR, cursor).await
+    }
+
+    /// Whether `reading` has a row older than `cursor`.
+    pub async fn exists_older(&self, reading: &TimelineReading, cursor: &TimelineCursor) -> Result<bool> {
+        self.exists(&reading.sources()?, Self::OLDER_THAN_CURSOR, cursor).await
+    }
 
     /// Rows older than `cursor`, or the newest rows without one, merged from every source, newest first.
     async fn older(&self, sources: &[TimelineSource], cursor: Option<&TimelineCursor>, limit: usize) -> Result<Vec<TimelineListedRow>> {
