@@ -791,6 +791,9 @@ For archives, `FileStorageArchive::block_groups` and `extract_group` extract eac
 `LibraryMutation`, at the same point as discarding listing snapshots, tells `TimelineService` the changed Entry's path via `apply_changes`.
 For renames and moves within the same Library, `renamed` reassigns the rows' paths.
 The API has 4 endpoints: `GET /timeline/entries`, `GET /timeline/months`, `GET /timeline/status`, and `POST /timeline/refresh`, each taking a set of Libraries.
+`TimelineIndex` holds the per-month counts per Library, month, kind, and whether the Entry is inside an archive; a migration recounts them from the rows, and triggers keep them in step with the rows, raising a count by an upsert, so an upsert that changes a row's kind or local file moves it too.
+A `TimelineReading` of starts reads the rows of a Scope in timeline-date order (§7): the roots of Libraries together by the date order, every other start by the range of its path, with the kinds, the descendants, and the insides of archives, and `count_months` sums the held counts for whole Libraries and otherwise counts the rows. `listTimelineEntries` and `listTimelineMonths` are served by the same code over whole Libraries.
+`ListingSnapshot::timeline` keeps the order of a start's matches of a name, rating, or tag condition by the dates of their rows (`TimelineIndex::rows_of`), and `ScopeTimeline` merges these sequences for `listEntries` with `sort=timeline_date` and `listEntryMonths` ([Listing and Search Design §9.1](./listing.md#91-current-code)).
 A video's `creation_time` is read by `MediaTools::probe_creation_time`.
 `TimelineScanner` passes the direct children of every non-hidden folder it enumerates to the name index with the scan's generation, and sweeps it next to the timeline index. `TimelineService` marks a Library's name index usable after a full aggregation, and startup also starts a full aggregation for a Library whose name index is not usable ([Listing and Search Design §9.1](./listing.md#91-current-code)).
 
@@ -801,11 +804,11 @@ Only the dependencies must be respected.
 
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
-| TL1 | Read timeline-date order for `listEntries` over a Scope and a Filter, with Library roots by the date order, folder starts by their paths, conditions over the name index's matches, and the insides of archives left out by the local file except under an archive start (§7) | L4 of [Listing and Search Design §9.2](./listing.md#92-roadmap) | Not started |
-| TL2 | Hold the per-month counts per kind and whether inside an archive, and return them over a Scope and a Filter, summed in advance for whole Libraries without conditions (§5, §7) | TL1 | Not started |
+| TL1 | Read timeline-date order for `listEntries` over a Scope and a Filter, with Library roots by the date order, folder starts by their paths, conditions over the name index's matches, and the insides of archives left out by the local file except under an archive start (§7) | L4 of [Listing and Search Design §9.2](./listing.md#92-roadmap) | Done |
+| TL2 | Hold the per-month counts per kind and whether inside an archive, and return them over a Scope and a Filter, summed in advance for whole Libraries without conditions (§5, §7) | TL1 | Done |
 | TL3 | Remove the timeline's own page and month APIs, which `listEntries` and the counts over a Scope replace (§9.1), once no client calls them | TL2 | Not started |
 
-TL1 and TL2 correspond to part of M28, and TL3 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
+TL1 and TL2 correspond to M28, and TL3 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
 The web client's current screen is in [Client Design §6.1](./client.md#61-current-code).
 
 For confirmed defects, see [issues.md](../issues.md).
