@@ -82,7 +82,8 @@ With this value the client decides the overall height of the listing from the fi
 `listEntries` takes a Scope in place of the target, and a Filter in place of `query` and `foldersOnly`, whose kind chooses the kinds of Entries and which also carries the rating and tag conditions (§5).
 It is one GET request to `/entries` whose query carries everything: each start is a repeated `start` whose value is the Library id followed by the Library-relative path without its leading `/` (`photos/2025`, or `photos` for the root), `recursive` and `insideArchives` give the Scope's choices, and the Filter's tags and kinds are repeated values, each kind one of `folder`, `archive`, `image`, `video`, and `other`.
 A Scope has at most 64 starts, and more, or a start whose value is not of this form, is `InvalidInput`.
-`sort` also takes the timeline date, which is read in descending order only; an ascending `order` with it is `InvalidInput`.
+`sort` also takes the timeline date, `timeline_date`, which is read in descending order only: without `order` it is descending, and an ascending `order` with it is `InvalidInput`.
+The sort of `listEntries` is a parameter of its own, so the sorts of the folder listings do not gain the timeline date.
 Hidden Entries are always excluded from it.
 
 ## 4. Snapshots
@@ -183,10 +184,11 @@ A `locate` request checks freshness as any request does (§4.3), so it may be an
 ### 4.6 Pages in Timeline-Date Order
 
 When `listEntries` is sorted by timeline date, its pages are not cut by `offset` but read in the order of the timeline index, from its rows, or, for a start with a name, rating, or tag condition, from the order of its matches that the start's snapshot keeps ([Timeline Design §7](./timeline.md#7-reading)).
-A page is pointed at by a cursor, the timeline date, Library id, and Library-relative path of the Entry at its edge, and the Entries after or before it are returned; the response carries the cursors of the pages on both sides, and a side with nothing further has none.
+A page is pointed at by a cursor, the timeline date, Library id, and Library-relative path of the Entry at its edge, given as `after` or `before`, and the Entries after or before it are returned; the response carries the cursors of the pages on both sides, and a side with nothing further has none.
 In place of a cursor, `month` starts at the newest Entry of that month, or of the next older month that has Entries, and `around` returns a page with the named Entry near its middle, named in the same form as `locate`.
 Without any of them the page starts at the newest Entry.
-`month`, `around`, and the cursors are accepted only in this order.
+At most one of `after`, `before`, `month`, and `around` is given, and they are accepted only in this order, where `offset`, `locate`, and `foldersFirst` are not.
+An archive start reads every row under it in this order, the archives nested in it included ([Timeline Design §9.1](./timeline.md#read-every-row-under-an-archive-start)).
 A cursor keeps its meaning only with the same Scope and Filter.
 
 The response has neither `totalCount` nor `offset`, so the client does not reserve the overall height and reads the continuation as it scrolls ([Client Design §5.1](./client.md#the-timeline-does-not-reserve-the-overall-height-and-reads-the-continuation)).
@@ -963,6 +965,18 @@ The starts of a Shelf are folders the owner picks one by one, and 64 leaves room
 No limit.
 A Shelf would never meet one, but one request could build as many snapshots as it names, so we rejected it.
 
+#### Give `listEntries` a Sort Parameter of Its Own
+
+**Decision**
+The sort of `listEntries` is a parameter of its own, which takes the sorts of the folder listings and `timeline_date`, and the folder listings keep theirs without the timeline date (§3).
+
+**Reason**
+A folder listing is cut from a snapshot in every order, and only `listEntries` reads the timeline index, so a shared parameter would offer the folder listings a value they could only reject.
+
+**Rejected alternative**
+Adding `timeline_date` to the shared sort parameter and rejecting it in the folder listings.
+The contract would have one sort parameter, but it would promise the folder listings an order they do not have, so we rejected it.
+
 #### Do Not Announce `listEntries` in the Capabilities
 
 **Decision**
@@ -1035,7 +1049,9 @@ The `[listing]` configuration, checking freshness by the target's version and el
 
 `listSearchEntries` is implemented by [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) and `LibraryBrowser::search_entries`: each Library's listing comes from the same snapshots as `listFolderEntries`, and `SearchResults` merges their sorted, filtered orders on every page (§5.3). `listFolderEntries` accepts only the name condition; rating and tag conditions are accepted only by the search API.
 
-`listEntries` answers the orders cut from snapshots over a Scope and a Filter at `GET /entries` ([entries.rs](../../daemon/entrypoints/daemon/src/interface/features/entries.rs)): up to 64 starts in one or more Libraries, `recursive` and `insideArchives`, the Filter's name, rating, tag, and kind, the sorts by name, kind, size, and modification time, and pages by `offset` or by `locate` in the form of a start. `Scope` and `ResolvedScope` in [scope.rs](../../daemon/entrypoints/daemon/src/service/listing/scope.rs) parse the start values and drop the starts that other starts cover, and `LibraryBrowser::resolve_scope` turns an unknown Library, a path that does not exist, and a plain file into missing starts. Each start has its own snapshot, keyed also by whether the insides are read; `ListOptions` carries the kinds, which a walk applies when it cuts a page and the name index applies in its query, so a recursive listing without a kind returns no folder and no archive that it read like a folder. An archive start is walked inside, and descends into nested archives down to `max_nested_depth` only with the insides ([listing.rs](../../daemon/entrypoints/daemon/src/service/listing.rs)). [merge.rs](../../daemon/entrypoints/daemon/src/service/listing/merge.rs) merges the per-start listings, which the search API uses too, and `ScopeResults` builds the response with `cutOffStarts`, `walkedStarts`, and `missingStarts`. Timeline-date order, its cursors, `month` and `around`, and the per-month counts over a Scope are not accepted yet, and `/capabilities` does not announce `listEntries`.
+`listEntries` answers the orders cut from snapshots over a Scope and a Filter at `GET /entries` ([entries.rs](../../daemon/entrypoints/daemon/src/interface/features/entries.rs)): up to 64 starts in one or more Libraries, `recursive` and `insideArchives`, the Filter's name, rating, tag, and kind, the sorts by name, kind, size, modification time, and timeline date, and pages by `offset` or by `locate` in the form of a start, or by cursor in timeline-date order. `Scope` and `ResolvedScope` in [scope.rs](../../daemon/entrypoints/daemon/src/service/listing/scope.rs) parse the start values and drop the starts that other starts cover, and `LibraryBrowser::resolve_scope` turns an unknown Library, a path that does not exist, and a plain file into missing starts. Each start has its own snapshot, keyed also by whether the insides are read; `ListOptions` carries the kinds, which a walk applies when it cuts a page and the name index applies in its query, so a recursive listing without a kind returns no folder and no archive that it read like a folder. An archive start is walked inside, and descends into nested archives down to `max_nested_depth` only with the insides ([listing.rs](../../daemon/entrypoints/daemon/src/service/listing.rs)). [merge.rs](../../daemon/entrypoints/daemon/src/service/listing/merge.rs) merges the per-start listings, which the search API uses too, and `ScopeResults` builds the response with `cutOffStarts`, `walkedStarts`, and `missingStarts`. `/capabilities` does not announce `listEntries`.
+
+`listEntries` reads timeline-date order through `ScopeTimeline` in [scope.rs](../../daemon/entrypoints/daemon/src/service/timeline/scope.rs) (§4.6): `ListOptions::from_entries` accepts `sort=timeline_date`, which records the order and keeps the name order that the snapshots of a start with a condition are built and matched with, and answers `InvalidInput` for an ascending `order`, `offset`, and `foldersFirst`; the route answers `InvalidInput` for `locate`, for an anchor with another sort, for more than one of `after`, `before`, `month`, and `around`, and for a malformed one, and `NotFound` for an `around` outside the sequence. `ScopeTimeline` resolves the Scope as the other orders do and rejects a kind other than images and videos. Without a name, rating, or tag condition it reads the starts together from the timeline index: Library roots by the date order, every other start by the range of its path, with the kinds, `recursive`, and the insides left out by the local file, except that a start that is an archive or inside one reads every row under it. With one, each start's snapshot keeps the order of its matches by the dates of their rows (`ListingSnapshot::timeline`, keyed as the name index's answer is, one per snapshot), so the Entries are the snapshot's and the starts cut off and walked are named. The response is the same `EntryListing` with `previous` and `next` and the timeline fields of `ScopedEntry`, and `listEntryMonths` at `GET /entries/months` returns `TimelineMonths` over the same Scope and Filter.
 
 `locate` and the response's `offset` of §4.5 are implemented in [listing.rs](../../daemon/entrypoints/daemon/src/service/listing.rs) for the detail listing, in [summary.rs](../../daemon/entrypoints/daemon/src/service/listing/summary.rs) for the summary listing, and in [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) for the search. The page is cut at a multiple of `limit` after the conditions are applied. The routes answer `InvalidInput` for `locate` with `offset`, for `locate` and `locateLibraryId` not given together in a search, and for a `locateLibraryId` outside `libraryIds`, and `NotFound` for an Entry outside the sequence. The web client asks with `locate` when the viewer URL or "Show in folder" names an Entry it has not read (Client Design §3.5).
 
@@ -1055,9 +1071,9 @@ Only the dependencies must be respected.
 | L1 | Implement the name index, its update by aggregation and by the daemon's own changes, and answering recursive listings with name, rating, and tag conditions from it (§5.1, §5.2) | None | Done |
 | L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Done |
 | L3 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while it is not usable (§5.1, §5.2) | L1 | Done |
-| L4 | Implement `listEntries` over a Scope and a Filter with pages by `offset` and by cursor, the starts cut off, walked, and missing, and `locate` in the form of a start (§3, §4.5, §4.6, §5.3) | L2, L3 | In progress |
+| L4 | Implement `listEntries` over a Scope and a Filter with pages by `offset` and by cursor, the starts cut off, walked, and missing, and `locate` in the form of a start (§3, §4.5, §4.6, §5.3) | L2, L3 | Done |
 | L5 | Remove the search API that `listEntries` replaces (§8.1) once no client calls it | L4 | Not started |
 
-L1 corresponds to M19, L2 to M24, L3 to M27, L4 to part of M28, and L5 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
+L1 corresponds to M19, L2 to M24, L3 to M27, L4 to M28, and L5 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
 
 For confirmed defects, see [issues.md](../issues.md).

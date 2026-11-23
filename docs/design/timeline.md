@@ -239,18 +239,21 @@ Each start is read from the index in one of two ways.
 A start that is the root of a Library follows the rows in the index's order, which puts the timeline date first, not the Library, so that several Libraries are read together.
 A start that is a folder or an archive takes the rows under its path through the primary key and orders them by timeline date, so the cost of a page grows with the Entries under the start, not with the Library.
 When the Scope does not read the descendants of its starts, both kinds of start take the rows under the start's path through the primary key and keep only its direct children, since the date order would skip the whole Library to find them; the insides of an archive among those children are its descendants and are not read.
-When the Scope does not read the insides of archives, only rows whose path is their local file's are read, except under a start that is an archive or a path inside one, which always reads that archive's inside ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)).
+When the Scope does not read the insides of archives, only rows whose path is their local file's are read, except under a start that is an archive or a path inside one, which always reads that archive's inside ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), the archives nested in it included, since the rows do not tell a nested archive's Entries apart (§9.1).
 The per-start sequences are merged in the order above, and an Entry reached from two starts is listed once, as in other listings ([Listing and Search Design §5.3](./listing.md#53-listing-several-starts)).
 
-When the Filter has a name, rating, or tag condition, the candidates are the matches that the name index answers for each start ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), and they are ordered by the timeline dates of their rows.
+When the Filter has a name, rating, or tag condition, the candidates are the matches of each start's listing, which the name index answers or a walk finds ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), and they are ordered by the timeline dates of their rows.
+An archive start is then walked, so its matches include the Entries of the archives nested in it only when the Scope reads the insides of archives, unlike its rows without a condition (§9.1).
 That order is computed once from the rows of the matches and kept in the start's snapshot, as the other orders of a snapshot are ([Listing and Search Design §4.1](./listing.md#41-the-unit-that-is-built)), and pages and per-month counts are cut from it.
 A match without a row, which is not an image or video or has not been aggregated yet, is not listed.
 The matches are bounded per start by the recursion limit and are walked while the name index is not usable, so in this case the response names the starts cut off or walked, as other listings over a Scope do.
 
 The Entries of a page are returned as the same `FileSystemEntry` as listings, with the Library, the timeline date, and the timeline date source added.
+Without a condition the Entry is built from its row; with one it is the Entry of the start's snapshot, whose attributes were read from the file system, with the date of its row (§9.1).
 The Entry of a file that vanished externally is also returned until the next aggregation.
 
 The per-month counts take the same Scope and Filter and are returned by `listEntryMonths` as a sequence in newest-month-first order ([Listing and Search Design §8.1](./listing.md#serve-the-listing-at-entries-and-its-per-month-counts-at-entriesmonths)).
+A kind other than images and videos is `InvalidInput` there too, and the response holds the months alone; the starts cut off, walked, and missing are named by `listEntries` (§9.1).
 When every start is the root of a Library, the Scope reads descendants, and the Filter has no name, rating, or tag condition, they are the sums of the counts held per Library, kind, and whether the Entry is inside an archive (§5), taking the kinds the Filter keeps and leaving out the insides of archives when the Scope does not read them.
 Otherwise they are counted on each request from the rows, or from the matches, that the same reading would return, so their cost grows with the Entries in the Scope (§9.2).
 
@@ -690,6 +693,45 @@ The counts always equal the rows counted by month (§5), so the rows already hol
 Discarding the index and aggregating again.
 No migration would be written, but every image and video, those inside archives included, would be read again for dates the rows already hold, so we rejected it.
 
+#### Read Every Row Under an Archive Start
+
+**Decision**
+In timeline-date order, a start that is an archive or a path inside one reads every row under its path, the Entries of the archives nested in it included, whether or not the Scope reads the insides of archives (§7).
+
+**Reason**
+A row holds the outermost archive as its local file, so the rows under an archive start do not tell which of them are inside a nested archive, and the rule of the orders cut from snapshots, which read nested archives only with the insides ([Listing and Search Design §8.1](./listing.md#walk-a-start-that-is-an-archive)), could be applied only by opening the archive.
+
+With a name, rating, or tag condition the start is walked like any archive start ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), so its matches follow that rule instead, and the timeline then lists what the grid lists.
+
+**Rejected alternative**
+Leaving out the Entries of nested archives by the archive marks of the name index.
+The timeline would list what the grid lists, but every page would join the two indexes, which are separate files, so we rejected it.
+
+#### Return the Attributes the Snapshot Read for the Matches of a Condition
+
+**Decision**
+In timeline-date order, the Entry of a match of a name, rating, or tag condition is the Entry of the start's snapshot, with the timeline date and its source of its row added, and the Entry of a start without a condition is built from its row (§7).
+
+**Reason**
+The snapshot already read the match's attributes from the file system and dropped the matches that had gone ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), so its Entry is newer than the row, which is as old as the last aggregation.
+A start without a condition has no snapshot, and its rows hold what the timeline has always returned.
+
+**Rejected alternative**
+Building every Entry from its row.
+Both kinds of start would return the same shape of Entry from one source, but the newer attributes of the matches would be thrown away, so we rejected it.
+
+#### Return Only the Months from the Per-Month Counts
+
+**Decision**
+`listEntryMonths` returns the months and their counts alone, and the starts cut off, walked, and missing are named only by `listEntries` (§7).
+
+**Reason**
+The web client shows the months of the open Shelf beside its pages ([Client Design §3.10](./client.md#310-timeline-layout)), which are read with the same Scope and Filter and name those starts (§7), and the months keep the schema `TimelineMonths` that clients already read ([Listing and Search Design §8.1](./listing.md#serve-the-listing-at-entries-and-its-per-month-counts-at-entriesmonths)).
+
+**Rejected alternative**
+Adding the three lists of starts to the months.
+A client that read only the months would learn of them too, but the months are shown beside those pages, and the schema could no longer be shared, so we rejected it.
+
 ### 9.2 Deferred
 
 #### Whether Timeline-Date Order Stays Fast over Folders and Conditions
@@ -749,6 +791,9 @@ For archives, `FileStorageArchive::block_groups` and `extract_group` extract eac
 `LibraryMutation`, at the same point as discarding listing snapshots, tells `TimelineService` the changed Entry's path via `apply_changes`.
 For renames and moves within the same Library, `renamed` reassigns the rows' paths.
 The API has 4 endpoints: `GET /timeline/entries`, `GET /timeline/months`, `GET /timeline/status`, and `POST /timeline/refresh`, each taking a set of Libraries.
+`TimelineIndex` holds the per-month counts per Library, month, kind, and whether the Entry is inside an archive; a migration recounts them from the rows, and triggers keep them in step with the rows, raising a count by an upsert, so an upsert that changes a row's kind or local file moves it too.
+A `TimelineReading` of starts reads the rows of a Scope in timeline-date order (§7): the roots of Libraries together by the date order, every other start by the range of its path, with the kinds, the descendants, and the insides of archives, and `count_months` sums the held counts for whole Libraries and otherwise counts the rows. `listTimelineEntries` and `listTimelineMonths` are served by the same code over whole Libraries.
+`ListingSnapshot::timeline` keeps the order of a start's matches of a name, rating, or tag condition by the dates of their rows (`TimelineIndex::rows_of`), and `ScopeTimeline` merges these sequences for `listEntries` with `sort=timeline_date` and `listEntryMonths` ([Listing and Search Design §9.1](./listing.md#91-current-code)).
 A video's `creation_time` is read by `MediaTools::probe_creation_time`.
 `TimelineScanner` passes the direct children of every non-hidden folder it enumerates to the name index with the scan's generation, and sweeps it next to the timeline index. `TimelineService` marks a Library's name index usable after a full aggregation, and startup also starts a full aggregation for a Library whose name index is not usable ([Listing and Search Design §9.1](./listing.md#91-current-code)).
 
@@ -759,11 +804,11 @@ Only the dependencies must be respected.
 
 | No. | Content | Dependencies assumed | State |
 | --- | --- | --- | --- |
-| TL1 | Read timeline-date order for `listEntries` over a Scope and a Filter, with Library roots by the date order, folder starts by their paths, conditions over the name index's matches, and the insides of archives left out by the local file except under an archive start (§7) | L4 of [Listing and Search Design §9.2](./listing.md#92-roadmap) | Not started |
-| TL2 | Hold the per-month counts per kind and whether inside an archive, and return them over a Scope and a Filter, summed in advance for whole Libraries without conditions (§5, §7) | TL1 | Not started |
+| TL1 | Read timeline-date order for `listEntries` over a Scope and a Filter, with Library roots by the date order, folder starts by their paths, conditions over the name index's matches, and the insides of archives left out by the local file except under an archive start (§7) | L4 of [Listing and Search Design §9.2](./listing.md#92-roadmap) | Done |
+| TL2 | Hold the per-month counts per kind and whether inside an archive, and return them over a Scope and a Filter, summed in advance for whole Libraries without conditions (§5, §7) | TL1 | Done |
 | TL3 | Remove the timeline's own page and month APIs, which `listEntries` and the counts over a Scope replace (§9.1), once no client calls them | TL2 | Not started |
 
-TL1 and TL2 correspond to part of M28, and TL3 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
+TL1 and TL2 correspond to M28, and TL3 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
 The web client's current screen is in [Client Design §6.1](./client.md#61-current-code).
 
 For confirmed defects, see [issues.md](../issues.md).

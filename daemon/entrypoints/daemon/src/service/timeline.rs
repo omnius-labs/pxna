@@ -14,17 +14,23 @@ use serde::Deserialize;
 
 use omnius_pxna_engine::service::{ArchiveIdentity, MediaTools, SourceFingerprint, StorageService};
 
-use crate::{config::LibraryConfig, prelude::*, service::listing::NameIndex};
+use crate::{
+    config::LibraryConfig,
+    prelude::*,
+    service::listing::{ListOptions, ListingSnapshot, NameIndex, SnapshotTimeline},
+};
 
 mod date;
 mod index;
 mod rules;
 mod scanner;
+mod scope;
 
 pub use date::*;
 pub use index::*;
 pub use rules::*;
 pub use scanner::*;
+pub use scope::*;
 
 /// 定期の集計の時機を確かめる間隔。
 const SCHEDULE_TICK: Duration = Duration::from_secs(60);
@@ -236,6 +242,19 @@ impl TimelineService {
     pub async fn page(&self, library_ids: &[String], anchor: &TimelineAnchor, limit: usize) -> Result<TimelinePage> {
         self.libraries(library_ids)?;
         self.index.page(library_ids, anchor, limit).await
+    }
+
+    /// The rows of `reading` as a sequence to merge, which `ScopeTimeline` reads the index through. A start in a Library that does not exist is `NotFound`.
+    pub fn rows(&self, reading: TimelineReading) -> Result<RowSequence> {
+        let libraries = reading.libraries().map(str::to_string).collect::<Vec<_>>();
+        self.libraries(&libraries)?;
+        Ok(RowSequence::new(self.index.clone(), reading))
+    }
+
+    /// The order of the matches of `snapshot`, the snapshot of a start in `library_id`, by the timeline dates of their rows. A Library that does not exist is `NotFound`.
+    pub async fn snapshot_timeline(&self, snapshot: &Arc<ListingSnapshot>, library_id: &str, options: &ListOptions) -> Result<SnapshotTimeline> {
+        self.library(library_id)?;
+        snapshot.timeline(library_id, options, &self.index).await
     }
 
     /// `library_ids` の月ごとの件数の和。どれかの Library がなければ `NotFound` にする。

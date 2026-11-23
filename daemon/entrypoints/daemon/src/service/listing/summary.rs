@@ -52,6 +52,7 @@ impl SummaryOptions {
             kinds: EntryKinds::default(),
             inside_archives: false,
             scoped: false,
+            timeline: false,
             offset: query.offset.unwrap_or(0),
             limit: ListOptions::parse_limit(query.limit)?,
         }))
