@@ -70,6 +70,8 @@ pub struct SnapshotKey {
     path: String,
     recursive: bool,
     include_hidden: bool,
+    /// Whether the Scope reads the insides of archives, since a walk and an answer from the name index hold different Entries for the same start.
+    inside_archives: bool,
     /// Set for a listing answered from the name index, which holds only the matches of these conditions.
     conditions: Option<IndexKey>,
 }
@@ -82,6 +84,7 @@ impl SnapshotKey {
             path: format!("/{}", relative.segments().join("/")),
             recursive: options.recursive(),
             include_hidden: options.include_hidden(),
+            inside_archives: options.inside_archives(),
             conditions: None,
         })
     }
@@ -334,7 +337,10 @@ impl ListingSnapshots {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service::listing::tests::{entry, query};
+    use crate::service::listing::{
+        EntryKind, EntryKinds,
+        tests::{entry, query},
+    };
     use futures::poll;
     use omnius_core_base::clock::FakeClockUtc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -354,6 +360,29 @@ mod tests {
     }
     async fn get(snapshots: &Arc<ListingSnapshots>, path: &str, count: usize) -> Arc<ListingSnapshot> {
         snapshots.get_or_scan(key(path), None, move || async move { Ok(entries(count)) }).await.unwrap()
+    }
+
+    #[test]
+    fn snapshot_keys_differ_by_the_insides_of_archives_test() -> testresult::TestResult {
+        let key = |recursive: bool, inside_archives: bool| {
+            let mut q = query(None, None);
+            q.recursive = Some(recursive);
+            SnapshotKey::new("test", "/", &ListOptions::from_query(&q)?.with_scope(EntryKinds::default(), inside_archives))
+        };
+        assert_ne!(key(true, false)?, key(true, true)?);
+        assert_eq!(key(true, true)?, key(true, true)?);
+        assert_eq!(key(false, false)?, key(false, true)?, "the insides change nothing in a listing of direct children");
+        let scoped = |kinds: &[EntryKind], inside_archives: bool| {
+            let mut q = query(None, None);
+            q.recursive = Some(true);
+            let options = ListOptions::from_query(&q)?.with_scope(EntryKinds::of(kinds.iter().copied()), inside_archives);
+            let conditions = options.index_conditions().expect("a recursive listing that reads the insides is answered from the index");
+            SnapshotKey::new("test", "/", &options).map(|key| key.answered_from(&conditions))
+        };
+        assert_ne!(scoped(&[], true)?, scoped(&[EntryKind::Image], true)?);
+        assert_eq!(scoped(&[EntryKind::Image], true)?, scoped(&[EntryKind::Image], true)?);
+        assert_ne!(scoped(&[], true)?, key(true, true)?, "an answer from the index does not share the walk's snapshot");
+        Ok(())
     }
 
     #[tokio::test]

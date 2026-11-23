@@ -10,7 +10,7 @@ use crate::{
     prelude::*,
     service::{
         library::{EntryConverter, LibraryPathResolver, LibraryRelativePath},
-        listing::{IndexCandidates, IndexConditions, ListingEntries, NameCursor, NameHit, NameIndex, NameQuery},
+        listing::{EntryKinds, IndexCandidates, IndexConditions, ListingEntries, NameCursor, NameHit, NameIndex, NameQuery},
     },
 };
 
@@ -52,19 +52,23 @@ impl IndexedListing {
     /// The limit counts matches that still exist: the index is read in batches, and an Entry that has gone does not take a place.
     pub async fn entries(&self, library: &LibraryConfig, start: &str, conditions: &IndexConditions, max_entries: usize) -> Result<Option<ListingEntries>> {
         let terms = conditions.terms().to_vec();
-        let query = |only_media| NameQuery {
+        let inside_archives = conditions.inside_archives();
+        let query = |kinds| NameQuery {
             library: library.id.clone(),
             start: start.to_string(),
             terms: terms.clone(),
-            only_media,
+            kinds,
+            inside_archives,
         };
+        // Ratings and tags belong to images and videos only, so a rating or tag condition narrows the kinds to them.
+        let rated_kinds = conditions.kinds().intersect(EntryKinds::media());
         let mut found = Found::default();
         let answered = match conditions.candidates() {
-            IndexCandidates::Names => match self.names.search(query(false)) {
+            IndexCandidates::Names => match self.names.search(query(conditions.kinds())) {
                 Some(cursor) => self.drain(library, cursor, |_| true, &mut found, max_entries).await,
                 None => false,
             },
-            IndexCandidates::Unrated { rated, tagged } => match self.names.search(query(true)) {
+            IndexCandidates::Unrated { rated, tagged } => match self.names.search(query(rated_kinds)) {
                 Some(cursor) => {
                     let keep = |hit: &NameHit| !rated.contains(&hit.path) && tagged.is_none_or(|tagged| tagged.contains(&hit.path));
                     self.drain(library, cursor, keep, &mut found, max_entries).await
@@ -73,7 +77,7 @@ impl IndexedListing {
             },
             IndexCandidates::Paths(paths) => {
                 let under = paths.into_iter().filter(|path| Self::is_under(start, path)).collect::<Vec<_>>();
-                match self.names.lookup(&library.id, &under, &terms, true).await {
+                match self.names.lookup(&library.id, &under, &terms, rated_kinds, inside_archives).await {
                     Some(hits) => {
                         for batch in hits.chunks(READ_BATCH) {
                             if !self.collect(library, batch.to_vec(), &mut found, max_entries).await {
@@ -87,7 +91,7 @@ impl IndexedListing {
             }
         };
         // The index may have failed while the attributes were read, and then its answer is not to be trusted.
-        Ok((answered && self.names.is_serving()).then(|| ListingEntries::from_index(found.entries, found.truncated)))
+        Ok((answered && self.names.is_serving()).then(|| ListingEntries::from_index(found.entries, found.truncated, conditions.inside_archives())))
     }
 
     /// Reads a search batch by batch until the limit is passed or the matches run out. Returns whether the index answered.
@@ -163,7 +167,7 @@ mod tests {
     use crate::{
         config::ListingConfig,
         service::{
-            listing::ListOptions,
+            listing::{EntryKind, EntryKinds, ListOptions},
             mutation::tests::{state, state_with_clock},
         },
         state::DaemonState,
@@ -574,6 +578,161 @@ mod tests {
         // The archive itself is found like any other file.
         let found = find(&state, "report").await?;
         assert_eq!(paths(&found), set(&["/report.txt", "/pics/report.png", "/report.7z"]));
+        Ok(())
+    }
+
+    /// A recursive listing of the test Library as `listEntries` reads it: the kinds of the Filter and the Scope's choice of reading the insides of archives.
+    /// Returns the paths of the page and whether the name index answered.
+    async fn scoped(
+        state: &DaemonState,
+        path: &str,
+        query: Option<&str>,
+        rating: Option<&str>,
+        tags: &[&str],
+        kinds: &[EntryKind],
+        inside_archives: bool,
+    ) -> TestResult<(BTreeSet<String>, bool)> {
+        let params = models::ListSearchEntriesQueryParams {
+            library_ids: vec![models::LibraryId(LIBRARY.to_string())],
+            path: None,
+            recursive: Some(true),
+            query: query.map(str::to_string),
+            rating: rating.map(str::to_string),
+            tag: tags.iter().map(|tag| models::TagName(tag.to_string())).collect(),
+            sort: None,
+            order: None,
+            folders_first: None,
+            offset: None,
+            locate: None,
+            locate_library_id: None,
+            limit: Some(1000),
+        };
+        let options = ListOptions::from_search(&params)?.with_scope(EntryKinds::of(kinds.iter().copied()), inside_archives);
+        let selection = options.marks().select(&state.rating_tags, USER, LIBRARY).await?;
+        let options = options.with_selection(selection);
+        let snapshot = state.library.snapshot(LIBRARY, path, &options).await?;
+        let page = snapshot.page(&options);
+        assert!(!page.truncated);
+        Ok((page.entries.iter().map(|entry| entry.path.clone()).collect(), snapshot.entries().indexed()))
+    }
+
+    /// A Library with an archive that holds a folder, images, and a nested archive, beside entries outside archives.
+    async fn library_with_archives(state: &DaemonState) -> TestResult {
+        let root = root(state);
+        write(&root, "top.txt", b"1")?;
+        write(&root, "sub/inner.png", b"2")?;
+        let nested = root.parent().expect("the Library has a parent").join("nested.7z");
+        write_7z(&nested, &[("c.png", b"nested")])?;
+        write_7z(
+            &root.join("pack.7z"),
+            &[("a.txt", b"x"), ("dir/b.png", b"y"), ("dir/deeper/d.mp4", b"z"), ("nested.7z", &std::fs::read(&nested)?)],
+        )?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_index_returns_the_insides_of_archives_only_when_they_are_read_test() -> TestResult {
+        let (_dir, state) = state().await?;
+        library_with_archives(&state).await?;
+        aggregate(&state).await?;
+        let none: &[EntryKind] = &[];
+
+        // Without the insides there is no condition for the index to answer, so a walk lists the archive as one Entry.
+        let (listed, indexed) = scoped(&state, "/", None, None, &[], none, false).await?;
+        assert!(!indexed);
+        assert_eq!(listed, set(&["/top.txt", "/sub/inner.png", "/pack.7z"]));
+
+        // With them the index answers with no condition, and an archive read like a folder is not an Entry of its own.
+        let (listed, indexed) = scoped(&state, "/", None, None, &[], none, true).await?;
+        assert!(indexed);
+        assert_eq!(
+            listed,
+            set(&[
+                "/top.txt",
+                "/sub/inner.png",
+                "/pack.7z/a.txt",
+                "/pack.7z/dir/b.png",
+                "/pack.7z/dir/deeper/d.mp4",
+                "/pack.7z/nested.7z/c.png"
+            ]),
+            "nested archives are read down to the depth limit"
+        );
+
+        // A name condition reads the same Scope the same way, and only the insides differ.
+        let (listed, indexed) = scoped(&state, "/", Some("png"), None, &[], none, false).await?;
+        assert!(indexed);
+        assert_eq!(listed, set(&["/sub/inner.png"]));
+        let (listed, indexed) = scoped(&state, "/", Some("png"), None, &[], none, true).await?;
+        assert!(indexed);
+        assert_eq!(listed, set(&["/sub/inner.png", "/pack.7z/dir/b.png", "/pack.7z/nested.7z/c.png"]));
+        let (listed, _) = scoped(&state, "/", Some("pack"), None, &[], none, false).await?;
+        assert_eq!(listed, set(&["/pack.7z"]), "an archive that is not read like a folder is a file");
+        let (listed, _) = scoped(&state, "/", Some("pack"), None, &[], none, true).await?;
+        assert!(listed.is_empty(), "and one that is read is not listed");
+
+        // A start below the root is answered from the index too.
+        let (listed, indexed) = scoped(&state, "/sub", None, None, &[], none, true).await?;
+        assert_eq!((listed, indexed), (set(&["/sub/inner.png"]), true));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_kinds_limit_what_the_index_returns_test() -> TestResult {
+        let (_dir, state) = state().await?;
+        library_with_archives(&state).await?;
+        aggregate(&state).await?;
+
+        let (listed, indexed) = scoped(&state, "/", None, None, &[], &[EntryKind::Archive], true).await?;
+        assert!(indexed);
+        assert_eq!(
+            listed,
+            set(&["/pack.7z", "/pack.7z/nested.7z"]),
+            "an archive that is asked for is returned though it is read like a folder"
+        );
+        let (listed, _) = scoped(&state, "/", None, None, &[], &[EntryKind::Folder], true).await?;
+        assert_eq!(listed, set(&["/sub", "/pack.7z/dir", "/pack.7z/dir/deeper"]));
+        let (listed, _) = scoped(&state, "/", None, None, &[], &[EntryKind::Folder], false).await?;
+        assert_eq!(listed, set(&["/sub"]));
+        let (listed, _) = scoped(&state, "/", None, None, &[], &[EntryKind::Image, EntryKind::Video], true).await?;
+        assert_eq!(
+            listed,
+            set(&["/sub/inner.png", "/pack.7z/dir/b.png", "/pack.7z/dir/deeper/d.mp4", "/pack.7z/nested.7z/c.png"])
+        );
+        let (listed, _) = scoped(&state, "/", None, None, &[], &[EntryKind::Video], true).await?;
+        assert_eq!(listed, set(&["/pack.7z/dir/deeper/d.mp4"]));
+        let (listed, _) = scoped(&state, "/", Some("t"), None, &[], &[EntryKind::Other], true).await?;
+        assert_eq!(listed, set(&["/top.txt", "/pack.7z/a.txt"]));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_rating_or_tag_condition_keeps_images_and_videos_among_the_kinds_test() -> TestResult {
+        let (_dir, state) = state().await?;
+        library_with_archives(&state).await?;
+        state.rating_tags.set_rating(USER, LIBRARY, "/pack.7z/dir/b.png", Some(Rating::Good)).await?;
+        state.rating_tags.set_rating(USER, LIBRARY, "/pack.7z/dir/deeper/d.mp4", Some(Rating::Good)).await?;
+        state.rating_tags.set_rating(USER, LIBRARY, "/sub/inner.png", Some(Rating::Good)).await?;
+        state.rating_tags.set_entry_tags(USER, LIBRARY, "/pack.7z/nested.7z/c.png", &["trip".to_string()]).await?;
+        aggregate(&state).await?;
+        let none: &[EntryKind] = &[];
+
+        let (listed, indexed) = scoped(&state, "/", None, Some("good"), &[], none, true).await?;
+        assert!(indexed);
+        assert_eq!(listed, set(&["/sub/inner.png", "/pack.7z/dir/b.png", "/pack.7z/dir/deeper/d.mp4"]));
+        let (listed, _) = scoped(&state, "/", None, Some("good"), &[], none, false).await?;
+        assert_eq!(listed, set(&["/sub/inner.png"]), "what is inside an archive is not found unless the insides are read");
+        let (listed, _) = scoped(&state, "/", None, Some("good"), &[], &[EntryKind::Video], true).await?;
+        assert_eq!(listed, set(&["/pack.7z/dir/deeper/d.mp4"]));
+        let (listed, _) = scoped(&state, "/", None, Some("good"), &[], &[EntryKind::Folder, EntryKind::Other], true).await?;
+        assert!(listed.is_empty(), "folders and other files cannot be rated, so nothing is left of those kinds");
+        let (listed, _) = scoped(&state, "/", None, None, &["trip"], none, true).await?;
+        assert_eq!(listed, set(&["/pack.7z/nested.7z/c.png"]));
+        let (listed, _) = scoped(&state, "/", None, None, &["trip"], &[EntryKind::Video], true).await?;
+        assert!(listed.is_empty());
+        let (listed, _) = scoped(&state, "/", None, Some("none"), &[], none, true).await?;
+        assert_eq!(listed, set(&["/pack.7z/nested.7z/c.png"]), "the unrated images and videos, those inside archives included");
+        let (listed, _) = scoped(&state, "/", Some("d."), Some("good"), &[], none, true).await?;
+        assert_eq!(listed, set(&["/pack.7z/dir/deeper/d.mp4"]));
         Ok(())
     }
 

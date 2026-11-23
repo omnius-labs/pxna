@@ -20,7 +20,7 @@ use omnius_pxna_interface::models;
 use serde::{Deserialize, Serialize};
 use tracing::{Instrument as _, Span, field::Empty};
 
-use super::{EntryPosition, ListOptions, ListSort, ListSortKey, ListingInvalidation, MarkFilter, MarkSelection, NameFilter, SnapshotVersion, SortValue};
+use super::{EntryKinds, EntryPosition, ListOptions, ListSort, ListSortKey, ListingInvalidation, MarkFilter, MarkSelection, NameFilter, SnapshotVersion, SortValue};
 use crate::{
     config::ListingConfig,
     prelude::*,
@@ -49,6 +49,9 @@ impl SummaryOptions {
             filter: NameFilter::new(query.query.as_deref().unwrap_or_default()),
             marks: MarkFilter::default(),
             selection: MarkSelection::default(),
+            kinds: EntryKinds::default(),
+            inside_archives: false,
+            scoped: false,
             offset: query.offset.unwrap_or(0),
             limit: ListOptions::parse_limit(query.limit)?,
         }))

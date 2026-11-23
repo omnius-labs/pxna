@@ -242,6 +242,16 @@ pub(crate) mod tests {
         clock: Arc<dyn omnius_core_base::clock::Clock<chrono::Utc> + Send + Sync>,
         thumbnail: omnius_pxna_engine::service::ThumbnailOptions,
     ) -> TestResult<Fixture> {
+        fixture_with_listing(options, web_dir, clock, thumbnail, Default::default()).await
+    }
+
+    pub(crate) async fn fixture_with_listing(
+        options: ArchiveOptions,
+        web_dir: Option<std::path::PathBuf>,
+        clock: Arc<dyn omnius_core_base::clock::Clock<chrono::Utc> + Send + Sync>,
+        thumbnail: omnius_pxna_engine::service::ThumbnailOptions,
+        listing: crate::config::ListingConfig,
+    ) -> TestResult<Fixture> {
         let dir = tempfile::tempdir()?;
         let library = dir.path().join("library");
         std::fs::create_dir_all(library.join("photos"))?;
@@ -280,7 +290,7 @@ pub(crate) mod tests {
                 },
             ],
             storage: StorageConfig { archive: options },
-            listing: Default::default(),
+            listing,
             timeline: Default::default(),
             thumbnail,
             scheduler: Default::default(),

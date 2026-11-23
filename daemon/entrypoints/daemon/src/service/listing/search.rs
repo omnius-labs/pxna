@@ -1,166 +1,60 @@
-use std::sync::Arc;
-
 use omnius_pxna_interface::models;
 
-use crate::service::listing::{EntryPosition, ListOptions, ListSort, ListingSnapshot};
+use crate::service::listing::{ListOptions, ListingSource, MergedPage, MergedSources};
 
-/// 検索する 1 つの Library の一覧と、その Library の評価とタグで引いた条件。
-pub struct SearchSource {
-    library_id: String,
-    snapshot: Arc<ListingSnapshot>,
-    options: ListOptions,
-}
-
-impl SearchSource {
-    pub fn new(library_id: &str, snapshot: Arc<ListingSnapshot>, options: ListOptions) -> Self {
-        Self {
-            library_id: library_id.to_string(),
-            snapshot,
-            options,
-        }
-    }
-}
+/// A Library's listing for the search API, which has no starts.
+pub type SearchSource = ListingSource;
 
 /// Library ごとの一覧を、並べ方の順に 1 つの列へまとめる。まとめた列は持たず、ページを切るたびに先頭からまとめ直す。
 pub struct SearchResults {
     /// 要求で与えた Library の順。同じ並びの値の Entry は、この順に置く。
-    sources: Vec<SearchSource>,
-}
-
-/// Merges the matches of the Libraries into one sequence in sort order. It keeps no copy and yields from the head.
-struct Merge<'a> {
-    sources: &'a [SearchSource],
-    sort: ListSort,
-    matching: Vec<Vec<usize>>,
-    cursors: Vec<usize>,
-    heads: Vec<Option<EntryPosition>>,
-}
-
-impl<'a> Merge<'a> {
-    fn new(sources: &'a [SearchSource], sort: ListSort) -> Self {
-        let matching = sources.iter().map(|source| source.snapshot.matching(&source.options)).collect::<Vec<_>>();
-        let mut merge = Self {
-            sources,
-            sort,
-            matching,
-            cursors: vec![0_usize; sources.len()],
-            heads: Vec::new(),
-        };
-        merge.heads = (0..sources.len()).map(|source| merge.position(source, 0)).collect();
-        merge
-    }
-
-    fn position(&self, source: usize, cursor: usize) -> Option<EntryPosition> {
-        let index = *self.matching[source].get(cursor)?;
-        Some(self.sort.position(&self.sources[source].snapshot.entries().entries[index].entry))
-    }
-
-    fn total(&self) -> u64 {
-        self.matching.iter().map(|indices| indices.len() as u64).sum()
-    }
-
-    /// Only the same path in different Libraries compares equal, and the Library earlier in the request order wins.
-    fn next(&mut self) -> Option<(usize, usize)> {
-        let source = self
-            .heads
-            .iter()
-            .enumerate()
-            .filter_map(|(source, head)| head.as_ref().map(|head| (source, head)))
-            .min_by(|(a, a_head), (b, b_head)| self.sort.compare(a_head, b_head).then(a.cmp(b)))
-            .map(|(source, _)| source)?;
-        let index = self.matching[source][self.cursors[source]];
-        self.cursors[source] += 1;
-        self.heads[source] = self.position(source, self.cursors[source]);
-        Some((source, index))
-    }
-
-    fn entry(&self, source: usize, index: usize) -> models::SearchEntry {
-        let entry = self.sources[source].snapshot.entries().entries[index].entry.clone();
-        models::SearchEntry::new(self.sources[source].library_id.clone(), entry)
-    }
+    merged: MergedSources,
 }
 
 impl SearchResults {
-    pub fn new(sources: Vec<SearchSource>) -> Self {
-        Self { sources }
+    pub fn new(sources: Vec<ListingSource>) -> Self {
+        Self {
+            merged: MergedSources::new(sources),
+        }
     }
 
-    /// `options` の並べ方、`offset`、`limit` でページを切る。条件は Library ごとの `SearchSource` が持つ。
+    /// `options` の並べ方、`offset`、`limit` でページを切る。条件は Library ごとの `ListingSource` が持つ。
     pub fn page(&self, options: &ListOptions) -> models::SearchListing {
-        let mut merge = Merge::new(&self.sources, options.sort());
-        let total = merge.total();
-        let end = options.offset.saturating_add(options.limit as u64).min(total);
-        let mut entries = Vec::new();
-        let mut produced = 0_u64;
-        while produced < end {
-            let Some((source, index)) = merge.next() else {
-                break;
-            };
-            if produced >= options.offset {
-                entries.push(merge.entry(source, index));
-            }
-            produced += 1;
-        }
-        self.listing(entries, total, options.offset)
+        self.listing(self.merged.page(options))
     }
 
     /// Finds the position of the Entry at `path` and cuts the page that holds it at a multiple of `limit`.
     /// `library_id` selects the Library when the same path is in several.
     pub fn locate(&self, options: &ListOptions, library_id: &str, path: &str) -> Option<models::SearchListing> {
-        let mut merge = Merge::new(&self.sources, options.sort());
-        let mut position = 0_u64;
-        let found = loop {
-            let (source, index) = merge.next()?;
-            if self.sources[source].library_id == library_id && self.sources[source].snapshot.entries().entries[index].entry.path == path {
-                break position;
-            }
-            position += 1;
-        };
-        let limit = options.limit as u64;
-        let offset = found / limit * limit;
-
-        let mut merge = Merge::new(&self.sources, options.sort());
-        let total = merge.total();
-        let end = offset.saturating_add(limit).min(total);
-        let mut entries = Vec::new();
-        let mut produced = 0_u64;
-        while produced < end {
-            let Some((source, index)) = merge.next() else {
-                break;
-            };
-            if produced >= offset {
-                entries.push(merge.entry(source, index));
-            }
-            produced += 1;
-        }
-        Some(self.listing(entries, total, offset))
+        self.merged.locate(options, library_id, path).map(|page| self.listing(page))
     }
 
-    fn listing(&self, entries: Vec<models::SearchEntry>, total: u64, offset: u64) -> models::SearchListing {
-        let snapshot = self
-            .sources
-            .iter()
-            .map(|source| source.options.selection.snapshot_id(source.snapshot.id().to_string()))
-            .collect::<Vec<_>>()
-            .join(",");
-        let truncated = self
-            .sources
-            .iter()
-            .filter(|source| source.snapshot.entries().truncated)
-            .map(|source| models::LibraryId(source.library_id.clone()))
+    fn listing(&self, page: MergedPage) -> models::SearchListing {
+        let sources = self.merged.sources();
+        let entries = page
+            .entries
+            .into_iter()
+            .map(|merged| models::SearchEntry::new(sources[merged.source].library_id().to_string(), merged.entry))
             .collect();
-        let indexed = self.sources.iter().all(|source| source.snapshot.entries().indexed());
-        models::SearchListing::new(entries, total, offset, snapshot, truncated, indexed)
+        let truncated = sources
+            .iter()
+            .filter(|source| source.is_cut_off())
+            .map(|source| models::LibraryId(source.library_id().to_string()))
+            .collect();
+        let indexed = sources.iter().all(ListingSource::is_indexed);
+        models::SearchListing::new(entries, page.total_count, page.offset, self.merged.snapshot_id(), truncated, indexed)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use chrono::DateTime;
     use omnius_core_base::clock::FakeClockUtc;
 
     use super::*;
-    use crate::service::listing::{ListingEntries, ListingSnapshots, SnapshotKey, tests::entry};
+    use crate::service::listing::{ListingEntries, ListingSnapshot, ListingSnapshots, SnapshotKey, tests::entry};
 
     fn options(offset: u64, limit: u32) -> ListOptions {
         let query = models::ListSearchEntriesQueryParams {
