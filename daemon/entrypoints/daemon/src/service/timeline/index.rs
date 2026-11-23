@@ -157,6 +157,15 @@ impl TimelineListedRow {
         }
     }
 
+    /// Puts `rows` in the order of the sequence, newest timeline date first and then by Library id and path, keeps a row that several sources
+    /// read once, and keeps at most `limit` rows.
+    fn merge(mut rows: Vec<Self>, limit: usize) -> Vec<Self> {
+        rows.sort_by_cached_key(|listed| (std::cmp::Reverse(listed.row.date.text()), listed.library.clone(), listed.row.path.clone()));
+        rows.dedup_by(|later, earlier| later.library == earlier.library && later.row.path == earlier.row.path);
+        rows.truncate(limit);
+        rows
+    }
+
     fn from_row(row: &SqliteRow) -> Result<Self> {
         Ok(Self {
             library: row.try_get("library_id")?,
@@ -226,6 +235,227 @@ pub struct TimelinePage {
     pub next: Option<TimelineCursor>,
 }
 
+/// One start of a reading: a Library with its root or a path in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelineStart {
+    library: String,
+    /// The Library-relative path with its leading `/` and without a trailing one, or `/` for the root.
+    path: String,
+    /// Whether the start is an archive or a path inside one, which reads every row under it.
+    in_archive: bool,
+}
+
+impl TimelineStart {
+    pub fn new(library: &str, path: &str, in_archive: bool) -> Self {
+        let trimmed = path.trim_matches('/');
+        Self {
+            library: library.to_string(),
+            path: if trimmed.is_empty() { "/".to_string() } else { format!("/{trimmed}") },
+            in_archive,
+        }
+    }
+
+    fn is_root(&self) -> bool {
+        self.path == "/"
+    }
+}
+
+/// What a reading of the index keeps from the starts' rows: the Scope's starts and choices, and the kinds of the Filter.
+///
+/// A start that is the root of a Library reads the Library's rows, and any other start the rows under its path. Starts are not expected to
+/// overlap, since the caller drops the starts that another start covers; a start given twice is read once.
+#[derive(Debug, Clone)]
+pub struct TimelineReading {
+    starts: Vec<TimelineStart>,
+    /// Whether the descendants of the starts are read, and not only their direct children.
+    recursive: bool,
+    /// Whether the archives found under the starts are read. A start that is in an archive reads that archive's inside regardless.
+    inside_archives: bool,
+    /// The kinds to keep. None given keeps both images and videos.
+    kinds: Vec<TimelineKind>,
+}
+
+impl TimelineReading {
+    #[cfg_attr(not(test), expect(dead_code, reason = "listEntries reads a Scope in timeline-date order through this from step 5"))]
+    pub fn new(starts: Vec<TimelineStart>, recursive: bool, inside_archives: bool, kinds: Vec<TimelineKind>) -> Self {
+        Self {
+            starts,
+            recursive,
+            inside_archives,
+            kinds,
+        }
+    }
+
+    /// Every row of the Libraries `ids`, of both kinds, the insides of archives included.
+    fn of_libraries(ids: &[String]) -> Self {
+        Self {
+            starts: ids.iter().map(|id| TimelineStart::new(id, "/", false)).collect(),
+            recursive: true,
+            inside_archives: true,
+            kinds: Vec::new(),
+        }
+    }
+
+    /// The queries that read this: the Library roots together, which the date order serves, and every other start by its path.
+    ///
+    /// A start that is a root reads by the date order only when the descendants are read, since direct children are found by the path.
+    fn sources(&self) -> Result<Vec<TimelineSource>> {
+        if self.starts.is_empty() {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message("at least one start is needed"));
+        }
+        let mut roots = Vec::<String>::new();
+        let mut paths = Vec::<&TimelineStart>::new();
+        for start in &self.starts {
+            if start.is_root() && self.recursive {
+                if !roots.contains(&start.library) {
+                    roots.push(start.library.clone());
+                }
+            } else if !paths.contains(&start) {
+                paths.push(start);
+            }
+        }
+        let mut sources = Vec::new();
+        if !roots.is_empty() {
+            sources.push(TimelineSource::new(roots, None, self, false));
+        }
+        for start in paths {
+            sources.push(TimelineSource::new(vec![start.library.clone()], Some(&start.path), self, start.in_archive));
+        }
+        Ok(sources)
+    }
+}
+
+/// One query's worth of a reading: the Libraries it reads, the range of paths under a start, and the conditions on the rows.
+struct TimelineSource {
+    libraries: Vec<String>,
+    /// The lower and upper bounds of the paths under the start's path, which the start itself is not among. None for a whole Library.
+    range: Option<(String, String)>,
+    /// With direct children only, the position in a path, counting from 1, where the part after the start's path begins.
+    direct_from: Option<i64>,
+    /// Whether only rows whose path is their local file's are read, which leaves out the insides of archives.
+    outside_only: bool,
+    kinds: Vec<TimelineKind>,
+}
+
+impl TimelineSource {
+    fn new(libraries: Vec<String>, path: Option<&str>, reading: &TimelineReading, in_archive: bool) -> Self {
+        let path = path.map(|path| path.trim_end_matches('/')).filter(|path| !path.is_empty());
+        let mut kinds = reading.kinds.clone();
+        kinds.dedup();
+        Self {
+            libraries,
+            // `/` is followed by `0` in the order of bytes, so the paths under `path` are exactly those from `path/` up to `path0`.
+            range: path.map(|path| (format!("{path}/"), format!("{path}0"))),
+            direct_from: (!reading.recursive).then(|| path.map_or(2, |path| path.chars().count() as i64 + 2)),
+            // A start in an archive reads every row under it, whether or not the Scope reads the insides of archives.
+            outside_only: !reading.inside_archives && !in_archive,
+            kinds: if kinds.len() >= 2 { Vec::new() } else { kinds },
+        }
+    }
+
+    /// The condition on the rows. The values are bound by `bind`, in the same order.
+    fn condition(&self) -> String {
+        let mut parts = vec![format!("library_id IN ({})", vec!["?"; self.libraries.len()].join(", "))];
+        if self.range.is_some() {
+            parts.push("(path >= ? AND path < ?)".to_string());
+        }
+        if self.direct_from.is_some() {
+            parts.push("instr(substr(path, ?), '/') = 0".to_string());
+        }
+        if self.outside_only {
+            parts.push("path = file_path".to_string());
+        }
+        if let [kind] = self.kinds.as_slice() {
+            parts.push(format!("kind = '{}'", kind.as_str()));
+        }
+        parts.join(" AND ")
+    }
+
+    fn bind<'q>(&'q self, query: SqliteQuery<'q>) -> SqliteQuery<'q> {
+        let mut query = self.libraries.iter().fold(query, |query, id| query.bind(id.as_str()));
+        if let Some((lower, upper)) = &self.range {
+            query = query.bind(lower.as_str()).bind(upper.as_str());
+        }
+        if let Some(from) = self.direct_from {
+            query = query.bind(from);
+        }
+        query
+    }
+}
+
+impl TimelineSource {
+    /// The rows older than `cursor`, or the newest rows without one, newest first, at most `limit`.
+    async fn older(&self, db: &SqlitePool, cursor: Option<&TimelineCursor>, limit: usize) -> Result<Vec<TimelineListedRow>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut sql = format!("SELECT {} FROM timeline_entries WHERE {}", TimelineIndex::COLUMNS, self.condition());
+        if cursor.is_some() {
+            sql = format!("{sql} AND {}", TimelineIndex::OLDER_THAN_CURSOR);
+        }
+        let mut query = self.bind(sqlx::query(sqlx::AssertSqlSafe(format!("{sql} {} LIMIT ?", TimelineIndex::NEWEST_FIRST))));
+        if let Some(cursor) = cursor {
+            query = TimelineIndex::bind_cursor(query, cursor);
+        }
+        let rows = query.bind(i64::try_from(limit)?).fetch_all(db).await?;
+        rows.iter().map(TimelineListedRow::from_row).collect()
+    }
+
+    /// The rows before `date`, newest first, at most `limit`.
+    async fn older_than_date(&self, db: &SqlitePool, date: &str, limit: usize) -> Result<Vec<TimelineListedRow>> {
+        let sql = format!(
+            "SELECT {} FROM timeline_entries WHERE {} AND date < ? {} LIMIT ?",
+            TimelineIndex::COLUMNS,
+            self.condition(),
+            TimelineIndex::NEWEST_FIRST
+        );
+        let rows = self
+            .bind(sqlx::query(sqlx::AssertSqlSafe(sql)))
+            .bind(date)
+            .bind(i64::try_from(limit)?)
+            .fetch_all(db)
+            .await?;
+        rows.iter().map(TimelineListedRow::from_row).collect()
+    }
+
+    /// The rows newer than `cursor` that are nearest to it, at most `limit`, newest first.
+    async fn newer(&self, db: &SqlitePool, cursor: &TimelineCursor, limit: usize) -> Result<Vec<TimelineListedRow>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT {} FROM timeline_entries WHERE {} AND {} {} LIMIT ?",
+            TimelineIndex::COLUMNS,
+            self.condition(),
+            TimelineIndex::NEWER_THAN_CURSOR,
+            TimelineIndex::OLDEST_FIRST
+        );
+        let query = TimelineIndex::bind_cursor(self.bind(sqlx::query(sqlx::AssertSqlSafe(sql))), cursor);
+        let rows = query.bind(i64::try_from(limit)?).fetch_all(db).await?;
+        let mut rows = rows.iter().map(TimelineListedRow::from_row).collect::<Result<Vec<_>>>()?;
+        rows.reverse();
+        Ok(rows)
+    }
+
+    /// Whether the source has a row on the side of `cursor` that `than_cursor` names.
+    async fn exists(&self, db: &SqlitePool, than_cursor: &str, cursor: &TimelineCursor) -> Result<bool> {
+        let sql = format!("SELECT EXISTS (SELECT 1 FROM timeline_entries WHERE {} AND {than_cursor})", self.condition());
+        let row = TimelineIndex::bind_cursor(self.bind(sqlx::query(sqlx::AssertSqlSafe(sql))), cursor).fetch_one(db).await?;
+        Ok(row.try_get(0)?)
+    }
+
+    /// The row at `path` of `library` when this source reads it.
+    async fn row(&self, db: &SqlitePool, library: &str, path: &str) -> Result<Option<TimelineListedRow>> {
+        let sql = format!(
+            "SELECT {} FROM timeline_entries WHERE {} AND library_id = ? AND path = ?",
+            TimelineIndex::COLUMNS,
+            self.condition()
+        );
+        let row = self.bind(sqlx::query(sqlx::AssertSqlSafe(sql))).bind(library).bind(path).fetch_optional(db).await?;
+        row.as_ref().map(TimelineListedRow::from_row).transpose()
+    }
+}
+
 /// Library 相対パスとその配下を指す範囲。Library のルートはすべてを指す。
 struct PathRange {
     exact: String,
@@ -264,10 +494,6 @@ impl<'a> TimelineLibraries<'a> {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("at least one library is needed"));
         }
         Ok(Self { ids })
-    }
-
-    fn contains(&self, id: &str) -> bool {
-        self.ids.iter().any(|candidate| candidate == id)
     }
 
     /// `library_id` が組に入る条件。引数は `bind` で bind する。
@@ -808,38 +1034,56 @@ ON CONFLICT (library_id, path) DO UPDATE SET
 
     /// `libraries` の Entry を 1 本の並びにしたページ。`libraries` は空でない。
     pub async fn page(&self, libraries: &[String], anchor: &TimelineAnchor, limit: usize) -> Result<TimelinePage> {
-        let libraries = TimelineLibraries::new(libraries)?;
+        self.read(&TimelineReading::of_libraries(libraries), anchor, limit).await
+    }
+
+    /// The page of the rows of `reading`'s starts as one sequence, newest timeline date first, with the Entries of the same timeline date
+    /// ordered by Library id and then by path. Starts that overlap list a row once. `reading` has at least one start.
+    ///
+    /// Each source reads at most `limit` rows from `anchor` and the merge keeps the first `limit` of them, which are the first `limit` of
+    /// the whole sequence, since a row that fewer than `limit` rows precede in the sequence is preceded by fewer in every source holding it.
+    pub async fn read(&self, reading: &TimelineReading, anchor: &TimelineAnchor, limit: usize) -> Result<TimelinePage> {
+        let sources = reading.sources()?;
         let limit = limit.max(1);
         let rows = match anchor {
-            TimelineAnchor::Newest => self.older(&libraries, None, limit).await?,
-            TimelineAnchor::After(cursor) => self.older(&libraries, Some(cursor), limit).await?,
-            TimelineAnchor::Before(cursor) => self.newer(&libraries, cursor, limit).await?,
+            TimelineAnchor::Newest => self.older(&sources, None, limit).await?,
+            TimelineAnchor::After(cursor) => self.older(&sources, Some(cursor), limit).await?,
+            TimelineAnchor::Before(cursor) => self.newer(&sources, cursor, limit).await?,
             TimelineAnchor::Month(month) => {
                 let end = Self::month_end(month)?;
-                self.older_than_date(&libraries, &end, limit).await?
+                let mut rows = Vec::new();
+                for source in &sources {
+                    rows.extend(source.older_than_date(&self.db, &end, limit).await?);
+                }
+                TimelineListedRow::merge(rows, limit)
             }
             TimelineAnchor::Around { library, path } => {
-                let center = match libraries.contains(library) {
-                    true => self.row(library, path).await?,
-                    false => None,
-                };
+                // The named row must be one that the starts read, with their conditions applied.
+                let mut center = None;
+                for source in &sources {
+                    if let Some(row) = source.row(&self.db, library, path).await? {
+                        center = Some(row);
+                        break;
+                    }
+                }
                 let Some(center) = center else {
                     return Err(Error::new(ErrorKind::NotFound).with_message("timeline entry not found"));
                 };
                 let cursor = center.cursor();
                 let newer_count = (limit - 1) / 2;
-                let mut rows = self.newer(&libraries, &cursor, newer_count).await?;
+                let mut rows = self.newer(&sources, &cursor, newer_count).await?;
                 rows.push(center);
-                rows.extend(self.older(&libraries, Some(&cursor), limit - rows.len()).await?);
+                let older_count = limit - rows.len();
+                rows.extend(self.older(&sources, Some(&cursor), older_count).await?);
                 rows
             }
         };
         let previous = match rows.first() {
-            Some(first) if self.exists_newer(&libraries, &first.cursor()).await? => Some(first.cursor()),
+            Some(first) if self.exists(&sources, Self::NEWER_THAN_CURSOR, &first.cursor()).await? => Some(first.cursor()),
             _ => None,
         };
         let next = match rows.last() {
-            Some(last) if self.exists_older(&libraries, &last.cursor()).await? => Some(last.cursor()),
+            Some(last) if self.exists(&sources, Self::OLDER_THAN_CURSOR, &last.cursor()).await? => Some(last.cursor()),
             _ => None,
         };
         Ok(TimelinePage { rows, previous, next })
@@ -872,97 +1116,34 @@ ON CONFLICT (library_id, path) DO UPDATE SET
     /// cursor より新しい Entry の条件。引数は `OLDER_THAN_CURSOR` と同じ順に bind する。
     const NEWER_THAN_CURSOR: &'static str = "(date > ? OR (date = ? AND (library_id, path) < (?, ?)))";
 
-    async fn row(&self, library: &str, path: &str) -> Result<Option<TimelineListedRow>> {
-        let sql = format!("SELECT {} FROM timeline_entries WHERE library_id = ? AND path = ?", Self::COLUMNS);
-        let row = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(library).bind(path).fetch_optional(&self.db).await?;
-        row.as_ref().map(TimelineListedRow::from_row).transpose()
-    }
-
-    /// cursor より古い Entry を、新しい順に `limit` 件。cursor がなければ最も新しい Entry から。
-    async fn older(&self, libraries: &TimelineLibraries<'_>, cursor: Option<&TimelineCursor>, limit: usize) -> Result<Vec<TimelineListedRow>> {
-        if limit == 0 {
-            return Ok(Vec::new());
+    /// Rows older than `cursor`, or the newest rows without one, merged from every source, newest first.
+    async fn older(&self, sources: &[TimelineSource], cursor: Option<&TimelineCursor>, limit: usize) -> Result<Vec<TimelineListedRow>> {
+        let mut rows = Vec::new();
+        for source in sources {
+            rows.extend(source.older(&self.db, cursor, limit).await?);
         }
-        let rows = match cursor {
-            None => {
-                let sql = format!(
-                    "SELECT {} FROM timeline_entries WHERE {} {} LIMIT ?",
-                    Self::COLUMNS,
-                    libraries.condition(),
-                    Self::NEWEST_FIRST
-                );
-                libraries
-                    .bind(sqlx::query(sqlx::AssertSqlSafe(sql)))
-                    .bind(i64::try_from(limit)?)
-                    .fetch_all(&self.db)
-                    .await?
-            }
-            Some(cursor) => {
-                let sql = format!(
-                    "SELECT {} FROM timeline_entries WHERE {} AND {} {} LIMIT ?",
-                    Self::COLUMNS,
-                    libraries.condition(),
-                    Self::OLDER_THAN_CURSOR,
-                    Self::NEWEST_FIRST
-                );
-                Self::bind_cursor(libraries.bind(sqlx::query(sqlx::AssertSqlSafe(sql))), cursor)
-                    .bind(i64::try_from(limit)?)
-                    .fetch_all(&self.db)
-                    .await?
-            }
-        };
-        rows.iter().map(TimelineListedRow::from_row).collect()
+        Ok(TimelineListedRow::merge(rows, limit))
     }
 
-    async fn older_than_date(&self, libraries: &TimelineLibraries<'_>, date: &str, limit: usize) -> Result<Vec<TimelineListedRow>> {
-        let sql = format!(
-            "SELECT {} FROM timeline_entries WHERE {} AND date < ? {} LIMIT ?",
-            Self::COLUMNS,
-            libraries.condition(),
-            Self::NEWEST_FIRST
-        );
-        let rows = libraries
-            .bind(sqlx::query(sqlx::AssertSqlSafe(sql)))
-            .bind(date)
-            .bind(i64::try_from(limit)?)
-            .fetch_all(&self.db)
-            .await?;
-        rows.iter().map(TimelineListedRow::from_row).collect()
-    }
-
-    /// cursor より新しい Entry のうち、cursor に近い `limit` 件を新しい順に。
-    async fn newer(&self, libraries: &TimelineLibraries<'_>, cursor: &TimelineCursor, limit: usize) -> Result<Vec<TimelineListedRow>> {
-        if limit == 0 {
-            return Ok(Vec::new());
+    /// The `limit` rows newer than `cursor` that are nearest to it, merged from every source, newest first.
+    async fn newer(&self, sources: &[TimelineSource], cursor: &TimelineCursor, limit: usize) -> Result<Vec<TimelineListedRow>> {
+        let mut rows = Vec::new();
+        for source in sources {
+            rows.extend(source.newer(&self.db, cursor, limit).await?);
         }
-        let sql = format!(
-            "SELECT {} FROM timeline_entries WHERE {} AND {} {} LIMIT ?",
-            Self::COLUMNS,
-            libraries.condition(),
-            Self::NEWER_THAN_CURSOR,
-            Self::OLDEST_FIRST
-        );
-        let rows = Self::bind_cursor(libraries.bind(sqlx::query(sqlx::AssertSqlSafe(sql))), cursor)
-            .bind(i64::try_from(limit)?)
-            .fetch_all(&self.db)
-            .await?;
-        let mut rows = rows.iter().map(TimelineListedRow::from_row).collect::<Result<Vec<_>>>()?;
-        rows.reverse();
-        Ok(rows)
+        let merged = TimelineListedRow::merge(rows, usize::MAX);
+        let skipped = merged.len().saturating_sub(limit);
+        Ok(merged.into_iter().skip(skipped).collect())
     }
 
-    async fn exists_newer(&self, libraries: &TimelineLibraries<'_>, cursor: &TimelineCursor) -> Result<bool> {
-        self.exists(libraries, Self::NEWER_THAN_CURSOR, cursor).await
-    }
-
-    async fn exists_older(&self, libraries: &TimelineLibraries<'_>, cursor: &TimelineCursor) -> Result<bool> {
-        self.exists(libraries, Self::OLDER_THAN_CURSOR, cursor).await
-    }
-
-    async fn exists(&self, libraries: &TimelineLibraries<'_>, than_cursor: &str, cursor: &TimelineCursor) -> Result<bool> {
-        let sql = format!("SELECT EXISTS (SELECT 1 FROM timeline_entries WHERE {} AND {than_cursor})", libraries.condition());
-        let row = Self::bind_cursor(libraries.bind(sqlx::query(sqlx::AssertSqlSafe(sql))), cursor).fetch_one(&self.db).await?;
-        Ok(row.try_get(0)?)
+    /// Whether any source has a row on the side of `cursor` that `than_cursor` names.
+    async fn exists(&self, sources: &[TimelineSource], than_cursor: &str, cursor: &TimelineCursor) -> Result<bool> {
+        for source in sources {
+            if source.exists(&self.db, than_cursor, cursor).await? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn bind_cursor<'q>(query: SqliteQuery<'q>, cursor: &'q TimelineCursor) -> SqliteQuery<'q> {
@@ -1621,6 +1802,288 @@ END
         assert!(held_counts(&index).await?.iter().all(|count| count.4 > 0));
         index.remove("lib", "/").await?;
         assert_counts_equal_rows(&index).await?;
+        Ok(())
+    }
+
+    fn start(library: &str, path: &str) -> TimelineStart {
+        TimelineStart::new(library, path, false)
+    }
+
+    fn archive_start(library: &str, path: &str) -> TimelineStart {
+        TimelineStart::new(library, path, true)
+    }
+
+    /// The Library and the path of every row of a page, as `library:path`.
+    fn listed(page: &TimelinePage) -> Vec<String> {
+        page.rows.iter().map(|listed| format!("{}:{}", listed.library, listed.row.path)).collect()
+    }
+
+    fn reading(starts: Vec<TimelineStart>, recursive: bool, inside_archives: bool, kinds: Vec<TimelineKind>) -> TimelineReading {
+        TimelineReading::new(starts, recursive, inside_archives, kinds)
+    }
+
+    /// Two Libraries with folders, an archive that holds a nested archive, images, and videos. `a` and `b` have rows of the same path and
+    /// timeline date, and `/f2` is a folder whose name starts with `/f`.
+    async fn scope_index(dir: &tempfile::TempDir) -> Result<TimelineIndex> {
+        let index = index(dir).await?;
+        insert_into(
+            &index,
+            "a",
+            &[
+                row("/top1.jpg", "/top1.jpg", "2024-03-10T00:00:00"),
+                video("/top2.mp4", "/top2.mp4", "2024-03-09T00:00:00"),
+                row("/f/p1.jpg", "/f/p1.jpg", "2024-03-08T00:00:00"),
+                video("/f/q.mp4", "/f/q.mp4", "2024-03-07T00:00:00"),
+                row("/f/sub/p2.jpg", "/f/sub/p2.jpg", "2024-03-06T00:00:00"),
+                row("/f/pack.zip/i1.jpg", "/f/pack.zip", "2024-03-05T00:00:00"),
+                row("/f/pack.zip/nested.7z/n1.jpg", "/f/pack.zip", "2024-03-04T00:00:00"),
+                row("/g/x.jpg", "/g/x.jpg", "2024-03-03T00:00:00"),
+                video("/f/pack.zip/dir/i2.mp4", "/f/pack.zip", "2024-03-02T00:00:00"),
+                row("/f2/other.jpg", "/f2/other.jpg", "2024-03-01T00:00:00"),
+            ],
+        )
+        .await?;
+        insert_into(
+            &index,
+            "b",
+            &[
+                row("/top1.jpg", "/top1.jpg", "2024-03-10T00:00:00"),
+                row("/f/p1.jpg", "/f/p1.jpg", "2024-03-08T00:00:00"),
+                row("/y.zip/z.jpg", "/y.zip", "2024-02-20T00:00:00"),
+            ],
+        )
+        .await?;
+        Ok(index)
+    }
+
+    async fn read_all(index: &TimelineIndex, reading: &TimelineReading) -> Result<Vec<String>> {
+        Ok(listed(&index.read(reading, &TimelineAnchor::Newest, 100).await?))
+    }
+
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn library_roots_are_read_together_by_the_date_order_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = scope_index(&dir).await?;
+        let roots = vec![start("b", "/"), start("a", "/")];
+
+        let all = read_all(&index, &reading(roots.clone(), true, true, vec![])).await?;
+        assert_eq!(
+            all,
+            strings(&[
+                "a:/top1.jpg",
+                "b:/top1.jpg",
+                "a:/top2.mp4",
+                "a:/f/p1.jpg",
+                "b:/f/p1.jpg",
+                "a:/f/q.mp4",
+                "a:/f/sub/p2.jpg",
+                "a:/f/pack.zip/i1.jpg",
+                "a:/f/pack.zip/nested.7z/n1.jpg",
+                "a:/g/x.jpg",
+                "a:/f/pack.zip/dir/i2.mp4",
+                "a:/f2/other.jpg",
+                "b:/y.zip/z.jpg",
+            ]),
+            "the same timeline date by Library id, then by path"
+        );
+        // The page of whole Libraries that `listTimelineEntries` reads is this reading.
+        let page = index.page(&strings(&["b", "a"]), &TimelineAnchor::Newest, 100).await?;
+        assert_eq!(listed(&page), all);
+
+        // Without the insides of archives only the rows whose path is their local file's are read.
+        let outside = read_all(&index, &reading(roots.clone(), true, false, vec![])).await?;
+        assert_eq!(outside.len(), 9);
+        assert!(outside.iter().all(|row| !row.contains(".zip/") && !row.contains(".7z/")));
+
+        // The kinds.
+        let videos = read_all(&index, &reading(roots.clone(), true, true, vec![TimelineKind::Video])).await?;
+        assert_eq!(videos, strings(&["a:/top2.mp4", "a:/f/q.mp4", "a:/f/pack.zip/dir/i2.mp4"]));
+        let images = read_all(&index, &reading(roots.clone(), true, false, vec![TimelineKind::Image])).await?;
+        assert_eq!(images.len(), 7);
+        let both = read_all(&index, &reading(roots, true, true, vec![TimelineKind::Image, TimelineKind::Video])).await?;
+        assert_eq!(both, all);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_folder_start_reads_the_rows_under_its_path_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = scope_index(&dir).await?;
+        let folder = vec![start("a", "/f")];
+
+        assert_eq!(
+            read_all(&index, &reading(folder.clone(), true, false, vec![])).await?,
+            strings(&["a:/f/p1.jpg", "a:/f/q.mp4", "a:/f/sub/p2.jpg"]),
+            "no Entry inside an archive without insideArchives, and nothing of `/f2`"
+        );
+        assert_eq!(
+            read_all(&index, &reading(folder.clone(), true, true, vec![])).await?,
+            strings(&[
+                "a:/f/p1.jpg",
+                "a:/f/q.mp4",
+                "a:/f/sub/p2.jpg",
+                "a:/f/pack.zip/i1.jpg",
+                "a:/f/pack.zip/nested.7z/n1.jpg",
+                "a:/f/pack.zip/dir/i2.mp4",
+            ])
+        );
+        // Direct children only: the insides of an archive among them are descendants, with or without insideArchives.
+        for inside_archives in [false, true] {
+            assert_eq!(
+                read_all(&index, &reading(folder.clone(), false, inside_archives, vec![])).await?,
+                strings(&["a:/f/p1.jpg", "a:/f/q.mp4"])
+            );
+        }
+        assert_eq!(read_all(&index, &reading(folder, false, true, vec![TimelineKind::Video])).await?, strings(&["a:/f/q.mp4"]));
+        // The direct children of a root, and a start given with a trailing `/` in another Library.
+        assert_eq!(
+            read_all(&index, &reading(vec![start("a", "/")], false, true, vec![])).await?,
+            strings(&["a:/top1.jpg", "a:/top2.mp4"])
+        );
+        assert_eq!(read_all(&index, &reading(vec![start("b", "/f/")], true, false, vec![])).await?, strings(&["b:/f/p1.jpg"]));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_archive_start_reads_every_row_under_it_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = scope_index(&dir).await?;
+        let archive = vec![archive_start("a", "/f/pack.zip")];
+        let everything = strings(&["a:/f/pack.zip/i1.jpg", "a:/f/pack.zip/nested.7z/n1.jpg", "a:/f/pack.zip/dir/i2.mp4"]);
+
+        for inside_archives in [false, true] {
+            assert_eq!(
+                read_all(&index, &reading(archive.clone(), true, inside_archives, vec![])).await?,
+                everything,
+                "the nested archive's Entries too, whether or not the Scope reads the insides of archives"
+            );
+        }
+        assert_eq!(read_all(&index, &reading(archive.clone(), false, false, vec![])).await?, strings(&["a:/f/pack.zip/i1.jpg"]));
+        assert_eq!(
+            read_all(&index, &reading(archive, true, false, vec![TimelineKind::Video])).await?,
+            strings(&["a:/f/pack.zip/dir/i2.mp4"])
+        );
+        // A path inside an archive.
+        assert_eq!(
+            read_all(&index, &reading(vec![archive_start("a", "/f/pack.zip/dir")], true, false, vec![])).await?,
+            strings(&["a:/f/pack.zip/dir/i2.mp4"])
+        );
+        // A folder start and an archive start under it read disjoint rows when the Scope does not read the insides of archives.
+        let both = vec![start("a", "/f"), archive_start("a", "/f/pack.zip")];
+        assert_eq!(read_all(&index, &reading(both, true, false, vec![])).await?.len(), 3 + 3);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn starts_of_both_shapes_are_merged_and_a_repeated_start_is_read_once_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = scope_index(&dir).await?;
+        let starts = vec![start("b", "/"), start("a", "/g"), start("a", "/f"), start("a", "/g")];
+        assert_eq!(
+            read_all(&index, &reading(starts, true, false, vec![])).await?,
+            strings(&["b:/top1.jpg", "a:/f/p1.jpg", "b:/f/p1.jpg", "a:/f/q.mp4", "a:/f/sub/p2.jpg", "a:/g/x.jpg"])
+        );
+        // Starts that overlap list a row once.
+        let overlapping = vec![start("a", "/"), start("a", "/f")];
+        assert_eq!(read_all(&index, &reading(overlapping, true, true, vec![])).await?.len(), 10);
+        assert!(
+            index.read(&reading(vec![], true, true, vec![]), &TimelineAnchor::Newest, 10).await.is_err(),
+            "a reading has a start"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cursors_join_without_a_repeat_or_a_gap_over_every_shape_of_start_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = scope_index(&dir).await?;
+        let readings = [
+            reading(vec![start("b", "/"), start("a", "/f"), start("a", "/g")], true, true, vec![]),
+            reading(vec![start("b", "/"), start("a", "/")], true, false, vec![]),
+            reading(vec![archive_start("a", "/f/pack.zip"), start("b", "/")], true, false, vec![TimelineKind::Image]),
+            reading(vec![start("a", "/f"), start("b", "/f")], false, true, vec![]),
+        ];
+        for reading in &readings {
+            let all = read_all(&index, reading).await?;
+            for limit in 1..=4 {
+                let mut forward = Vec::new();
+                let mut page = index.read(reading, &TimelineAnchor::Newest, limit).await?;
+                assert_eq!(page.previous, None);
+                loop {
+                    forward.extend(listed(&page));
+                    let Some(next) = page.next.clone() else { break };
+                    page = index.read(reading, &TimelineAnchor::After(next), limit).await?;
+                }
+                assert_eq!(forward, all, "forward by {limit}");
+
+                let last = index.read(reading, &TimelineAnchor::Newest, 100).await?.rows.last().unwrap().cursor();
+                let mut backward = vec![format!("{}:{}", last.library, last.path)];
+                let mut page = index.read(reading, &TimelineAnchor::Before(last), limit).await?;
+                loop {
+                    let mut current = listed(&page);
+                    current.extend(backward);
+                    backward = current;
+                    let Some(previous) = page.previous.clone() else { break };
+                    page = index.read(reading, &TimelineAnchor::Before(previous), limit).await?;
+                }
+                assert_eq!(backward, all, "backward by {limit}");
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn month_and_around_start_where_the_reading_has_rows_test() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let index = scope_index(&dir).await?;
+        let all = reading(vec![start("a", "/"), start("b", "/")], true, true, vec![]);
+
+        let page = index.read(&all, &TimelineAnchor::Month("2024-02".to_string()), 5).await?;
+        assert_eq!(listed(&page), strings(&["b:/y.zip/z.jpg"]));
+        assert!(page.previous.is_some() && page.next.is_none());
+        let page = index.read(&all, &TimelineAnchor::Month("2024-04".to_string()), 2).await?;
+        assert_eq!(
+            listed(&page),
+            strings(&["a:/top1.jpg", "b:/top1.jpg"]),
+            "an empty month starts at the next older month that has Entries"
+        );
+        let empty = index.read(&all, &TimelineAnchor::Month("2024-01".to_string()), 2).await?;
+        assert!(empty.rows.is_empty() && empty.previous.is_none() && empty.next.is_none());
+        assert!(index.read(&all, &TimelineAnchor::Month("2024-13".to_string()), 2).await.is_err());
+
+        let around = |library: &str, path: &str| TimelineAnchor::Around {
+            library: library.to_string(),
+            path: path.to_string(),
+        };
+        let page = index.read(&all, &around("a", "/f/q.mp4"), 5).await?;
+        assert_eq!(
+            listed(&page),
+            strings(&["a:/f/p1.jpg", "b:/f/p1.jpg", "a:/f/q.mp4", "a:/f/sub/p2.jpg", "a:/f/pack.zip/i1.jpg"])
+        );
+        assert!(page.previous.is_some() && page.next.is_some());
+
+        // The named Entry must be one the starts read, with their conditions applied.
+        let folder = reading(vec![start("a", "/f")], true, false, vec![TimelineKind::Image]);
+        assert_eq!(
+            listed(&index.read(&folder, &around("a", "/f/sub/p2.jpg"), 3).await?),
+            strings(&["a:/f/p1.jpg", "a:/f/sub/p2.jpg"])
+        );
+        for (library, path) in [
+            ("a", "/f/q.mp4"),           // another kind
+            ("a", "/f/pack.zip/i1.jpg"), // inside an archive the Scope does not read
+            ("a", "/top1.jpg"),          // outside the start
+            ("b", "/f/p1.jpg"),          // in another Library
+            ("a", "/missing.jpg"),       // not a row
+        ] {
+            let error = index.read(&folder, &around(library, path), 3).await.unwrap_err();
+            assert_eq!(*error.kind(), ErrorKind::NotFound, "{library}{path}");
+        }
+        let archive = reading(vec![archive_start("a", "/f/pack.zip")], true, false, vec![]);
+        assert_eq!(index.read(&archive, &around("a", "/f/pack.zip/nested.7z/n1.jpg"), 1).await?.rows.len(), 1);
         Ok(())
     }
 
