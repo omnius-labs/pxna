@@ -720,6 +720,31 @@ paths:
                 `offset`. The server returns the page that holds it, with the
                 `offset` it was cut at. `locate` together with `offset` is 400,
                 and an Entry that is not in the sequence is 404.
+
+                With `sort=timeline_date` the Entries are the images and
+                videos of the Scope, newest timeline date first, and those with
+                the same timeline date are ordered by Library id and then by
+                path. `kind` may name only `image` and `video`, and names both
+                when it is absent; any other kind is 400. The page is not cut
+                by `offset`: at most one of `after`, `before`, `month`, and
+                `around` selects where it starts, and without any of them it
+                starts at the newest Entry. `previous` and `next` are cursors
+                for the pages before and after the returned Entries and are
+                absent when there is nothing further in that direction; a
+                cursor is only meaningful with the same Scope and Filter. The
+                response has no `totalCount`, `offset`, or `snapshot`. `order`
+                may be `desc` only, and `offset`, `locate`, and `foldersFirst`
+                are 400. `after`, `before`, `month`, and `around` are 400 with
+                any other sort, and so is more than one of them.
+
+                Without a name, rating, or tag condition the Entries come from
+                the timeline index that the daemon builds in the background,
+                as of the last aggregation, and a start that is an archive, or
+                inside one, returns every row under it, the Entries of the
+                archives nested in it included. With one, the Entries are the
+                matches of each start, which carry the attributes read from the
+                file system, and the starts cut off and walked are named as
+                above; a match that has no timeline date yet is not returned.
             operationId: listEntries
             parameters:
                 - name: start
@@ -773,7 +798,21 @@ paths:
                               - image
                               - video
                               - other
-                - $ref: "#/components/parameters/SortQuery"
+                - name: sort
+                  in: query
+                  required: false
+                  description: |
+                      Sort key. `timeline_date` orders the images and videos by
+                      their timeline dates, newest first only.
+                  schema:
+                      type: string
+                      enum:
+                          - name
+                          - kind
+                          - size
+                          - modified_at
+                          - timeline_date
+                      default: name
                 - $ref: "#/components/parameters/OrderQuery"
                 - $ref: "#/components/parameters/FoldersFirstQuery"
                 - $ref: "#/components/parameters/ListOffsetQuery"
@@ -788,6 +827,45 @@ paths:
                       type: string
                       minLength: 1
                       maxLength: 4096
+                - name: after
+                  in: query
+                  required: false
+                  description: |
+                      Only with `sort=timeline_date`. A cursor from `next`;
+                      returns the Entries older than it.
+                  schema:
+                      type: string
+                - name: before
+                  in: query
+                  required: false
+                  description: |
+                      Only with `sort=timeline_date`. A cursor from `previous`;
+                      returns the Entries newer than it.
+                  schema:
+                      type: string
+                - name: month
+                  in: query
+                  required: false
+                  description: |
+                      Only with `sort=timeline_date`. Starts at the newest Entry
+                      of this month (`YYYY-MM`), or of the next older month that
+                      has Entries.
+                  schema:
+                      type: string
+                      pattern: "^[0-9]{4}-[0-9]{2}$"
+                - name: around
+                  in: query
+                  required: false
+                  description: |
+                      Only with `sort=timeline_date`. The Entry to start around,
+                      in the form of a start: its Library id, `/`, and its path
+                      relative to the Library without the leading `/`. The page
+                      has it near its middle, and an Entry that is not in the
+                      sequence is 404.
+                  schema:
+                      type: string
+                      minLength: 1
+                      maxLength: 4096
                 - $ref: "#/components/parameters/ListLimitQuery"
             responses:
                 "200":
@@ -796,6 +874,97 @@ paths:
                         application/json:
                             schema:
                                 $ref: "#/components/schemas/EntryListing"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /entries/months:
+        get:
+            tags:
+                - Entries
+            summary: List the months that have Entries of a Scope
+            description: |
+                Returns the number of images and videos of a Scope through a
+                Filter in each month of their timeline dates, newest month
+                first, without the months that have none. Each count equals the
+                number of Entries that `listEntries` with `sort=timeline_date`
+                returns for that month with the same `start`, `recursive`,
+                `insideArchives`, `query`, `rating`, `tag`, and `kind`. For
+                whole Libraries without a name, rating, or tag condition the
+                counts are sums held in advance; otherwise they are counted
+                from the Entries of the Scope on each request. `kind` may name
+                only `image` and `video`; any other kind is 400. The starts cut
+                off, walked, and missing are named by `listEntries` alone.
+            operationId: listEntryMonths
+            parameters:
+                - name: start
+                  in: query
+                  required: true
+                  description: |
+                      Starts of the Scope, repeated as `start=photos/2025&start=videos`.
+                      Each is a Library id, `/`, and the path relative to the
+                      Library without its leading `/`; the path is the root when
+                      there is none. At most 64.
+                  style: form
+                  explode: true
+                  schema:
+                      type: array
+                      minItems: 1
+                      maxItems: 64
+                      items:
+                          type: string
+                          minLength: 1
+                          maxLength: 4096
+                - $ref: "#/components/parameters/RecursiveQuery"
+                - name: insideArchives
+                  in: query
+                  required: false
+                  description: |
+                      Whether the Scope reads the archives found under its starts
+                      like folders, down to the nesting limit. It changes nothing
+                      without `recursive`.
+                  schema:
+                      type: boolean
+                      default: false
+                - $ref: "#/components/parameters/NameFilterQuery"
+                - $ref: "#/components/parameters/RatingFilterQuery"
+                - $ref: "#/components/parameters/TagFiltersQuery"
+                - name: kind
+                  in: query
+                  required: false
+                  description: |
+                      Count only Entries of these kinds, repeated as
+                      `kind=image&kind=video`. Only `image` and `video` are
+                      accepted.
+                  style: form
+                  explode: true
+                  schema:
+                      type: array
+                      maxItems: 5
+                      items:
+                          type: string
+                          enum:
+                              - folder
+                              - archive
+                              - image
+                              - video
+                              - other
+            responses:
+                "200":
+                    description: Entry counts per month.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TimelineMonths"
                 "400":
                     $ref: "#/components/responses/InvalidRequest"
                 "401":
@@ -3142,6 +3311,21 @@ components:
                     $ref: "#/components/schemas/LibraryId"
                 entry:
                     $ref: "#/components/schemas/FileSystemEntry"
+                timelineDate:
+                    type: string
+                    description: |
+                        Present with `sort=timeline_date`. Date the Entry is
+                        ordered by, as `YYYY-MM-DDTHH:MM:SS` without a time zone,
+                        in the daemon's configured time zone.
+                timelineDateSource:
+                    type: string
+                    description: Present with `timelineDate`. Where it came from.
+                    enum:
+                        - exif
+                        - creationTime
+                        - modified
+                        - archiveModified
+                        - fileName
 
         EntryListing:
             type: object
@@ -3159,17 +3343,31 @@ components:
                     type: integer
                     format: int64
                     minimum: 0
-                    description: Number of Entries in the merged sequence after the Filter.
+                    description: |
+                        Number of Entries in the merged sequence after the Filter.
+                        Absent with `sort=timeline_date`.
                 offset:
                     type: integer
                     format: int64
                     minimum: 0
-                    description: Offset of this page in the merged sequence.
+                    description: |
+                        Offset of this page in the merged sequence. Absent with
+                        `sort=timeline_date`.
                 snapshot:
                     type: string
                     description: |
                         Opaque identifier of the merged listing. It changes when
                         the listing of any start is rebuilt.
+                previous:
+                    type: string
+                    description: |
+                        Present with `sort=timeline_date`. Cursor for the page of
+                        newer Entries. Absent when there are none.
+                next:
+                    type: string
+                    description: |
+                        Present with `sort=timeline_date`. Cursor for the page of
+                        older Entries. Absent when there are none.
                 cutOffStarts:
                     type: array
                     description: Starts, by the value given, whose recursive traversal reached the entry limit.

@@ -97,7 +97,7 @@ pub struct ListEntriesQueryParams {
     #[validate(length(max = 5))]
     #[serde(default)]
     pub kind: Vec<String>,
-    /// Sort key for folder entries.
+    /// Sort key. `timeline_date` orders the images and videos by their timeline dates, newest first only.
     /// Note: inline enums are not fully supported by openapi-generator
     #[serde(rename = "sort")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -121,11 +121,72 @@ pub struct ListEntriesQueryParams {
     #[validate(length(min = 1, max = 4096))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locate: Option<String>,
+    /// Only with `sort=timeline_date`. A cursor from `next`; returns the Entries older than it.
+    #[serde(rename = "after")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+    /// Only with `sort=timeline_date`. A cursor from `previous`; returns the Entries newer than it.
+    #[serde(rename = "before")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    /// Only with `sort=timeline_date`. Starts at the newest Entry of this month (`YYYY-MM`), or of the next older month that has Entries.
+    #[serde(rename = "month")]
+    #[validate(
+                          regex(path = *RE_LISTENTRIESQUERYPARAMS_MONTH),
+              )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub month: Option<String>,
+    /// Only with `sort=timeline_date`. The Entry to start around, in the form of a start: its Library id, `/`, and its path relative to the Library without the leading `/`. The page has it near its middle, and an Entry that is not in the sequence is 404.
+    #[serde(rename = "around")]
+    #[validate(length(min = 1, max = 4096))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub around: Option<String>,
     /// Maximum number of entries to return.
     #[serde(rename = "limit")]
     #[validate(range(min = 1u32, max = 1000u32))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_LISTENTRIESQUERYPARAMS_MONTH: regex::Regex = regex::Regex::new("^[0-9]{4}-[0-9]{2}$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct ListEntryMonthsQueryParams {
+    /// Starts of the Scope, repeated as `start=photos/2025&start=videos`. Each is a Library id, `/`, and the path relative to the Library without its leading `/`; the path is the root when there is none. At most 64.
+    #[serde(rename = "start")]
+    #[validate(length(min = 1, max = 64))]
+    pub start: Vec<String>,
+    /// Whether to include descendants below the requested folder.
+    #[serde(rename = "recursive")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recursive: Option<bool>,
+    /// Whether the Scope reads the archives found under its starts like folders, down to the nesting limit. It changes nothing without `recursive`.
+    #[serde(rename = "insideArchives")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inside_archives: Option<bool>,
+    /// Whitespace-separated terms that must all occur in an entry name. Names and terms are normalized with NFKC and converted to lowercase.
+    #[serde(rename = "query")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    /// Return only images and videos with this rating of the current user. `none` selects the images and videos that have not been rated. Folders and other files never match. `totalCount` counts the entries after this filter.
+    /// Note: inline enums are not fully supported by openapi-generator
+    #[serde(rename = "rating")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<String>,
+    /// Return only images and videos that have all of these tags of the current user, repeated as `tag=a&tag=b`. Each word is trimmed like a tag being set; a word the user has never used selects nothing. `totalCount` counts the entries after this filter.
+    #[serde(rename = "tag")]
+    #[validate(length(max = 32))]
+    #[serde(default)]
+    pub tag: Vec<models::TagName>,
+    /// Count only Entries of these kinds, repeated as `kind=image&kind=video`. Only `image` and `video` are accepted.
+    /// Note: inline enums are not fully supported by openapi-generator
+    #[serde(rename = "kind")]
+    #[validate(length(max = 5))]
+    #[serde(default)]
+    pub kind: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -3057,13 +3118,13 @@ pub struct EntryListing {
     #[validate(nested)]
     pub entries: Vec<models::ScopedEntry>,
 
-    /// Number of Entries in the merged sequence after the Filter.
+    /// Number of Entries in the merged sequence after the Filter. Absent with `sort=timeline_date`.
     #[serde(rename = "totalCount")]
     #[validate(range(min = 0u64))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_count: Option<u64>,
 
-    /// Offset of this page in the merged sequence.
+    /// Offset of this page in the merged sequence. Absent with `sort=timeline_date`.
     #[serde(rename = "offset")]
     #[validate(range(min = 0u64))]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3074,6 +3135,18 @@ pub struct EntryListing {
     #[validate(custom(function = "check_xss_string"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<String>,
+
+    /// Present with `sort=timeline_date`. Cursor for the page of newer Entries. Absent when there are none.
+    #[serde(rename = "previous")]
+    #[validate(custom(function = "check_xss_string"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous: Option<String>,
+
+    /// Present with `sort=timeline_date`. Cursor for the page of older Entries. Absent when there are none.
+    #[serde(rename = "next")]
+    #[validate(custom(function = "check_xss_string"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
 
     /// Starts, by the value given, whose recursive traversal reached the entry limit.
     #[serde(rename = "cutOffStarts")]
@@ -3099,6 +3172,8 @@ impl EntryListing {
             total_count: None,
             offset: None,
             snapshot: None,
+            previous: None,
+            next: None,
             cut_off_starts,
             walked_starts,
             missing_starts,
@@ -3116,6 +3191,8 @@ impl std::fmt::Display for EntryListing {
             self.total_count.as_ref().map(|total_count| ["totalCount".to_string(), total_count.to_string()].join(",")),
             self.offset.as_ref().map(|offset| ["offset".to_string(), offset.to_string()].join(",")),
             self.snapshot.as_ref().map(|snapshot| ["snapshot".to_string(), snapshot.to_string()].join(",")),
+            self.previous.as_ref().map(|previous| ["previous".to_string(), previous.to_string()].join(",")),
+            self.next.as_ref().map(|next| ["next".to_string(), next.to_string()].join(",")),
             Some("cutOffStarts".to_string()),
             Some(self.cut_off_starts.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
             Some("walkedStarts".to_string()),
@@ -3143,6 +3220,8 @@ impl std::str::FromStr for EntryListing {
             pub total_count: Vec<u64>,
             pub offset: Vec<u64>,
             pub snapshot: Vec<String>,
+            pub previous: Vec<String>,
+            pub next: Vec<String>,
             pub cut_off_starts: Vec<Vec<String>>,
             pub walked_starts: Vec<Vec<String>>,
             pub missing_starts: Vec<Vec<String>>,
@@ -3170,6 +3249,10 @@ impl std::str::FromStr for EntryListing {
                     "offset" => intermediate_rep.offset.push(<u64 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "snapshot" => intermediate_rep.snapshot.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "previous" => intermediate_rep.previous.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "next" => intermediate_rep.next.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     "cutOffStarts" => return std::result::Result::Err("Parsing a container in this style is not supported in EntryListing".to_string()),
                     "walkedStarts" => return std::result::Result::Err("Parsing a container in this style is not supported in EntryListing".to_string()),
                     "missingStarts" => return std::result::Result::Err("Parsing a container in this style is not supported in EntryListing".to_string()),
@@ -3187,6 +3270,8 @@ impl std::str::FromStr for EntryListing {
             total_count: intermediate_rep.total_count.into_iter().next(),
             offset: intermediate_rep.offset.into_iter().next(),
             snapshot: intermediate_rep.snapshot.into_iter().next(),
+            previous: intermediate_rep.previous.into_iter().next(),
+            next: intermediate_rep.next.into_iter().next(),
             cut_off_starts: intermediate_rep
                 .cut_off_starts
                 .into_iter()
@@ -8074,6 +8159,19 @@ pub struct ScopedEntry {
     #[serde(rename = "entry")]
     #[validate(nested)]
     pub entry: models::FileSystemEntry,
+
+    /// Present with `sort=timeline_date`. Date the Entry is ordered by, as `YYYY-MM-DDTHH:MM:SS` without a time zone, in the daemon's configured time zone.
+    #[serde(rename = "timelineDate")]
+    #[validate(custom(function = "check_xss_string"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline_date: Option<String>,
+
+    /// Present with `timelineDate`. Where it came from.
+    /// Note: inline enums are not fully supported by openapi-generator
+    #[serde(rename = "timelineDateSource")]
+    #[validate(custom(function = "check_xss_string"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline_date_source: Option<String>,
 }
 
 lazy_static::lazy_static! {
@@ -8083,7 +8181,12 @@ lazy_static::lazy_static! {
 impl ScopedEntry {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
     pub fn new(library_id: String, entry: models::FileSystemEntry) -> ScopedEntry {
-        ScopedEntry { library_id, entry }
+        ScopedEntry {
+            library_id,
+            entry,
+            timeline_date: None,
+            timeline_date_source: None,
+        }
     }
 }
 
@@ -8096,6 +8199,12 @@ impl std::fmt::Display for ScopedEntry {
             Some("libraryId".to_string()),
             Some(self.library_id.to_string()),
             // Skipping entry in query parameter serialization
+            self.timeline_date
+                .as_ref()
+                .map(|timeline_date| ["timelineDate".to_string(), timeline_date.to_string()].join(",")),
+            self.timeline_date_source
+                .as_ref()
+                .map(|timeline_date_source| ["timelineDateSource".to_string(), timeline_date_source.to_string()].join(",")),
         ];
 
         write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
@@ -8115,6 +8224,8 @@ impl std::str::FromStr for ScopedEntry {
         struct IntermediateRep {
             pub library_id: Vec<String>,
             pub entry: Vec<models::FileSystemEntry>,
+            pub timeline_date: Vec<String>,
+            pub timeline_date_source: Vec<String>,
         }
 
         let mut intermediate_rep = IntermediateRep::default();
@@ -8138,6 +8249,14 @@ impl std::str::FromStr for ScopedEntry {
                     "entry" => intermediate_rep
                         .entry
                         .push(<models::FileSystemEntry as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "timelineDate" => intermediate_rep
+                        .timeline_date
+                        .push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "timelineDateSource" => intermediate_rep
+                        .timeline_date_source
+                        .push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     _ => return std::result::Result::Err("Unexpected key while parsing ScopedEntry".to_string()),
                 }
             }
@@ -8154,6 +8273,8 @@ impl std::str::FromStr for ScopedEntry {
                 .next()
                 .ok_or_else(|| "libraryId missing in ScopedEntry".to_string())?,
             entry: intermediate_rep.entry.into_iter().next().ok_or_else(|| "entry missing in ScopedEntry".to_string())?,
+            timeline_date: intermediate_rep.timeline_date.into_iter().next(),
+            timeline_date_source: intermediate_rep.timeline_date_source.into_iter().next(),
         })
     }
 }

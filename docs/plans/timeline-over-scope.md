@@ -91,7 +91,7 @@ The timeline index's stored format changes by a migration at startup that cannot
 | [3](#s-3) | Count the months over starts | 1, 2 | Done |
 | [4](#s-4) | Keep the timeline-date order of a snapshot's matches | - | Done |
 | [5](#s-5) | Read a Scope in timeline-date order | 3, 4 | Done |
-| [6](#s-6) | Serve timeline-date order and `listEntryMonths` | 5 | Not started |
+| [6](#s-6) | Serve timeline-date order and `listEntryMonths` | 5 | Done |
 | [7](#s-7) | Describe the state | 6 | Not started |
 
 <a id="s-1"></a>

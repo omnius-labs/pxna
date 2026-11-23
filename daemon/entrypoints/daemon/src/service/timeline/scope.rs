@@ -141,19 +141,11 @@ struct ScopeSequences {
 ///
 /// The starts without a name, rating, or tag condition are read from the rows of the timeline index, which hold what the last aggregation found. With one,
 /// each start is read from the order of its snapshot's matches, which holds the Entries as the file system had them when the snapshot was built.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the route of listEntries reads a Scope in timeline-date order through this from step 6")
-)]
 pub struct ScopeTimeline<'a> {
     library: &'a LibraryBrowser,
     timeline: &'a TimelineService,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the route of listEntries reads a Scope in timeline-date order through this from step 6")
-)]
 impl<'a> ScopeTimeline<'a> {
     pub fn new(library: &'a LibraryBrowser, timeline: &'a TimelineService) -> Self {
         Self { library, timeline }
@@ -456,6 +448,10 @@ mod tests {
             folders_first: None,
             offset: None,
             locate: None,
+            after: None,
+            before: None,
+            month: None,
+            around: None,
             limit: None,
         })?)
     }

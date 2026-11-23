@@ -12,7 +12,10 @@ use omnius_core_base::error::OmniError as _;
 use crate::{
     error::{ApiError, ApiStatus, Error, ErrorKind},
     interface::{ApiServer, session::Claims},
-    service::listing::{ListOptions, MarkSelection, Scope, ScopeEntry, ScopeListing, ScopeStart},
+    service::{
+        listing::{ListOptions, MarkSelection, Scope, ScopeEntry, ScopeListing, ScopeStart},
+        timeline::{ScopeTimeline, ScopeTimelinePage, TimelineAnchor, TimelineCursor, TimelineIndex},
+    },
 };
 
 #[allow(unused_variables)]
@@ -31,6 +34,14 @@ impl apis::entries::Entries for ApiServer {
         let listing = async {
             let options = ListOptions::from_entries(query_params)?;
             let scope = Scope::parse(&query_params.start, options.recursive(), options.inside_archives())?;
+            let anchor = Self::timeline_anchor(query_params, &options)?;
+            let selections = self.select(&options, &scope, &claims.user.id).await?;
+            if let Some(anchor) = anchor {
+                let page = ScopeTimeline::new(&self.state.library, &self.state.timeline)
+                    .page(&scope, &selections, &options, &anchor, options.limit())
+                    .await?;
+                return Ok::<_, Error>(models::EntryListing::from(page));
+            }
             // `locate` names an Entry in the form of a start, which is how it is parsed.
             let located = match &query_params.locate {
                 Some(locate) => {
@@ -41,26 +52,85 @@ impl apis::entries::Entries for ApiServer {
                 }
                 None => None,
             };
-            let selections = self.select(&options, &scope, &claims.user.id).await?;
-            match located {
+            let listing = match located {
                 Some(entry) => {
                     self.state
                         .library
                         .list_entries_located(&scope, &selections, &options, entry.library_id(), &entry.path().absolute())
-                        .await
+                        .await?
                 }
-                None => self.state.library.list_entries(&scope, &selections, &options).await,
-            }
+                None => self.state.library.list_entries(&scope, &selections, &options).await?,
+            };
+            Ok(listing.into())
         }
         .await;
         Ok(match listing {
-            Ok(listing) => apis::entries::ListEntriesResponse::Status200_TheEntriesOfTheScope(listing.into()),
+            Ok(listing) => apis::entries::ListEntriesResponse::Status200_TheEntriesOfTheScope(listing),
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+
+    async fn list_entry_months(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        query_params: &models::ListEntryMonthsQueryParams,
+    ) -> std::result::Result<apis::entries::ListEntryMonthsResponse, ()> {
+        let months = async {
+            let options = ListOptions::from_entry_months(query_params)?;
+            let scope = Scope::parse(&query_params.start, options.recursive(), options.inside_archives())?;
+            let selections = self.select(&options, &scope, &claims.user.id).await?;
+            ScopeTimeline::new(&self.state.library, &self.state.timeline).months(&scope, &selections, &options).await
+        }
+        .await;
+        Ok(match months {
+            Ok(months) => {
+                let months = months.into_iter().map(|(month, count)| models::TimelineMonth::new(month, count)).collect();
+                apis::entries::ListEntryMonthsResponse::Status200_EntryCountsPerMonth(models::TimelineMonths::new(months))
+            }
             Err(error) => ApiError::from(error).into(),
         })
     }
 }
 
 impl ApiServer {
+    /// Where a page in timeline-date order starts, or none when the listing is cut from snapshots.
+    ///
+    /// At most one of `after`, `before`, `month`, and `around` is given, only with `sort=timeline_date`, and `locate` is not accepted with it.
+    fn timeline_anchor(query: &models::ListEntriesQueryParams, options: &ListOptions) -> crate::result::Result<Option<TimelineAnchor>> {
+        let given = [query.after.is_some(), query.before.is_some(), query.month.is_some(), query.around.is_some()];
+        if given.iter().filter(|given| **given).count() > 1 {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message("at most one of after, before, month and around can be given"));
+        }
+        if !options.is_timeline() {
+            if given.contains(&true) {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message("after, before, month and around can be given only with sort=timeline_date"));
+            }
+            return Ok(None);
+        }
+        if query.locate.is_some() {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message("locate cannot be given with sort=timeline_date"));
+        }
+        Ok(Some(if let Some(after) = &query.after {
+            TimelineAnchor::After(TimelineCursor::parse(after)?)
+        } else if let Some(before) = &query.before {
+            TimelineAnchor::Before(TimelineCursor::parse(before)?)
+        } else if let Some(month) = &query.month {
+            TimelineIndex::month_end(month)?;
+            TimelineAnchor::Month(month.clone())
+        } else if let Some(around) = &query.around {
+            let entry = ScopeStart::parse(around)?;
+            TimelineAnchor::Around {
+                library: entry.library_id().to_string(),
+                path: entry.path().absolute(),
+            }
+        } else {
+            TimelineAnchor::Newest
+        }))
+    }
+
     /// What the rating and tag conditions of the Filter come to for the user in each Library that the Scope names and that exists.
     async fn select(&self, options: &ListOptions, scope: &Scope, user_id: &str) -> crate::result::Result<HashMap<String, MarkSelection>> {
         let mut selections = HashMap::new();
@@ -93,9 +163,43 @@ impl From<ScopeListing> for models::EntryListing {
     }
 }
 
+impl From<ScopeTimelinePage> for models::EntryListing {
+    fn from(page: ScopeTimelinePage) -> Self {
+        let entries = page
+            .entries
+            .into_iter()
+            .map(|found| {
+                let mut scoped = models::ScopedEntry::new(found.library, found.entry);
+                scoped.timeline_date = Some(found.date.text());
+                scoped.timeline_date_source = Some(found.date.source.as_str().to_string());
+                scoped
+            })
+            .collect();
+        let mut response = models::EntryListing::new(entries, page.cut_off_starts, page.walked_starts, page.missing_starts);
+        response.previous = page.previous.map(|cursor| cursor.encode());
+        response.next = page.next.map(|cursor| cursor.encode());
+        response
+    }
+}
+
 impl From<ScopeEntry> for models::ScopedEntry {
     fn from(scoped: ScopeEntry) -> Self {
         models::ScopedEntry::new(scoped.library_id, scoped.entry)
+    }
+}
+
+impl From<ApiError> for apis::entries::ListEntryMonthsResponse {
+    fn from(error: ApiError) -> Self {
+        match error.status {
+            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
+            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
+            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
+            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
+            ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
+            ApiStatus::Conflict | ApiStatus::RangeNotSatisfiable | ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => {
+                Self::Status500_InternalServerError(error.body)
+            }
+        }
     }
 }
 
@@ -635,6 +739,430 @@ mod tests {
         assert_eq!(after.body["totalCount"], 3);
         let none = get(&router, &token, &format!("{query}&rating=good&kind=folder")).await?;
         assert_eq!(none.body["totalCount"], 0);
+        Ok(())
+    }
+
+    /// Writes a file of `size` bytes whose modification time, which is its timeline date, is noon UTC on `date`, as `year-month-day`.
+    fn write_dated(path: &std::path::Path, size: usize, date: (i32, u32, u32)) -> TestResult {
+        use chrono::TimeZone as _;
+        std::fs::create_dir_all(path.parent().ok_or("a path under a folder")?)?;
+        std::fs::write(path, vec![b'x'; size])?;
+        let time = chrono::Utc.with_ymd_and_hms(date.0, date.1, date.2, 12, 0, 0).single().ok_or("a date")?;
+        std::fs::File::options().write(true).open(path)?.set_modified(time.into())?;
+        Ok(())
+    }
+
+    /// Images and videos in two Libraries dated by their modification times, and the fixture's folder `photos` with two archives in `photos`.
+    /// The same timeline date is in both Libraries, `photos` before `videos`.
+    fn write_dated_files(fixture: &Fixture) -> TestResult {
+        let dir = fixture._dir.path();
+        write_dated(&dir.join("library/photos/p1.png"), 1, (2024, 3, 15))?;
+        write_dated(&dir.join("library/photos/p2.mp4"), 2, (2024, 3, 14))?;
+        write_dated(&dir.join("library/photos/sub/p3.png"), 3, (2024, 2, 15))?;
+        write_dated(&dir.join("library/top.png"), 4, (2024, 1, 15))?;
+        write_dated(&dir.join("videos/x/v1.mp4"), 5, (2024, 3, 15))?;
+        write_dated(&dir.join("videos/v2.png"), 6, (2023, 12, 15))?;
+        Ok(())
+    }
+
+    async fn aggregated_fixture() -> TestResult<Fixture> {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        write_dated_files(&fixture)?;
+        aggregate(&fixture.server.state, "photos").await?;
+        aggregate(&fixture.server.state, "videos").await?;
+        Ok(fixture)
+    }
+
+    const TIMELINE: &str = "sort=timeline_date&limit=100";
+    const BOTH: &str = "start=photos&start=videos&recursive=true";
+    const OUTSIDE_ORDER: [&str; 6] = [
+        "photos:/photos/p1.png",
+        "videos:/x/v1.mp4",
+        "photos:/photos/p2.mp4",
+        "photos:/photos/sub/p3.png",
+        "photos:/top.png",
+        "videos:/v2.png",
+    ];
+
+    /// The months of a response of `listEntryMonths`, as `(month, count)`.
+    fn month_counts(body: &Value) -> Vec<(String, u64)> {
+        body["months"]
+            .as_array()
+            .map(|months| {
+                months
+                    .iter()
+                    .map(|month| (month["month"].as_str().unwrap_or_default().to_string(), month["count"].as_u64().unwrap_or_default()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    async fn months(router: &axum::Router, token: &str, query: &str) -> TestResult<HttpResponse> {
+        send(router, http::Method::GET, &format!("{ENTRIES}/months?{query}"), &[("authorization", token)], None).await
+    }
+
+    /// Every Entry that `query` lists in timeline-date order, read page by page by `after` from `next` with `limit`, and the same read back by `before`.
+    async fn walk(router: &axum::Router, token: &str, query: &str, limit: usize) -> TestResult<Vec<String>> {
+        let mut seen = Vec::new();
+        let mut page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}")).await?;
+        assert_eq!(page.status, StatusCode::OK, "{query}: {}", page.body);
+        assert!(page.body["previous"].is_null());
+        loop {
+            seen.extend(listed(&page.body)?);
+            let Some(next) = page.body["next"].as_str().map(str::to_string) else { break };
+            page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&after={}", urlencoding_escape(&next))).await?;
+            assert_eq!(page.status, StatusCode::OK, "{query}: {}", page.body);
+        }
+        let all = get(router, token, &format!("{query}&sort=timeline_date&limit=1000")).await?;
+        let mut back = Vec::new();
+        if let Some(last) = all.body["entries"].as_array().and_then(|entries| entries.last()) {
+            let cursor = format!(
+                "{}{}{}",
+                last["timelineDate"].as_str().unwrap_or_default(),
+                last["libraryId"].as_str().unwrap_or_default(),
+                last["entry"]["path"].as_str().unwrap_or_default()
+            );
+            back.push(format!(
+                "{}:{}",
+                last["libraryId"].as_str().unwrap_or_default(),
+                last["entry"]["path"].as_str().unwrap_or_default()
+            ));
+            let mut page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&before={}", urlencoding_escape(&cursor))).await?;
+            loop {
+                let mut current = listed(&page.body)?;
+                current.extend(back);
+                back = current;
+                let Some(previous) = page.body["previous"].as_str().map(str::to_string) else { break };
+                page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&before={}", urlencoding_escape(&previous))).await?;
+            }
+        }
+        assert_eq!(back, seen, "{query} read back by {limit}");
+        Ok(seen)
+    }
+
+    /// Escapes a cursor, which holds a path, for a query value.
+    fn urlencoding_escape(value: &str) -> String {
+        value
+            .bytes()
+            .map(|byte| {
+                if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                    (byte as char).to_string()
+                } else {
+                    format!("%{byte:02X}")
+                }
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn timeline_date_order_reads_two_libraries_by_cursor_month_and_around_test() -> TestResult {
+        let fixture = aggregated_fixture().await?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+
+        let all = get(&router, &token, &format!("{BOTH}&{TIMELINE}")).await?;
+        assert_eq!(all.status, StatusCode::OK, "{}", all.body);
+        assert_eq!(
+            listed(&all.body)?,
+            OUTSIDE_ORDER,
+            "newest first, the same date by Library id, and nothing inside an archive"
+        );
+        for field in ["totalCount", "offset", "snapshot", "previous", "next"] {
+            assert!(all.body.get(field).is_none(), "{field} is absent");
+        }
+        let first = &all.body["entries"][0];
+        assert_eq!(
+            (first["timelineDate"].as_str().map(|date| &date[..10]), first["timelineDateSource"].as_str()),
+            (Some("2024-03-15"), Some("modified"))
+        );
+        assert_eq!(first["entry"]["name"], "p1.png");
+        for field in ["cutOffStarts", "walkedStarts", "missingStarts"] {
+            assert!(strings(&all.body, field).is_empty());
+        }
+        let first_page = get(&router, &token, &format!("{BOTH}&sort=timeline_date&limit=2")).await?;
+        assert!(first_page.body["previous"].is_null() && first_page.body["next"].is_string());
+
+        // The pages join without a repeat or a gap in both directions, whatever their size.
+        for limit in 1..=4 {
+            assert_eq!(walk(&router, &token, BOTH, limit).await?, OUTSIDE_ORDER, "limit {limit}");
+        }
+
+        // A month starts at its newest Entry, or at the next older month that has one.
+        let february = get(&router, &token, &format!("{BOTH}&sort=timeline_date&limit=2&month=2024-02")).await?;
+        assert_eq!(listed(&february.body)?, ["photos:/photos/sub/p3.png", "photos:/top.png"]);
+        assert!(february.body["previous"].is_string() && february.body["next"].is_string());
+        let gap = get(&router, &token, &format!("{BOTH}&{TIMELINE}&month=2024-01")).await?;
+        assert_eq!(listed(&gap.body)?, ["photos:/top.png", "videos:/v2.png"]);
+
+        // Around names an Entry in the form of a start and puts it near the middle.
+        let around = get(&router, &token, &format!("{BOTH}&sort=timeline_date&limit=3&around=photos/photos/p2.mp4")).await?;
+        assert_eq!(listed(&around.body)?, ["videos:/x/v1.mp4", "photos:/photos/p2.mp4", "photos:/photos/sub/p3.png"]);
+        for missing in ["photos/photos/notes.txt", "photos/nope.png", "videos/photos/p1.png", "other/x.png"] {
+            let response = get(&router, &token, &format!("{BOTH}&{TIMELINE}&around={missing}")).await?;
+            assert_eq!(response.status, StatusCode::NOT_FOUND, "{missing}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn timeline_date_order_reads_folders_archives_and_direct_children_test() -> TestResult {
+        let fixture = aggregated_fixture().await?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        let list = |query: &'static str| {
+            let (router, token) = (router.clone(), token.clone());
+            async move {
+                let response = get(&router, &token, &format!("{query}&{TIMELINE}")).await?;
+                assert_eq!(response.status, StatusCode::OK, "{query}: {}", response.body);
+                TestResult::Ok((listed(&response.body)?, strings(&response.body, "missingStarts")))
+            }
+        };
+
+        assert_eq!(
+            list("start=photos/photos&recursive=true").await?.0,
+            ["photos:/photos/p1.png", "photos:/photos/p2.mp4", "photos:/photos/sub/p3.png"],
+            "only the rows under the folder, and nothing inside its archives"
+        );
+        let inside = list("start=photos/photos&recursive=true&insideArchives=true").await?.0;
+        assert_eq!(inside.len(), 3 + 2, "the image inside a.7z and the one inside the archive nested in outer.7z");
+        assert!(inside.contains(&"photos:/photos/a.7z/dir/x.png".to_string()) && inside.contains(&"photos:/photos/outer.7z/inner.7z/x.png".to_string()));
+        assert_eq!(list("start=photos/photos").await?.0, ["photos:/photos/p1.png", "photos:/photos/p2.mp4"], "direct children");
+        assert_eq!(list("start=photos/photos&insideArchives=true").await?.0, ["photos:/photos/p1.png", "photos:/photos/p2.mp4"]);
+
+        // A start that is an archive, or inside one, reads every row under it, the nested archives included, with or without insideArchives.
+        for query in [
+            "start=photos/photos/outer.7z&recursive=true",
+            "start=photos/photos/outer.7z&recursive=true&insideArchives=true",
+            "start=photos/photos/outer.7z/inner.7z&recursive=true",
+        ] {
+            assert_eq!(list(query).await?.0, ["photos:/photos/outer.7z/inner.7z/x.png"], "{query}");
+        }
+        assert!(list("start=photos/photos/a.7z").await?.0.is_empty(), "`dir/x.png` is not a direct child of the archive");
+        assert_eq!(list("start=photos/photos/a.7z&recursive=true").await?.0, ["photos:/photos/a.7z/dir/x.png"]);
+
+        // The kinds: both without `kind`, and only the named ones with it.
+        assert_eq!(
+            list("start=photos&start=videos&recursive=true&kind=video").await?.0,
+            ["videos:/x/v1.mp4", "photos:/photos/p2.mp4"]
+        );
+        assert_eq!(
+            list("start=photos&start=videos&recursive=true&kind=image").await?.0,
+            ["photos:/photos/p1.png", "photos:/photos/sub/p3.png", "photos:/top.png", "videos:/v2.png"]
+        );
+        assert_eq!(list("start=photos&start=videos&recursive=true&kind=image&kind=video").await?.0, OUTSIDE_ORDER);
+        for kind in ["folder", "archive", "other"] {
+            let response = get(&router, &token, &format!("{BOTH}&{TIMELINE}&kind=image&kind={kind}")).await?;
+            assert_eq!(response.status, StatusCode::BAD_REQUEST, "{kind}");
+            let response = months(&router, &token, &format!("{BOTH}&kind={kind}")).await?;
+            assert_eq!(response.status, StatusCode::BAD_REQUEST, "months {kind}");
+        }
+
+        // Covered starts add nothing and missing starts are named.
+        let (covered, missing) = list("start=photos&start=photos/photos&start=nope/x&start=photos/gone&start=photos&recursive=true").await?;
+        assert_eq!(covered, list("start=photos&recursive=true").await?.0);
+        assert_eq!(missing, ["nope/x", "photos/gone"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn timeline_date_order_applies_conditions_and_names_cut_off_and_walked_starts_test() -> TestResult {
+        let listing = ListingConfig {
+            recursive_max_entries: 3,
+            ..Default::default()
+        };
+        let fixture = fixture_with_listing(
+            ArchiveOptions::default(),
+            None,
+            std::sync::Arc::new(omnius_core_base::clock::ClockUtc),
+            Default::default(),
+            listing,
+        )
+        .await?;
+        write_dated_files(&fixture)?;
+        let dir = fixture._dir.path();
+        for number in 0..6 {
+            write_dated(&dir.join(format!("library/big/sun-{number}.png")), 1, (2024, 3, 10 + number))?;
+        }
+        write_dated(&dir.join("videos/sun.mp4"), 1, (2024, 3, 1))?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        let state = fixture.server.state.clone();
+
+        // The index of `photos` is not usable and nothing is aggregated, so the matches are found by a walk and have no timeline date yet.
+        let query = "start=photos/big&start=videos&query=sun&recursive=true";
+        let before = get(&router, &token, &format!("{query}&{TIMELINE}")).await?;
+        assert_eq!(before.status, StatusCode::OK, "{}", before.body);
+        assert!(listed(&before.body)?.is_empty(), "a match without a row is not returned");
+        assert_eq!(strings(&before.body, "walkedStarts"), ["photos/big", "videos"]);
+        assert_eq!(
+            strings(&before.body, "cutOffStarts"),
+            ["photos/big", "videos"],
+            "the walk counts the folders and files of `videos` too"
+        );
+        assert!(month_counts(&months(&router, &token, query).await?.body).is_empty());
+
+        aggregate(&state, "photos").await?;
+        aggregate(&state, "videos").await?;
+        let after = get(&router, &token, &format!("{query}&{TIMELINE}")).await?;
+        assert!(strings(&after.body, "walkedStarts").is_empty());
+        assert_eq!(strings(&after.body, "cutOffStarts"), ["photos/big"]);
+        assert_eq!(listed(&after.body)?.len(), 3 + 1, "the matches of each start up to the limit");
+        let dates = after.body["entries"]
+            .as_array()
+            .ok_or("entries")?
+            .iter()
+            .map(|entry| entry["timelineDate"].as_str().unwrap_or_default().to_string())
+            .collect::<Vec<_>>();
+        assert!(dates.windows(2).all(|pair| pair[0] >= pair[1]), "newest first: {dates:?}");
+        assert_eq!(walk(&router, &token, query, 1).await?, listed(&after.body)?);
+        let counted = months(&router, &token, query).await?;
+        assert_eq!(counted.status, StatusCode::OK, "{}", counted.body);
+        assert_eq!(month_counts(&counted.body), [("2024-03".to_string(), 4)]);
+        // Without a condition there is no limit, no walk, and nothing to name.
+        let plain = get(&router, &token, &format!("start=photos/big&start=videos&recursive=true&{TIMELINE}")).await?;
+        assert_eq!(listed(&plain.body)?.len(), 9);
+        assert!(strings(&plain.body, "cutOffStarts").is_empty() && strings(&plain.body, "walkedStarts").is_empty());
+
+        // A name condition over the whole Scope keeps the images that have it, in the order of the rows.
+        let named = get(&router, &token, &format!("{BOTH}&query=png&{TIMELINE}")).await?;
+        let images = get(&router, &token, &format!("{BOTH}&kind=image&{TIMELINE}")).await?;
+        assert_eq!(listed(&named.body)?.len(), 3 + 1, "the matches of `photos`, cut at the limit of 3, and of `videos`");
+        assert_eq!(strings(&named.body, "cutOffStarts"), ["photos"]);
+        assert_eq!(listed(&images.body)?.len(), 4 + 6);
+
+        // A rating condition keeps the rated matches, and a write of ratings changes what the next read returns.
+        let headers = &[("authorization", token.as_str())];
+        for (library, path) in [("photos", "/photos/p1.png"), ("videos", "/v2.png")] {
+            let saved = send(
+                &router,
+                http::Method::PUT,
+                &format!("/api/v1/libraries/{library}/rating"),
+                headers,
+                Some(json!({"path": path, "rating": "good"})),
+            )
+            .await?;
+            assert_eq!(saved.status, StatusCode::OK, "{}", saved.body);
+        }
+        let good = get(&router, &token, &format!("{BOTH}&rating=good&{TIMELINE}")).await?;
+        assert_eq!(listed(&good.body)?, ["photos:/photos/p1.png", "videos:/v2.png"]);
+        assert_eq!(
+            month_counts(&months(&router, &token, &format!("{BOTH}&rating=good")).await?.body),
+            [("2024-03".to_string(), 1), ("2023-12".to_string(), 1)]
+        );
+        send(
+            &router,
+            http::Method::PUT,
+            "/api/v1/libraries/photos/rating",
+            headers,
+            Some(json!({"path": "/top.png", "rating": "good"})),
+        )
+        .await?;
+        let more = get(&router, &token, &format!("{BOTH}&rating=good&{TIMELINE}")).await?;
+        assert_eq!(listed(&more.body)?, ["photos:/photos/p1.png", "photos:/top.png", "videos:/v2.png"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_months_equal_the_pages_over_every_scope_and_filter_test() -> TestResult {
+        let fixture = aggregated_fixture().await?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        let mut checked = 0;
+        for starts in [
+            "start=photos&start=videos",
+            "start=videos",
+            "start=photos/photos",
+            "start=photos/photos&start=videos/x",
+            "start=photos/photos/outer.7z&start=videos",
+            "start=photos/photos/a.7z",
+        ] {
+            for choices in ["recursive=true", "recursive=true&insideArchives=true", "recursive=false"] {
+                for kinds in ["", "&kind=image", "&kind=video", "&kind=image&kind=video"] {
+                    for query in ["", "&query=png", "&query=x"] {
+                        let filter = format!("{starts}&{choices}{kinds}{query}");
+                        let seen = walk(&router, &token, &filter, 3).await?;
+                        let pages = get(&router, &token, &format!("{filter}&{TIMELINE}")).await?;
+                        let mut counted = Vec::<(String, u64)>::new();
+                        for entry in pages.body["entries"].as_array().ok_or("entries")? {
+                            let month = entry["timelineDate"].as_str().unwrap_or_default()[..7].to_string();
+                            match counted.last_mut() {
+                                Some((last, count)) if *last == month => *count += 1,
+                                _ => counted.push((month, 1)),
+                            }
+                        }
+                        let response = months(&router, &token, &filter).await?;
+                        assert_eq!(response.status, StatusCode::OK, "{filter}: {}", response.body);
+                        assert_eq!(month_counts(&response.body), counted, "{filter}");
+                        assert_eq!(seen.len(), counted.iter().map(|(_, count)| *count as usize).sum::<usize>(), "{filter}");
+                        checked += seen.len();
+                    }
+                }
+            }
+        }
+        assert!(checked > 100, "the readings are not all empty");
+        let unauthenticated = send(&router, http::Method::GET, &format!("{ENTRIES}/months?{BOTH}"), &[], None).await?;
+        assert_eq!(unauthenticated.status, StatusCode::UNAUTHORIZED);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn timeline_date_order_rejects_what_it_does_not_accept_test() -> TestResult {
+        let fixture = aggregated_fixture().await?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        let cursor = "2024-03-15T12:00:00photos/photos/p1.png";
+        for query in [
+            "order=asc",
+            "offset=0",
+            "offset=5",
+            "locate=photos/photos/p1.png",
+            "foldersFirst=true",
+            "foldersFirst=false",
+            &format!("after={cursor}&before={cursor}"),
+            &format!("after={cursor}&month=2024-02"),
+            "month=2024-02&around=photos/photos/p1.png",
+            "after=2024-03",
+            "after=nonsense",
+            "before=2024-03-15T12:00:00nolibrary",
+            "month=2024-13",
+            "month=2024-2",
+            "month=202402",
+            "around=/photos/p1.png",
+            "start=",
+        ] {
+            let response = get(&router, &token, &format!("{BOTH}&sort=timeline_date&{query}")).await?;
+            assert_eq!(response.status, StatusCode::BAD_REQUEST, "{query}: {}", response.body);
+        }
+        // An Entry that is a Library's root is not one of the sequence.
+        let root = get(&router, &token, &format!("{BOTH}&{TIMELINE}&around=nolibrary")).await?;
+        assert_eq!(root.status, StatusCode::NOT_FOUND);
+        // The anchors belong to timeline-date order only.
+        for query in [
+            format!("after={cursor}"),
+            format!("before={cursor}"),
+            "month=2024-02".to_string(),
+            "around=photos/photos/p1.png".to_string(),
+        ] {
+            for sort in ["", "&sort=name", "&sort=modified_at"] {
+                let response = get(&router, &token, &format!("{BOTH}{sort}&{query}")).await?;
+                assert_eq!(response.status, StatusCode::BAD_REQUEST, "{sort} {query}");
+            }
+        }
+        // An order that descends is accepted, and so is a sort that is not a timeline.
+        let descending = get(&router, &token, &format!("{BOTH}&{TIMELINE}&order=desc")).await?;
+        assert_eq!(listed(&descending.body)?, OUTSIDE_ORDER);
+        // The folder listings keep rejecting the timeline date as a sort.
+        for uri in [
+            "/api/v1/libraries/photos/folders/entries?path=/&sort=timeline_date",
+            "/api/v1/search/entries?libraryIds=photos&query=p&sort=timeline_date",
+        ] {
+            let response = send(&router, http::Method::GET, uri, &[("authorization", token.as_str())], None).await?;
+            assert_eq!(response.status, StatusCode::BAD_REQUEST, "{uri}");
+        }
+        // A listing cut from snapshots answers as before, with `totalCount` and without the cursors.
+        let named = get(&router, &token, &format!("{BOTH}&sort=name&limit=100")).await?;
+        assert_eq!(named.status, StatusCode::OK);
+        assert!(named.body["totalCount"].is_number() && named.body["previous"].is_null() && named.body["entries"][0]["timelineDate"].is_null());
         Ok(())
     }
 }

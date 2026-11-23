@@ -55,6 +55,8 @@ pub struct ListOptions {
     inside_archives: bool,
     /// Whether this is a `listEntries` listing, which applies the kinds of a Filter. The folder listing and the search API return every kind.
     scoped: bool,
+    /// Whether the listing is read in timeline-date order, which `sort` does not name: it keeps the name order the snapshots of a start with a condition are built and matched with.
+    timeline: bool,
     offset: u64,
     limit: usize,
 }
@@ -72,6 +74,7 @@ impl ListOptions {
             kinds: EntryKinds::default(),
             inside_archives: false,
             scoped: false,
+            timeline: false,
             offset: query.offset.unwrap_or(0),
             limit: Self::parse_limit(query.limit)?,
         })
@@ -91,30 +94,98 @@ impl ListOptions {
             kinds: EntryKinds::default(),
             inside_archives: false,
             scoped: false,
+            timeline: false,
             offset: query.offset.unwrap_or(0),
             limit: Self::parse_limit(query.limit)?,
         })
     }
 
     /// The conditions of `listEntries`. Hidden Entries are never included, as in the search API, and the Filter's kinds and the Scope's reading of archives apply.
+    ///
+    /// `sort=timeline_date` reads the timeline in descending order only, so an ascending `order`, `foldersFirst`, and `offset` with it are `InvalidInput`.
     pub fn from_entries(query: &models::ListEntriesQueryParams) -> Result<Self> {
-        let tags = query.tag.iter().map(|tag| tag.0.as_str()).collect::<Vec<_>>();
-        let kinds = query.kind.iter().map(|kind| EntryKind::parse(kind)).collect::<Result<Vec<_>>>()?;
+        let timeline = query.sort.as_deref() == Some("timeline_date");
+        let sort = if timeline {
+            if query.order.as_deref().is_some_and(|order| order != "desc") {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message("timeline_date is read in descending order only"));
+            }
+            if query.folders_first.is_some() {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message("foldersFirst cannot be given with sort=timeline_date"));
+            }
+            if query.offset.is_some() {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message("offset cannot be given with sort=timeline_date"));
+            }
+            ListSort::parse(None, None, false)?
+        } else {
+            ListSort::parse(query.sort.as_deref(), query.order.as_deref(), query.folders_first.unwrap_or(false))?
+        };
+        let mut options = Self::scoped_query(
+            query.recursive,
+            query.inside_archives,
+            query.query.as_deref(),
+            query.rating.as_deref(),
+            &query.tag,
+            &query.kind,
+            sort,
+        )?;
+        options.offset = query.offset.unwrap_or(0);
+        options.limit = Self::parse_limit(query.limit)?;
+        options.timeline = timeline;
+        Ok(options)
+    }
+
+    /// The conditions of the per-month counts of `listEntries`: the Scope's choices and the Filter, with no sort or page.
+    pub fn from_entry_months(query: &models::ListEntryMonthsQueryParams) -> Result<Self> {
+        let mut options = Self::scoped_query(
+            query.recursive,
+            query.inside_archives,
+            query.query.as_deref(),
+            query.rating.as_deref(),
+            &query.tag,
+            &query.kind,
+            ListSort::parse(None, None, false)?,
+        )?;
+        options.timeline = true;
+        Ok(options)
+    }
+
+    fn scoped_query(
+        recursive: Option<bool>,
+        inside_archives: Option<bool>,
+        query: Option<&str>,
+        rating: Option<&str>,
+        tags: &[models::TagName],
+        kinds: &[String],
+        sort: ListSort,
+    ) -> Result<Self> {
+        let tags = tags.iter().map(|tag| tag.0.as_str()).collect::<Vec<_>>();
+        let kinds = kinds.iter().map(|kind| EntryKind::parse(kind)).collect::<Result<Vec<_>>>()?;
         Ok(Self {
-            recursive: query.recursive.unwrap_or(false),
+            recursive: recursive.unwrap_or(false),
             include_hidden: false,
             folders_only: false,
-            sort: ListSort::parse(query.sort.as_deref(), query.order.as_deref(), query.folders_first.unwrap_or(false))?,
-            filter: NameFilter::new(query.query.as_deref().unwrap_or_default()),
-            marks: MarkFilter::parse(query.rating.as_deref(), &tags)?,
+            sort,
+            filter: NameFilter::new(query.unwrap_or_default()),
+            marks: MarkFilter::parse(rating, &tags)?,
             selection: MarkSelection::default(),
             kinds: EntryKinds::default(),
             inside_archives: false,
             scoped: false,
-            offset: query.offset.unwrap_or(0),
-            limit: Self::parse_limit(query.limit)?,
+            timeline: false,
+            offset: 0,
+            limit: DEFAULT_LIST_LIMIT as usize,
         }
-        .with_scope(EntryKinds::of(kinds), query.inside_archives.unwrap_or(false)))
+        .with_scope(EntryKinds::of(kinds), inside_archives.unwrap_or(false)))
+    }
+
+    /// Whether the listing is read in timeline-date order.
+    pub fn is_timeline(&self) -> bool {
+        self.timeline
+    }
+
+    /// The most Entries of a page.
+    pub fn limit(&self) -> usize {
+        self.limit
     }
 
     pub fn recursive(&self) -> bool {
