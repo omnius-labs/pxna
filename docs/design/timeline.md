@@ -133,7 +133,8 @@ The Library-relative path of an Entry inside an archive is held as the archive's
 The local file it belongs to is the outermost archive that contains that Entry, or the Entry's own local file.
 An Entry is therefore inside an archive exactly when its path differs from the path of its local file, which is how a Scope that does not read the insides of archives leaves them out (§7).
 
-The per-month counts are increased or decreased in the same transaction that adds or removes Entry rows.
+The per-month counts are increased or decreased in the same transaction that adds or removes Entry rows, by triggers on the rows.
+A row is written by an upsert that can move it into another month, kind, or local file, so the triggers raise a count with an upsert too, since an `INSERT OR IGNORE` in their bodies would fail under it ([An upsert that fires a trigger](../knowledge/sqlite-upsert-trigger-conflict.md) in [knowledge.md](../knowledge.md)).
 Therefore, the per-month counts always match the number obtained by counting Entry rows by month.
 This invariant presupposes that all writes to the index go through the timeline component, and breaks if the index file is rewritten from outside.
 When it breaks, deleting the index file lets it be rebuilt by the next aggregation.
@@ -244,6 +245,7 @@ The per-start sequences are merged in the order above, and an Entry reached from
 
 When the Filter has a name, rating, or tag condition, the candidates are the matches of each start's listing, which the name index answers or a walk finds ([Listing and Search Design §5.2](./listing.md#52-answering-recursive-listings-with-conditions)), and they are ordered by the timeline dates of their rows.
 An archive start is then walked, so its matches include the Entries of the archives nested in it only when the Scope reads the insides of archives, unlike its rows without a condition (§9.1).
+Without a condition, when the Scope reads descendants, a start at or under another start that is an archive or inside one is not read: the resolution of the starts keeps it when the insides of archives are not read, while its rows are already among the other start's, and the months would otherwise count them twice.
 That order is computed once from the rows of the matches and kept in the start's snapshot, as the other orders of a snapshot are ([Listing and Search Design §4.1](./listing.md#41-the-unit-that-is-built)), and pages and per-month counts are cut from it.
 A match without a row, which is not an image or video or has not been aggregated yet, is not listed.
 The matches are bounded per start by the recursion limit and are walked while the name index is not usable, so in this case the response names the starts cut off or walked, as other listings over a Scope do.

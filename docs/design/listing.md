@@ -279,7 +279,7 @@ A listing is answered from the name index when all of the following hold.
 These hold for each start of a Scope, so one start can be answered from the index while another is walked.
 Otherwise the listing of the start walks the file system as before.
 A start that is an archive or a path inside one always reads that archive's inside, whether or not the Scope reads the insides of archives, which applies only to archives found under the starts; in the orders cut from snapshots it is walked inside that archive, which is small and gives exact results, and in timeline-date order it is read from the timeline index ([Timeline Design §7](./timeline.md#7-reading)).
-The walk of such a start reads the archives nested inside it like folders, down to `max_nested_depth`, when the Scope reads the insides of archives, and otherwise lists them as Entries, as a walk lists the archives under a folder.
+The walk of such a start reads the archives nested inside it like folders, down to `max_nested_depth`, when the Scope reads the insides of archives, and otherwise lists them as Entries, as a walk lists the archives under a folder; the inside of a nested archive that cannot be opened is not read, and the walk goes on, as the name index holds such an archive without contents (§5.1).
 The response lists, by start value, the starts that were walked because the index of their Library is not usable.
 When only the last condition fails, the walked result may be cut off by the walk's count and has none of the Entries inside archives, so it returns archives like other files, and the client shows that the index is being built ([Client Design §3.6](./client.md#36-shelves-and-search)).
 A walk taken for one of the other reasons is the intended answer and is not marked.
@@ -302,8 +302,10 @@ The starts may be in one Library or in several, and any folder of a Library can 
 An Entry is listed once even when starts overlap: a start that another start already covers adds nothing, the same start given twice included, and an Entry reached from two starts is kept at its first start.
 A start inside an archive is covered by another start only when the Scope reads the insides of archives, since otherwise the other start lists that archive as one Entry.
 Entries are told apart by Library and path, so two Entries compare as equal only when they have the same path in different Libraries, and those are ordered by the position of their start in the Scope.
-A start whose folder or Library no longer exists, or that names a file that is neither a folder nor an archive, is a missing start: it is skipped, the other starts are listed, and the response lists the missing starts by start value, in every sort, the timeline date included.
-When every start is missing, the result is empty and every start is named.
+A start whose folder or Library no longer exists, that names a file that is neither a folder nor an archive, or whose path passes through such a file, is a missing start: it is skipped, the other starts are listed, and the response lists the missing starts by start value, in every sort, the timeline date included.
+A start that is an archive that cannot be opened, or a path inside one, is not missing, and fails the request as reading that archive fails.
+When every start is missing, the result is empty and every start is named; a start value given twice is named once.
+Coverage is decided from the Scope alone, before any listing is built: a start inside an archive under a recursive start is dropped when the Scope reads the insides of archives, even while that start is walked because its Library's index is not usable, and the archive's insides are then missing from the result until the index is usable, while the covering start is named among the walked starts.
 A start goes missing when its folder is deleted, through Pxna or outside it, or moved or renamed outside Pxna, or when its Library no longer exists ([design.md §6.5](../design.md#65-shelves-and-folder-settings)).
 
 The merged sequence is not kept as a snapshot of its own.
