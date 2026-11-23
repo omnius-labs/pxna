@@ -80,8 +80,8 @@ A listing is a sequence of Entries determined by the target (Library and `path`)
 With this value the client decides the overall height of the listing from the first page.
 
 `listEntries` takes a Scope in place of the target, and a Filter in place of `query` and `foldersOnly`, whose kind chooses the kinds of Entries and which also carries the rating and tag conditions (§5).
-It is one GET request to `/entries` whose query carries everything: each start is a repeated `start` whose value is the Library id followed by the Library-relative path without its leading `/` (`photos/2025`, or `photos` for the root), `recursive` and `insideArchives` give the Scope's choices, and the Filter's tags and kinds are repeated values, each kind one of `folder`, `archive`, `image`, `video`, and `other`.
-A Scope has at most 64 starts, and more, or a start whose value is not of this form, is `InvalidInput`.
+It is one POST request to `/entries` whose JSON body carries everything: `scope` holds the starts, each an object of a Library id and a Library-relative path with its leading `/` (`/` for the root), with `recursive` and `insideArchives`, `filter` holds the name, rating, and tag conditions and the kinds, each kind one of `folder`, `archive`, `image`, `video`, and `other`, and the sort and the page sit beside them.
+A Scope has at most 64 starts, and more, or a start whose Library id is not of the form a configured Library id has or whose path is not a Library-relative path, is `InvalidInput`.
 `sort` also takes the timeline date, `timeline_date`, which is read in descending order only: without `order` it is descending, and an ascending `order` with it is `InvalidInput`.
 The sort of `listEntries` is a parameter of its own, so the sorts of the folder listings do not gain the timeline date.
 Hidden Entries are always excluded from it.
@@ -112,7 +112,7 @@ A page is specified by `offset` and `limit`, and cut out from the sequence after
 If `offset` exceeds the count, an empty page is returned.
 
 The response has the page's Entries, the `offset` the page was cut at, `totalCount`, the snapshot's id, and whether the recursion was cut off (`truncated`, §6).
-A response of `listEntries` lists the starts that were cut off (`cutOffStarts`) in place of `truncated`, and also the starts that were walked (`walkedStarts`) and the missing starts (`missingStarts`), each by start value (§5.3).
+A response of `listEntries` lists the starts that were cut off (`cutOffStarts`) in place of `truncated`, and also the starts that were walked (`walkedStarts`) and the missing starts (`missingStarts`), each as it was given (§5.3).
 The response of `listEntries` has one schema for both kinds of page: `totalCount`, `offset`, and the snapshot's id are present in the orders cut from snapshots, and the cursors of §4.6 in timeline-date order.
 The snapshot's id is a value newly assigned each time a snapshot is built, and it changes if rebuilt even when the version is the same.
 
@@ -171,7 +171,7 @@ The page starts at the largest multiple of `limit` that is not greater than the 
 Every response cut by `offset` carries the `offset` it was cut at, which is how the client learns which page it received.
 
 For `listFolderEntries` and `listFolderSummaries`, `locate` is the path of the Entry relative to the listed folder, so a direct child is its name, and a descendant in a `recursive` listing is its path below the folder.
-For `listEntries`, whose starts can be in several Libraries, `locate` names the Entry in the form of a start: its Library id followed by its Library-relative path without the leading `/`.
+For `listEntries`, whose starts can be in several Libraries, `locate` names the Entry as a start is named: an object of its Library id and its Library-relative path.
 `locate` together with `offset` is `InvalidInput`, and so is `locate` in timeline-date order, where `around` takes its place (§4.6).
 
 The position is the Entry's place after `foldersOnly`, `includeHidden`, `query`, and the rating and tag conditions are applied, or after the Filter for `listEntries`, so an Entry that these leave out is not in the sequence.
@@ -280,7 +280,7 @@ These hold for each start of a Scope, so one start can be answered from the inde
 Otherwise the listing of the start walks the file system as before.
 A start that is an archive or a path inside one always reads that archive's inside, whether or not the Scope reads the insides of archives, which applies only to archives found under the starts; in the orders cut from snapshots it is walked inside that archive, which is small and gives exact results, and in timeline-date order it is read from the timeline index ([Timeline Design §7](./timeline.md#7-reading)).
 The walk of such a start reads the archives nested inside it like folders, down to `max_nested_depth`, when the Scope reads the insides of archives, and otherwise lists them as Entries, as a walk lists the archives under a folder; the inside of a nested archive that cannot be opened is not read, and the walk goes on, as the name index holds such an archive without contents (§5.1).
-The response lists, by start value, the starts that were walked because the index of their Library is not usable.
+The response lists the starts that were walked because the index of their Library is not usable.
 When only the last condition fails, the walked result may be cut off by the walk's count and has none of the Entries inside archives, so it returns archives like other files, and the client shows that the index is being built ([Client Design §3.6](./client.md#36-shelves-and-search)).
 A walk taken for one of the other reasons is the intended answer and is not marked.
 
@@ -302,9 +302,9 @@ The starts may be in one Library or in several, and any folder of a Library can 
 An Entry is listed once even when starts overlap: a start that another start already covers adds nothing, the same start given twice included, and an Entry reached from two starts is kept at its first start.
 A start inside an archive is covered by another start only when the Scope reads the insides of archives, since otherwise the other start lists that archive as one Entry.
 Entries are told apart by Library and path, so two Entries compare as equal only when they have the same path in different Libraries, and those are ordered by the position of their start in the Scope.
-A start whose folder or Library no longer exists, that names a file that is neither a folder nor an archive, or whose path passes through such a file, is a missing start: it is skipped, the other starts are listed, and the response lists the missing starts by start value, in every sort, the timeline date included.
+A start whose folder or Library no longer exists, that names a file that is neither a folder nor an archive, or whose path passes through such a file, is a missing start: it is skipped, the other starts are listed, and the response lists the missing starts as they were given, in every sort, the timeline date included.
 A start that is an archive that cannot be opened, or a path inside one, is not missing, and fails the request as reading that archive fails.
-When every start is missing, the result is empty and every start is named; a start value given twice is named once.
+When every start is missing, the result is empty and every start is named; a start given twice is named once.
 Coverage is decided from the Scope alone, before any listing is built: a start inside an archive under a recursive start is dropped when the Scope reads the insides of archives, even while that start is walked because its Library's index is not usable, and the archive's insides are then missing from the result until the index is usable, while the covering start is named among the walked starts.
 A start goes missing when its folder is deleted, through Pxna or outside it, or moved or renamed outside Pxna, or when its Library no longer exists ([design.md §6.5](../design.md#65-shelves-and-folder-settings)).
 
@@ -316,7 +316,7 @@ Each page request merges the per-start orders again from the head, so the cost o
 In timeline-date order the pages come from the timeline index instead (§4.6).
 
 `totalCount` is the number of Entries in the merged sequence.
-The recursion limit of §6 applies to each start separately, and the response lists, by start value, the starts that were cut off.
+The recursion limit of §6 applies to each start separately, and the response lists the starts that were cut off.
 
 ## 6. Recursion Limit
 
@@ -749,29 +749,33 @@ The paging would be one form, but a large folder could no longer be jumped throu
 Cutting every page by `offset`, the timeline included.
 The client's loading would be one form, but positions in the timeline index shift while aggregation adds rows, skipping rows costs more time the further the position, and the height of millions of Entries cannot be reserved, so we rejected it.
 
-#### Carry a Scope and a Filter in the Query of One GET Request
+#### Carry a Scope and a Filter in the JSON Body of One POST Request
 
 **Decision**
-`listEntries` is a GET request whose query carries the starts, as repeated values of a Library id followed by a Library-relative path, the Scope's choices, the Filter, the sort, and the page (§3).
-`locate` and `around` name an Entry in the same form, with no separate parameter for its Library.
+`listEntries` and `listEntryMonths` are POST requests whose JSON body carries the Scope and the Filter, and for `listEntries` also the sort and the page (§3).
+A start, `locate`, `around`, and every start the response names are objects of a Library id and a Library-relative path, and the Scope and the Filter have the shapes a saved Shelf holds them in ([design.md §6.5](../design.md#65-shelves-and-folder-settings)).
 A saved Shelf is read by sending its Scope and Filter, not its id.
 
 **Reason**
-A listing is a read, and a GET keeps it outside the checks of mutating requests ([design.md §8.5](../design.md#85-csrf)) and in the form of the other listing APIs.
-A Library id cannot contain `/` ([openapi.yaml](../../daemon/openapi.yaml), `LibraryId`), so one value names a Library and a path without ambiguity, as the web client's timeline already does in its URL ([Client Design §3.10](./client.md#310-timeline-layout)).
+A Shelf holds its starts as objects, so a client sends the Scope and the Filter of a Shelf as it saved them, and the contract types every start and Entry it names instead of leaving a string for the server to split.
 Sending the Scope and the Filter reads a saved Shelf and an Unsaved Shelf the same way, so the server has one path and a Shelf being edited can be read before it is saved.
+The `Origin` check that a POST meets applies only to requests with a session cookie, which the web client sends from the same origin with its `Origin`, and not to bearer requests ([design.md §8.5](../design.md#85-csrf)), so a read by POST is answered as a read by GET was.
 
 **Rejected alternative 1**
-A POST request with the Scope and the Filter in a JSON body.
-A long Scope would fit without care for URL length, but a read would become a request that the `Origin` check, which exempts only GET and HEAD, applies to, so we rejected it.
+A GET request whose query carries each start as one value of a Library id followed by a Library-relative path.
+A read would stay a GET, but every start would be a string the server parses and a client builds from each saved Shelf, so we rejected it.
 
 **Rejected alternative 2**
-Reading a saved Shelf by its id.
-The request would be short, but there would be two ways to read a Shelf, and a Shelf being edited could not be read until saved, so we rejected it.
+A GET request whose query carries the Library ids and the paths of the starts as two parameters repeated in the same order.
+A start would need no parsing, but a start would be two values matched by position, so we rejected it.
 
 **Rejected alternative 3**
-Naming the Library of `locate` and `around` in separate parameters, as `listSearchEntries` and `listTimelineEntries` did.
-It needs no parsing of the value, but every Entry and start would be named in two forms, so we rejected it.
+A GET request whose query carries the Scope and the Filter as JSON in one value.
+The types would be the body's, but the URL would be long and unreadable in logs, so we rejected it.
+
+**Rejected alternative 4**
+Reading a saved Shelf by its id.
+The request would be short, but there would be two ways to read a Shelf, and a Shelf being edited could not be read until saved, so we rejected it.
 
 #### List Only Files Recursively Unless the Filter Asks for Folders
 
@@ -915,7 +919,7 @@ It would confirm the targets with archives, but the 1-million-Entry measurement 
 #### Serve the Listing at `/entries` and Its Per-Month Counts at `/entries/months`
 
 **Decision**
-`listEntries` is `GET /entries`, and the per-month counts over the same Scope and Filter are `listEntryMonths` at `GET /entries/months`, which returns the same `TimelineMonths` as the timeline's month API.
+`listEntries` is `POST /entries`, and the per-month counts over the same Scope and Filter are `listEntryMonths` at `POST /entries/months` (the method is that of "Carry a Scope and a Filter in the JSON Body of One POST Request" below), which returns the same `TimelineMonths` as the timeline's month API.
 
 **Reason**
 The API lists the Entries of any Scope, for a saved Shelf and an Unsaved Shelf alike, so the path names what it returns, and the counts are an aggregate of the same listing, so they sit under it.
@@ -923,7 +927,7 @@ The month schema already holds months newest first with their counts, so a clien
 
 **Rejected alternative**
 `/shelves/entries`.
-It would group the listing with Shelves, but an Unsaved Shelf calls it as well, and the path would suggest reading a saved Shelf by its id, which this API does not do ("Carry a Scope and a Filter in the Query of One GET Request" above), so we rejected it.
+It would group the listing with Shelves, but an Unsaved Shelf calls it as well, and the path would suggest reading a saved Shelf by its id, which this API does not do ("Carry a Scope and a Filter in the JSON Body of One POST Request" above), so we rejected it.
 
 #### Answer Both Kinds of Pages with One Response Schema
 
@@ -944,11 +948,11 @@ Each order's fields would be required in its own schema, but every client would 
 
 **Decision**
 A start in a Library that is not configured, or that names a file that is neither a folder nor an archive, is a missing start like a deleted folder (§5.3).
-A start whose value is not a Library id followed by a Library-relative path is `InvalidInput` (§3).
+A start whose Library id is not of the form a configured Library id has, or whose path is not a Library-relative path, is `InvalidInput` (§3).
 
 **Reason**
 A Shelf's start can turn into a plain file outside Pxna, as when a folder is replaced by a file of the same name, and a Library can be removed from the configuration; either way the start no longer reads anything, as a deleted folder does.
-A malformed value cannot come from a saved start, so it is an error of the client.
+Such a start cannot come from a saved start, since the configuration accepts only Library ids of that form, so it is an error of the client.
 
 **Rejected alternative**
 `InvalidInput` for a start that names a plain file.
@@ -960,7 +964,7 @@ It would be explicit, but one file replaced outside Pxna would make the whole Sh
 A Scope has at most 64 starts, and more is `InvalidInput` (§3).
 
 **Reason**
-Each start can build a snapshot up to the recursion limit (§6), and the starts are carried in the URL, so a bound keeps the memory, the wait, and the URL of one request bounded.
+Each start can build a snapshot up to the recursion limit (§6), so a bound keeps the memory and the wait of one request bounded.
 The starts of a Shelf are folders the owner picks one by one, and 64 leaves room for them.
 
 **Rejected alternative**
@@ -1075,7 +1079,8 @@ Only the dependencies must be respected.
 | L3 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while it is not usable (§5.1, §5.2) | L1 | Done |
 | L4 | Implement `listEntries` over a Scope and a Filter with pages by `offset` and by cursor, the starts cut off, walked, and missing, and `locate` in the form of a start (§3, §4.5, §4.6, §5.3) | L2, L3 | Done |
 | L5 | Remove the search API that `listEntries` replaces (§8.1) once no client calls it | L4 | Not started |
+| L6 | Carry the Scope and the Filter of `listEntries` and `listEntryMonths` in a POST body, with starts and Entries as objects of a Library id and a Library-relative path (§3, §8.1) | L4 | Not started |
 
-L1 corresponds to M19, L2 to M24, L3 to M27, L4 to M28, and L5 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
+L1 corresponds to M19, L2 to M24, L3 to M27, L4 to M28, L5 to part of M31, and L6 to part of M29 of [design.md §12.2](../design.md#122-roadmap).
 
 For confirmed defects, see [issues.md](../issues.md).
