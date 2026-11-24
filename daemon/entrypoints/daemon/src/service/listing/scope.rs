@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use omnius_pxna_engine::service::{NestedFsEntry, ResolvedStoragePath};
+use omnius_pxna_interface::models;
 
 use crate::{config::LibraryConfig, prelude::*, service::library::LibraryRelativePath};
 
@@ -32,15 +33,14 @@ impl ScopeStart {
         })
     }
 
-    /// Splits `value` at its first `/` into the Library id and the path, which is empty when there is none, and keeps the path with its `/`.
-    pub fn parse(value: &str) -> Result<Self> {
-        let (library_id, path) = value.find('/').map_or((value, ""), |index| value.split_at(index));
-        Self::new(library_id, path)
+    /// The start a request names: its Library id and its path as sent.
+    pub fn from_request(start: &models::LibraryPath) -> Result<Self> {
+        Self::new(&start.library_id, &start.path)
     }
 
-    /// The text `parse` was given, which `parse` reads back as this start.
-    pub fn value(&self) -> String {
-        format!("{}{}", self.library_id, self.given_path)
+    /// The Library id and the path as they were given, which a response names the start by.
+    pub fn to_response(&self) -> models::LibraryPath {
+        models::LibraryPath::new(self.library_id.clone(), self.given_path.clone())
     }
 
     pub fn library_id(&self) -> &str {
@@ -78,9 +78,13 @@ impl Scope {
         })
     }
 
-    /// More than `MAX_STARTS` starts, none, and a start that is not of the form of `ScopeStart::parse` are `InvalidInput`.
-    pub fn parse(values: &[String], recursive: bool, inside_archives: bool) -> Result<Self> {
-        Self::new(values.iter().map(|value| ScopeStart::parse(value)).collect::<Result<_>>()?, recursive, inside_archives)
+    /// The Scope a request names: its starts, in the order sent, and its choices.
+    pub fn from_request(scope: &models::EntryScope) -> Result<Self> {
+        Self::new(
+            scope.starts.iter().map(ScopeStart::from_request).collect::<Result<_>>()?,
+            scope.recursive.unwrap_or(false),
+            scope.inside_archives.unwrap_or(false),
+        )
     }
 
     pub fn starts(&self) -> &[ScopeStart] {
@@ -93,6 +97,29 @@ impl Scope {
 
     pub fn inside_archives(&self) -> bool {
         self.inside_archives
+    }
+}
+
+/// Test helpers: the tests name a start by the compact text `library/path`, which is the Library id and the path as given, the path with its leading `/` or none.
+#[cfg(test)]
+impl ScopeStart {
+    /// Splits `value` at its first `/` into the Library id and the path, which is empty when there is none.
+    pub fn parse(value: &str) -> Result<Self> {
+        let (library_id, path) = value.find('/').map_or((value, ""), |index| value.split_at(index));
+        Self::new(library_id, path)
+    }
+
+    /// The text `parse` was given, which `parse` reads back as this start.
+    pub fn value(&self) -> String {
+        format!("{}{}", self.library_id, self.given_path)
+    }
+}
+
+#[cfg(test)]
+impl Scope {
+    /// A Scope of the starts named by `ScopeStart::parse`.
+    pub fn parse(values: &[String], recursive: bool, inside_archives: bool) -> Result<Self> {
+        Self::new(values.iter().map(|value| ScopeStart::parse(value)).collect::<Result<_>>()?, recursive, inside_archives)
     }
 }
 

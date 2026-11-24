@@ -56,20 +56,12 @@ pub trait Entries<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
 
     /// List the Entries of a Scope.
     ///
-    /// ListEntries - GET /api/v1/entries
-    async fn list_entries(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        query_params: &models::ListEntriesQueryParams,
-    ) -> Result<ListEntriesResponse, E>;
+    /// ListEntries - POST /api/v1/entries
+    async fn list_entries(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims, body: &models::EntryListRequest) -> Result<ListEntriesResponse, E>;
 
     /// List the months that have Entries of a Scope.
     ///
-    /// ListEntryMonths - GET /api/v1/entries/months
+    /// ListEntryMonths - POST /api/v1/entries/months
     async fn list_entry_months(
         &self,
 
@@ -77,6 +69,6 @@ pub trait Entries<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        query_params: &models::ListEntryMonthsQueryParams,
+        body: &models::EntryMonthsRequest,
     ) -> Result<ListEntryMonthsResponse, E>;
 }

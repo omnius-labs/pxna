@@ -437,25 +437,18 @@ mod tests {
 
     /// The parameters of `listEntries` that the Filter and the Scope's choices come from.
     fn options(recursive: bool, inside_archives: bool, query: Option<&str>, rating: Option<&str>, kinds: &[&str]) -> TestResult<ListOptions> {
-        Ok(ListOptions::from_entries(&models::ListEntriesQueryParams {
-            start: vec!["photos".to_string()],
+        let scope = models::EntryScope {
+            starts: vec![models::LibraryPath::new("photos".to_string(), "/".to_string())],
             recursive: Some(recursive),
             inside_archives: Some(inside_archives),
-            query: query.map(str::to_string),
-            rating: rating.map(str::to_string),
-            tag: Vec::new(),
-            kind: kinds.iter().map(|kind| kind.to_string()).collect(),
-            sort: None,
-            order: None,
-            folders_first: None,
-            offset: None,
-            locate: None,
-            after: None,
-            before: None,
-            month: None,
-            around: None,
-            limit: None,
-        })?)
+        };
+        let mut filter = models::EntryFilter::new();
+        filter.query = query.map(str::to_string);
+        filter.rating = rating.map(str::to_string);
+        filter.kinds = Some(kinds.iter().map(|kind| kind.to_string()).collect());
+        let mut request = models::EntryListRequest::new(scope);
+        request.filter = Some(filter);
+        Ok(ListOptions::from_entries(&request)?)
     }
 
     fn scope(starts: &[&str], options: &ListOptions) -> TestResult<Scope> {
