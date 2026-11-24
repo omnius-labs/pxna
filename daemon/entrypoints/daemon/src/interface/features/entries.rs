@@ -152,9 +152,9 @@ impl From<ScopeListing> for models::EntryListing {
     fn from(listing: ScopeListing) -> Self {
         let mut response = models::EntryListing::new(
             listing.entries.into_iter().map(models::ScopedEntry::from).collect(),
-            listing.cut_off_starts,
-            listing.walked_starts,
-            listing.missing_starts,
+            listing.cut_off_starts.iter().map(ScopeStart::value).collect(),
+            listing.walked_starts.iter().map(ScopeStart::value).collect(),
+            listing.missing_starts.iter().map(ScopeStart::value).collect(),
         );
         response.total_count = Some(listing.total_count);
         response.offset = Some(listing.offset);
@@ -175,7 +175,12 @@ impl From<ScopeTimelinePage> for models::EntryListing {
                 scoped
             })
             .collect();
-        let mut response = models::EntryListing::new(entries, page.cut_off_starts, page.walked_starts, page.missing_starts);
+        let mut response = models::EntryListing::new(
+            entries,
+            page.cut_off_starts.iter().map(ScopeStart::value).collect(),
+            page.walked_starts.iter().map(ScopeStart::value).collect(),
+            page.missing_starts.iter().map(ScopeStart::value).collect(),
+        );
         response.previous = page.previous.map(|cursor| cursor.encode());
         response.next = page.next.map(|cursor| cursor.encode());
         response

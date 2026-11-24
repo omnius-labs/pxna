@@ -71,7 +71,7 @@ The contract of `listEntries` and `listEntryMonths` breaks, which no client depe
 
 | No. | Content | Depends on | Status |
 | --- | --- | --- | --- |
-| [1](#s-1) | Name starts by a Library id and a path in the service | - | Not started |
+| [1](#s-1) | Name starts by a Library id and a path in the service | - | Done |
 | [2](#s-2) | Take the Scope and the Filter in a POST body | 1 | Not started |
 | [3](#s-3) | Describe the state | 2 | Not started |
 

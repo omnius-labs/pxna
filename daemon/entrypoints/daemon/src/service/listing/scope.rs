@@ -2,41 +2,54 @@ use std::path::Path;
 
 use omnius_pxna_engine::service::{NestedFsEntry, ResolvedStoragePath};
 
-use crate::{prelude::*, service::library::LibraryRelativePath};
+use crate::{config::LibraryConfig, prelude::*, service::library::LibraryRelativePath};
 
 /// How many starts a Scope has at most.
 pub const MAX_STARTS: usize = 64;
 
 /// One start of a Scope: a Library and a Library-relative path, as the client named it.
 ///
-/// The value is kept as it was given, because the response names the starts that were cut off, walked, or missing by it.
+/// The path is kept as it was given, because the response names the starts that were cut off, walked, or missing by it.
+/// Two starts are equal when their Library ids and the paths as given are.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopeStart {
-    value: String,
     library_id: String,
+    given_path: String,
     path: LibraryRelativePath,
 }
 
 impl ScopeStart {
-    /// Parses the Library id, up to the first `/`, and the Library-relative path after it, which is the root when there is none.
-    pub fn parse(value: &str) -> Result<Self> {
-        let (library_id, path) = value.split_once('/').unwrap_or((value, ""));
-        if library_id.is_empty() {
-            return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("start has no library id: {value:?}")));
+    /// A Library id that is not of the form a configured one has and a path that is not a Library-relative path are `InvalidInput`.
+    /// Whether the Library is configured is not checked: a start in a Library that is not is a missing start.
+    pub fn new(library_id: &str, path: &str) -> Result<Self> {
+        if !LibraryConfig::is_valid_id(library_id) {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("start has no valid library id: {library_id:?}")));
         }
         Ok(Self {
-            value: value.to_string(),
             library_id: library_id.to_string(),
+            given_path: path.to_string(),
             path: LibraryRelativePath::parse(path)?,
         })
     }
 
-    pub fn value(&self) -> &str {
-        &self.value
+    /// Splits `value` at its first `/` into the Library id and the path, which is empty when there is none, and keeps the path with its `/`.
+    pub fn parse(value: &str) -> Result<Self> {
+        let (library_id, path) = value.find('/').map_or((value, ""), |index| value.split_at(index));
+        Self::new(library_id, path)
+    }
+
+    /// The text `parse` was given, which `parse` reads back as this start.
+    pub fn value(&self) -> String {
+        format!("{}{}", self.library_id, self.given_path)
     }
 
     pub fn library_id(&self) -> &str {
         &self.library_id
+    }
+
+    /// The path as it was given.
+    pub fn given_path(&self) -> &str {
+        &self.given_path
     }
 
     pub fn path(&self) -> &LibraryRelativePath {
@@ -53,16 +66,21 @@ pub struct Scope {
 }
 
 impl Scope {
-    /// More than `MAX_STARTS` starts, none, and a start that is not of the form of `ScopeStart::parse` are `InvalidInput`.
-    pub fn parse(values: &[String], recursive: bool, inside_archives: bool) -> Result<Self> {
-        if values.is_empty() || values.len() > MAX_STARTS {
-            return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("a scope has 1-{MAX_STARTS} starts: {}", values.len())));
+    /// None and more than `MAX_STARTS` starts are `InvalidInput`.
+    pub fn new(starts: Vec<ScopeStart>, recursive: bool, inside_archives: bool) -> Result<Self> {
+        if starts.is_empty() || starts.len() > MAX_STARTS {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message(format!("a scope has 1-{MAX_STARTS} starts: {}", starts.len())));
         }
         Ok(Self {
-            starts: values.iter().map(|value| ScopeStart::parse(value)).collect::<Result<_>>()?,
+            starts,
             recursive,
             inside_archives,
         })
+    }
+
+    /// More than `MAX_STARTS` starts, none, and a start that is not of the form of `ScopeStart::parse` are `InvalidInput`.
+    pub fn parse(values: &[String], recursive: bool, inside_archives: bool) -> Result<Self> {
+        Self::new(values.iter().map(|value| ScopeStart::parse(value)).collect::<Result<_>>()?, recursive, inside_archives)
     }
 
     pub fn starts(&self) -> &[ScopeStart] {
@@ -173,14 +191,14 @@ impl ResolvedStart {
 /// What resolving one start came to.
 pub enum StartResolution {
     Found(Box<ResolvedStart>),
-    /// The start's folder or Library does not exist, or it names a file that is neither a folder nor an archive. It keeps its start value.
-    Missing(String),
+    /// The start's folder or Library does not exist, or it names a file that is neither a folder nor an archive.
+    Missing(ScopeStart),
 }
 
-/// The starts of a Scope that exist and add Entries, in the order they were given, and the values of the starts that are missing.
+/// The starts of a Scope that exist and add Entries, in the order they were given, and the starts that are missing.
 pub struct ResolvedScope {
     starts: Vec<ResolvedStart>,
-    missing: Vec<String>,
+    missing: Vec<ScopeStart>,
 }
 
 impl ResolvedScope {
@@ -188,11 +206,11 @@ impl ResolvedScope {
     /// A missing start covers nothing, and is named whatever covers its path.
     pub fn new(resolutions: Vec<StartResolution>, scope: &Scope) -> Self {
         let mut found = Vec::new();
-        let mut missing = Vec::<String>::new();
+        let mut missing = Vec::<ScopeStart>::new();
         for resolution in resolutions {
             match resolution {
                 StartResolution::Found(start) => found.push(*start),
-                StartResolution::Missing(value) if !missing.contains(&value) => missing.push(value),
+                StartResolution::Missing(start) if !missing.contains(&start) => missing.push(start),
                 StartResolution::Missing(_) => {}
             }
         }
@@ -213,8 +231,8 @@ impl ResolvedScope {
         &self.starts
     }
 
-    /// The values of the missing starts, in the order they were given.
-    pub fn missing(&self) -> &[String] {
+    /// The missing starts as they were given, in the order they were given, one of identical starts.
+    pub fn missing(&self) -> &[ScopeStart] {
         &self.missing
     }
 }
@@ -248,7 +266,7 @@ mod tests {
     fn a_start_value_is_a_library_id_and_a_path_test() -> testresult::TestResult {
         let start = parse("photos/2025/trip")?;
         assert_eq!(
-            (start.library_id(), start.path().segments(), start.value()),
+            (start.library_id(), start.path().segments(), start.value().as_str()),
             ("photos", &["2025".to_string(), "trip".to_string()][..], "photos/2025/trip")
         );
         let root = parse("photos")?;
@@ -268,6 +286,72 @@ mod tests {
         for value in ["", "/photos", "/", "photos/../..", "photos/a\\b", "photos/C:/x", "photos/a\0b"] {
             assert_eq!(*parse(value).unwrap_err().kind(), ErrorKind::InvalidInput, "{value:?}");
         }
+    }
+
+    #[test]
+    fn a_start_is_built_from_a_library_id_and_a_path_kept_as_given_test() -> testresult::TestResult {
+        let start = ScopeStart::new("photos", "/a/../b/./")?;
+        assert_eq!(
+            (start.library_id(), start.given_path(), start.path().segments()),
+            ("photos", "/a/../b/./", ["b".to_string()].as_slice())
+        );
+        assert_eq!(start.value(), "photos/a/../b/./");
+        // A path with or without its leading `/`, and the root as `/` or as nothing, are the same place and different starts as given.
+        assert_eq!(ScopeStart::new("photos", "/")?.path().segments(), ScopeStart::new("photos", "")?.path().segments());
+        assert_ne!(ScopeStart::new("photos", "/x")?, ScopeStart::new("photos", "/x/")?);
+        assert_ne!(ScopeStart::new("photos", "/x")?, ScopeStart::new("videos", "/x")?);
+        assert_eq!(ScopeStart::new("photos", "/x")?, ScopeStart::new("photos", "/x")?);
+        // `parse` reads back what `value` gives.
+        for value in ["photos", "photos/", "photos/x", "photos/a/../b/./"] {
+            assert_eq!(parse(value)?.value(), value);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_start_with_an_invalid_library_id_or_path_is_invalid_input_test() {
+        let long = "a".repeat(65);
+        for library_id in ["", ".", "..", "a b", "a/b", "ph\"otos", "フォト", long.as_str()] {
+            assert_eq!(*ScopeStart::new(library_id, "/").unwrap_err().kind(), ErrorKind::InvalidInput, "{library_id:?}");
+        }
+        for path in ["/..", "/a/../..", "/a\\b", "/C:/x", "/a\0b"] {
+            assert_eq!(*ScopeStart::new("photos", path).unwrap_err().kind(), ErrorKind::InvalidInput, "{path:?}");
+        }
+        assert!(ScopeStart::new(&"a".repeat(64), "/").is_ok());
+        assert!(ScopeStart::new("A.b_c-1", "/").is_ok());
+        // A Library that is not configured is not a malformed start.
+        assert!(ScopeStart::new("nolibrary", "/x").is_ok());
+    }
+
+    #[test]
+    fn a_scope_of_starts_has_one_to_sixty_four_test() {
+        let starts = |count: usize| (0..count).map(|number| ScopeStart::new("photos", &format!("/{number}")).unwrap()).collect::<Vec<_>>();
+        assert_eq!(Scope::new(starts(1), true, false).unwrap().starts().len(), 1);
+        assert_eq!(Scope::new(starts(64), true, false).unwrap().starts().len(), 64);
+        assert_eq!(*Scope::new(starts(65), true, false).unwrap_err().kind(), ErrorKind::InvalidInput);
+        assert_eq!(*Scope::new(Vec::new(), true, false).unwrap_err().kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn a_missing_start_given_twice_is_named_once_as_given_test() {
+        let missing = |value: &str| StartResolution::Missing(parse(value).unwrap());
+        let scope = Scope::new(vec![parse("photos").unwrap()], true, false).unwrap();
+        let resolved = ResolvedScope::new(
+            vec![
+                missing("photos/gone"),
+                missing("nolibrary/x"),
+                missing("photos/gone"),
+                missing("photos/gone/"),
+                missing("photos/x/../gone"),
+            ],
+            &scope,
+        );
+        assert_eq!(
+            resolved.missing().iter().map(ScopeStart::value).collect::<Vec<_>>(),
+            ["photos/gone", "nolibrary/x", "photos/gone/", "photos/x/../gone"],
+            "identical starts once, the others as they were given"
+        );
+        assert!(resolved.starts().is_empty());
     }
 
     #[test]

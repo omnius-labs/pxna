@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use omnius_pxna_interface::models;
 
-use crate::service::listing::{EntryPosition, ListOptions, ListSort, ListingSnapshot};
+use crate::service::listing::{EntryPosition, ListOptions, ListSort, ListingSnapshot, ScopeStart};
 
 /// One listing that is merged with others: a start's snapshot with that start's options, which carry the rating and tag selection of its Library.
 pub struct ListingSource {
-    /// The start value the client gave, or the Library id for the search API, which has no starts.
-    start: String,
+    /// The start the client gave, which the search API does not have.
+    start: Option<ScopeStart>,
     library_id: String,
     snapshot: Arc<ListingSnapshot>,
     options: ListOptions,
@@ -19,7 +19,7 @@ impl ListingSource {
     /// A Library's listing for the search API.
     pub fn new(library_id: &str, snapshot: Arc<ListingSnapshot>, options: ListOptions) -> Self {
         Self {
-            start: library_id.to_string(),
+            start: None,
             library_id: library_id.to_string(),
             snapshot,
             options,
@@ -27,19 +27,20 @@ impl ListingSource {
         }
     }
 
-    /// The listing of the start `start` in `library_id`, which is `local` when it is a local folder and not an archive or a path inside one.
-    pub fn for_start(start: &str, library_id: &str, snapshot: Arc<ListingSnapshot>, options: ListOptions, local: bool) -> Self {
+    /// The listing of `start`, which is `local` when it is a local folder and not an archive or a path inside one.
+    pub fn for_start(start: ScopeStart, snapshot: Arc<ListingSnapshot>, options: ListOptions, local: bool) -> Self {
         Self {
-            start: start.to_string(),
-            library_id: library_id.to_string(),
+            library_id: start.library_id().to_string(),
+            start: Some(start),
             snapshot,
             options,
             local,
         }
     }
 
-    pub fn start(&self) -> &str {
-        &self.start
+    /// The start of the Scope this listing is of, or none for the search API.
+    pub fn start(&self) -> Option<&ScopeStart> {
+        self.start.as_ref()
     }
 
     pub fn library_id(&self) -> &str {

@@ -7,7 +7,7 @@ use crate::{
     prelude::*,
     service::{
         library::LibraryBrowser,
-        listing::{ListOptions, MarkSelection, ResolvedScope, Scope, SnapshotTimeline, TimelineMatch},
+        listing::{ListOptions, MarkSelection, ResolvedScope, Scope, ScopeStart, SnapshotTimeline, TimelineMatch},
         timeline::{TimelineAnchor, TimelineCursor, TimelineIndex, TimelineKind, TimelineListedRow, TimelineReading, TimelineService, TimelineStart},
     },
 };
@@ -121,20 +121,20 @@ pub struct ScopeTimelinePage {
     pub previous: Option<TimelineCursor>,
     /// The cursor of the page after this one, which is none when there is no Entry older than the last.
     pub next: Option<TimelineCursor>,
-    /// The starts with a condition whose matches reached `recursive_max_entries`, by start value.
-    pub cut_off_starts: Vec<String>,
+    /// The starts with a condition whose matches reached `recursive_max_entries`, as they were given.
+    pub cut_off_starts: Vec<ScopeStart>,
     /// The starts with a condition that the name index would answer from a local folder, which were walked because the index was not usable.
-    pub walked_starts: Vec<String>,
-    /// The starts that do not exist, by start value.
-    pub missing_starts: Vec<String>,
+    pub walked_starts: Vec<ScopeStart>,
+    /// The starts that do not exist, as they were given.
+    pub missing_starts: Vec<ScopeStart>,
 }
 
 /// What the starts of a Scope came to: the sequences to merge, and the starts to name.
 struct ScopeSequences {
     sequences: Vec<TimelineSequence>,
-    cut_off_starts: Vec<String>,
-    walked_starts: Vec<String>,
-    missing_starts: Vec<String>,
+    cut_off_starts: Vec<ScopeStart>,
+    walked_starts: Vec<ScopeStart>,
+    missing_starts: Vec<ScopeStart>,
 }
 
 /// Reads the Entries of a Scope through a Filter in timeline-date order and counts their months.
@@ -249,11 +249,13 @@ impl<'a> ScopeTimeline<'a> {
             for source in self.library.scope_sources(&resolved, selections, options).await? {
                 let timeline = self.timeline.snapshot_timeline(source.snapshot(), source.library_id(), source.options()).await?;
                 prepared.sequences.push(TimelineSequence::Snapshot(timeline));
-                if source.is_cut_off() {
-                    prepared.cut_off_starts.push(source.start().to_string());
-                }
-                if source.is_walked() {
-                    prepared.walked_starts.push(source.start().to_string());
+                if let Some(start) = source.start() {
+                    if source.is_cut_off() {
+                        prepared.cut_off_starts.push(start.clone());
+                    }
+                    if source.is_walked() {
+                        prepared.walked_starts.push(start.clone());
+                    }
                 }
             }
         } else if !resolved.starts().is_empty() {
@@ -465,6 +467,11 @@ mod tests {
         page.entries.iter().map(|found| format!("{}:{}", found.library, found.entry.path)).collect()
     }
 
+    /// The starts as the text they were parsed from.
+    fn values(starts: &[ScopeStart]) -> Vec<String> {
+        starts.iter().map(ScopeStart::value).collect()
+    }
+
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
     }
@@ -602,7 +609,7 @@ mod tests {
         let read = |starts: &'static [&'static str], recursive: bool, inside: bool, kinds: &'static [&'static str]| async move {
             let options = options(recursive, inside, None, None, kinds)?;
             let found = page(state, starts, &options, &TimelineAnchor::Newest, 100).await?;
-            TestResult::Ok((listed(&found), found.missing_starts))
+            TestResult::Ok((listed(&found), values(&found.missing_starts)))
         };
 
         let folder = read(&["photos/photos"], true, false, &[]).await?.0;
@@ -677,11 +684,11 @@ mod tests {
         )
         .await?;
         assert_eq!(listed(&with), listed(&base), "starts that `photos` covers add nothing");
-        assert_eq!(with.missing_starts, strings(&["nope/x", "photos/gone", "photos/photos/notes.txt"]));
+        assert_eq!(values(&with.missing_starts), strings(&["nope/x", "photos/gone", "photos/photos/notes.txt"]));
         // Every start missing is an empty sequence that names them.
         let none = page(state, &["nope"], &options, &TimelineAnchor::Newest, 10).await?;
         assert!(none.entries.is_empty() && none.previous.is_none() && none.next.is_none());
-        assert_eq!(none.missing_starts, strings(&["nope"]));
+        assert_eq!(values(&none.missing_starts), strings(&["nope"]));
         assert!(months(state, &["nope"], &options).await?.is_empty());
 
         // A start inside an archive is covered by a recursive start above it only with the insides.
@@ -811,15 +818,15 @@ mod tests {
         // The index of `photos` is not usable, and nothing is aggregated, so the matches are found by a walk but have no row to be dated by.
         let before = page(state, &["photos/big", "videos"], &named, &TimelineAnchor::Newest, 100).await?;
         assert!(before.entries.is_empty(), "a match without a row is not returned");
-        assert_eq!(before.walked_starts, strings(&["photos/big", "videos"]));
-        assert_eq!(before.cut_off_starts, strings(&["photos/big"]));
+        assert_eq!(values(&before.walked_starts), strings(&["photos/big", "videos"]));
+        assert_eq!(values(&before.cut_off_starts), strings(&["photos/big"]));
         assert!(months(state, &["photos/big", "videos"], &named).await?.is_empty());
 
         aggregate(state, "photos").await?;
         aggregate(state, "videos").await?;
         let after = page(state, &["photos/big", "videos"], &named, &TimelineAnchor::Newest, 100).await?;
         assert!(after.walked_starts.is_empty());
-        assert_eq!(after.cut_off_starts, strings(&["photos/big"]), "the limit counts the matches of the index too");
+        assert_eq!(values(&after.cut_off_starts), strings(&["photos/big"]), "the limit counts the matches of the index too");
         assert_eq!(after.entries.len(), 3 + 1, "the matches up to the limit of the start, and the other start's");
         assert_eq!(months(state, &["photos/big", "videos"], &named).await?, [("2024-03".to_string(), 4)]);
         // Without a condition the rows have no limit and no walk.

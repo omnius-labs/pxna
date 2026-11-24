@@ -327,18 +327,20 @@ pub struct LibraryConfig {
 }
 
 impl LibraryConfig {
+    /// Whether `id` is of the form a configured Library id has: 1 to `LIBRARY_ID_MAX_LENGTH` characters of `[A-Za-z0-9._-]`, and not a dot segment.
+    pub fn is_valid_id(id: &str) -> bool {
+        !id.is_empty() && id.len() <= LIBRARY_ID_MAX_LENGTH && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')) && !matches!(id, "." | "..")
+    }
+
     // A library id is used as a URL path segment, so a misconfigured one must fail
     // at startup instead of breaking routing once the daemon is serving.
     fn validate_id(id: &str) -> Result<()> {
-        let valid = !id.is_empty() && id.len() <= LIBRARY_ID_MAX_LENGTH && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-
-        if !valid {
-            return Err(Error::new(ErrorKind::InvalidFormat).with_message(format!("library id must be 1-{LIBRARY_ID_MAX_LENGTH} characters of [A-Za-z0-9._-]: {id:?}")));
-        }
-
         // クライアントや中継が URL の dot segment を除去すると、その Library へルーティングできなくなる。
         if matches!(id, "." | "..") {
             return Err(Error::new(ErrorKind::InvalidFormat).with_message(format!("library id must not be a dot segment: {id:?}")));
+        }
+        if !Self::is_valid_id(id) {
+            return Err(Error::new(ErrorKind::InvalidFormat).with_message(format!("library id must be 1-{LIBRARY_ID_MAX_LENGTH} characters of [A-Za-z0-9._-]: {id:?}")));
         }
 
         Ok(())
