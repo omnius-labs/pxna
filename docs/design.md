@@ -1652,7 +1652,7 @@ The implementation status of the storage layer, listing and search, thumbnails, 
 The container passes build and smoke tests in native CI for amd64 and arm64.
 
 The library-local trash and the content hash for ratings and tags are not implemented; they are M25 and M26 in §12.2.
-The documents describe browsing through the tree and the Shelves (§2, §6.5), while the code reads a Scope through `listEntries` in every order and counts its months, with the Scope and the Filter in the query rather than in the shapes a Shelf holds, but has no Shelves, and the web client still reads the timeline through `listTimelineEntries` and `listTimelineMonths` over chosen Libraries; M29 to M31 in §12.2 close that gap.
+The documents describe browsing through the tree and the Shelves (§2, §6.5), while the code reads a Scope through `listEntries` in every order and counts its months, with the Scope and the Filter in a POST body in the shapes a Shelf holds, but has no Shelves, and the web client still reads the timeline through `listTimelineEntries` and `listTimelineMonths` over chosen Libraries; M29 to M31 in §12.2 close that gap.
 The local AI assistance of §2 is a deferred item in §11.2.
 
 ### 12.2 Roadmap

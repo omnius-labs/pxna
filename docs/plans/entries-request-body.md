@@ -73,7 +73,7 @@ The contract of `listEntries` and `listEntryMonths` breaks, which no client depe
 | --- | --- | --- | --- |
 | [1](#s-1) | Name starts by a Library id and a path in the service | - | Done |
 | [2](#s-2) | Take the Scope and the Filter in a POST body | 1 | Done |
-| [3](#s-3) | Describe the state | 2 | Not started |
+| [3](#s-3) | Describe the state | 2 | Done |
 
 <a id="s-1"></a>
 ### Step 1. Name Starts by a Library Id and a Path in the Service
