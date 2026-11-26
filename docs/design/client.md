@@ -493,7 +493,7 @@ Even if the display preferences cannot be read, browsing is not stopped.
 The shape and ranges of the set of values are defined by `openapi.yaml` and validated by the server.
 A `PUT` that contains an out-of-range value is rejected with 400, and the saved values do not change.
 How an archive opens is optional, and a set saved before it existed is read with the default, opening as a folder. `filmstripSize` is required. A set saved before it existed cannot be read, so `GET /preferences` fails with `SerdeError`, the web client runs with the defaults, and the next `PUT` saves the new shape. Deleting only the saved preferences row also resets it; the state directory holds users and ratings and is not deleted.
-The ranges are written in the contract, so the generated router rejects when it reads the body. The body of this 400 is not an `ErrorResponse`, and the web client judges the rejection from the status code alone.
+The ranges and the values of the enums are written in the contract, so the generated router rejects when it reads the body, a value out of range with 400 and an unknown value of an enum with 422 ([design.md §4.4](../design.md#44-error-model-and-http-mapping)). The body of these rejections is not an `ErrorResponse`, and the web client judges the rejection from the status code alone.
 
 The display preferences have two sets: for wide screens and for narrow screens.
 The web client decides which set to use by the screen width (768 CSS px), and switches sets when the width changes.
