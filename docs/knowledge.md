@@ -42,6 +42,7 @@ For items whose source is `Literature only`, reread the primary sources every 3 
 | [SQLite's FTS5 trigram tokenizer matches only substrings of 3 or more characters through the index](./knowledge/sqlite-fts5-trigram.md) | SQLite FTS5 documentation, libsqlite3-sys 0.30.1 (SQLite 3.46.0) | Literature only | 2026-10-23 |
 | [ffprobe 9.0.2 reports -99 as the level of VP8 and VP9 streams](./knowledge/ffprobe-stream-level.md) | ffmpeg 9.0.2 | Verified | 2026-11-04 |
 | [Chromium limits an element's width to 33,554,428 CSS pixels](./knowledge/chromium-scrollable-width.md) | Chromium 156.0.0.0 | Verified | 2026-11-04 |
+| [An upsert that fires a trigger turns `INSERT OR IGNORE` in the trigger body into a failure](./knowledge/sqlite-upsert-trigger-conflict.md) | sqlite3 3.51.0, libsqlite3-sys 0.30.1 (SQLite 3.46.0) | Verified | 2026-11-24 |
 
 The first 2 items, the WebP size item, and the webp crate item are the premises of the decision to output thumbnails as lossy WebP.
 The first 2 items hold as a pair, and if image gains a lossy WebP encoder, there is no longer a reason to depend on libwebp-sys.
@@ -49,6 +50,7 @@ The kamadak-exif item is independent and is the premise for reading shooting inf
 The POSIX modification-time item and the NFS item are the premises of the freshness of listing snapshots, and the NFS item describes the delay before the modification time, for which the POSIX item holds, reaches the client.
 The macOS normalization item is the reason names are normalized before matching in name search.
 The SQLite trigram item is the premise of how the name index matches terms, and it does not depend on the other items.
+The SQLite upsert and trigger item is the premise of how the triggers of the timeline index keep the per-month counts, and it is about the same bundled SQLite as the trigram item but does not depend on it.
 
 The Chromium directory-reading and beforeunload items are the premises of bringing in folders and of the leave confirmation during uploads. They do not depend on the other external component items.
 The ffprobe rotation item and the ffmpeg tile grid item are about the same ffmpeg, and are the premises of the decision to return the rotation of images read with ffmpeg as an attribute without swapping the dimensions. The former covers images without tiles and the latter tile grids. The tile grid item is also the premise of bundling ffmpeg 9.0 in the image.
