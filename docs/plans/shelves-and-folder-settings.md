@@ -93,7 +93,7 @@ No existing request or response changes its meaning, so compatibility holds; the
 | [3](#s-3) | Store the folder settings and reassign both by path | 2 | Done |
 | [4](#s-4) | Serve the Shelves and the folder settings | 1, 3 | Done |
 | [5](#s-5) | Follow the daemon's own changes | 4 | Done |
-| [6](#s-6) | Describe the state | 5 | Not started |
+| [6](#s-6) | Describe the state | 5 | Done |
 
 <a id="s-1"></a>
 ### Step 1. Hold How an Archive Opens in the Display Preferences
