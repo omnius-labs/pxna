@@ -66,6 +66,14 @@ pub struct ShelfFilter {
     pub kinds: Option<Vec<String>>,
 }
 
+/// The display values saved for one folder, named by its Library and its Library-relative path in normal form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderSetting {
+    pub library_id: String,
+    pub path: String,
+    pub display: DisplayValues,
+}
+
 /// What a client saves as a Shelf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShelfInput {
@@ -86,6 +94,14 @@ pub struct Shelf {
 }
 
 impl DisplayValues {
+    /// Checks the values of folder settings, whose Layout cannot be the timeline.
+    pub fn validate_for_folder(&self) -> Result<()> {
+        if [self.wide, self.narrow].into_iter().flatten().any(|set| set.view == Some(DisplayLayout::Timeline)) {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message("the timeline layout can be saved only in a shelf"));
+        }
+        self.validate()
+    }
+
     pub fn validate(&self) -> Result<()> {
         for (name, set) in [("wide", self.wide), ("narrow", self.narrow)] {
             if let Some(tile_size) = set.and_then(|set| set.tile_size)

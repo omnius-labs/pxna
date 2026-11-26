@@ -446,6 +446,11 @@ These requests change no Library, so they respond synchronously and follow, of t
 The daemon's own changes keep both in step with the tree.
 At the point where `LibraryMutation` reassigns the rows of the indexes, a rename or move reassigns the folder settings and the Shelf starts at or under the old path to the new one, and a delete removes the folder settings at or under the path and keeps the Shelf starts.
 A move that replaces its destination first removes the folder settings at or under it, as it removes the ratings and tags there, while a Shelf start that named the destination keeps naming it.
+A move across Libraries, of several Entries, or of a folder onto an existing folder to merge them goes entry by entry instead of renaming a folder, and each file it moves is reassigned as it moves.
+A folder's own settings and the Shelf starts naming it are reassigned once the folder has left its source, so a folder that stays, because an Entry in it was skipped or failed, keeps them there.
+Moving into an existing folder merges into it and replaces nothing of it, so a destination folder that has settings keeps them and the moved folder's are dropped.
+Where such a move creates a folder, including one that takes the place of a file or an archive, it first removes the folder settings at or under it.
+It does not carry a setting or a start under a moved folder that already names nothing (§11.1 "Carry a Folder Moved Entry by Entry When It Leaves Its Source").
 Changes made outside Pxna are not followed, so a folder renamed outside loses its settings, and a Shelf start that no longer names a folder is a missing start.
 `listEntries` lists a Shelf without its missing starts and names them ([Listing and Search Design §5.3](./design/listing.md#53-listing-several-starts)), and the client shows the Shelf with a notice that leads to editing it.
 
@@ -1450,6 +1455,29 @@ A deleted folder's settings have nothing left to apply to, while a missing start
 **Rejected alternative**
 Leaving the Shelf starts as they are on a move.
 Moves would touch one table fewer, but a Shelf would lose a folder the owner only moved through Pxna, so we rejected it.
+
+#### Carry a Folder Moved Entry by Entry When It Leaves Its Source
+
+**Decision**
+In a move that goes entry by entry, a folder's own settings and the Shelf starts naming it are reassigned once the folder has left its source.
+A folder that stays keeps them, and a destination folder that has settings keeps its own (§6.5).
+
+**Reason**
+Such a move creates or merges the destination folders and moves the files one by one, so there is no rename of the folder to follow.
+A folder that has not left is still where the owner sees it, so what names it stays with it.
+A destination folder that existed is the same folder after the merge, so its settings do not change for an Entry the owner moved into it.
+
+**Rejected alternative 1**
+Reassigning the whole subtree at once with the top folder.
+It would be one step, but a merge would remove the destination's settings, and a partly moved folder would lose the settings of what stayed.
+
+**Rejected alternative 2**
+Replacing the destination folder's settings with the moved folder's.
+The moved folder would look as it did, but a folder that was not replaced would change, so we rejected it.
+
+**Rejected alternative 3**
+Following only renames within one Library.
+The entry-by-entry moves would need no rule, but every move across Libraries would drop the folder's settings and leave its starts missing, so we rejected it.
 
 #### Create the Default Shelf Once from timelineLibraries
 

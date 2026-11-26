@@ -32,7 +32,7 @@ A client keeps the owner's Shelves and folder settings in the daemon, so the sam
 3. `POST /shelves` returns 201 with the created Shelf and its id and puts it last, `PUT /shelves/{shelfId}` replaces a Shelf whole and returns it, `DELETE /shelves/{shelfId}` returns 204, both are 404 for an id the user has no Shelf of, `PUT /shelves/order` with every id of the user once reorders and returns the Shelves, and `GET /shelves` returns a user's own Shelves only, in their order
 4. Saving a Shelf whose name trimmed is empty or longer than 100 characters, a 201st Shelf of a user, a `PUT /shelves/order` that does not name every Shelf of the user exactly once, and a Scope or Filter that `listEntryMonths` refuses are `InvalidInput`; a start that names nothing, a start given twice, and the timeline with any kinds are saved, and every start is returned by its path in normal form
 5. `GET /settings/folder` returns the user's folder settings, `PUT /settings/folder` saves one folder's display values by its path in normal form, replacing what it had, and returns them, the timeline Layout in them is `InvalidInput`, and `POST /settings/folder/delete` returns 204, or 404 when the folder has no settings
-6. After a rename or a move through Pxna, in one Library or across Libraries, the folder settings and the Shelf starts at or under the old path are at the new path; a move that replaces its destination leaves no folder settings of the replaced folder and keeps a start that named the destination; after a delete, the folder settings at or under the path are gone and the Shelf starts are kept
+6. After a rename or a move through Pxna, in one Library or across Libraries, the folder settings and the Shelf starts at or under the old path of a file or folder that left it are at the new path; a move that replaces a file or an archive leaves no folder settings of it and keeps a start that named it; a move that merges a folder into an existing one keeps the settings the existing folder has, and a folder left at its source because an Entry was skipped or failed keeps its settings and starts there; after a delete, the folder settings at or under the path are gone and the Shelf starts are kept
 7. A request to these paths with a session cookie and an `Origin` matching the `Host` is answered, and one other than GET without an `Origin` is 403
 8. `cd daemon && RUSTC_WRAPPER= cargo make lint` and `RUSTC_WRAPPER= cargo test` pass, and the committed interface crate and web client API types are what the contract generates
 9. The terms documents name the paths of the Shelves and the folder settings, `ShelfService`, and `archiveOpen`, design.md §12.1 no longer says the code has no Shelves, and M29 is done in §12.2
@@ -50,6 +50,7 @@ The display preferences are one row of JSON that `PreferencesService` replaces w
 There are no Shelves or folder settings in the code, the contract, or `sqlite.db`.
 `RatingTagService` keys its rows by user, Library id, and path, and `moved` and `forget` reassign or remove the rows at or under a path for every user by comparing the prefix `path/` ([rating_tags.rs#L254-L314](../../daemon/modules/engine/src/service/rating_tags.rs#L254-L314)).
 `LibraryMutation` calls them after an operation: `renamed` and `moved_across` for renames and moves, and `forget_missing` for the changed Entries that no longer exist ([mutation.rs#L55-L102](../../daemon/entrypoints/daemon/src/service/mutation.rs#L55-L102)).
+Only a rename within one Library calls them for a folder itself; a move across Libraries, of several Entries, or of a folder onto an existing folder goes entry by entry and calls them for files only ([operation.rs#L115-L127](../../daemon/entrypoints/daemon/src/service/mutation/operation.rs#L115-L127), [operation.rs#L316-L419](../../daemon/entrypoints/daemon/src/service/mutation/operation.rs#L316-L419)).
 Every service records its migrations by name in one `_migrations` table of `sqlite.db`, and `DaemonState` creates `AuthService`, whose migration creates `users`, last, after `LibraryMutation` ([state.rs#L86-L131](../../daemon/entrypoints/daemon/src/state.rs#L86-L131), [auth/repo.rs#L55-L62](../../daemon/modules/engine/src/service/auth/repo.rs#L55-L62)).
 `listEntryMonths` checks its Scope and Filter with `Scope::from_request` and `ListOptions::from_entry_months`, and `LibraryRelativePath::absolute` gives a path in normal form ([scope.rs#L20-L88](../../daemon/entrypoints/daemon/src/service/listing/scope.rs#L20-L88), [listing.rs#L129-L165](../../daemon/entrypoints/daemon/src/service/listing.rs#L129-L165), [path.rs#L11-L60](../../daemon/entrypoints/daemon/src/service/library/path.rs#L11-L60)).
 
@@ -60,6 +61,7 @@ The design of §6.5 therefore has nothing in the daemon to keep its Shelves and 
 The engine gains a `ShelfService` that owns the three tables and the column of `users`, and holds the Shelves, the folder settings, the default Shelf, and the reassignment by path, as `RatingTagService` holds ratings and tags.
 The daemon checks what the engine cannot know, the Scope, the Filter, and the paths, with the checks of `listEntries`, and gives the engine the paths in normal form and the starts of the default Shelf.
 The contract gains the Shelves and the folder settings, whose Scope and Filter are the schemas `listEntries` takes, and `LibraryMutation` calls `ShelfService` where it calls `RatingTagService`.
+The entry-by-entry move also tells it of the folders it creates and of the folders that leave their source.
 
 ### 4.1 Decisions Assumed
 
@@ -73,11 +75,12 @@ The contract gains the Shelves and the folder settings, whose Scope and Filter a
 | A Shelf's id a TSID string, 201 for a created Shelf, and `NotFound` for a Shelf or folder settings that do not exist | [design.md §6.5](../design.md#65-shelves-and-folder-settings) |
 | Starts and folders stored by their paths in normal form | [design.md §11.1](../design.md#store-starts-and-folders-by-the-normal-form-of-their-paths) |
 | Renames and moves reassign both, a replacing move removes the destination's folder settings, and a delete removes folder settings only | [design.md §6.5](../design.md#65-shelves-and-folder-settings), [§11.1](../design.md#move-folder-settings-and-shelf-starts-with-the-daemons-own-changes) |
+| A folder moved entry by entry is reassigned when it leaves its source, and a destination folder keeps its settings | [design.md §6.5](../design.md#65-shelves-and-folder-settings), [§11.1](../design.md#carry-a-folder-moved-entry-by-entry-when-it-leaves-its-source) |
 | No version: the later write wins | [design.md §11.2](../design.md#optimistic-locking-with-etag--if-match) |
 
 ### 4.2 Scope of Impact
 
-[openapi.yaml](../../daemon/openapi.yaml#L241-L291) gains `archiveOpen` in `Preferences`, the paths `/shelves`, `/shelves/{shelfId}`, `/shelves/order`, `/settings/folder`, and `/settings/folder/delete`, and their schemas, so the generated interface crate and `ui-web/src/api/schema.d.ts` change; the engine gains `service/shelves.rs` and its model, and `model/preferences.rs` changes; the daemon gains `interface/features/shelves.rs`, and `interface/features/preferences.rs`, `service/mutation.rs`, and `state.rs` change.
+[openapi.yaml](../../daemon/openapi.yaml#L241-L291) gains `archiveOpen` in `Preferences`, the paths `/shelves`, `/shelves/{shelfId}`, `/shelves/order`, `/settings/folder`, and `/settings/folder/delete`, and their schemas, so the generated interface crate and `ui-web/src/api/schema.d.ts` change; the engine gains `service/shelves.rs` and its model, and `model/preferences.rs` changes; the daemon gains `interface/features/shelves.rs`, and `interface/features/preferences.rs`, `service/mutation.rs`, `service/mutation/operation.rs`, and `state.rs` change.
 `sqlite.db` gains the tables `shelves`, `shelf_starts`, and `folder_settings` and the column `users.default_shelf_created_at`, which a daemon of an earlier commit ignores.
 No existing request or response changes its meaning, so compatibility holds; the display preferences saved before read back without `archiveOpen`.
 
@@ -87,7 +90,7 @@ No existing request or response changes its meaning, so compatibility holds; the
 | --- | --- | --- | --- |
 | [1](#s-1) | Hold how an archive opens in the display preferences | - | Done |
 | [2](#s-2) | Store the Shelves and create the default Shelf | - | Done |
-| [3](#s-3) | Store the folder settings and reassign both by path | 2 | Not started |
+| [3](#s-3) | Store the folder settings and reassign both by path | 2 | Done |
 | [4](#s-4) | Serve the Shelves and the folder settings | 1, 3 | Not started |
 | [5](#s-5) | Follow the daemon's own changes | 4 | Not started |
 | [6](#s-6) | Describe the state | 5 | Not started |
@@ -130,9 +133,10 @@ Unit tests show the cases of §2.1 conditions 2 to 4 that the engine decides: th
 **What to do**
 Read a user's folder settings, put one folder's display values replacing what it had, and remove one folder's, which is `NotFound` when it has none; display values with the timeline Layout are `InvalidInput` here.
 Add `moved`, which for every user first removes the folder settings at or under the destination, then reassigns the folder settings and the Shelf starts at or under the source to the destination, across Libraries too, and `forget`, which removes the folder settings at or under a path and keeps the starts; both compare the path or its prefix followed by `/`, as `RatingTagService::moved` and `forget` do.
+Add `moved_folder`, which for every user reassigns the folder settings and the Shelf starts naming exactly the source folder, and drops the source's settings where the destination has its own.
 
 **Completion condition**
-Unit tests show putting, replacing, reading, and removing folder settings, the timeline refused, `NotFound` on removing, a move reassigning settings and starts at and under the path but not a sibling whose name only begins with it, across Libraries, a replacing move dropping the destination's settings and keeping a start that named it, and `forget` removing settings and keeping starts.
+Unit tests show putting, replacing, reading, and removing folder settings, the timeline refused, `NotFound` on removing, a move reassigning settings and starts at and under the path but not a sibling whose name only begins with it, across Libraries, a replacing move dropping the destination's settings and keeping a start that named it, `moved_folder` carrying the exact folder only and keeping the destination's settings, and `forget` removing settings and keeping starts.
 
 <a id="s-4"></a>
 ### Step 4. Serve the Shelves and the Folder Settings
@@ -153,13 +157,14 @@ Route tests show §2.1 conditions 2 to 5 through the HTTP router, including the 
 ### Step 5. Follow the Daemon's Own Changes
 
 **Locations to change**
-[mutation.rs#L26-L102](../../daemon/entrypoints/daemon/src/service/mutation.rs#L26-L102), [state.rs#L86-L146](../../daemon/entrypoints/daemon/src/state.rs#L86-L146), and the tests of `interface::features::shelves`.
+[mutation.rs#L26-L102](../../daemon/entrypoints/daemon/src/service/mutation.rs#L26-L102), [operation.rs#L316-L454](../../daemon/entrypoints/daemon/src/service/mutation/operation.rs#L316-L454), [state.rs#L86-L146](../../daemon/entrypoints/daemon/src/state.rs#L86-L146), and the tests of `interface::features::shelves`.
 
 **What to do**
 Give `LibraryMutation` the `ShelfService`, and call its `moved` from `moved_across` and its `forget` from `forget_missing`, next to the calls of `RatingTagService`, logging a failure without failing the operation, as those calls do.
+In the entry-by-entry move of `OperationService`, call `forget` for a destination where a move creates a folder, and `moved_folder` after the move has removed the emptied source folder.
 
 **Completion condition**
-Route tests that rename, move in one Library, move across Libraries, move over an existing folder with the conflict policy that replaces it, and delete through the HTTP router show §2.1 condition 6 by `GET /settings/folder` and `GET /shelves`.
+Route tests that rename, move in one Library, move across Libraries, move several folders at once, merge a folder into an existing one, move leaving an Entry behind, move over an archive with the conflict policy that replaces it, and delete through the HTTP router show §2.1 condition 6 by `GET /settings/folder` and `GET /shelves`.
 
 <a id="s-6"></a>
 ### Step 6. Describe the State
@@ -193,5 +198,5 @@ The new tests protect the following.
 - The default Shelf: its starts, created once, under concurrent first reads, and with no Library
 - The Shelves: their operations, order, limits, checks, and separation by user
 - The folder settings: their operations and the refused timeline
-- The following of changes: renames, moves in and across Libraries, replacing moves, and deletes
+- The following of changes: renames, moves in and across Libraries, merging, partial, and replacing moves, and deletes
 - The method: each mutating operation meeting the `Origin` check
