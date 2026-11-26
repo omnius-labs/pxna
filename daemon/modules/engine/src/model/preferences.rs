@@ -28,6 +28,14 @@ pub enum OriginalImageMode {
     OnZoom,
 }
 
+/// How an archive opens: browsed like a folder, or in the viewer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ArchiveOpen {
+    Folder,
+    Viewer,
+}
+
 /// 並べ替えのキー。一覧の API の `sort` と同じ値を取る。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -73,6 +81,9 @@ pub struct Preferences {
     pub wide: DisplaySet,
     pub narrow: DisplaySet,
     pub sort: SortPreference,
+    /// How an archive opens. `None` opens it as a folder.
+    #[serde(rename = "archiveOpen", default, skip_serializing_if = "Option::is_none")]
+    pub archive_open: Option<ArchiveOpen>,
     /// タイムラインに並べる Library の id。`None` はすべての Library である。
     ///
     /// 設定から消えた Library の id も保存したまま持ち、web が読み飛ばす。
@@ -144,6 +155,7 @@ impl Default for Preferences {
                 key: SortKey::Name,
                 order: SortOrder::Asc,
             },
+            archive_open: None,
             timeline_libraries: None,
         }
     }
@@ -217,6 +229,28 @@ mod tests {
         assert!(json.get("timelineLibraries").is_none(), "None は書かない");
         json.as_object_mut().unwrap().remove("timelineLibraries");
         assert_eq!(serde_json::from_value::<Preferences>(json)?.timeline_libraries, None);
+        Ok(())
+    }
+
+    #[test]
+    fn keeps_how_an_archive_opens_test() -> testresult::TestResult {
+        for (value, name) in [(ArchiveOpen::Folder, "folder"), (ArchiveOpen::Viewer, "viewer")] {
+            let preferences = Preferences {
+                archive_open: Some(value),
+                ..Preferences::default()
+            };
+            let json = serde_json::to_value(&preferences)?;
+            assert_eq!(json["archiveOpen"], name);
+            assert_eq!(serde_json::from_value::<Preferences>(json)?, preferences);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn reads_values_saved_before_how_an_archive_opens_test() -> testresult::TestResult {
+        let json = serde_json::to_value(Preferences::default())?;
+        assert!(json.get("archiveOpen").is_none(), "an unset value is not written");
+        assert_eq!(serde_json::from_value::<Preferences>(json)?.archive_open, None);
         Ok(())
     }
 

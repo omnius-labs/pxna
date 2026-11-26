@@ -333,13 +333,17 @@ impl OperationService {
             self.mutation.destination(&transfer.dst_library, &dst_relative, false).await?;
             let entry = source.get_entry(WorkClass::Foreground).await?;
             if matches!(entry.detail, FsEntryDetail::Dir { .. }) {
-                let Some(destination) = self
+                let Some((destination, merged)) = self
                     .directory(&transfer.dst_library, &destination, transfer.conflict, progress.as_ref(), &transfer.changes)
                     .await?
                 else {
                     Self::skipped(progress.as_ref());
                     return Ok(Vec::new());
                 };
+                let published = self.mutation.relative(&transfer.dst_library, &LibraryMutation::nested(&destination)?)?;
+                if transfer.moving && !merged {
+                    self.mutation.folder_created(&transfer.dst_library, &published).await;
+                }
                 let results = vec![self.mutation.entry(&transfer.dst_library, &LibraryMutation::nested(&destination)?).await?];
                 Self::processed(progress.as_ref());
                 for (child_relative, child) in self.children(&source, &relative).await? {
@@ -365,6 +369,7 @@ impl OperationService {
                     let mut remaining = source.find_entries(false, WorkClass::Foreground).await?;
                     if remaining.next().await.is_none() {
                         self.mutation.storage.remove_dir(source.path()).await?;
+                        self.mutation.folder_left(&transfer.src_library, &relative, &transfer.dst_library, &published).await;
                     }
                 }
                 Ok(results)
@@ -418,6 +423,7 @@ impl OperationService {
         })
     }
 
+    /// The folder the entries go into, and whether it already existed and they are merged into it. `None` skips the folder.
     async fn directory(
         &self,
         library: &str,
@@ -425,12 +431,12 @@ impl OperationService {
         conflict: ConflictPolicy,
         progress: Option<&Arc<Mutex<OperationRecord>>>,
         changes: &Mutex<ListingInvalidation>,
-    ) -> Result<Option<PathBuf>> {
+    ) -> Result<Option<(PathBuf, bool)>> {
         if let Ok(meta) = tokio::fs::symlink_metadata(destination).await {
             match conflict {
                 ConflictPolicy::Fail => return Err(Error::new(ErrorKind::AlreadyExists).with_message("destination already exists")),
                 ConflictPolicy::Skip => return Ok(None),
-                ConflictPolicy::Overwrite if meta.is_dir() => return Ok(Some(destination.to_path_buf())),
+                ConflictPolicy::Overwrite if meta.is_dir() => return Ok(Some((destination.to_path_buf(), true))),
                 ConflictPolicy::Overwrite => {
                     self.remove_destination(library, destination, progress, changes).await?;
                 }
@@ -445,7 +451,7 @@ impl OperationService {
                 destination.with_file_name(format!("{name} ({index})"))
             };
             match tokio::fs::create_dir(&candidate).await {
-                Ok(()) => return Ok(Some(candidate)),
+                Ok(()) => return Ok(Some((candidate, false))),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && conflict == ConflictPolicy::Rename => {}
                 Err(error) => return Err(LibraryMutation::io_error(error)),
             }

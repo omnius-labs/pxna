@@ -161,6 +161,124 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/shelves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the Shelves
+         * @description Returns the current user's Shelves in their order. The first read of a
+         *     user while a Library is configured creates the default Shelf Timeline,
+         *     which is not created again once it is deleted. It starts at the roots of
+         *     the Libraries in `timelineLibraries` of the display preferences, or of
+         *     every Library when none of them is configured, at most 64. A user
+         *     who already has 200 Shelves gets it at a later read, once there is
+         *     room.
+         */
+        get: operations["listShelves"];
+        put?: never;
+        /**
+         * Create a Shelf
+         * @description Creates a Shelf and puts it last. The Scope and the Filter are checked as
+         *     the body of `listEntryMonths` is, and the starts for form only, so a
+         *     start may name nothing. A user has at most 200 Shelves.
+         */
+        post: operations["createShelf"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shelves/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Reorder the Shelves
+         * @description Orders the Shelves as given. `ids` names every Shelf of the user exactly
+         *     once, and any other list is refused.
+         */
+        put: operations["reorderShelves"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shelves/{shelfId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a Shelf
+         * @description Replaces a Shelf whole, keeping its id and position, with the checks of
+         *     `createShelf`.
+         */
+        put: operations["replaceShelf"];
+        post?: never;
+        /** Delete a Shelf */
+        delete: operations["deleteShelf"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the folder settings
+         * @description Returns the display values the current user saved for folders. A client
+         *     resolves the values of a folder itself.
+         */
+        get: operations["listFolderSettings"];
+        /**
+         * Save the settings of a folder
+         * @description Saves the display values of one folder, replacing what it had. The folder
+         *     is not looked up. The timeline Layout can be saved only in a Shelf.
+         */
+        put: operations["putFolderSetting"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/folder/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove the settings of a folder */
+        post: operations["deleteFolderSetting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/timeline/entries": {
         parameters: {
             query?: never;
@@ -1202,19 +1320,82 @@ export interface components {
         };
         /**
          * @description Display preferences. `wide` and `narrow` are chosen by the
-         *     width of the screen (768 CSS px); `sort` and `timelineLibraries`
-         *     do not depend on it.
+         *     width of the screen (768 CSS px); `sort`, `archiveOpen`, and
+         *     `timelineLibraries` do not depend on it.
          */
         Preferences: {
             wide: components["schemas"]["DisplaySet"];
             narrow: components["schemas"]["DisplaySet"];
             sort: components["schemas"]["SortPreference"];
+            archiveOpen?: components["schemas"]["ArchiveOpen"];
             /**
              * @description Libraries the timeline shows. Absent means every
              *     Library. Ids of Libraries that no longer exist are kept
              *     as saved, and clients ignore them.
              */
             timelineLibraries?: components["schemas"]["LibraryId"][];
+        };
+        /**
+         * @description How a listing is laid out.
+         * @enum {string}
+         */
+        DisplayLayout: "grid" | "list" | "timeline";
+        /** @description The values chosen by the width of the screen. An absent value is taken from the layer below. */
+        DisplayValueSet: {
+            view?: components["schemas"]["DisplayLayout"];
+            /**
+             * Format: int32
+             * @description Tile size step from 1 (smallest) to 5 (largest).
+             */
+            tileSize?: number;
+            thumbnailShape?: components["schemas"]["ThumbnailShape"];
+        };
+        /**
+         * @description The display values a Shelf or the settings of a folder hold, in
+         *     the shape of the display preferences. Every value is optional.
+         */
+        DisplayValues: {
+            wide?: components["schemas"]["DisplayValueSet"];
+            narrow?: components["schemas"]["DisplayValueSet"];
+            sort?: components["schemas"]["SortPreference"];
+            archiveOpen?: components["schemas"]["ArchiveOpen"];
+        };
+        ShelfInput: {
+            /** @description 1 to 100 characters after surrounding whitespace is trimmed. */
+            name: string;
+            scope: components["schemas"]["EntryScope"];
+            filter?: components["schemas"]["EntryFilter"];
+            display?: components["schemas"]["DisplayValues"];
+        };
+        /**
+         * @description A saved Shelf. Its Scope and Filter can be sent to `listEntries`
+         *     as they are. The path of each start is returned in normal form,
+         *     with `.` and `..` resolved.
+         */
+        Shelf: {
+            id: string;
+            name: string;
+            scope: components["schemas"]["EntryScope"];
+            filter: components["schemas"]["EntryFilter"];
+            display: components["schemas"]["DisplayValues"];
+        };
+        ShelfList: {
+            shelves: components["schemas"]["Shelf"][];
+        };
+        ShelfOrder: {
+            ids: string[];
+        };
+        /**
+         * @description The display values saved for one folder. The path is returned in
+         *     normal form, with `.` and `..` resolved.
+         */
+        FolderSetting: {
+            libraryId: components["schemas"]["LibraryId"];
+            path: components["schemas"]["RelativePath"];
+            display: components["schemas"]["DisplayValues"];
+        };
+        FolderSettingList: {
+            settings: components["schemas"]["FolderSetting"][];
         };
         DisplaySet: {
             /**
@@ -1237,6 +1418,13 @@ export interface components {
         ThumbnailShape: "crop" | "fit";
         /** @enum {string} */
         ListView: "grid" | "list";
+        /**
+         * @description How an archive opens: `folder` browses its contents like a
+         *     folder, and `viewer` opens them in the viewer. An archive opens
+         *     as a folder when the value is absent.
+         * @enum {string}
+         */
+        ArchiveOpen: "folder" | "viewer";
         /**
          * @description When a viewer swaps the display image for the original image.
          *     `auto` swaps automatically; `onZoom` swaps only when the user
@@ -1548,9 +1736,10 @@ export interface components {
             indexed: boolean;
         };
         /**
-         * @description A place in a Library: a start of a Scope, or an Entry. The path
-         *     is kept as it was given, so a response names a start by the
-         *     path it was sent with.
+         * @description A place in a Library: a start of a Scope, an Entry, or a folder.
+         *     A listing keeps the path of a start as it was given, so its
+         *     response names a start by the path it was sent with. A saved
+         *     Shelf and the folder settings return their paths in normal form.
          */
         LibraryPath: {
             libraryId: components["schemas"]["LibraryId"];
@@ -2249,6 +2438,8 @@ export interface components {
     parameters: {
         VideoSessionIdPath: string;
         VideoSegmentNamePath: string;
+        /** @description Identifier the daemon gave the Shelf. */
+        ShelfIdPath: string;
         /** @description Opaque identifier of a Library owned by the owner. */
         LibraryIdPath: components["schemas"]["LibraryId"];
         /**
@@ -2569,6 +2760,212 @@ export interface operations {
             };
             400: components["responses"]["InvalidRequest"];
             401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listShelves: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Shelves. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShelfList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createShelf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShelfInput"];
+            };
+        };
+        responses: {
+            /** @description The created Shelf. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Shelf"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    reorderShelves: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShelfOrder"];
+            };
+        };
+        responses: {
+            /** @description The Shelves in the new order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShelfList"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    replaceShelf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identifier the daemon gave the Shelf. */
+                shelfId: components["parameters"]["ShelfIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShelfInput"];
+            };
+        };
+        responses: {
+            /** @description The saved Shelf. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Shelf"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteShelf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identifier the daemon gave the Shelf. */
+                shelfId: components["parameters"]["ShelfIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Shelf was deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listFolderSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The folder settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderSettingList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    putFolderSetting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderSetting"];
+            };
+        };
+        responses: {
+            /** @description The saved settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderSetting"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteFolderSetting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryPath"];
+            };
+        };
+        responses: {
+            /** @description The settings were removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
         };
     };
