@@ -20,6 +20,7 @@ Definitions of words are not in this document.
 | [Thumbnail Design](./design/thumbnail.md)     | Generating thumbnails, sprite sheets, and display images, how representative thumbnails are chosen, generation concurrency, caches                      |
 | [Video Playback Design](./design/video.md)    | Media info for images and videos, direct playback, HLS transcoded delivery and transcode sessions                                                       |
 | [Image Socket Design](./design/image-socket.md) | The WebSocket that carries thumbnails, sprite sheets, and display images, wanted sets, request classes, delivery, revalidation                     |
+| [API Design](./design/api.md#1-about-this-document)                 | Target v2 resource model, URL hierarchy, method conventions, listing and mutation contracts, uploads and operations, errors, grouping, and v1 migration |
 | [Client Design](./design/client.md)           | Screen structure of the web client, behavior of tiles and the viewer, how thumbnails and listings are requested, Entry operations, display preferences |
 | [Timeline Design](./design/timeline.md)       | What is listed in the timeline, timeline dates, the timeline index, aggregation and reading                                                              |
 | [Rating and Tag Design](./design/rating-tags.md) | What can be rated and tagged, value rules, storage, following changes, filtering listings, API conventions                                          |
@@ -501,6 +502,7 @@ Even when the username does not exist, a dummy hash is verified, to make it hard
 
 This section gathers the mutating conventions scattered across `openapi.yaml` from the viewpoint of judgment.
 For individual paths and schemas, see `openapi.yaml`.
+The target v2 structure is in [API Design](./design/api.md#5-method-conventions); this section records the current v1 conventions and remains the v1 reference.
 Writing the daemon's own state, such as the display preferences, the Shelves, and the folder settings, changes no Library and follows only §8.5 (§6.5).
 API paths in this document are written relative to the server base `/api/v1`, such as `/libraries/{id}/files/...`.
 
