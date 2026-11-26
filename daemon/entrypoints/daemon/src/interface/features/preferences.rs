@@ -66,25 +66,16 @@ impl From<ApiError> for apis::preferences::PutPreferencesResponse {
 }
 
 /// engine の表示設定と、API の応答と要求の型を相互に写す。
-struct PreferencesModel;
+///
+/// Shelves and folder settings hold values of the same shapes, so they map them through this too.
+pub(super) struct PreferencesModel;
 
 impl PreferencesModel {
     fn to_model(preferences: Preferences) -> models::Preferences {
         let mut model = models::Preferences::new(
             Self::display_set_to_model(preferences.wide),
             Self::display_set_to_model(preferences.narrow),
-            models::SortPreference::new(
-                match preferences.sort.key {
-                    SortKey::Name => models::SortKey::Name,
-                    SortKey::Kind => models::SortKey::Kind,
-                    SortKey::Size => models::SortKey::Size,
-                    SortKey::ModifiedAt => models::SortKey::ModifiedAt,
-                },
-                match preferences.sort.order {
-                    SortOrder::Asc => models::SortOrder::Asc,
-                    SortOrder::Desc => models::SortOrder::Desc,
-                },
-            ),
+            Self::sort_to_model(preferences.sort),
         );
         model.archive_open = preferences.archive_open.map(Self::archive_open_to_model);
         model.timeline_libraries = preferences.timeline_libraries.map(|ids| ids.into_iter().map(models::LibraryId).collect());
@@ -95,31 +86,64 @@ impl PreferencesModel {
         Preferences {
             wide: Self::display_set_from_model(&model.wide),
             narrow: Self::display_set_from_model(&model.narrow),
-            sort: SortPreference {
-                key: match model.sort.key {
-                    models::SortKey::Name => SortKey::Name,
-                    models::SortKey::Kind => SortKey::Kind,
-                    models::SortKey::Size => SortKey::Size,
-                    models::SortKey::ModifiedAt => SortKey::ModifiedAt,
-                },
-                order: match model.sort.order {
-                    models::SortOrder::Asc => SortOrder::Asc,
-                    models::SortOrder::Desc => SortOrder::Desc,
-                },
-            },
+            sort: Self::sort_from_model(&model.sort),
             archive_open: model.archive_open.map(Self::archive_open_from_model),
             timeline_libraries: model.timeline_libraries.as_ref().map(|ids| ids.iter().map(|id| id.0.clone()).collect()),
         }
     }
 
-    fn archive_open_to_model(value: ArchiveOpen) -> models::ArchiveOpen {
+    pub(super) fn sort_to_model(sort: SortPreference) -> models::SortPreference {
+        models::SortPreference::new(
+            match sort.key {
+                SortKey::Name => models::SortKey::Name,
+                SortKey::Kind => models::SortKey::Kind,
+                SortKey::Size => models::SortKey::Size,
+                SortKey::ModifiedAt => models::SortKey::ModifiedAt,
+            },
+            match sort.order {
+                SortOrder::Asc => models::SortOrder::Asc,
+                SortOrder::Desc => models::SortOrder::Desc,
+            },
+        )
+    }
+
+    pub(super) fn sort_from_model(model: &models::SortPreference) -> SortPreference {
+        SortPreference {
+            key: match model.key {
+                models::SortKey::Name => SortKey::Name,
+                models::SortKey::Kind => SortKey::Kind,
+                models::SortKey::Size => SortKey::Size,
+                models::SortKey::ModifiedAt => SortKey::ModifiedAt,
+            },
+            order: match model.order {
+                models::SortOrder::Asc => SortOrder::Asc,
+                models::SortOrder::Desc => SortOrder::Desc,
+            },
+        }
+    }
+
+    pub(super) fn thumbnail_shape_to_model(value: ThumbnailShape) -> models::ThumbnailShape {
+        match value {
+            ThumbnailShape::Crop => models::ThumbnailShape::Crop,
+            ThumbnailShape::Fit => models::ThumbnailShape::Fit,
+        }
+    }
+
+    pub(super) fn thumbnail_shape_from_model(value: models::ThumbnailShape) -> ThumbnailShape {
+        match value {
+            models::ThumbnailShape::Crop => ThumbnailShape::Crop,
+            models::ThumbnailShape::Fit => ThumbnailShape::Fit,
+        }
+    }
+
+    pub(super) fn archive_open_to_model(value: ArchiveOpen) -> models::ArchiveOpen {
         match value {
             ArchiveOpen::Folder => models::ArchiveOpen::Folder,
             ArchiveOpen::Viewer => models::ArchiveOpen::Viewer,
         }
     }
 
-    fn archive_open_from_model(value: models::ArchiveOpen) -> ArchiveOpen {
+    pub(super) fn archive_open_from_model(value: models::ArchiveOpen) -> ArchiveOpen {
         match value {
             models::ArchiveOpen::Folder => ArchiveOpen::Folder,
             models::ArchiveOpen::Viewer => ArchiveOpen::Viewer,
@@ -129,10 +153,7 @@ impl PreferencesModel {
     fn display_set_to_model(set: DisplaySet) -> models::DisplaySet {
         models::DisplaySet::new(
             u32::from(set.tile_size),
-            match set.thumbnail_shape {
-                ThumbnailShape::Crop => models::ThumbnailShape::Crop,
-                ThumbnailShape::Fit => models::ThumbnailShape::Fit,
-            },
+            Self::thumbnail_shape_to_model(set.thumbnail_shape),
             match set.view {
                 ListView::Grid => models::ListView::Grid,
                 ListView::List => models::ListView::List,
@@ -149,10 +170,7 @@ impl PreferencesModel {
         DisplaySet {
             // u8 に収まらない値は範囲外として、engine の検査が拒否する。
             tile_size: u8::try_from(model.tile_size).unwrap_or(u8::MAX),
-            thumbnail_shape: match model.thumbnail_shape {
-                models::ThumbnailShape::Crop => ThumbnailShape::Crop,
-                models::ThumbnailShape::Fit => ThumbnailShape::Fit,
-            },
+            thumbnail_shape: Self::thumbnail_shape_from_model(model.thumbnail_shape),
             view: match model.view {
                 models::ListView::Grid => ListView::Grid,
                 models::ListView::List => ListView::List,

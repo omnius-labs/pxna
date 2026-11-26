@@ -16,6 +16,7 @@ src/apis/preferences.rs
 src/apis/rating.rs
 src/apis/search.rs
 src/apis/setup.rs
+src/apis/shelves.rs
 src/apis/tags.rs
 src/apis/timeline.rs
 src/apis/uploads.rs

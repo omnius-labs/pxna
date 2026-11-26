@@ -91,7 +91,7 @@ No existing request or response changes its meaning, so compatibility holds; the
 | [1](#s-1) | Hold how an archive opens in the display preferences | - | Done |
 | [2](#s-2) | Store the Shelves and create the default Shelf | - | Done |
 | [3](#s-3) | Store the folder settings and reassign both by path | 2 | Done |
-| [4](#s-4) | Serve the Shelves and the folder settings | 1, 3 | Not started |
+| [4](#s-4) | Serve the Shelves and the folder settings | 1, 3 | Done |
 | [5](#s-5) | Follow the daemon's own changes | 4 | Not started |
 | [6](#s-6) | Describe the state | 5 | Not started |
 

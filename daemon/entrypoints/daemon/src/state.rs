@@ -6,8 +6,8 @@ use omnius_core_base::{
     tsid::TsidProviderImpl,
 };
 use omnius_pxna_engine::service::{
-    ArchiveRuntime, AuthService, LocalStorageDriver, MediaInfoService, MediaTools, PreferencesService, RatingTagService, StorageService, ThumbnailGenerator, WorkBudget, WorkPools,
-    WorkScheduler,
+    ArchiveRuntime, AuthService, LocalStorageDriver, MediaInfoService, MediaTools, PreferencesService, RatingTagService, ShelfService, StorageService, ThumbnailGenerator,
+    WorkBudget, WorkPools, WorkScheduler,
 };
 use rand::{SeedableRng as _, rngs::ChaCha20Rng};
 
@@ -33,6 +33,7 @@ pub struct DaemonState {
     pub auth: AuthService,
     pub preferences: PreferencesService,
     pub rating_tags: Arc<RatingTagService>,
+    pub shelves: Arc<ShelfService>,
     pub thumbnails: ThumbnailGenerator,
     pub mutation: Arc<LibraryMutation>,
     pub uploads: Arc<UploadService>,
@@ -95,6 +96,9 @@ impl DaemonState {
             clock.clone(),
         )
         .await?;
+        // The migration of the Shelves alters `users`, which `AuthService` creates, and `LibraryMutation` keeps the Shelves in step with its changes.
+        let auth = AuthService::new(db.clone(), clock.clone(), tsid_provider.clone()).await?;
+        let shelves = Arc::new(ShelfService::new(db.clone(), clock.clone(), tsid_provider.clone()).await?);
         let mutation = Arc::new(LibraryMutation::new(
             &conf.libraries,
             storage.clone(),
@@ -126,8 +130,7 @@ impl DaemonState {
         )
         .await?;
 
-        let preferences = PreferencesService::new(db.clone()).await?;
-        let auth = AuthService::new(db, clock, tsid_provider).await?;
+        let preferences = PreferencesService::new(db).await?;
 
         Ok(Self {
             conf,
@@ -135,6 +138,7 @@ impl DaemonState {
             auth,
             preferences,
             rating_tags,
+            shelves,
             thumbnails,
             mutation,
             uploads,

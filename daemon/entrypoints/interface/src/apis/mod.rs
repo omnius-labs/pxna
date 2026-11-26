@@ -11,6 +11,7 @@ pub mod preferences;
 pub mod rating;
 pub mod search;
 pub mod setup;
+pub mod shelves;
 pub mod tags;
 pub mod timeline;
 pub mod uploads;
