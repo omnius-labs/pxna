@@ -86,7 +86,7 @@ No existing request or response changes its meaning, so compatibility holds; the
 | No. | Content | Depends on | Status |
 | --- | --- | --- | --- |
 | [1](#s-1) | Hold how an archive opens in the display preferences | - | Done |
-| [2](#s-2) | Store the Shelves and create the default Shelf | - | Not started |
+| [2](#s-2) | Store the Shelves and create the default Shelf | - | Done |
 | [3](#s-3) | Store the folder settings and reassign both by path | 2 | Not started |
 | [4](#s-4) | Serve the Shelves and the folder settings | 1, 3 | Not started |
 | [5](#s-5) | Follow the daemon's own changes | 4 | Not started |
@@ -116,7 +116,7 @@ New `daemon/modules/engine/src/service/shelves.rs` (the `ShelfService`) and `dae
 Model a Shelf as its id, name, Scope (starts of a Library id and a path, `recursive`, `insideArchives`), Filter (`query`, `rating`, `tags`, `kinds`), and display values, and the display values as an optional set per screen of an optional Layout of `grid`, `list`, or `timeline`, tile size of 1 to 5, and thumbnail shape, an optional sort of the display preferences' shape, and an optional `archiveOpen`.
 Give `ShelfService` a migration that creates `shelves` (id, user, name, position, the Scope's two choices, the Filter and the display values as JSON), `shelf_starts` (Shelf, position, Library id, path, keyed by the Shelf and the position, indexed by the Library id and the path), and `folder_settings` (user, Library id, path, the display values as JSON, keyed by the three), and adds `default_shelf_created_at` to `users`; the service needs `users`, so its tests create `AuthService` on the same database first.
 Read a user's Shelves in their order; create one with a TSID id, last; replace one whole, keeping its id and position; delete one with its starts; and replace the order from a list of ids; a name trimmed of surrounding whitespace outside 1 to 100 characters, a 201st Shelf, a list of ids that does not name every Shelf of the user once, and a tile size out of range are `InvalidInput`, and an id the user has no Shelf of is `NotFound`.
-On reading, when the user's `default_shelf_created_at` is unset and the caller gives at least one start, set it and create the default Shelf of §2.1 condition 2 from the given starts in one transaction whose first statement is the update of that column, so a second reader finds it set; with no start given, create and record nothing.
+On reading, when the user's `default_shelf_created_at` is unset and the caller gives at least one start, set it and create the default Shelf of §2.1 condition 2 from the given starts in one transaction whose first statement is the update of that column, so a second reader finds it set; with no start given, or when the user already has 200 Shelves, create and record nothing.
 
 **Completion condition**
 Unit tests show the cases of §2.1 conditions 2 to 4 that the engine decides: the default Shelf created once from the given starts, not again after its deletion, once under two concurrent first reads, and not with no start; creating last, replacing whole, deleting, reordering, the order list cases, the name and count limits, `NotFound`, and Shelves kept apart by user.

@@ -454,6 +454,7 @@ It is named Timeline, it reads descendants and the insides of archives, its Filt
 Its starts are the roots of the Libraries in `timelineLibraries` of the display preferences that still exist, or of every Library at that moment when none is saved or none of the saved ones exists, and `timelineLibraries` is not read afterwards.
 Display preferences that cannot be read count as none saved, as they do for a client, which then runs with the defaults ([Client Design §3.9](./design/client.md#39-display-preferences)).
 Of more than 64 such Libraries, the first 64 in the order of the configuration are its starts, and a read while no Library is configured creates and records nothing, so the default Shelf is created by the first read after a Library is configured.
+A read by a user who already has 200 Shelves creates and records nothing either, so the default Shelf is created by the first read after there is room.
 A Library added later is therefore not in the default Shelf until the owner adds it (§11.1 "Create the Default Shelf Once from timelineLibraries").
 
 ## 7. Authentication and Sessions
@@ -1455,13 +1456,14 @@ Moves would touch one table fewer, but a Shelf would lose a folder the owner onl
 **Decision**
 The first read of the Shelves of a user whose row in the `users` table does not record the default Shelf creates the default Shelf Timeline and sets that record in the same transaction, and it is not created again (§6.5).
 Its starts are the roots of the Libraries in `timelineLibraries` that still exist, or of every Library at that moment when none is saved or none remains, and a Library added later is not added to it.
-A read while no Library is configured creates and records nothing.
+A read while no Library is configured, or by a user who has the most Shelves, creates and records nothing.
 
 **Reason**
 Creating it at the first read takes over the Libraries the owner chose for the timeline, and it works for a user who is registered after the daemon starts.
 A record on the user's row is one value per user that the creating transaction sets, so a deleted default Shelf stays deleted, as an owner who deleted it meant, and two first reads at once create it once.
 Ids of Libraries removed from the configuration name nothing, and a Shelf names its folders, so it lists what it was made with, like any other Shelf.
 A Shelf with no start cannot exist, and recording the default Shelf without creating it would leave an owner who configures the first Library later without one.
+An owner who made 200 Shelves before the first read keeps that limit, and by recording nothing still gets the default Shelf once one is deleted.
 
 **Rejected alternative 1**
 Creating it in the migration that adds the tables.
