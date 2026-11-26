@@ -737,6 +737,245 @@ mod tests {
         Ok(())
     }
 
+    /// The Libraries `photos` and `videos`, both writable, with a Shelf and folder settings that name folders and archives of them.
+    struct Tree {
+        client: Client,
+        photos: PathBuf,
+        videos: PathBuf,
+    }
+
+    impl Tree {
+        /// Makes the files and folders under `photos`, then saves settings of tile size 1, 2, ... for `settings` and a Shelf that starts at `starts`.
+        async fn new(files: &[&str], settings: &[(&str, &str)], starts: &[(&str, &str)]) -> TestResult<Self> {
+            let mut client = Client::new().await?;
+            client.restart(|conf| conf.libraries[1].readonly = false).await?;
+            let libraries = &client.fixture.server.state.conf.libraries;
+            let (photos, videos) = (libraries[0].path.clone(), libraries[1].path.clone());
+            for file in files {
+                let path = photos.join(file);
+                std::fs::create_dir_all(path.parent().ok_or("parent")?)?;
+                std::fs::write(path, file.as_bytes())?;
+            }
+            let tree = Self { client, photos, videos };
+            for (index, (library_id, path)) in settings.iter().enumerate() {
+                tree.save_setting(library_id, path, index + 1).await?;
+            }
+            let starts = starts.iter().map(|(library_id, path)| place(library_id, path)).collect::<Vec<_>>();
+            // The default Shelf is left uncreated, so the only Shelf is this one.
+            tree.client.create(json!({"name": "s", "scope": {"starts": starts}})).await?;
+            Ok(tree)
+        }
+
+        async fn save_setting(&self, library_id: &str, path: &str, tile_size: usize) -> TestResult {
+            let body = json!({"libraryId": library_id, "path": path, "display": {"wide": {"tileSize": tile_size}}});
+            let response = self.client.send(Method::PUT, "/settings/folder", Some(body)).await?;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            Ok(())
+        }
+
+        /// Sends a mutating request of `photos`, and waits for its operation when it starts one.
+        async fn mutate(&self, path: &str, body: Value) -> TestResult {
+            let response = self.client.send(Method::POST, &format!("/libraries/photos{path}"), Some(body)).await?;
+            assert!(response.status.is_success(), "{path}: {} {}", response.status, response.body);
+            if response.status == StatusCode::ACCEPTED {
+                let id = response.body["operation"]["id"].as_str().ok_or("operation id")?;
+                wait_operation(&self.client.fixture.server.state, id).await?;
+            }
+            Ok(())
+        }
+
+        /// The folder settings as their Library, path, and tile size.
+        async fn settings(&self) -> TestResult<Vec<(String, String, u64)>> {
+            Ok(self
+                .client
+                .folder_settings()
+                .await?
+                .as_array()
+                .ok_or("settings")?
+                .iter()
+                .map(|setting| {
+                    (
+                        setting["libraryId"].as_str().unwrap_or_default().to_string(),
+                        setting["path"].as_str().unwrap_or_default().to_string(),
+                        setting["display"]["wide"]["tileSize"].as_u64().unwrap_or_default(),
+                    )
+                })
+                .collect())
+        }
+
+        async fn starts(&self) -> TestResult<Vec<(String, String)>> {
+            let response = self.client.send(Method::GET, "/shelves", None).await?;
+            let shelf = response.body["shelves"][0].clone();
+            assert_eq!(shelf["name"], "s", "{}", response.body);
+            Ok(shelf["scope"]["starts"]
+                .as_array()
+                .ok_or("starts")?
+                .iter()
+                .map(|start| {
+                    (
+                        start["libraryId"].as_str().unwrap_or_default().to_string(),
+                        start["path"].as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect())
+        }
+    }
+
+    fn rows(values: &[(&str, &str, u64)]) -> Vec<(String, String, u64)> {
+        values
+            .iter()
+            .map(|(library_id, path, tile_size)| (library_id.to_string(), path.to_string(), *tile_size))
+            .collect()
+    }
+
+    fn places(values: &[(&str, &str)]) -> Vec<(String, String)> {
+        values.iter().map(|(library_id, path)| (library_id.to_string(), path.to_string())).collect()
+    }
+
+    #[tokio::test]
+    async fn settings_and_starts_follow_a_rename_and_a_move_within_a_library_test() -> TestResult {
+        let at = [("photos", "/a"), ("photos", "/a/sub"), ("photos", "/ab")];
+        let tree = Tree::new(&["a/sub/x.png", "ab/y.png", "into/z.png"], &at, &at).await?;
+
+        tree.mutate("/folders/move", json!({"srcPaths": ["/a"], "dstPath": "/b"})).await?;
+        assert_eq!(tree.settings().await?, rows(&[("photos", "/ab", 3), ("photos", "/b", 1), ("photos", "/b/sub", 2)]));
+        assert_eq!(tree.starts().await?, places(&[("photos", "/b"), ("photos", "/b/sub"), ("photos", "/ab")]));
+
+        tree.mutate("/folders/move", json!({"srcPaths": ["/b"], "dstFolderPath": "/into"})).await?;
+        assert_eq!(
+            tree.settings().await?,
+            rows(&[("photos", "/ab", 3), ("photos", "/into/b", 1), ("photos", "/into/b/sub", 2)])
+        );
+        assert_eq!(tree.starts().await?, places(&[("photos", "/into/b"), ("photos", "/into/b/sub"), ("photos", "/ab")]));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn settings_and_starts_follow_a_move_across_libraries_test() -> TestResult {
+        let at = [("photos", "/a"), ("photos", "/a/sub"), ("photos", "/a/empty"), ("photos", "/a/pack.7z/dir")];
+        let tree = Tree::new(&["a/sub/x.png"], &at, &at).await?;
+        std::fs::create_dir_all(tree.photos.join("a/empty"))?;
+        std::fs::copy(&tree.client.fixture.archive, tree.photos.join("a/pack.7z"))?;
+        // Settings left at the destination by a folder removed outside Pxna do not apply to the folder moved there.
+        tree.save_setting("videos", "/a/gone", 5).await?;
+
+        tree.mutate("/folders/move", json!({"srcPaths": ["/a"], "dstPath": "/a", "dstLibraryId": "videos"})).await?;
+        assert!(tree.videos.join("a/sub/x.png").is_file());
+        assert_eq!(
+            tree.settings().await?,
+            rows(&[("videos", "/a", 1), ("videos", "/a/empty", 3), ("videos", "/a/pack.7z/dir", 4), ("videos", "/a/sub", 2)])
+        );
+        assert_eq!(
+            tree.starts().await?,
+            places(&[("videos", "/a"), ("videos", "/a/sub"), ("videos", "/a/empty"), ("videos", "/a/pack.7z/dir")])
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn settings_and_starts_follow_a_move_of_several_folders_test() -> TestResult {
+        let at = [("photos", "/a"), ("photos", "/b")];
+        let tree = Tree::new(&["a/x.png", "b/y.png", "into/z.png"], &at, &at).await?;
+
+        tree.mutate("/folders/move", json!({"srcPaths": ["/a", "/b"], "dstFolderPath": "/into"})).await?;
+        assert_eq!(tree.settings().await?, rows(&[("photos", "/into/a", 1), ("photos", "/into/b", 2)]));
+        assert_eq!(tree.starts().await?, places(&[("photos", "/into/a"), ("photos", "/into/b")]));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_folder_moved_into_an_existing_folder_leaves_its_settings_test() -> TestResult {
+        for conflict_target_has_settings in [true, false] {
+            let at = [("photos", "/src"), ("photos", "/src/sub")];
+            let tree = Tree::new(&["src/sub/x.png", "src/y.png", "dst/z.png"], &at, &at).await?;
+            if conflict_target_has_settings {
+                tree.save_setting("photos", "/dst", 5).await?;
+            }
+
+            tree.mutate("/folders/move", json!({"srcPaths": ["/src"], "dstPath": "/dst", "conflict": "overwrite"}))
+                .await?;
+            assert!(tree.photos.join("dst/sub/x.png").is_file() && !tree.photos.join("src").exists());
+            let kept = if conflict_target_has_settings { 5 } else { 1 };
+            assert_eq!(tree.settings().await?, rows(&[("photos", "/dst", kept), ("photos", "/dst/sub", 2)]));
+            assert_eq!(tree.starts().await?, places(&[("photos", "/dst"), ("photos", "/dst/sub")]));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_skipped_folder_keeps_its_settings_test() -> TestResult {
+        let at = [("photos", "/a"), ("photos", "/b")];
+        let tree = Tree::new(&["a/x.png", "b/y.png", "into/a/z.png"], &at, &at).await?;
+
+        tree.mutate("/folders/move", json!({"srcPaths": ["/a", "/b"], "dstFolderPath": "/into", "conflict": "skip"}))
+            .await?;
+        assert!(tree.photos.join("a/x.png").is_file() && tree.photos.join("into/b/y.png").is_file());
+        assert_eq!(tree.settings().await?, rows(&[("photos", "/a", 1), ("photos", "/into/b", 2)]));
+        assert_eq!(tree.starts().await?, places(&[("photos", "/a"), ("photos", "/into/b")]));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_folder_left_by_a_failed_entry_keeps_its_settings_while_what_left_it_follows_test() -> TestResult {
+        let at = [("photos", "/a"), ("photos", "/a/done"), ("photos", "/a/kept")];
+        let tree = Tree::new(&["a/done/x.png", "a/kept/y.png"], &at, &at).await?;
+        // A symbolic link cannot be traversed, so it fails and holds `kept` and `a` at the source.
+        std::os::unix::fs::symlink("y.png", tree.photos.join("a/kept/link"))?;
+
+        tree.mutate("/folders/move", json!({"srcPaths": ["/a"], "dstPath": "/a", "dstLibraryId": "videos"})).await?;
+        assert!(tree.photos.join("a/kept").is_dir() && !tree.photos.join("a/done").exists());
+        assert!(tree.videos.join("a/kept/y.png").is_file());
+        assert_eq!(tree.settings().await?, rows(&[("photos", "/a", 1), ("photos", "/a/kept", 3), ("videos", "/a/done", 2)]));
+        assert_eq!(tree.starts().await?, places(&[("photos", "/a"), ("videos", "/a/done"), ("photos", "/a/kept")]));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_move_that_replaces_an_archive_drops_its_settings_and_keeps_its_starts_test() -> TestResult {
+        // A file takes the place of one archive, and a folder moved entry by entry takes the place of another.
+        let tree = Tree::new(
+            &["new.7z", "pack.7z/x.png", "into/pack.7z"],
+            &[
+                ("photos", "/photos/a.7z/dir"),
+                ("photos", "/into/pack.7z/inside"),
+                ("photos", "/new.7z"),
+                ("photos", "/pack.7z"),
+            ],
+            &[("photos", "/photos/a.7z"), ("photos", "/into/pack.7z"), ("photos", "/new.7z")],
+        )
+        .await?;
+        std::fs::create_dir_all(tree.photos.join("other"))?;
+
+        tree.mutate("/files/move", json!({"srcPaths": ["/new.7z"], "dstPath": "/photos/a.7z", "conflict": "overwrite"}))
+            .await?;
+        tree.mutate(
+            "/folders/move",
+            json!({"srcPaths": ["/pack.7z", "/other"], "dstFolderPath": "/into", "conflict": "overwrite"}),
+        )
+        .await?;
+        assert!(tree.photos.join("into/pack.7z/x.png").is_file());
+        assert_eq!(tree.settings().await?, rows(&[("photos", "/into/pack.7z", 4), ("photos", "/photos/a.7z", 3)]));
+        assert_eq!(
+            tree.starts().await?,
+            places(&[("photos", "/photos/a.7z"), ("photos", "/into/pack.7z"), ("photos", "/photos/a.7z")])
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_delete_removes_settings_and_keeps_starts_test() -> TestResult {
+        let at = [("photos", "/a"), ("photos", "/a/sub"), ("photos", "/b"), ("photos", "/ab")];
+        let tree = Tree::new(&["a/sub/x.png", "ab/y.png"], &at, &at).await?;
+        std::fs::create_dir_all(tree.photos.join("b"))?;
+
+        tree.mutate("/folders/delete", json!({"srcPaths": ["/a"], "recursive": true})).await?;
+        tree.mutate("/folders/delete", json!({"srcPaths": ["/b"]})).await?;
+        assert_eq!(tree.settings().await?, rows(&[("photos", "/ab", 4)]));
+        assert_eq!(tree.starts().await?, places(&at));
+        Ok(())
+    }
+
     #[tokio::test]
     async fn requests_from_a_cookie_session_require_the_same_origin_test() -> TestResult {
         let fixture = fixture(ArchiveOptions::default()).await?;

@@ -106,6 +106,7 @@ impl DaemonState {
             snapshots,
             timeline.clone(),
             rating_tags.clone(),
+            shelves.clone(),
         ));
         let operations = OperationService::new(mutation.clone(), tsid_provider.clone());
         let uploads = UploadService::new(mutation.clone(), tsid_provider.clone());
