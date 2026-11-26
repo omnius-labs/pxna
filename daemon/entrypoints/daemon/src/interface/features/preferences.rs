@@ -3,7 +3,7 @@ use axum_extra::extract::CookieJar;
 use headers::Host;
 use http::Method;
 
-use omnius_pxna_engine::model::{DisplaySet, ListView, OriginalImageMode, Preferences, SortKey, SortOrder, SortPreference, ThumbnailShape};
+use omnius_pxna_engine::model::{ArchiveOpen, DisplaySet, ListView, OriginalImageMode, Preferences, SortKey, SortOrder, SortPreference, ThumbnailShape};
 use omnius_pxna_interface::{apis, models};
 
 use crate::{
@@ -86,6 +86,7 @@ impl PreferencesModel {
                 },
             ),
         );
+        model.archive_open = preferences.archive_open.map(Self::archive_open_to_model);
         model.timeline_libraries = preferences.timeline_libraries.map(|ids| ids.into_iter().map(models::LibraryId).collect());
         model
     }
@@ -106,7 +107,22 @@ impl PreferencesModel {
                     models::SortOrder::Desc => SortOrder::Desc,
                 },
             },
+            archive_open: model.archive_open.map(Self::archive_open_from_model),
             timeline_libraries: model.timeline_libraries.as_ref().map(|ids| ids.iter().map(|id| id.0.clone()).collect()),
+        }
+    }
+
+    fn archive_open_to_model(value: ArchiveOpen) -> models::ArchiveOpen {
+        match value {
+            ArchiveOpen::Folder => models::ArchiveOpen::Folder,
+            ArchiveOpen::Viewer => models::ArchiveOpen::Viewer,
+        }
+    }
+
+    fn archive_open_from_model(value: models::ArchiveOpen) -> ArchiveOpen {
+        match value {
+            models::ArchiveOpen::Folder => ArchiveOpen::Folder,
+            models::ArchiveOpen::Viewer => ArchiveOpen::Viewer,
         }
     }
 
@@ -214,6 +230,40 @@ mod tests {
 
         let malformed = send(&router, Method::PUT, "/api/v1/preferences", headers, Some(json!({"wide": 1}))).await?;
         assert!(malformed.status.is_client_error(), "形の違う本文は拒否される: {}", malformed.status);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn preferences_hold_how_an_archive_opens_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let router = router(&fixture);
+        let setup = send(&router, Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "bearer")).await?;
+        let bearer = bearer(&setup)?;
+        let headers = &[("authorization", bearer.as_str())];
+
+        let defaults = send(&router, Method::GET, "/api/v1/preferences", headers, None).await?;
+        assert!(defaults.body.get("archiveOpen").is_none(), "never saved: {}", defaults.body);
+
+        for value in ["folder", "viewer"] {
+            let mut body = preferences(3);
+            body["archiveOpen"] = json!(value);
+            let saved = send(&router, Method::PUT, "/api/v1/preferences", headers, Some(body.clone())).await?;
+            assert_eq!(saved.status, StatusCode::OK, "{value}");
+            assert_eq!(saved.body, body);
+            assert_eq!(send(&router, Method::GET, "/api/v1/preferences", headers, None).await?.body, body);
+        }
+
+        let mut unknown = preferences(3);
+        unknown["archiveOpen"] = json!("window");
+        let rejected = send(&router, Method::PUT, "/api/v1/preferences", headers, Some(unknown)).await?;
+        // The generated router rejects an unknown enum value while it reads the body, as for every enum of the contract.
+        assert_eq!(rejected.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(send(&router, Method::GET, "/api/v1/preferences", headers, None).await?.body["archiveOpen"], "viewer");
+
+        // A save without `archiveOpen` unsets it.
+        send(&router, Method::PUT, "/api/v1/preferences", headers, Some(preferences(3))).await?;
+        let replaced = send(&router, Method::GET, "/api/v1/preferences", headers, None).await?;
+        assert!(replaced.body.get("archiveOpen").is_none(), "a save without it unsets it: {}", replaced.body);
         Ok(())
     }
 

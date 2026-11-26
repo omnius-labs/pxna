@@ -1202,13 +1202,14 @@ export interface components {
         };
         /**
          * @description Display preferences. `wide` and `narrow` are chosen by the
-         *     width of the screen (768 CSS px); `sort` and `timelineLibraries`
-         *     do not depend on it.
+         *     width of the screen (768 CSS px); `sort`, `archiveOpen`, and
+         *     `timelineLibraries` do not depend on it.
          */
         Preferences: {
             wide: components["schemas"]["DisplaySet"];
             narrow: components["schemas"]["DisplaySet"];
             sort: components["schemas"]["SortPreference"];
+            archiveOpen?: components["schemas"]["ArchiveOpen"];
             /**
              * @description Libraries the timeline shows. Absent means every
              *     Library. Ids of Libraries that no longer exist are kept
@@ -1237,6 +1238,13 @@ export interface components {
         ThumbnailShape: "crop" | "fit";
         /** @enum {string} */
         ListView: "grid" | "list";
+        /**
+         * @description How an archive opens: `folder` browses its contents like a
+         *     folder, and `viewer` opens them in the viewer. An archive opens
+         *     as a folder when the value is absent.
+         * @enum {string}
+         */
+        ArchiveOpen: "folder" | "viewer";
         /**
          * @description When a viewer swaps the display image for the original image.
          *     `auto` swaps automatically; `onZoom` swaps only when the user

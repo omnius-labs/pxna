@@ -901,6 +901,48 @@ lazy_static::lazy_static! {
     static ref RE_GETVIDEOSEGMENTPATHPARAMS_SEGMENT_NAME: regex::Regex = regex::Regex::new("^[0-9]+\\.ts$").unwrap();
 }
 
+/// How an archive opens: `folder` browses its contents like a folder, and `viewer` opens them in the viewer. An archive opens as a folder when the value is absent.
+/// Enumeration of values.
+/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
+/// which helps with FFI.
+#[allow(non_camel_case_types, clippy::large_enum_variant)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
+pub enum ArchiveOpen {
+    #[serde(rename = "folder")]
+    Folder,
+    #[serde(rename = "viewer")]
+    Viewer,
+}
+
+impl validator::Validate for ArchiveOpen {
+    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
+        std::result::Result::Ok(())
+    }
+}
+
+impl std::fmt::Display for ArchiveOpen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            ArchiveOpen::Folder => write!(f, "folder"),
+            ArchiveOpen::Viewer => write!(f, "viewer"),
+        }
+    }
+}
+
+impl std::str::FromStr for ArchiveOpen {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "folder" => std::result::Result::Ok(ArchiveOpen::Folder),
+            "viewer" => std::result::Result::Ok(ArchiveOpen::Viewer),
+            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct AuthResult {
@@ -8222,7 +8264,7 @@ impl std::ops::DerefMut for Password {
     }
 }
 
-/// Display preferences. `wide` and `narrow` are chosen by the width of the screen (768 CSS px); `sort` and `timelineLibraries` do not depend on it.
+/// Display preferences. `wide` and `narrow` are chosen by the width of the screen (768 CSS px); `sort`, `archiveOpen`, and `timelineLibraries` do not depend on it.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct Preferences {
@@ -8238,6 +8280,11 @@ pub struct Preferences {
     #[validate(nested)]
     pub sort: models::SortPreference,
 
+    #[serde(rename = "archiveOpen")]
+    #[validate(nested)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive_open: Option<models::ArchiveOpen>,
+
     /// Libraries the timeline shows. Absent means every Library. Ids of Libraries that no longer exist are kept as saved, and clients ignore them.
     #[serde(rename = "timelineLibraries")]
     #[validate(length(min = 1, max = 64), nested)]
@@ -8252,6 +8299,7 @@ impl Preferences {
             wide,
             narrow,
             sort,
+            archive_open: None,
             timeline_libraries: None,
         }
     }
@@ -8268,6 +8316,8 @@ impl std::fmt::Display for Preferences {
             // Skipping narrow in query parameter serialization
 
             // Skipping sort in query parameter serialization
+
+            // Skipping archiveOpen in query parameter serialization
             self.timeline_libraries.as_ref().map(|timeline_libraries| {
                 [
                     "timelineLibraries".to_string(),
@@ -8295,6 +8345,7 @@ impl std::str::FromStr for Preferences {
             pub wide: Vec<models::DisplaySet>,
             pub narrow: Vec<models::DisplaySet>,
             pub sort: Vec<models::SortPreference>,
+            pub archive_open: Vec<models::ArchiveOpen>,
             pub timeline_libraries: Vec<Vec<models::LibraryId>>,
         }
 
@@ -8325,6 +8376,10 @@ impl std::str::FromStr for Preferences {
                     "sort" => intermediate_rep
                         .sort
                         .push(<models::SortPreference as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "archiveOpen" => intermediate_rep
+                        .archive_open
+                        .push(<models::ArchiveOpen as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     "timelineLibraries" => return std::result::Result::Err("Parsing a container in this style is not supported in Preferences".to_string()),
                     _ => return std::result::Result::Err("Unexpected key while parsing Preferences".to_string()),
                 }
@@ -8339,6 +8394,7 @@ impl std::str::FromStr for Preferences {
             wide: intermediate_rep.wide.into_iter().next().ok_or_else(|| "wide missing in Preferences".to_string())?,
             narrow: intermediate_rep.narrow.into_iter().next().ok_or_else(|| "narrow missing in Preferences".to_string())?,
             sort: intermediate_rep.sort.into_iter().next().ok_or_else(|| "sort missing in Preferences".to_string())?,
+            archive_open: intermediate_rep.archive_open.into_iter().next(),
             timeline_libraries: intermediate_rep.timeline_libraries.into_iter().next(),
         })
     }

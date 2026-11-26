@@ -27,7 +27,7 @@ A client keeps the owner's Shelves and folder settings in the daemon, so the sam
 
 ### 2.1 Completion Conditions
 
-1. `GET /preferences` returns `archiveOpen` as it was saved by `PUT /preferences`, `folder` or `viewer`, and without it when it was never saved; another value is rejected with 400
+1. `GET /preferences` returns `archiveOpen` as it was saved by `PUT /preferences`, `folder` or `viewer`, and without it when it was never saved; another value is rejected with 422 and leaves the saved value
 2. The first `GET /shelves` of a user returns the default Shelf named Timeline, recursive, reading the insides of archives, with the kinds `image` and `video` and the timeline Layout in both sets, whose starts are the roots of the configured Libraries named in `timelineLibraries`, or of every configured Library when none is saved, none remains, or the display preferences cannot be read, in the order of the configuration and at most 64; after it is deleted, later reads do not create it again, two first reads at the same time create one, and a read while no Library is configured returns no Shelf and leaves the next read with a Library to create it
 3. `POST /shelves` returns 201 with the created Shelf and its id and puts it last, `PUT /shelves/{shelfId}` replaces a Shelf whole and returns it, `DELETE /shelves/{shelfId}` returns 204, both are 404 for an id the user has no Shelf of, `PUT /shelves/order` with every id of the user once reorders and returns the Shelves, and `GET /shelves` returns a user's own Shelves only, in their order
 4. Saving a Shelf whose name trimmed is empty or longer than 100 characters, a 201st Shelf of a user, a `PUT /shelves/order` that does not name every Shelf of the user exactly once, and a Scope or Filter that `listEntryMonths` refuses are `InvalidInput`; a start that names nothing, a start given twice, and the timeline with any kinds are saved, and every start is returned by its path in normal form
@@ -85,7 +85,7 @@ No existing request or response changes its meaning, so compatibility holds; the
 
 | No. | Content | Depends on | Status |
 | --- | --- | --- | --- |
-| [1](#s-1) | Hold how an archive opens in the display preferences | - | Not started |
+| [1](#s-1) | Hold how an archive opens in the display preferences | - | Done |
 | [2](#s-2) | Store the Shelves and create the default Shelf | - | Not started |
 | [3](#s-3) | Store the folder settings and reassign both by path | 2 | Not started |
 | [4](#s-4) | Serve the Shelves and the folder settings | 1, 3 | Not started |
@@ -104,7 +104,7 @@ Give `Preferences` of the engine an optional value of it that is read as absent 
 Regenerate the interface crate and the web client's API types.
 
 **Completion condition**
-Tests show `archiveOpen` saved and read back for both values, absent when never saved and when read from a value saved before it, and another value rejected with 400; the existing tests of the display preferences pass.
+Tests show `archiveOpen` saved and read back for both values, absent when never saved and when read from a value saved before it, and another value rejected with 422; the existing tests of the display preferences pass.
 
 <a id="s-2"></a>
 ### Step 2. Store the Shelves and Create the Default Shelf
@@ -177,7 +177,7 @@ The terms list names the two paths, `ShelfService`, and `archiveOpen`, Folder se
 
 | Condition | Command | Expected result |
 | --- | --- | --- |
-| 1 | `cd daemon && RUSTC_WRAPPER= cargo test -p omnius-pxna-daemon interface::features::preferences && RUSTC_WRAPPER= cargo test -p omnius-pxna-engine model::preferences` | The tests of step 1 pass: both values round-trip, absent when never saved or saved before, and another value is 400 |
+| 1 | `cd daemon && RUSTC_WRAPPER= cargo test -p omnius-pxna-daemon interface::features::preferences && RUSTC_WRAPPER= cargo test -p omnius-pxna-engine model::preferences` | The tests of step 1 pass: both values round-trip, absent when never saved or saved before, and another value is 422 |
 | 2 to 5 | `cd daemon && RUSTC_WRAPPER= cargo test -p omnius-pxna-engine service::shelves` | The unit tests of steps 2 and 3 pass |
 | 2 to 7 | `cd daemon && RUSTC_WRAPPER= cargo test -p omnius-pxna-daemon interface::features::shelves` | The route tests of steps 4 and 5 pass: the default Shelf, the operations and their errors, the checks, the folder settings, the following of renames, moves, and deletes, and the `Origin` check |
 | 8 | `cd daemon && RUSTC_WRAPPER= cargo make lint && RUSTC_WRAPPER= cargo test` | Both exit 0 |
