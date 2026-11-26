@@ -1,6 +1,6 @@
 use omnius_pxna_interface::models;
 
-use crate::service::listing::{ListOptions, ListingSource, MergedPage, MergedSources};
+use crate::service::listing::{ListOptions, ListingSource, MergedPage, MergedSources, ScopeStart};
 
 /// An Entry of a Scope's listing, with the Library it is in.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,23 +17,23 @@ pub struct ScopeListing {
     pub offset: u64,
     /// The identifiers of the starts' listings joined with commas.
     pub snapshot: String,
-    /// The starts whose listing reached `recursive_max_entries`, by start value.
-    pub cut_off_starts: Vec<String>,
+    /// The starts whose listing reached `recursive_max_entries`, as they were given.
+    pub cut_off_starts: Vec<ScopeStart>,
     /// The starts the name index would answer from a local folder, which were walked because the index was not usable or failed meanwhile.
-    pub walked_starts: Vec<String>,
-    /// The starts that do not exist, by start value.
-    pub missing_starts: Vec<String>,
+    pub walked_starts: Vec<ScopeStart>,
+    /// The starts that do not exist, as they were given.
+    pub missing_starts: Vec<ScopeStart>,
 }
 
 /// The listings of the starts of a Scope as one sequence in sort order, with ties in the order of the starts.
 pub struct ScopeResults {
     merged: MergedSources,
-    missing: Vec<String>,
+    missing: Vec<ScopeStart>,
 }
 
 impl ScopeResults {
-    /// `sources` are the starts that add Entries in the order they were given, and `missing` the values of the starts that do not exist.
-    pub fn new(sources: Vec<ListingSource>, missing: Vec<String>) -> Self {
+    /// `sources` are the starts that add Entries in the order they were given, and `missing` the starts that do not exist.
+    pub fn new(sources: Vec<ListingSource>, missing: Vec<ScopeStart>) -> Self {
         Self {
             merged: MergedSources::new(sources),
             missing,
@@ -52,7 +52,13 @@ impl ScopeResults {
 
     fn listing(&self, page: MergedPage) -> ScopeListing {
         let sources = self.merged.sources();
-        let starts = |keep: fn(&ListingSource) -> bool| sources.iter().filter(|source| keep(source)).map(|source| source.start().to_string()).collect::<Vec<_>>();
+        let starts = |keep: fn(&ListingSource) -> bool| {
+            sources
+                .iter()
+                .filter(|source| keep(source))
+                .filter_map(|source| source.start().cloned())
+                .collect::<Vec<_>>()
+        };
         ScopeListing {
             entries: page
                 .entries
@@ -105,6 +111,19 @@ mod tests {
         ListingEntries::from_entries(names.iter().map(|name| entry(name)).collect())
     }
 
+    fn start(value: &str) -> ScopeStart {
+        ScopeStart::parse(value).unwrap()
+    }
+
+    fn starts(values: &[&str]) -> Vec<ScopeStart> {
+        values.iter().map(|value| start(value)).collect()
+    }
+
+    /// The starts as the text they were parsed from.
+    fn values(starts: &[ScopeStart]) -> Vec<String> {
+        starts.iter().map(ScopeStart::value).collect()
+    }
+
     fn keys(listing: &ScopeListing) -> Vec<String> {
         listing.entries.iter().map(|scoped| format!("{}:{}", scoped.library_id, scoped.entry.name)).collect()
     }
@@ -116,9 +135,9 @@ mod tests {
         let second = snapshot(&snapshots, "a", "/y", entries(&["2.png", "10.png"])).await;
         let other = snapshot(&snapshots, "b", "/", entries(&["same.png", "4.png"])).await;
         let sources = vec![
-            ListingSource::for_start("a/x", "a", first.clone(), options(0, 1, None), true),
-            ListingSource::for_start("a/y", "a", second.clone(), options(0, 1, None), true),
-            ListingSource::for_start("b", "b", other.clone(), options(0, 1, None), true),
+            ListingSource::for_start(start("a/x"), first.clone(), options(0, 1, None), true),
+            ListingSource::for_start(start("a/y"), second.clone(), options(0, 1, None), true),
+            ListingSource::for_start(start("b"), other.clone(), options(0, 1, None), true),
         ];
         (ScopeResults::new(sources, vec![]), vec![first, second, other])
     }
@@ -136,12 +155,12 @@ mod tests {
         assert_eq!(all.snapshot, snapshots.iter().map(|snapshot| snapshot.id().to_string()).collect::<Vec<_>>().join(","));
 
         // One start of one Library, and the same two Libraries with their starts in the other order.
-        let one = ScopeResults::new(vec![ListingSource::for_start("a/y", "a", snapshots[1].clone(), options(0, 1, None), true)], vec![]);
+        let one = ScopeResults::new(vec![ListingSource::for_start(start("a/y"), snapshots[1].clone(), options(0, 1, None), true)], vec![]);
         assert_eq!(keys(&one.page(&options(0, 100, None))), ["a:2.png", "a:10.png"]);
         let reversed = ScopeResults::new(
             vec![
-                ListingSource::for_start("b", "b", snapshots[2].clone(), options(0, 1, None), true),
-                ListingSource::for_start("a/x", "a", snapshots[0].clone(), options(0, 1, None), true),
+                ListingSource::for_start(start("b"), snapshots[2].clone(), options(0, 1, None), true),
+                ListingSource::for_start(start("a/x"), snapshots[0].clone(), options(0, 1, None), true),
             ],
             vec![],
         );
@@ -170,8 +189,8 @@ mod tests {
         // Each source carries its own conditions: the start of `b` has a name condition, and the starts of `a` have none.
         let results = ScopeResults::new(
             vec![
-                ListingSource::for_start("a/x", "a", snapshots[0].clone(), options(0, 1, None), true),
-                ListingSource::for_start("b", "b", snapshots[2].clone(), options(0, 1, Some("same")), true),
+                ListingSource::for_start(start("a/x"), snapshots[0].clone(), options(0, 1, None), true),
+                ListingSource::for_start(start("b"), snapshots[2].clone(), options(0, 1, Some("same")), true),
             ],
             vec![],
         );
@@ -204,7 +223,7 @@ mod tests {
         }
         assert!(results.locate(&options(0, 2, None), "a", "/missing.png").is_none());
         assert!(results.locate(&options(0, 2, None), "c", "/1.png").is_none());
-        let filtered = ScopeResults::new(vec![ListingSource::for_start("b", "b", snapshots[2].clone(), options(0, 1, Some("same")), true)], vec![]);
+        let filtered = ScopeResults::new(vec![ListingSource::for_start(start("b"), snapshots[2].clone(), options(0, 1, Some("same")), true)], vec![]);
         assert!(
             filtered.locate(&options(0, 2, None), "b", "/4.png").is_none(),
             "an Entry outside the Filter has no position"
@@ -224,30 +243,30 @@ mod tests {
         let archive = snapshot(&snapshots, "a", "/pack.7z", entries(&["p.png"])).await;
         let plain = snapshot(&snapshots, "b", "/", entries(&["n.png"])).await;
         let sources = vec![
-            ListingSource::for_start("a/walked", "a", walked, options(0, 1, name), true),
-            ListingSource::for_start("a/cut", "a", cut_off, options(0, 1, name), true),
-            ListingSource::for_start("a/indexed", "a", indexed, options(0, 1, name), true),
-            ListingSource::for_start("a/pack.7z", "a", archive, options(0, 1, name), false),
-            ListingSource::for_start("b", "b", plain, options(0, 1, None), true),
+            ListingSource::for_start(start("a/walked"), walked, options(0, 1, name), true),
+            ListingSource::for_start(start("a/cut"), cut_off, options(0, 1, name), true),
+            ListingSource::for_start(start("a/indexed"), indexed, options(0, 1, name), true),
+            ListingSource::for_start(start("a/pack.7z"), archive, options(0, 1, name), false),
+            ListingSource::for_start(start("b"), plain, options(0, 1, None), true),
         ];
-        let results = ScopeResults::new(sources, vec!["gone/x".to_string(), "a/deleted".to_string()]);
+        let results = ScopeResults::new(sources, starts(&["gone/x", "a/deleted"]));
         let page = results.page(&options(0, 100, name));
-        assert_eq!(page.cut_off_starts, ["a/cut"]);
-        assert_eq!(page.walked_starts, ["a/walked", "a/cut"], "a cut-off walk is a walk too");
-        assert_eq!(page.missing_starts, ["gone/x", "a/deleted"]);
+        assert_eq!(values(&page.cut_off_starts), ["a/cut"]);
+        assert_eq!(values(&page.walked_starts), ["a/walked", "a/cut"], "a cut-off walk is a walk too");
+        assert_eq!(values(&page.missing_starts), ["gone/x", "a/deleted"]);
         assert_eq!(page.total_count, 5, "the start without the name condition lists its Entry too");
         // The lists are the same on every page, not only the first.
-        assert_eq!(results.page(&options(3, 1, name)).missing_starts, ["gone/x", "a/deleted"]);
-        assert_eq!(results.locate(&options(0, 1, name), "a", "/p.png").expect("found").cut_off_starts, ["a/cut"]);
+        assert_eq!(values(&results.page(&options(3, 1, name)).missing_starts), ["gone/x", "a/deleted"]);
+        assert_eq!(values(&results.locate(&options(0, 1, name), "a", "/p.png").expect("found").cut_off_starts), ["a/cut"]);
     }
 
     #[tokio::test]
     async fn a_scope_with_every_start_missing_is_empty_and_names_them_all_test() {
-        let results = ScopeResults::new(vec![], vec!["a/x".to_string(), "b".to_string()]);
+        let results = ScopeResults::new(vec![], starts(&["a/x", "b"]));
         let page = results.page(&options(0, 10, None));
         assert!(page.entries.is_empty());
         assert_eq!((page.total_count, page.offset), (0, 0));
-        assert_eq!(page.missing_starts, ["a/x", "b"]);
+        assert_eq!(values(&page.missing_starts), ["a/x", "b"]);
         assert!(page.cut_off_starts.is_empty() && page.walked_starts.is_empty());
         assert!(results.locate(&options(0, 10, None), "a", "/x.png").is_none());
     }

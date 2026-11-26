@@ -431,7 +431,7 @@ Any value can be left unset, which means it is taken from the layer below.
 A folder inside an archive has settings by its joined path, as any other folder ([§11.1](#represent-paths-inside-archives-by-joining-paths)).
 
 The Shelves are read in full, created, replaced whole, and deleted one at a time, and their order is replaced as a whole; the paths and schemas are defined in `openapi.yaml` by M29 of §12.2, which adds them.
-A Shelf is listed by sending its Scope and Filter to `listEntries`, as an Unsaved Shelf is ([Listing and Search Design §8.1](./design/listing.md#carry-a-scope-and-a-filter-in-the-query-of-one-get-request)).
+A Shelf is listed by sending its Scope and Filter to `listEntries`, as an Unsaved Shelf is ([Listing and Search Design §8.1](./design/listing.md#carry-a-scope-and-a-filter-in-the-json-body-of-one-post-request)).
 The folder settings are read in full when a client starts, and written or removed one folder at a time.
 A client resolves a folder's values itself: each unset value is taken from the nearest folder at or above it that sets it, and then from the display preferences; an open Shelf's set values win over both, and inside a Shelf only how an archive opens is taken from folder settings ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
 These requests change no Library, so they respond synchronously and follow, of the conventions of §8, only the `Origin` check of §8.5.
@@ -1652,7 +1652,7 @@ The implementation status of the storage layer, listing and search, thumbnails, 
 The container passes build and smoke tests in native CI for amd64 and arm64.
 
 The library-local trash and the content hash for ratings and tags are not implemented; they are M25 and M26 in §12.2.
-The documents describe browsing through the tree and the Shelves (§2, §6.5), while the code reads a Scope through `listEntries` in every order and counts its months, but has no Shelves, and the web client still reads the timeline through `listTimelineEntries` and `listTimelineMonths` over chosen Libraries; M29 to M31 in §12.2 close that gap.
+The documents describe browsing through the tree and the Shelves (§2, §6.5), while the code reads a Scope through `listEntries` in every order and counts its months, with the Scope and the Filter in a POST body in the shapes a Shelf holds, but has no Shelves, and the web client still reads the timeline through `listTimelineEntries` and `listTimelineMonths` over chosen Libraries; M29 to M31 in §12.2 close that gap.
 The local AI assistance of §2 is a deferred item in §11.2.
 
 ### 12.2 Roadmap
@@ -1691,7 +1691,7 @@ M7 is a retired number and is not used.
 | M26 | Identify ratings and tags by a lazily computed content hash, cache it with the file's metadata or the archive identity and inner path, and share ratings and tags among identical content | M2, M10, M18, M22 | Not started |
 | M27 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while the index is not usable, as in [Listing and Search Design §5.1](./design/listing.md#51-name-index) | M19 | Done |
 | M28 | Implement `listEntries` over a Scope and a Filter, with pages by `offset` and by cursor in timeline-date order, the starts cut off, walked, and missing, and the per-month counts over the same Scope and Filter ([Listing and Search Design §4.6](./design/listing.md#46-pages-in-timeline-date-order), [§5.3](./design/listing.md#53-listing-several-starts), [Timeline Design §7](./design/timeline.md#7-reading)) | M24, M27 | Done |
-| M29 | Implement the storage and API of Shelves and folder settings, their reassignment by the daemon's own changes, and the default Shelf (§6.5) | M2, M3, M11 | Not started |
+| M29 | Carry the Scope and the Filter of `listEntries` in the shapes a Shelf holds ([Listing and Search Design §9.2](./design/listing.md#92-roadmap), L6), and implement the storage and API of Shelves and folder settings, their reassignment by the daemon's own changes, and the default Shelf (§6.5) | M2, M3, M11 | Not started |
 | M30 | Rebuild the web client around the Libraries and the Shelves: the left area, the conditions bar and the Unsaved Shelf, the timeline Layout, folder settings, and how archives open ([Client Design §3](./design/client.md#3-screens)) | M28, M29 | Not started |
 | M31 | Remove the listing and month APIs that `listEntries` replaces ([Listing and Search Design §8.1](./design/listing.md#list-the-entries-of-a-scope-through-one-api)) once the web client and the iOS app read `listEntries` | M30 | Not started |
 | M32 | Decide and implement the control of background work (§11.2 "Controlling Background Work"), including what the Shelves list before the owner opts in to aggregation | M27, M30 | Not started |

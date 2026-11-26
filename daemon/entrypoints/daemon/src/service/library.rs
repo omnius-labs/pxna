@@ -146,8 +146,7 @@ impl LibraryBrowser {
             let path = start.start().path().absolute();
             let snapshot = self.snapshot_of(library, &path, start.folder().clone(), start.entry(), &options).await?;
             Ok::<_, Error>(ListingSource::for_start(
-                start.start().value(),
-                library_id,
+                start.start().clone(),
                 snapshot,
                 options,
                 start.folder().archive_identity().is_none(),
@@ -404,7 +403,7 @@ impl LibraryBrowser {
     }
 
     async fn resolve_start(&self, start: &ScopeStart) -> Result<StartResolution> {
-        let missing = || StartResolution::Missing(start.value().to_string());
+        let missing = || StartResolution::Missing(start.clone());
         let Ok(library) = self.library(start.library_id()) else {
             return Ok(missing());
         };
@@ -453,9 +452,14 @@ mod tests {
         let values = values.iter().map(|value| value.to_string()).collect::<Vec<_>>();
         let resolved = state.library.resolve_scope(&Scope::parse(&values, recursive, inside_archives)?).await?;
         Ok((
-            resolved.starts().iter().map(|start| start.start().value().to_string()).collect(),
-            resolved.missing().to_vec(),
+            resolved.starts().iter().map(|start| start.start().value()).collect(),
+            resolved.missing().iter().map(ScopeStart::value).collect(),
         ))
+    }
+
+    /// The starts as the text they were parsed from.
+    fn values(starts: &[ScopeStart]) -> Vec<String> {
+        starts.iter().map(ScopeStart::value).collect()
     }
 
     fn strings(values: &[&str]) -> Vec<String> {
@@ -618,12 +622,12 @@ mod tests {
             "sorted by name in natural order, the covered start adding nothing"
         );
         assert_eq!(listing.total_count, 3);
-        assert_eq!(listing.missing_starts, ["test/gone", "unknown/x"]);
+        assert_eq!(values(&listing.missing_starts), ["test/gone", "unknown/x"]);
         assert!(listing.cut_off_starts.is_empty() && listing.walked_starts.is_empty());
 
         let all_missing = list(&state, &["test/gone", "unknown"], None, false, 100, 0).await?;
         assert!(all_missing.entries.is_empty() && all_missing.total_count == 0);
-        assert_eq!(all_missing.missing_starts, ["test/gone", "unknown"]);
+        assert_eq!(values(&all_missing.missing_starts), ["test/gone", "unknown"]);
 
         // Pages of one limit joined in order neither repeat nor skip an Entry, and `locate` returns the page of the offset it gives.
         let mut joined = Vec::new();
@@ -653,7 +657,7 @@ mod tests {
 
         // The index is not usable yet, so a recursive listing with a name condition is walked, from a local folder and not from an archive.
         let before = list(&state, &["test/a", "test/pack.7z"], Some("one"), false, 100, 0).await?;
-        assert_eq!(before.walked_starts, ["test/a"]);
+        assert_eq!(values(&before.walked_starts), ["test/a"]);
         assert_eq!(paths(&before), ["test:/a/one.txt"]);
         // Without a condition a walk is the intended answer and is not named.
         assert!(list(&state, &["test/a"], None, false, 100, 0).await?.walked_starts.is_empty());
@@ -680,7 +684,7 @@ mod tests {
         }
         std::fs::write(root.join("small/only.txt"), b"x")?;
         let listing = list(&state, &["test/big", "test/small"], None, false, 100, 0).await?;
-        assert_eq!(listing.cut_off_starts, ["test/big"]);
+        assert_eq!(values(&listing.cut_off_starts), ["test/big"]);
         assert_eq!(listing.total_count, 4, "three of the big folder, which stops at the limit, and the small one");
         Ok(())
     }

@@ -52,8 +52,8 @@ where
         .route("/api/v1/auth/me", get(get_current_user::<I, A, E, C>))
         .route("/api/v1/auth/session", delete(delete_current_session::<I, A, E, C>))
         .route("/api/v1/capabilities", get(get_capabilities::<I, A, E, C>))
-        .route("/api/v1/entries", get(list_entries::<I, A, E, C>))
-        .route("/api/v1/entries/months", get(list_entry_months::<I, A, E, C>))
+        .route("/api/v1/entries", post(list_entries::<I, A, E, C>))
+        .route("/api/v1/entries/months", post(list_entry_months::<I, A, E, C>))
         .route("/api/v1/health", get(get_health::<I, A, E>))
         .route("/api/v1/libraries", get(list_libraries::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}", get(get_library::<I, A, E, C>))
@@ -481,21 +481,29 @@ where
     })
 }
 
-#[tracing::instrument(skip_all)]
-fn list_entries_validation(query_params: models::ListEntriesQueryParams) -> std::result::Result<(models::ListEntriesQueryParams,), ValidationErrors> {
-    query_params.validate()?;
-
-    Ok((query_params,))
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct ListEntriesBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::EntryListRequest,
 }
-/// ListEntries - GET /api/v1/entries
+
+#[tracing::instrument(skip_all)]
+fn list_entries_validation(body: models::EntryListRequest) -> std::result::Result<(models::EntryListRequest,), ValidationErrors> {
+    let b = ListEntriesBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// ListEntries - POST /api/v1/entries
 #[tracing::instrument(skip_all)]
 async fn list_entries<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    QueryExtra(query_params): QueryExtra<models::ListEntriesQueryParams>,
     State(api_impl): State<I>,
+    Json(body): Json<models::EntryListRequest>,
 ) -> Result<Response, StatusCode>
 where
     I: AsRef<A> + Send + Sync,
@@ -514,16 +522,16 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || list_entries_validation(query_params)).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || list_entries_validation(body)).await.unwrap();
 
-    let Ok((query_params,)) = validation else {
+    let Ok((body,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().list_entries(&method, &host, &cookies, &claims, &query_params).await;
+    let result = api_impl.as_ref().list_entries(&method, &host, &cookies, &claims, &body).await;
 
     let mut response = Response::builder();
 
@@ -662,21 +670,29 @@ where
     })
 }
 
-#[tracing::instrument(skip_all)]
-fn list_entry_months_validation(query_params: models::ListEntryMonthsQueryParams) -> std::result::Result<(models::ListEntryMonthsQueryParams,), ValidationErrors> {
-    query_params.validate()?;
-
-    Ok((query_params,))
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct ListEntryMonthsBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::EntryMonthsRequest,
 }
-/// ListEntryMonths - GET /api/v1/entries/months
+
+#[tracing::instrument(skip_all)]
+fn list_entry_months_validation(body: models::EntryMonthsRequest) -> std::result::Result<(models::EntryMonthsRequest,), ValidationErrors> {
+    let b = ListEntryMonthsBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// ListEntryMonths - POST /api/v1/entries/months
 #[tracing::instrument(skip_all)]
 async fn list_entry_months<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
     headers: HeaderMap,
-    QueryExtra(query_params): QueryExtra<models::ListEntryMonthsQueryParams>,
     State(api_impl): State<I>,
+    Json(body): Json<models::EntryMonthsRequest>,
 ) -> Result<Response, StatusCode>
 where
     I: AsRef<A> + Send + Sync,
@@ -695,16 +711,16 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || list_entry_months_validation(query_params)).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || list_entry_months_validation(body)).await.unwrap();
 
-    let Ok((query_params,)) = validation else {
+    let Ok((body,)) = validation else {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from(validation.unwrap_err().to_string()))
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().list_entry_months(&method, &host, &cookies, &claims, &query_params).await;
+    let result = api_impl.as_ref().list_entry_months(&method, &host, &cookies, &claims, &body).await;
 
     let mut response = Response::builder();
 

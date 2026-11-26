@@ -29,12 +29,12 @@ impl apis::entries::Entries for ApiServer {
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        query_params: &models::ListEntriesQueryParams,
+        body: &models::EntryListRequest,
     ) -> std::result::Result<apis::entries::ListEntriesResponse, ()> {
         let listing = async {
-            let options = ListOptions::from_entries(query_params)?;
-            let scope = Scope::parse(&query_params.start, options.recursive(), options.inside_archives())?;
-            let anchor = Self::timeline_anchor(query_params, &options)?;
+            let options = ListOptions::from_entries(body)?;
+            let scope = Scope::from_request(&body.scope)?;
+            let anchor = Self::timeline_anchor(body, &options)?;
             let selections = self.select(&options, &scope, &claims.user.id).await?;
             if let Some(anchor) = anchor {
                 let page = ScopeTimeline::new(&self.state.library, &self.state.timeline)
@@ -42,13 +42,12 @@ impl apis::entries::Entries for ApiServer {
                     .await?;
                 return Ok::<_, Error>(models::EntryListing::from(page));
             }
-            // `locate` names an Entry in the form of a start, which is how it is parsed.
-            let located = match &query_params.locate {
+            let located = match &body.locate {
                 Some(locate) => {
-                    if query_params.offset.is_some() {
+                    if body.offset.is_some() {
                         return Err(Error::new(ErrorKind::InvalidInput).with_message("locate and offset cannot be given together"));
                     }
-                    Some(ScopeStart::parse(locate)?)
+                    Some(ScopeStart::from_request(locate)?)
                 }
                 None => None,
             };
@@ -76,11 +75,11 @@ impl apis::entries::Entries for ApiServer {
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        query_params: &models::ListEntryMonthsQueryParams,
+        body: &models::EntryMonthsRequest,
     ) -> std::result::Result<apis::entries::ListEntryMonthsResponse, ()> {
         let months = async {
-            let options = ListOptions::from_entry_months(query_params)?;
-            let scope = Scope::parse(&query_params.start, options.recursive(), options.inside_archives())?;
+            let options = ListOptions::from_entry_months(body)?;
+            let scope = Scope::from_request(&body.scope)?;
             let selections = self.select(&options, &scope, &claims.user.id).await?;
             ScopeTimeline::new(&self.state.library, &self.state.timeline).months(&scope, &selections, &options).await
         }
@@ -98,9 +97,9 @@ impl apis::entries::Entries for ApiServer {
 impl ApiServer {
     /// Where a page in timeline-date order starts, or none when the listing is cut from snapshots.
     ///
-    /// At most one of `after`, `before`, `month`, and `around` is given, only with `sort=timeline_date`, and `locate` is not accepted with it.
-    fn timeline_anchor(query: &models::ListEntriesQueryParams, options: &ListOptions) -> crate::result::Result<Option<TimelineAnchor>> {
-        let given = [query.after.is_some(), query.before.is_some(), query.month.is_some(), query.around.is_some()];
+    /// At most one of `after`, `before`, `month`, and `around` is given, only with `sort` of `timeline_date`, and `locate` is not accepted with it.
+    fn timeline_anchor(request: &models::EntryListRequest, options: &ListOptions) -> crate::result::Result<Option<TimelineAnchor>> {
+        let given = [request.after.is_some(), request.before.is_some(), request.month.is_some(), request.around.is_some()];
         if given.iter().filter(|given| **given).count() > 1 {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("at most one of after, before, month and around can be given"));
         }
@@ -110,18 +109,18 @@ impl ApiServer {
             }
             return Ok(None);
         }
-        if query.locate.is_some() {
+        if request.locate.is_some() {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("locate cannot be given with sort=timeline_date"));
         }
-        Ok(Some(if let Some(after) = &query.after {
+        Ok(Some(if let Some(after) = &request.after {
             TimelineAnchor::After(TimelineCursor::parse(after)?)
-        } else if let Some(before) = &query.before {
+        } else if let Some(before) = &request.before {
             TimelineAnchor::Before(TimelineCursor::parse(before)?)
-        } else if let Some(month) = &query.month {
+        } else if let Some(month) = &request.month {
             TimelineIndex::month_end(month)?;
             TimelineAnchor::Month(month.clone())
-        } else if let Some(around) = &query.around {
-            let entry = ScopeStart::parse(around)?;
+        } else if let Some(around) = &request.around {
+            let entry = ScopeStart::from_request(around)?;
             TimelineAnchor::Around {
                 library: entry.library_id().to_string(),
                 path: entry.path().absolute(),
@@ -152,9 +151,9 @@ impl From<ScopeListing> for models::EntryListing {
     fn from(listing: ScopeListing) -> Self {
         let mut response = models::EntryListing::new(
             listing.entries.into_iter().map(models::ScopedEntry::from).collect(),
-            listing.cut_off_starts,
-            listing.walked_starts,
-            listing.missing_starts,
+            listing.cut_off_starts.iter().map(ScopeStart::to_response).collect(),
+            listing.walked_starts.iter().map(ScopeStart::to_response).collect(),
+            listing.missing_starts.iter().map(ScopeStart::to_response).collect(),
         );
         response.total_count = Some(listing.total_count);
         response.offset = Some(listing.offset);
@@ -175,7 +174,12 @@ impl From<ScopeTimelinePage> for models::EntryListing {
                 scoped
             })
             .collect();
-        let mut response = models::EntryListing::new(entries, page.cut_off_starts, page.walked_starts, page.missing_starts);
+        let mut response = models::EntryListing::new(
+            entries,
+            page.cut_off_starts.iter().map(ScopeStart::to_response).collect(),
+            page.walked_starts.iter().map(ScopeStart::to_response).collect(),
+            page.missing_starts.iter().map(ScopeStart::to_response).collect(),
+        );
         response.previous = page.previous.map(|cursor| cursor.encode());
         response.next = page.next.map(|cursor| cursor.encode());
         response
@@ -250,15 +254,76 @@ mod tests {
             .collect())
     }
 
+    /// The starts that a response names in `field`, each as its Library id and its path as given, the root without its `/`.
     fn strings(body: &Value, field: &str) -> Vec<String> {
         body[field]
             .as_array()
-            .map(|values| values.iter().map(|value| value.as_str().unwrap_or_default().to_string()).collect())
+            .map(|starts| {
+                starts
+                    .iter()
+                    .map(|start| {
+                        let path = start["path"].as_str().unwrap_or_default();
+                        format!("{}{}", start["libraryId"].as_str().unwrap_or_default(), if path == "/" { "" } else { path })
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
-    async fn get(router: &axum::Router, token: &str, query: &str) -> TestResult<HttpResponse> {
-        send(router, http::Method::GET, &format!("{ENTRIES}?{query}"), &[("authorization", token)], None).await
+    /// A start or an Entry as the body holds it, from the text `library/path`: the Library id and the path with its leading `/`.
+    fn library_path(value: &str) -> Value {
+        let (library_id, path) = value.split_once('/').unwrap_or((value, ""));
+        json!({"libraryId": library_id, "path": format!("/{path}")})
+    }
+
+    /// The JSON body of a request, from the parameters in the compact form `start=photos/x&start=videos&recursive=true&kind=image&sort=name`.
+    /// Each `start`, `locate`, and `around` is a `library/path` text that becomes an object of `libraryId` and `path`.
+    fn body_of(spec: &str) -> Value {
+        let mut starts = Vec::new();
+        let (mut scope, mut filter, mut body) = (serde_json::Map::new(), serde_json::Map::new(), serde_json::Map::new());
+        for (key, value) in spec.split('&').filter(|pair| !pair.is_empty()).map(|pair| pair.split_once('=').unwrap_or((pair, ""))) {
+            let number = || value.parse::<u64>().map(Value::from).unwrap_or_else(|_| json!(value));
+            match key {
+                "start" => starts.push(library_path(value)),
+                "recursive" | "insideArchives" => {
+                    scope.insert(key.to_string(), json!(value == "true"));
+                }
+                "query" | "rating" => {
+                    filter.insert(key.to_string(), json!(value));
+                }
+                "tag" | "kind" => {
+                    let name = if key == "tag" { "tags" } else { "kinds" };
+                    filter
+                        .entry(name)
+                        .or_insert_with(|| json!([]))
+                        .as_array_mut()
+                        .into_iter()
+                        .for_each(|values| values.push(json!(value)));
+                }
+                "locate" | "around" => {
+                    body.insert(key.to_string(), library_path(value));
+                }
+                "foldersFirst" => {
+                    body.insert(key.to_string(), json!(value == "true"));
+                }
+                "offset" | "limit" => {
+                    body.insert(key.to_string(), number());
+                }
+                _ => {
+                    body.insert(key.to_string(), json!(value));
+                }
+            }
+        }
+        scope.insert("starts".to_string(), Value::Array(starts));
+        body.insert("scope".to_string(), Value::Object(scope));
+        if !filter.is_empty() {
+            body.insert("filter".to_string(), Value::Object(filter));
+        }
+        Value::Object(body)
+    }
+
+    async fn get(router: &axum::Router, token: &str, spec: &str) -> TestResult<HttpResponse> {
+        send(router, http::Method::POST, ENTRIES, &[("authorization", token)], Some(body_of(spec))).await
     }
 
     /// Runs a full aggregation of `library` and waits for it, which makes its name index usable.
@@ -679,7 +744,7 @@ mod tests {
             "start=".to_string(),
             "start=/photos".to_string(),
             "start=photos/../..".to_string(),
-            "start=photos/a%5Cb".to_string(),
+            "start=photos/a\\b".to_string(),
             "start=photos&locate=photos/x/a.png&offset=0".to_string(),
             "start=photos&locate=/x".to_string(),
             "start=photos&locate=photos/../..".to_string(),
@@ -696,8 +761,185 @@ mod tests {
             let response = get(&router, &token, &query).await?;
             assert_eq!(response.status, StatusCode::BAD_REQUEST, "{:.80}: {}", query, response.body);
         }
-        let unauthenticated = send(&router, http::Method::GET, &format!("{ENTRIES}?start=photos"), &[], None).await?;
+        let unauthenticated = send(&router, http::Method::POST, ENTRIES, &[], Some(body_of("start=photos"))).await?;
         assert_eq!(unauthenticated.status, StatusCode::UNAUTHORIZED);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_start_or_an_entry_that_is_not_a_library_path_is_invalid_input_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        write_pairs(&fixture)?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        let headers = &[("authorization", token.as_str())];
+        let long = "a".repeat(65);
+        let start = |library_id: &str, path: &str| json!({"libraryId": library_id, "path": path});
+
+        let mut bodies = vec![
+            json!({"scope": {"starts": []}}),
+            json!({"scope": {"starts": (0..65).map(|number| start("photos", &format!("/{number}"))).collect::<Vec<_>>()}}),
+        ];
+        for (library_id, path) in [
+            ("", "/x"),
+            (".", "/x"),
+            ("..", "/x"),
+            ("a b", "/x"),
+            ("a/b", "/x"),
+            (long.as_str(), "/x"),
+            ("photos", ""),
+            ("photos", "/.."),
+            ("photos", "/x/../.."),
+            ("photos", "/a\\b"),
+            ("photos", "/C:/x"),
+        ] {
+            bodies.push(json!({"scope": {"starts": [start("photos", "/x"), start(library_id, path)]}}));
+            bodies.push(json!({"scope": {"starts": [start("photos", "/x")]}, "locate": start(library_id, path)}));
+            bodies.push(json!({"scope": {"starts": [start("photos", "/x")]}, "sort": "timeline_date", "around": start(library_id, path)}));
+        }
+        for body in &bodies {
+            for uri in [ENTRIES, &format!("{ENTRIES}/months")] {
+                let response = send(&router, http::Method::POST, uri, headers, Some(body.clone())).await?;
+                // The months request has no `locate` and no `around`, which it ignores, so it answers the starts only.
+                let sorted_out = uri.ends_with("/months")
+                    && (body.get("locate").is_some() || body.get("around").is_some())
+                    && body["scope"]["starts"].as_array().is_some_and(|starts| starts.len() == 1);
+                if sorted_out {
+                    continue;
+                }
+                assert_eq!(response.status, StatusCode::BAD_REQUEST, "{uri} {body}: {}", response.body);
+            }
+        }
+        // Whatever the body, a body that is not a request is not answered with a listing.
+        for body in [
+            json!({}),
+            json!({"filter": {}}),
+            json!({"scope": {}}),
+            json!({"scope": {"starts": "photos/x"}}),
+            json!({"scope": {"starts": ["photos/x"]}}),
+        ] {
+            let response = send(&router, http::Method::POST, ENTRIES, headers, Some(body.clone())).await?;
+            assert!(response.status.is_client_error(), "{body}: {}", response.status);
+        }
+        // A Library that is not configured is a start that is missing.
+        let response = send(
+            &router,
+            http::Method::POST,
+            ENTRIES,
+            headers,
+            Some(json!({"scope": {"starts": [start("nolibrary", "/x"), start("photos", "/")]}})),
+        )
+        .await?;
+        assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+        assert_eq!(response.body["missingStarts"], json!([start("nolibrary", "/x")]));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn starts_are_named_in_the_response_as_objects_with_the_path_given_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        write_pairs(&fixture)?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        let headers = &[("authorization", token.as_str())];
+        let start = |library_id: &str, path: &str| json!({"libraryId": library_id, "path": path});
+
+        let body = json!({"scope": {
+            "recursive": true,
+            "starts": [start("photos", "/gone/"), start("nolibrary", "/"), start("photos", "/gone/"), start("photos", "/x/../gone"), start("photos", "/x")],
+        }});
+        let response = send(&router, http::Method::POST, ENTRIES, headers, Some(body)).await?;
+        assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+        assert_eq!(
+            response.body["missingStarts"],
+            json!([start("photos", "/gone/"), start("nolibrary", "/"), start("photos", "/x/../gone")]),
+            "as given, and a start given twice once"
+        );
+        assert_eq!(response.body["totalCount"], 3);
+        for field in ["cutOffStarts", "walkedStarts"] {
+            assert_eq!(response.body[field], json!([]), "{field}");
+        }
+        // The Filter and the choices of the Scope are optional, and `filter` may be empty.
+        for body in [
+            json!({"scope": {"starts": [start("photos", "/x")]}}),
+            json!({"scope": {"starts": [start("photos", "/x")]}, "filter": {}}),
+            json!({"scope": {"starts": [start("photos", "/x")], "recursive": false, "insideArchives": false}, "filter": {"tags": [], "kinds": []}}),
+        ] {
+            let response = send(&router, http::Method::POST, ENTRIES, headers, Some(body.clone())).await?;
+            assert_eq!(response.status, StatusCode::OK, "{body}: {}", response.body);
+            assert_eq!(response.body["totalCount"], 3, "{body}");
+        }
+        // `locate` is an Entry of a Library and a path.
+        let located = send(
+            &router,
+            http::Method::POST,
+            ENTRIES,
+            headers,
+            Some(
+                json!({"scope": {"starts": [start("photos", "/x"), start("videos", "/x")], "recursive": true}, "sort": "name", "limit": 2, "locate": start("videos", "/x/y.txt")}),
+            ),
+        )
+        .await?;
+        assert_eq!(located.status, StatusCode::OK, "{}", located.body);
+        assert_eq!(located.body["offset"], 4);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_get_operations_are_gone_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        write_pairs(&fixture)?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        for uri in [
+            format!("{ENTRIES}?start=photos/x&recursive=true"),
+            format!("{ENTRIES}/months?start=photos/x&recursive=true"),
+            ENTRIES.to_string(),
+            format!("{ENTRIES}/months"),
+        ] {
+            let response = send(&router, http::Method::GET, &uri, &[("authorization", token.as_str())], None).await?;
+            assert_eq!(response.status, StatusCode::METHOD_NOT_ALLOWED, "{uri}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_cookie_request_meets_the_origin_check_like_any_post_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        write_pairs(&fixture)?;
+        let router = router(&fixture);
+        let setup = send(&router, http::Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "cookie")).await?;
+        let cookie = cookie(&setup)?;
+        let body = body_of("start=photos/x&recursive=true&limit=100");
+
+        for uri in [ENTRIES.to_string(), format!("{ENTRIES}/months")] {
+            let same = send(
+                &router,
+                http::Method::POST,
+                &uri,
+                &[("cookie", &cookie), ("origin", "http://localhost")],
+                Some(body.clone()),
+            )
+            .await?;
+            assert_eq!(same.status, StatusCode::OK, "{uri}: {}", same.body);
+            let missing = send(&router, http::Method::POST, &uri, &[("cookie", &cookie)], Some(body.clone())).await?;
+            assert_eq!(missing.status, StatusCode::FORBIDDEN, "{uri}");
+            let foreign = send(
+                &router,
+                http::Method::POST,
+                &uri,
+                &[("cookie", &cookie), ("origin", "http://evil.example")],
+                Some(body.clone()),
+            )
+            .await?;
+            assert_eq!(foreign.status, StatusCode::FORBIDDEN, "{uri}");
+        }
+        // The same Entries as a bearer request, which has no `Origin` to check.
+        let login = send(&router, http::Method::POST, "/api/v1/auth/login", &[], credentials("owner", "password1", "bearer")).await?;
+        let token = bearer(&login)?;
+        let bearer = send(&router, http::Method::POST, ENTRIES, &[("authorization", &token)], Some(body.clone())).await?;
+        let same = send(&router, http::Method::POST, ENTRIES, &[("cookie", &cookie), ("origin", "http://localhost")], Some(body)).await?;
+        assert_eq!(bearer.body["entries"], same.body["entries"]);
         Ok(())
     }
 
@@ -797,8 +1039,8 @@ mod tests {
             .unwrap_or_default()
     }
 
-    async fn months(router: &axum::Router, token: &str, query: &str) -> TestResult<HttpResponse> {
-        send(router, http::Method::GET, &format!("{ENTRIES}/months?{query}"), &[("authorization", token)], None).await
+    async fn months(router: &axum::Router, token: &str, spec: &str) -> TestResult<HttpResponse> {
+        send(router, http::Method::POST, &format!("{ENTRIES}/months"), &[("authorization", token)], Some(body_of(spec))).await
     }
 
     /// Every Entry that `query` lists in timeline-date order, read page by page by `after` from `next` with `limit`, and the same read back by `before`.
@@ -810,7 +1052,7 @@ mod tests {
         loop {
             seen.extend(listed(&page.body)?);
             let Some(next) = page.body["next"].as_str().map(str::to_string) else { break };
-            page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&after={}", urlencoding_escape(&next))).await?;
+            page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&after={next}")).await?;
             assert_eq!(page.status, StatusCode::OK, "{query}: {}", page.body);
         }
         let all = get(router, token, &format!("{query}&sort=timeline_date&limit=1000")).await?;
@@ -827,31 +1069,17 @@ mod tests {
                 last["libraryId"].as_str().unwrap_or_default(),
                 last["entry"]["path"].as_str().unwrap_or_default()
             ));
-            let mut page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&before={}", urlencoding_escape(&cursor))).await?;
+            let mut page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&before={cursor}")).await?;
             loop {
                 let mut current = listed(&page.body)?;
                 current.extend(back);
                 back = current;
                 let Some(previous) = page.body["previous"].as_str().map(str::to_string) else { break };
-                page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&before={}", urlencoding_escape(&previous))).await?;
+                page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&before={previous}")).await?;
             }
         }
         assert_eq!(back, seen, "{query} read back by {limit}");
         Ok(seen)
-    }
-
-    /// Escapes a cursor, which holds a path, for a query value.
-    fn urlencoding_escape(value: &str) -> String {
-        value
-            .bytes()
-            .map(|byte| {
-                if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-                    (byte as char).to_string()
-                } else {
-                    format!("%{byte:02X}")
-                }
-            })
-            .collect()
     }
 
     #[tokio::test]
@@ -1100,7 +1328,7 @@ mod tests {
             }
         }
         assert!(checked > 100, "the readings are not all empty");
-        let unauthenticated = send(&router, http::Method::GET, &format!("{ENTRIES}/months?{BOTH}"), &[], None).await?;
+        let unauthenticated = send(&router, http::Method::POST, &format!("{ENTRIES}/months"), &[], Some(body_of(BOTH))).await?;
         assert_eq!(unauthenticated.status, StatusCode::UNAUTHORIZED);
         Ok(())
     }

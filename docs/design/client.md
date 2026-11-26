@@ -298,7 +298,7 @@ When a page arrives whose id differs from the pages already loaded, the listing 
 At this time the scroll position is kept, and the overall height changes by the amount `totalCount` changed.
 
 When the client needs the position of an Entry whose page it has not read, it asks the server with `locate` in place of `offset` ([Listing and Search Design §4.5](./listing.md#45-locating-an-entry)). This is the case for the Entry named by the viewer's `view` when a URL is opened directly in folder view or a Shelf, and for the Entry that "Show in folder" names with `reveal`.
-The client sends the Entry's path relative to the listed folder in folder view, and in a Shelf its Library id followed by its Library-relative path ([Listing and Search Design §4.5](./listing.md#45-locating-an-entry)). A viewer URL's `view` and the Entry paths the client holds include the folder or the Library, so the client converts them first.
+The client sends the Entry's path relative to the listed folder in folder view, and in a Shelf its Library id and Library-relative path ([Listing and Search Design §4.5](./listing.md#45-locating-an-entry)). A viewer URL's `view` and the Entry paths the client holds include the folder or the Library, so the client converts them first.
 The page it receives is kept as the page at its `offset`, so the grid and the viewer use it without another request, and the Entry's position is that offset plus its place in the page. The snapshot's id is compared as for any page.
 An answer of `NotFound` means the Entry is not in the listing under its present sort and filters, so the viewer shows "Not found." and "Show in folder" reports that the Entry was not found. The timeline Layout does not use `locate` and reads the range around the Entry (§3.10).
 

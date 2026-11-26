@@ -389,39 +389,44 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        get?: never;
+        put?: never;
         /**
          * List the Entries of a Scope
-         * @description Lists the Entries of a Scope, the starts given as `start` with
-         *     `recursive` and `insideArchives`, through a Filter of `query`,
-         *     `rating`, `tag`, and `kind`, as one sequence ordered by `sort`,
-         *     `order`, and `foldersFirst`. Each Entry comes with its Library
-         *     id. Entries that compare equal, which only happens for the same
-         *     path in different Libraries, follow the order of the starts.
+         * @description Lists the Entries of a Scope, the `starts` of `scope` with its
+         *     `recursive` and `insideArchives`, through a `filter` of `query`,
+         *     `rating`, `tags`, and `kinds`, as one sequence ordered by
+         *     `sort`, `order`, and `foldersFirst`. Each Entry comes with its
+         *     Library id. Entries that compare equal, which only happens for
+         *     the same path in different Libraries, follow the order of the
+         *     starts. The request is a POST because it carries a body; it
+         *     changes nothing.
          *
-         *     A `start` is the Library id, then `/` and the path relative to
-         *     the Library without its leading `/` (`photos/2025`, or `photos`
-         *     for the root). A start that another start covers adds nothing,
-         *     the same start given twice included. A start inside an archive
-         *     is covered by a recursive start above it only with
-         *     `insideArchives`.
+         *     A start is a `LibraryPath`: a Library id and a path relative to
+         *     the Library with its leading `/` (`/` for the root). A start
+         *     whose Library id is not of the form of a configured one, or
+         *     whose path is not a Library-relative path, is 400. A start that
+         *     another start covers adds nothing, the same start given twice
+         *     included. A start inside an archive is covered by a recursive
+         *     start above it only with `insideArchives`.
          *
          *     A start whose folder was deleted, whose Library is not
          *     configured, or that names a file that is neither a folder nor an
-         *     archive is skipped and named in `missingStarts`; the other
-         *     starts are listed. A start that is an archive, or inside one, is
-         *     walked inside that archive, and reads the archives nested in it
-         *     only with `insideArchives`.
+         *     archive is skipped and named in `missingStarts`, with the path
+         *     it was given; the other starts are listed. A start that is an
+         *     archive, or inside one, is walked inside that archive, and reads
+         *     the archives nested in it only with `insideArchives`.
          *
-         *     A recursive listing without `kind` returns no folder, and, with
+         *     A recursive listing without `kinds` returns no folder, and, with
          *     `insideArchives`, none of the archives it reads like folders. A
          *     start that is walked because the name index of its Library is not
          *     usable returns its archives like other files and is named in
-         *     `walkedStarts`. With `kind` it returns exactly the named kinds,
+         *     `walkedStarts`. With `kinds` it returns exactly the named kinds,
          *     symbolic links counted as `other`. A listing of direct children
-         *     without `kind` returns every kind. Hidden entries are never
+         *     without `kinds` returns every kind. Hidden entries are never
          *     returned.
          *
-         *     `rating` and `tag` keep only the images and videos that the
+         *     `rating` and `tags` keep only the images and videos that the
          *     current user has rated or tagged that way. While one of them is
          *     set, `snapshot` also changes whenever the user rates or tags
          *     anything.
@@ -429,15 +434,15 @@ export interface paths {
          *     Recursive traversal is cut off per start at the configured entry
          *     limit, and the starts cut off are listed in `cutOffStarts`.
          *
-         *     `locate` names an Entry in the form of a start, in place of
+         *     `locate` names an Entry as a start is named, in place of
          *     `offset`. The server returns the page that holds it, with the
          *     `offset` it was cut at. `locate` together with `offset` is 400,
          *     and an Entry that is not in the sequence is 404.
          *
-         *     With `sort=timeline_date` the Entries are the images and
+         *     With `sort` of `timeline_date` the Entries are the images and
          *     videos of the Scope, newest timeline date first, and those with
          *     the same timeline date are ordered by Library id and then by
-         *     path. `kind` may name only `image` and `video`, and names both
+         *     path. `kinds` may name only `image` and `video`, and names both
          *     when it is absent; any other kind is 400. The page is not cut
          *     by `offset`: at most one of `after`, `before`, `month`, and
          *     `around` selects where it starts, and without any of them it
@@ -459,9 +464,7 @@ export interface paths {
          *     file system, and the starts cut off and walked are named as
          *     above; a match that has no timeline date yet is not returned.
          */
-        get: operations["listEntries"];
-        put?: never;
-        post?: never;
+        post: operations["listEntries"];
         delete?: never;
         options?: never;
         head?: never;
@@ -475,23 +478,24 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        get?: never;
+        put?: never;
         /**
          * List the months that have Entries of a Scope
          * @description Returns the number of images and videos of a Scope through a
          *     Filter in each month of their timeline dates, newest month
          *     first, without the months that have none. Each count equals the
-         *     number of Entries that `listEntries` with `sort=timeline_date`
-         *     returns for that month with the same `start`, `recursive`,
-         *     `insideArchives`, `query`, `rating`, `tag`, and `kind`. For
-         *     whole Libraries without a name, rating, or tag condition the
-         *     counts are sums held in advance; otherwise they are counted
-         *     from the Entries of the Scope on each request. `kind` may name
-         *     only `image` and `video`; any other kind is 400. The starts cut
-         *     off, walked, and missing are named by `listEntries` alone.
+         *     number of Entries that `listEntries` with `sort` of
+         *     `timeline_date` returns for that month with the same `scope`
+         *     and `filter`. For whole Libraries without a name, rating, or tag
+         *     condition the counts are sums held in advance; otherwise they
+         *     are counted from the Entries of the Scope on each request.
+         *     `kinds` may name only `image` and `video`; any other kind is
+         *     400. The starts cut off, walked, and missing are named by
+         *     `listEntries` alone. The request is a POST because it carries a
+         *     body; it changes nothing.
          */
-        get: operations["listEntryMonths"];
-        put?: never;
-        post?: never;
+        post: operations["listEntryMonths"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1543,6 +1547,124 @@ export interface components {
              */
             indexed: boolean;
         };
+        /**
+         * @description A place in a Library: a start of a Scope, or an Entry. The path
+         *     is kept as it was given, so a response names a start by the
+         *     path it was sent with.
+         */
+        LibraryPath: {
+            libraryId: components["schemas"]["LibraryId"];
+            path: components["schemas"]["RelativePath"];
+        };
+        /** @description The starts of a listing and how far it reads from them. */
+        EntryScope: {
+            starts: components["schemas"]["LibraryPath"][];
+            /**
+             * @description Whether to include descendants below each start.
+             * @default false
+             */
+            recursive: boolean;
+            /**
+             * @description Whether the Scope reads the archives found under its
+             *     starts like folders, down to the nesting limit. It
+             *     changes nothing without `recursive`.
+             * @default false
+             */
+            insideArchives: boolean;
+        };
+        /** @description The conditions the Entries of a listing meet. */
+        EntryFilter: {
+            /**
+             * @description Whitespace-separated terms that must all occur in an
+             *     entry name. Names and terms are normalized with NFKC and
+             *     converted to lowercase.
+             */
+            query?: string;
+            /**
+             * @description Return only images and videos with this rating of the
+             *     current user. `none` selects the images and videos that
+             *     have not been rated. Folders and other files never match.
+             * @enum {string}
+             */
+            rating?: "good" | "bad" | "none";
+            /**
+             * @description Return only images and videos that have all of these
+             *     tags of the current user. Each word is trimmed like a tag
+             *     being set; a word the user has never used selects
+             *     nothing.
+             */
+            tags?: components["schemas"]["TagName"][];
+            /** @description Return only Entries of these kinds. A symbolic link is `other`. */
+            kinds?: ("folder" | "archive" | "image" | "video" | "other")[];
+        };
+        EntryListRequest: {
+            scope: components["schemas"]["EntryScope"];
+            filter?: components["schemas"]["EntryFilter"];
+            /**
+             * @description Sort key. `timeline_date` orders the images and videos by
+             *     their timeline dates, newest first only.
+             * @default name
+             * @enum {string}
+             */
+            sort: "name" | "kind" | "size" | "modified_at" | "timeline_date";
+            /**
+             * @description Sort direction.
+             * @default asc
+             * @enum {string}
+             */
+            order: "asc" | "desc";
+            /**
+             * @description Place folders, and files whose `file.archive` hint is
+             *     true, before the other entries. `sort` and `order` apply
+             *     within each of the two groups.
+             * @default false
+             */
+            foldersFirst: boolean;
+            /**
+             * Format: int64
+             * @description Offset in the sorted and filtered listing.
+             * @default 0
+             */
+            offset: number;
+            /**
+             * Format: int32
+             * @description Maximum number of entries to return.
+             * @default 200
+             */
+            limit: number;
+            /**
+             * @description The Entry to find, named as a start is named. Not with
+             *     `offset`.
+             */
+            locate?: components["schemas"]["LibraryPath"];
+            /**
+             * @description Only with `sort` of `timeline_date`. A cursor from
+             *     `next`; returns the Entries older than it.
+             */
+            after?: string;
+            /**
+             * @description Only with `sort` of `timeline_date`. A cursor from
+             *     `previous`; returns the Entries newer than it.
+             */
+            before?: string;
+            /**
+             * @description Only with `sort` of `timeline_date`. Starts at the newest
+             *     Entry of this month (`YYYY-MM`), or of the next older
+             *     month that has Entries.
+             */
+            month?: string;
+            /**
+             * @description Only with `sort` of `timeline_date`. The Entry to start
+             *     around, named as a start is named. The page has it near
+             *     its middle, and an Entry that is not in the sequence is
+             *     404.
+             */
+            around?: components["schemas"]["LibraryPath"];
+        };
+        EntryMonthsRequest: {
+            scope: components["schemas"]["EntryScope"];
+            filter?: components["schemas"]["EntryFilter"];
+        };
         ScopedEntry: {
             libraryId: components["schemas"]["LibraryId"];
             entry: components["schemas"]["FileSystemEntry"];
@@ -1587,20 +1709,20 @@ export interface components {
              *     older Entries. Absent when there are none.
              */
             next?: string;
-            /** @description Starts, by the value given, whose recursive traversal reached the entry limit. */
-            cutOffStarts: string[];
+            /** @description Starts, as they were given, whose recursive traversal reached the entry limit. */
+            cutOffStarts: components["schemas"]["LibraryPath"][];
             /**
-             * @description Starts, by the value given, that the name index would
+             * @description Starts, as they were given, that the name index would
              *     answer from a local folder but that were walked because
              *     the index of their Library is not usable.
              */
-            walkedStarts: string[];
+            walkedStarts: components["schemas"]["LibraryPath"][];
             /**
-             * @description Starts, by the value given, that were skipped because
+             * @description Starts, as they were given, that were skipped because
              *     their folder or Library does not exist or they name a
              *     file that is neither a folder nor an archive.
              */
-            missingStarts: string[];
+            missingStarts: components["schemas"]["LibraryPath"][];
         };
         Capabilities: {
             summaryListing: boolean;
@@ -2851,99 +2973,16 @@ export interface operations {
     };
     listEntries: {
         parameters: {
-            query: {
-                /**
-                 * @description Starts of the Scope, repeated as `start=photos/2025&start=videos`.
-                 *     Each is a Library id, `/`, and the path relative to the
-                 *     Library without its leading `/`; the path is the root when
-                 *     there is none. At most 64.
-                 */
-                start: string[];
-                /** @description Whether to include descendants below the requested folder. */
-                recursive?: components["parameters"]["RecursiveQuery"];
-                /**
-                 * @description Whether the Scope reads the archives found under its starts
-                 *     like folders, down to the nesting limit. It changes nothing
-                 *     without `recursive`.
-                 */
-                insideArchives?: boolean;
-                /**
-                 * @description Whitespace-separated terms that must all occur in an entry name.
-                 *     Names and terms are normalized with NFKC and converted to lowercase.
-                 */
-                query?: components["parameters"]["NameFilterQuery"];
-                /**
-                 * @description Return only images and videos with this rating of the current
-                 *     user. `none` selects the images and videos that have not been
-                 *     rated. Folders and other files never match. `totalCount` counts
-                 *     the entries after this filter.
-                 */
-                rating?: components["parameters"]["RatingFilterQuery"];
-                /**
-                 * @description Return only images and videos that have all of these tags of the
-                 *     current user, repeated as `tag=a&tag=b`. Each word is trimmed
-                 *     like a tag being set; a word the user has never used selects
-                 *     nothing. `totalCount` counts the entries after this filter.
-                 */
-                tag?: components["parameters"]["TagFiltersQuery"];
-                /**
-                 * @description Return only Entries of these kinds, repeated as
-                 *     `kind=image&kind=video`. A symbolic link is `other`.
-                 */
-                kind?: ("folder" | "archive" | "image" | "video" | "other")[];
-                /**
-                 * @description Sort key. `timeline_date` orders the images and videos by
-                 *     their timeline dates, newest first only.
-                 */
-                sort?: "name" | "kind" | "size" | "modified_at" | "timeline_date";
-                /** @description Sort direction. */
-                order?: components["parameters"]["OrderQuery"];
-                /**
-                 * @description Place folders, and files whose `file.archive` hint is true,
-                 *     before the other entries. `sort` and `order` apply within each
-                 *     of the two groups.
-                 */
-                foldersFirst?: components["parameters"]["FoldersFirstQuery"];
-                /** @description Offset in the sorted and filtered listing. */
-                offset?: components["parameters"]["ListOffsetQuery"];
-                /**
-                 * @description The Entry to find, in the form of a start: its Library id,
-                 *     `/`, and its path relative to the Library without the
-                 *     leading `/`. Not with `offset`.
-                 */
-                locate?: string;
-                /**
-                 * @description Only with `sort=timeline_date`. A cursor from `next`;
-                 *     returns the Entries older than it.
-                 */
-                after?: string;
-                /**
-                 * @description Only with `sort=timeline_date`. A cursor from `previous`;
-                 *     returns the Entries newer than it.
-                 */
-                before?: string;
-                /**
-                 * @description Only with `sort=timeline_date`. Starts at the newest Entry
-                 *     of this month (`YYYY-MM`), or of the next older month that
-                 *     has Entries.
-                 */
-                month?: string;
-                /**
-                 * @description Only with `sort=timeline_date`. The Entry to start around,
-                 *     in the form of a start: its Library id, `/`, and its path
-                 *     relative to the Library without the leading `/`. The page
-                 *     has it near its middle, and an Entry that is not in the
-                 *     sequence is 404.
-                 */
-                around?: string;
-                /** @description Maximum number of entries to return. */
-                limit?: components["parameters"]["ListLimitQuery"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EntryListRequest"];
+            };
+        };
         responses: {
             /** @description The Entries of the Scope. */
             200: {
@@ -2964,53 +3003,16 @@ export interface operations {
     };
     listEntryMonths: {
         parameters: {
-            query: {
-                /**
-                 * @description Starts of the Scope, repeated as `start=photos/2025&start=videos`.
-                 *     Each is a Library id, `/`, and the path relative to the
-                 *     Library without its leading `/`; the path is the root when
-                 *     there is none. At most 64.
-                 */
-                start: string[];
-                /** @description Whether to include descendants below the requested folder. */
-                recursive?: components["parameters"]["RecursiveQuery"];
-                /**
-                 * @description Whether the Scope reads the archives found under its starts
-                 *     like folders, down to the nesting limit. It changes nothing
-                 *     without `recursive`.
-                 */
-                insideArchives?: boolean;
-                /**
-                 * @description Whitespace-separated terms that must all occur in an entry name.
-                 *     Names and terms are normalized with NFKC and converted to lowercase.
-                 */
-                query?: components["parameters"]["NameFilterQuery"];
-                /**
-                 * @description Return only images and videos with this rating of the current
-                 *     user. `none` selects the images and videos that have not been
-                 *     rated. Folders and other files never match. `totalCount` counts
-                 *     the entries after this filter.
-                 */
-                rating?: components["parameters"]["RatingFilterQuery"];
-                /**
-                 * @description Return only images and videos that have all of these tags of the
-                 *     current user, repeated as `tag=a&tag=b`. Each word is trimmed
-                 *     like a tag being set; a word the user has never used selects
-                 *     nothing. `totalCount` counts the entries after this filter.
-                 */
-                tag?: components["parameters"]["TagFiltersQuery"];
-                /**
-                 * @description Count only Entries of these kinds, repeated as
-                 *     `kind=image&kind=video`. Only `image` and `video` are
-                 *     accepted.
-                 */
-                kind?: ("folder" | "archive" | "image" | "video" | "other")[];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EntryMonthsRequest"];
+            };
+        };
         responses: {
             /** @description Entry counts per month. */
             200: {
