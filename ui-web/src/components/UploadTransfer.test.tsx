@@ -20,7 +20,7 @@ it.each(["Keep both", "Skip", "Replace", "Abort"])(
         const response = (data: unknown) => ({ data, response: new Response(null, { status: 200 }) });
         vi.mocked(api.GET).mockImplementation(async (route: string) => {
             if (route === "/libraries") return response({ libraries: [{ id: "dest", readonly: false }] }) as never;
-            if (route.endsWith("/folders")) return response({ folder: { metadata: { readonly: false } } }) as never;
+            if (route.endsWith("/metadata")) return response({ entry: { metadata: { readonly: false } } }) as never;
             return response({ entries: [{ name: "same.txt" }], totalCount: 1, snapshot: "s" }) as never;
         });
         const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

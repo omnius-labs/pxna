@@ -102,7 +102,7 @@ it("ファイルのメニューとツールバーに download 属性付きリン
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
-    const actions = { ...state(), downloadHref: "/api/v1/libraries/ops/files/content?path=%2Fa" };
+    const actions = { ...state(), downloadHref: "/api/v1/libraries/ops/entries/content?path=%2Fa" };
     actions.selection.items = new Map([["/a", { size: 1, folder: false, readonly: true, entry: testEntry("/a") }]]);
     try {
         await act(async () =>

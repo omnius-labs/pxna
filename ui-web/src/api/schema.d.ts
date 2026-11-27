@@ -235,7 +235,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/settings/folder": {
+    "/folder-settings": {
         parameters: {
             query?: never;
             header?: never;
@@ -248,30 +248,8 @@ export interface paths {
          *     resolves the values of a folder itself.
          */
         get: operations["listFolderSettings"];
-        /**
-         * Save the settings of a folder
-         * @description Saves the display values of one folder, replacing what it had. The folder
-         *     is not looked up. The timeline Layout can be saved only in a Shelf.
-         */
-        put: operations["putFolderSetting"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/settings/folder/delete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
         put?: never;
-        /** Remove the settings of a folder */
-        post: operations["deleteFolderSetting"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -409,30 +387,6 @@ export interface paths {
         get: operations["getLibrary"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/folders": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get folder metadata */
-        get: operations["getFolder"];
-        put?: never;
-        /**
-         * Create a folder
-         * @description Creates a new folder. With `createParents=true`, missing
-         *     intermediate folders are created as well. An entry already
-         *     existing at `path` returns `409`; a missing parent with
-         *     `createParents=false` returns `404`.
-         */
-        post: operations["createFolder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -716,34 +670,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/libraries/{libraryId}/folders/children": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Probe for a folder-like direct child within a small budget
-         * @description A tri-state hint, independent of loading the child listing.
-         *     Counts directories and archive hints, not symlink targets.
-         *     After authentication and path validation, the probe includes
-         *     boundary checks and worker waiting in a 50 ms response budget,
-         *     examines at most 128 entries, and stops at the first match.
-         *     Returns null when busy, incomplete or interrupted. False is
-         *     returned only after reaching EOF without a matching child.
-         *     Does not open or extract a new archive just for this probe.
-         *     A timed-out blocking call retains its work slot until it exits.
-         */
-        get: operations["probeFolderChildren"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/libraries/{libraryId}/folders/copy": {
         parameters: {
             query?: never;
@@ -810,57 +736,6 @@ export interface paths {
          *     through an asynchronous operation.
          */
         post: operations["deleteFolders"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get file metadata */
-        get: operations["getFile"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/files/content": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read file content
-         * @description Streams raw file bytes. Clients may use either HTTP `Range` or the
-         *     explicit `offset` and `limit` query parameters. If both are provided,
-         *     `Range` takes precedence. With neither `offset` nor `limit`, the whole
-         *     file is streamed. With `offset` alone, the window is 1 MiB.
-         */
-        get: operations["readFileContent"];
-        /**
-         * Write file content in one request
-         * @description Writes a whole file from the raw request body. The bytes are
-         *     staged as a hidden `.pxna-tmp-*` file in the target's own
-         *     directory and renamed into place atomically, so a failed
-         *     request never leaves a partial file at the target path.
-         *     Staging next to the target keeps the rename inside one
-         *     filesystem even when the Library spans mounts.
-         *     Bodies larger than 32 MiB are rejected with `413`; use an
-         *     upload session for those.
-         */
-        put: operations["writeFileContent"];
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -965,6 +840,265 @@ export interface paths {
          *     limit, and `1001` when it shuts down.
          */
         get: operations["getImageSocket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{libraryId}/entries/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the metadata of an Entry
+         * @description Returns one Entry. `view` chooses the face of an archive: `file`
+         *     is the archive file, and `folder` is its root. Without `view`, a
+         *     folder is read as a folder and every file, an archive included,
+         *     as a file. `view=file` on a folder and `view=folder` on a file
+         *     that is not an archive are `400`.
+         */
+        get: operations["getEntryMetadata"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{libraryId}/entries/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read file content
+         * @description Streams raw file bytes. Clients may use either HTTP `Range` or the
+         *     explicit `offset` and `limit` query parameters. If both are provided,
+         *     `Range` takes precedence. With neither `offset` nor `limit`, the whole
+         *     file is streamed. With `offset` alone, the window is 1 MiB.
+         */
+        get: operations["readFileContent"];
+        /**
+         * Write file content in one request
+         * @description Writes a whole file from the raw request body. The bytes are
+         *     staged as a hidden `.pxna-tmp-*` file in the target's own
+         *     directory and renamed into place atomically, so a failed
+         *     request never leaves a partial file at the target path.
+         *     Staging next to the target keeps the rename inside one
+         *     filesystem even when the Library spans mounts.
+         *     `conflict` is `fail`, `skip`, or `overwrite`; a write that may
+         *     publish under another name is `POST .../entries/files`.
+         *     Bodies larger than 32 MiB are rejected with `413`; use an
+         *     upload session for those.
+         */
+        put: operations["writeFileContent"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{libraryId}/entries/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a file under a name the daemon may choose
+         * @description Writes a whole file from the raw request body under `path`, or,
+         *     when an entry already exists there, under another name the
+         *     daemon chooses, and returns the published Entry. It is the
+         *     creation counterpart of `PUT .../entries/content`, which writes
+         *     to the exact path. The staging, the atomic publication, and the
+         *     32 MiB limit are the same.
+         */
+        post: operations["createFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{libraryId}/entries/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a folder
+         * @description Creates a new folder. With `createParents=true`, missing
+         *     intermediate folders are created as well. An entry already
+         *     existing at `path` returns `409`; a missing parent with
+         *     `createParents=false` returns `404`.
+         */
+        post: operations["createFolder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{libraryId}/entries/child-probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Probe whether a folder has a folder-like direct child
+         * @description A tri-state hint, independent of loading the child listing.
+         *     Counts directories and archive hints, not symlink targets.
+         *     After authentication and path validation, the probe includes
+         *     boundary checks and worker waiting in a 50 ms response budget,
+         *     examines at most 128 entries, and stops at the first match.
+         *     Returns null when busy, incomplete or interrupted. False is
+         *     returned only after reaching EOF without a matching child.
+         *     Does not open or extract a new archive just for this probe.
+         *     A timed-out blocking call retains its work slot until it exits.
+         */
+        get: operations["probeFolderChildren"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{libraryId}/entries/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect media information */
+        get: operations["getMediaInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{libraryId}/entries/rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the rating of an image or video
+         * @description Returns the current user's rating. `none` means the entry has not
+         *     been rated. Ratings are kept per user, so another user's rating
+         *     never appears here. Reading works the same for a `readonly`
+         *     Library.
+         */
+        get: operations["getRating"];
+        /**
+         * Set the rating of an image or video
+         * @description Replaces the current user's rating. `none` clears it. The rating
+         *     is stored by the daemon, not on the entry, so it is accepted for a
+         *     `readonly` Library and for a path inside an archive, and the
+         *     entry itself is never changed. Only images and videos can be
+         *     rated; other files are rejected with `400`.
+         */
+        put: operations["putRating"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{libraryId}/entries/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the tags of an image or video
+         * @description Returns the current user's tags on the entry, sorted by word.
+         *     Tags are kept per user. Reading works the same for a `readonly`
+         *     Library.
+         */
+        get: operations["getEntryTags"];
+        /**
+         * Replace the tags of an image or video
+         * @description Replaces the current user's tags on the entry with the given set.
+         *     Words are trimmed and duplicates are dropped; a word the user has
+         *     not used before is created. An invalid word or too many tags is
+         *     rejected with `400` and nothing is changed. Like a rating, tags
+         *     are stored by the daemon, so they are accepted for a `readonly`
+         *     Library and for a path inside an archive.
+         */
+        put: operations["putEntryTags"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{libraryId}/entries/folder-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save the settings of a folder
+         * @description Saves the display values of the folder at `path`, replacing what it
+         *     had. The folder is not looked up. The timeline Layout can be saved only in a Shelf.
+         */
+        put: operations["putFolderSetting"];
+        post?: never;
+        /** Remove the settings of a folder */
+        delete: operations["deleteFolderSetting"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tags/words": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the words the current user has created
+         * @description Returns every word the user has used on any entry, sorted. A word
+         *     stays in the list after it is removed from the last entry that
+         *     had it. Clients use the list to complete a word being typed.
+         */
+        get: operations["listTagWords"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1134,23 +1268,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/libraries/{libraryId}/media-info": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Inspect media information */
-        get: operations["getMediaInfo"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/libraries/{libraryId}/video/sessions": {
         parameters: {
             query?: never;
@@ -1211,90 +1328,6 @@ export interface paths {
         };
         /** Read a completed transport stream segment */
         get: operations["getVideoSegment"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/rating": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get the rating of an image or video
-         * @description Returns the current user's rating. `none` means the entry has not
-         *     been rated. Ratings are kept per user, so another user's rating
-         *     never appears here. Reading works the same for a `readonly`
-         *     Library.
-         */
-        get: operations["getRating"];
-        /**
-         * Set the rating of an image or video
-         * @description Replaces the current user's rating. `none` clears it. The rating
-         *     is stored by the daemon, not on the entry, so it is accepted for a
-         *     `readonly` Library and for a path inside an archive, and the
-         *     entry itself is never changed. Only images and videos can be
-         *     rated; other files are rejected with `400`.
-         */
-        put: operations["putRating"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/tags": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get the tags of an image or video
-         * @description Returns the current user's tags on the entry, sorted by word.
-         *     Tags are kept per user. Reading works the same for a `readonly`
-         *     Library.
-         */
-        get: operations["getEntryTags"];
-        /**
-         * Replace the tags of an image or video
-         * @description Replaces the current user's tags on the entry with the given set.
-         *     Words are trimmed and duplicates are dropped; a word the user has
-         *     not used before is created. An invalid word or too many tags is
-         *     rejected with `400` and nothing is changed. Like a rating, tags
-         *     are stored by the daemon, so they are accepted for a `readonly`
-         *     Library and for a path inside an archive.
-         */
-        put: operations["putEntryTags"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tags": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the words the current user has created
-         * @description Returns every word the user has used on any entry, sorted. A word
-         *     stays in the list after it is removed from the last entry that
-         *     had it. Clients use the list to complete a word being typed.
-         */
-        get: operations["listTags"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1383,6 +1416,10 @@ export interface components {
         };
         ShelfOrder: {
             ids: string[];
+        };
+        /** @description The display values to save for the folder named in the query. */
+        FolderSettingRequest: {
+            display: components["schemas"]["DisplayValues"];
         };
         /**
          * @description The display values saved for one folder. The path is returned in
@@ -1628,9 +1665,15 @@ export interface components {
          * @example photos
          */
         LibraryId: string;
-        FolderResponse: {
-            folder: components["schemas"]["FileSystemEntry"];
+        EntryResponse: {
+            entry: components["schemas"]["FileSystemEntry"];
         };
+        /**
+         * @description The face of a path. `file` is the file, an archive file
+         *     included; `folder` is a folder or an archive's root.
+         * @enum {string}
+         */
+        EntryView: "file" | "folder";
         FileResponse: {
             file: components["schemas"]["FileSystemEntry"];
         };
@@ -2088,7 +2131,6 @@ export interface components {
             rating: components["schemas"]["RatingValue"];
         };
         PutRatingRequest: {
-            path: components["schemas"]["RelativePath"];
             rating: components["schemas"]["RatingValue"];
         };
         /**
@@ -2101,12 +2143,19 @@ export interface components {
             tags: components["schemas"]["TagName"][];
         };
         PutEntryTagsRequest: {
-            path: components["schemas"]["RelativePath"];
             tags: components["schemas"]["TagName"][];
         };
         TagsResponse: {
             tags: components["schemas"]["TagName"][];
         };
+        /**
+         * @description How a write to an exact path resolves an existing entry there:
+         *     `fail` rejects with `409`, `skip` leaves it in place, and
+         *     `overwrite` replaces it.
+         * @default fail
+         * @enum {string}
+         */
+        WriteConflictPolicy: "fail" | "skip" | "overwrite";
         /**
          * @description How to resolve an entry that already exists at the target
          *     path. `fail` rejects with `409`. `skip` leaves the existing
@@ -2592,6 +2641,16 @@ export interface components {
         OffsetQuery: number;
         /** @description Maximum bytes in an explicit read window. Defaults to 1 MiB only when offset is supplied. */
         ReadLimitQuery: number;
+        /**
+         * @description How to resolve an existing entry at the exact path. `rename` is
+         *     not accepted; use `POST .../entries/files`.
+         */
+        WriteConflictQuery: components["schemas"]["WriteConflictPolicy"];
+        /**
+         * @description Which face of the path is meant: `file` or `folder`. Only an
+         *     archive has both; without it, an archive is its file.
+         */
+        ViewQuery: components["schemas"]["EntryView"];
         /** @description How to resolve an existing entry at the target path. */
         ConflictQuery: components["schemas"]["ConflictPolicy"];
         /** @description Opaque identifier of an upload session. */
@@ -2981,59 +3040,6 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    putFolderSetting: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FolderSetting"];
-            };
-        };
-        responses: {
-            /** @description The saved settings. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderSetting"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    deleteFolderSetting: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LibraryPath"];
-            };
-        };
-        responses: {
-            /** @description The settings were removed. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
     listTimelineEntries: {
         parameters: {
             query: {
@@ -3210,75 +3216,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getFolder: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Folder metadata. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    createFolder: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateFolderRequest"];
-            };
-        };
-        responses: {
-            /** @description Folder created. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -3640,49 +3577,6 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    probeFolderChildren: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-                /** @description Whether hidden entries should be returned. */
-                includeHidden?: components["parameters"]["IncludeHiddenQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description True, confirmed false, or unknown (null). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderChildrenProbe"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-            /** @description Child probes are not provided; childProbes is false. No response body. */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     copyFolders: {
         parameters: {
             query?: never;
@@ -3795,155 +3689,6 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             500: components["responses"]["InternalServerError"];
-        };
-    };
-    getFile: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description File metadata. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FileResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    readFileContent: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-                /** @description Byte offset used when `Range` is not supplied. */
-                offset?: components["parameters"]["OffsetQuery"];
-                /** @description Maximum bytes in an explicit read window. Defaults to 1 MiB only when offset is supplied. */
-                limit?: components["parameters"]["ReadLimitQuery"];
-            };
-            header?: {
-                /**
-                 * @description Single HTTP byte range as defined by RFC 7233, including suffix
-                 *     ranges such as `bytes=-500`. The daemon parses this header itself,
-                 *     so the schema intentionally carries no pattern.
-                 *
-                 *     Multi-range requests such as `bytes=0-99,200-299` are not supported.
-                 *     The daemon ignores the header and returns a full `200` response in
-                 *     that case, as RFC 7233 permits. A well-formed but unsatisfiable
-                 *     range returns `416`.
-                 * @example bytes=0-65535
-                 */
-                Range?: components["parameters"]["RangeHeader"];
-            };
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Full or requested file bytes. */
-            200: {
-                headers: {
-                    "Accept-Ranges": components["headers"]["AcceptRanges"];
-                    "Content-Length": components["headers"]["ContentLength"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": string;
-                };
-            };
-            /** @description Partial file bytes. */
-            206: {
-                headers: {
-                    "Accept-Ranges": components["headers"]["AcceptRanges"];
-                    "Content-Range": components["headers"]["ContentRange"];
-                    "Content-Length": components["headers"]["ContentLength"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": string;
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            416: components["responses"]["RangeNotSatisfiable"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    writeFileContent: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-                /** @description How to resolve an existing entry at the target path. */
-                conflict?: components["parameters"]["ConflictQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/octet-stream": string;
-            };
-        };
-        responses: {
-            /** @description File written. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FileResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            500: components["responses"]["InternalServerError"];
-            507: components["responses"]["InsufficientStorage"];
         };
     };
     copyFiles: {
@@ -4087,6 +3832,549 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getEntryMetadata: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+                /**
+                 * @description Which face of the path is meant: `file` or `folder`. Only an
+                 *     archive has both; without it, an archive is its file.
+                 */
+                view?: components["parameters"]["ViewQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Entry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    readFileContent: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+                /** @description Byte offset used when `Range` is not supplied. */
+                offset?: components["parameters"]["OffsetQuery"];
+                /** @description Maximum bytes in an explicit read window. Defaults to 1 MiB only when offset is supplied. */
+                limit?: components["parameters"]["ReadLimitQuery"];
+            };
+            header?: {
+                /**
+                 * @description Single HTTP byte range as defined by RFC 7233, including suffix
+                 *     ranges such as `bytes=-500`. The daemon parses this header itself,
+                 *     so the schema intentionally carries no pattern.
+                 *
+                 *     Multi-range requests such as `bytes=0-99,200-299` are not supported.
+                 *     The daemon ignores the header and returns a full `200` response in
+                 *     that case, as RFC 7233 permits. A well-formed but unsatisfiable
+                 *     range returns `416`.
+                 * @example bytes=0-65535
+                 */
+                Range?: components["parameters"]["RangeHeader"];
+            };
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Full or requested file bytes. */
+            200: {
+                headers: {
+                    "Accept-Ranges": components["headers"]["AcceptRanges"];
+                    "Content-Length": components["headers"]["ContentLength"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Partial file bytes. */
+            206: {
+                headers: {
+                    "Accept-Ranges": components["headers"]["AcceptRanges"];
+                    "Content-Range": components["headers"]["ContentRange"];
+                    "Content-Length": components["headers"]["ContentLength"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            416: components["responses"]["RangeNotSatisfiable"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    writeFileContent: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+                /**
+                 * @description How to resolve an existing entry at the exact path. `rename` is
+                 *     not accepted; use `POST .../entries/files`.
+                 */
+                conflict?: components["parameters"]["WriteConflictQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description File written. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["InternalServerError"];
+            507: components["responses"]["InsufficientStorage"];
+        };
+    };
+    createFile: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description File created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["InternalServerError"];
+            507: components["responses"]["InsufficientStorage"];
+        };
+    };
+    createFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateFolderRequest"];
+            };
+        };
+        responses: {
+            /** @description Folder created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    probeFolderChildren: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+                /** @description Whether hidden entries should be returned. */
+                includeHidden?: components["parameters"]["IncludeHiddenQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description True, confirmed false, or unknown (null). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderChildrenProbe"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+            /** @description Child probes are not provided; childProbes is false. No response body. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getMediaInfo: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Media information of an image or a video. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaInfoResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getRating: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rating. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    putRating: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutRatingRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved rating. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getEntryTags: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tags. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryTagsResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    putEntryTags: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutEntryTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved tags. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryTagsResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    putFolderSetting: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderSetting"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteFolderSetting: {
+        parameters: {
+            query: {
+                /**
+                 * @description Path relative to the selected Library.
+                 * @example /photos/2026
+                 */
+                path: components["parameters"]["PathQuery"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque identifier of a Library owned by the owner. */
+                libraryId: components["parameters"]["LibraryIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings were removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listTagWords: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The words. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -4325,42 +4613,6 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    getMediaInfo: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Media information of an image or a video. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MediaInfoResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
     createVideoSession: {
         parameters: {
             query?: never;
@@ -4485,160 +4737,6 @@ export interface operations {
             409: components["responses"]["Conflict"];
             500: components["responses"]["InternalServerError"];
             504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    getRating: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The rating. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RatingResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    putRating: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PutRatingRequest"];
-            };
-        };
-        responses: {
-            /** @description The saved rating. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RatingResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    getEntryTags: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The tags. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EntryTagsResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    putEntryTags: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PutEntryTagsRequest"];
-            };
-        };
-        responses: {
-            /** @description The saved tags. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EntryTagsResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    listTags: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The words. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TagsResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
         };
     };
 }

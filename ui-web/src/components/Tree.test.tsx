@@ -99,12 +99,12 @@ async function harness(narrow = false, folderCount = 0, blockLaterPages = false,
                 ],
             });
         const path = options.params.query.path;
-        if (route.endsWith("/children"))
+        if (route.endsWith("/child-probe"))
             return probes === "ready"
                 ? response({ hasChildren: false, sourceVersion: "v1", maxAgeMs: 30000 })
                 : new Promise(() => {});
-        if (route.endsWith("/folders"))
-            return response({ folder: { ...folder(path), metadata: { size: 0, readonly: path.endsWith(".zip") } } });
+        if (route.endsWith("/metadata"))
+            return response({ entry: { ...folder(path), metadata: { size: 0, readonly: path.endsWith(".zip") } } });
         const entries = options.params.path.libraryId === "ro" ? [] : (children.get(path) ?? []);
         const offset = options.params.query.offset ?? 0;
         if (blockLaterPages && offset > 0) return new Promise(() => {});
@@ -142,7 +142,7 @@ async function harness(narrow = false, folderCount = 0, blockLaterPages = false,
         const parent = path.slice(0, path.lastIndexOf("/")) || "/";
         const entry = folder(path);
         children.set(parent, [...(children.get(parent) ?? []), entry]);
-        return response({ folder: entry }, 201);
+        return response({ entry }, 201);
     });
     const media = stubChangingMatchMedia(narrow);
     const restoreResize = stubResizeObserver();
@@ -376,8 +376,8 @@ it("親を閉じると展開状態を保った子の購読も止め、変更通�
 it("可視行の探査だけを送り、探査と後続ページが止まっても子一覧を開始する", async () => {
     const h = await harness(false, 22432, true, true);
     try {
-        await wait(() => expect(get.mock.calls.filter(([route]) => route.endsWith("/children"))).toHaveLength(1));
-        const probe = get.mock.calls.find(([route]) => route.endsWith("/children"))!;
+        await wait(() => expect(get.mock.calls.filter(([route]) => route.endsWith("/child-probe"))).toHaveLength(1));
+        const probe = get.mock.calls.find(([route]) => route.endsWith("/child-probe"))!;
         expect(probe[1].params.query.path).toBe("/folder-00000");
         const tree = h.host.querySelector('[role="tree"]')!;
         await act(async () => tree.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
@@ -389,7 +389,7 @@ it("可視行の探査だけを送り、探査と後続ページが止まって�
                 ),
             ).toBe(true),
         );
-        expect(get.mock.calls.filter(([route]) => route.endsWith("/children"))).toHaveLength(1);
+        expect(get.mock.calls.filter(([route]) => route.endsWith("/child-probe"))).toHaveLength(1);
     } finally {
         await h.dispose();
     }
@@ -399,15 +399,15 @@ it("22k件のうち実際に見える行だけを探査し、End後に画面外�
     const h = await harness(false, 22432, false, "ready");
     try {
         await wait(() =>
-            expect(get.mock.calls.filter(([route]) => route.endsWith("/children")).length).toBeGreaterThan(1),
+            expect(get.mock.calls.filter(([route]) => route.endsWith("/child-probe")).length).toBeGreaterThan(1),
         );
-        const initial = get.mock.calls.filter(([route]) => route.endsWith("/children"));
+        const initial = get.mock.calls.filter(([route]) => route.endsWith("/child-probe"));
         expect(initial.length).toBeLessThanOrEqual(19);
         expect(initial.every(([, options]) => Number(options.params.query.path.split("-").at(-1)) < 19)).toBe(true);
         const tree = h.host.querySelector('[role="tree"]')!;
         await act(async () => tree.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })));
         await wait(() => expect(document.activeElement?.textContent).toContain("folder-22431"));
-        const requests = get.mock.calls.filter(([route]) => route.endsWith("/children"));
+        const requests = get.mock.calls.filter(([route]) => route.endsWith("/child-probe"));
         expect(requests.length).toBeLessThan(40);
         await act(async () => h.item("folder-22431").click());
         expect(navigate).toHaveBeenCalled();

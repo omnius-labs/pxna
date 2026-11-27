@@ -25,13 +25,13 @@ export function childPath(parent: string, name: string): string {
 }
 export async function createFolder(client: QueryClient, libraryId: string, path: string): Promise<Entry> {
     const data = unwrap(
-        await api.POST("/libraries/{libraryId}/folders", {
+        await api.POST("/libraries/{libraryId}/entries/folders", {
             params: { path: { libraryId } },
             body: { path, createParents: false },
         }),
     );
     await refreshLibrary(client, libraryId);
-    return data.folder;
+    return data.entry;
 }
 /// `scope` は Library の id か、タイムラインの範囲である。
 export async function renameEntry(

@@ -34,7 +34,7 @@ export class ChildProbeQueue {
             signal,
         ) =>
             unwrap(
-                await api.GET("/libraries/{libraryId}/folders/children", {
+                await api.GET("/libraries/{libraryId}/entries/child-probe", {
                     params: {
                         path: { libraryId: target.libraryId },
                         query: { path: target.path, includeHidden: false },

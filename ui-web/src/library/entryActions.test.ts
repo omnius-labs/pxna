@@ -43,7 +43,7 @@ it.each([
     ["a.txt", undefined],
 ])("名前を検証 %s", (name, expected) => expect(validateName(name!)).toBe(expected));
 it("直下にフォルダを作り、一覧を更新", async () => {
-    post.mockResolvedValue(result({ folder: entry }, 201));
+    post.mockResolvedValue(result({ entry }, 201));
     const client = new QueryClient();
     await createFolder(client, "ops", "/made");
     expect(post.mock.calls[0]![1].body).toEqual({ path: "/made", createParents: false });

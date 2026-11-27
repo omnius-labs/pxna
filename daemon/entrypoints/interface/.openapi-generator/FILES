@@ -9,15 +9,15 @@ src/apis/folders.rs
 src/apis/health.rs
 src/apis/image_socket.rs
 src/apis/libraries.rs
+src/apis/media.rs
 src/apis/mod.rs
 src/apis/operations.rs
 src/apis/performance.rs
 src/apis/preferences.rs
-src/apis/rating.rs
+src/apis/ratings_tags.rs
 src/apis/search.rs
 src/apis/setup.rs
 src/apis/shelves.rs
-src/apis/tags.rs
 src/apis/timeline.rs
 src/apis/uploads.rs
 src/apis/video.rs

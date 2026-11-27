@@ -285,6 +285,15 @@ impl LibraryMutation {
         }
     }
 
+    /// The policy of a write to an exact path, which has no `rename`.
+    pub fn write_conflict(policy: Option<models::WriteConflictPolicy>) -> ConflictPolicy {
+        match policy.unwrap_or(models::WriteConflictPolicy::Fail) {
+            models::WriteConflictPolicy::Fail => ConflictPolicy::Fail,
+            models::WriteConflictPolicy::Skip => ConflictPolicy::Skip,
+            models::WriteConflictPolicy::Overwrite => ConflictPolicy::Overwrite,
+        }
+    }
+
     pub fn nested(path: &Path) -> Result<NestedPathBuf> {
         let mut nested = NestedPathBuf::new();
         nested

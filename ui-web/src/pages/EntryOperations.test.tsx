@@ -94,9 +94,9 @@ async function harness(view: "grid" | "list" = "grid", initial: Entry[] = []) {
                 return { error: { code: "NotFound" }, response: new Response(null, { status: 404 }) };
             if (route === "/libraries") return response({ libraries: [{ id: "ops", name: "Ops", readonly: false }] });
             if (route === "/operations") return response({ operations: [] });
-            if (route.endsWith("/folders"))
+            if (route.endsWith("/metadata"))
                 return response({
-                    folder: {
+                    entry: {
                         path: options?.params?.query?.path ?? "/",
                         name: "",
                         kind: "folder",
@@ -141,7 +141,7 @@ async function harness(view: "grid" | "list" = "grid", initial: Entry[] = []) {
         };
         entries.push(entry);
         snapshot++;
-        return response({ folder: entry }, 201);
+        return response({ entry }, 201);
     });
     const media = stubChangingMatchMedia();
     const restoreResize = stubResizeObserver();
@@ -403,7 +403,7 @@ it("単一ファイルだけを content API の download リンクにする", as
         expect(h.host.querySelector("a[download]")).toBeNull();
         await act(async () => options[0]!.click());
         expect(h.host.querySelector("a[download]")?.getAttribute("href")).toBe(
-            "/api/v1/libraries/ops/files/content?path=%2Fempty%2Fa.txt",
+            "/api/v1/libraries/ops/entries/content?path=%2Fempty%2Fa.txt",
         );
         await act(async () => options[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true })));
         expect(h.host.querySelector("a[download]")).toBeNull();

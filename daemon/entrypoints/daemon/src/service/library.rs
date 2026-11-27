@@ -246,6 +246,25 @@ impl LibraryBrowser {
         self.resolve(library, path).await
     }
 
+    /// The Entry at `path` by its face. Without `view`, a folder is read as a folder and anything else as a file, so an archive is its file.
+    pub async fn get_entry(&self, library_id: &str, path: &str, view: Option<models::EntryView>) -> Result<models::FileSystemEntry> {
+        let view = match view {
+            Some(view) => view,
+            None => {
+                let library = self.library(library_id)?;
+                let entry = self.resolve(library, path).await?.get_entry(WorkClass::Foreground).await?;
+                match entry.detail {
+                    FsEntryDetail::Dir { .. } => models::EntryView::Folder,
+                    _ => models::EntryView::File,
+                }
+            }
+        };
+        match view {
+            models::EntryView::Folder => self.get_folder(library_id, path).await,
+            models::EntryView::File => self.get_file(library_id, path).await,
+        }
+    }
+
     /// archive file を指す path は、root へ入らず archive file 自体の entry を返す。
     pub async fn get_file(&self, library_id: &str, path: &str) -> Result<models::FileSystemEntry> {
         let library = self.library(library_id)?;

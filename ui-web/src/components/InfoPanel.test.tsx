@@ -268,7 +268,8 @@ describe("大きめのサムネイル", () => {
 
 describe("メディア情報", () => {
     type Info = components["schemas"]["MediaInfo"];
-    const mediaRequests = () => mocks.get.mock.calls.filter(([path]) => path === "/libraries/{libraryId}/media-info");
+    const mediaRequests = () =>
+        mocks.get.mock.calls.filter(([path]) => path === "/libraries/{libraryId}/entries/media");
     const elapse = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms));
     /// 200 ms 待ち、再描画で有効になった問い合わせの結果を、描画まで進める。act の区切りごとに、React の更新が反映される。
     const load = async () => {
@@ -305,7 +306,7 @@ describe("メディア情報", () => {
     /// サムネイルは常に成功させ、メディア情報の応答は `respond` で決める。
     const answer = (respond: () => Promise<unknown>) =>
         mocks.get.mockImplementation(async (path: string) =>
-            path === "/libraries/{libraryId}/media-info"
+            path === "/libraries/{libraryId}/entries/media"
                 ? respond()
                 : { data: new Blob(["x"]), response: new Response() },
         );

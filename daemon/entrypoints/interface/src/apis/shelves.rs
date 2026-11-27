@@ -133,7 +133,7 @@ pub trait Shelves<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
 
     /// Remove the settings of a folder.
     ///
-    /// DeleteFolderSetting - POST /api/v1/settings/folder/delete
+    /// DeleteFolderSetting - DELETE /api/v1/libraries/{libraryId}/entries/folder-settings
     async fn delete_folder_setting(
         &self,
 
@@ -141,7 +141,8 @@ pub trait Shelves<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::LibraryPath,
+        path_params: &models::DeleteFolderSettingPathParams,
+        query_params: &models::DeleteFolderSettingQueryParams,
     ) -> Result<DeleteFolderSettingResponse, E>;
 
     /// Delete a Shelf.
@@ -159,7 +160,7 @@ pub trait Shelves<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
 
     /// List the folder settings.
     ///
-    /// ListFolderSettings - GET /api/v1/settings/folder
+    /// ListFolderSettings - GET /api/v1/folder-settings
     async fn list_folder_settings(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> Result<ListFolderSettingsResponse, E>;
 
     /// List the Shelves.
@@ -169,7 +170,7 @@ pub trait Shelves<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
 
     /// Save the settings of a folder.
     ///
-    /// PutFolderSetting - PUT /api/v1/settings/folder
+    /// PutFolderSetting - PUT /api/v1/libraries/{libraryId}/entries/folder-settings
     async fn put_folder_setting(
         &self,
 
@@ -177,7 +178,9 @@ pub trait Shelves<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::FolderSetting,
+        path_params: &models::PutFolderSettingPathParams,
+        query_params: &models::PutFolderSettingQueryParams,
+        body: &models::FolderSettingRequest,
     ) -> Result<PutFolderSettingResponse, E>;
 
     /// Reorder the Shelves.

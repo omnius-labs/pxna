@@ -38,7 +38,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | Folder-like Entry | all | - | `foldersFirst`, `foldersOnly` | A collective name for an Entry whose `kind` is `folder` and an Entry whose file detail `archive` is true | - |
 | Trash | all | - | - | A reserved hidden folder at the root of a Library where deleted Entries are moved, so they can be restored until the owner empties it | deleted folder |
 | Shelf | all | `ShelfService`, `Shelf` | `/api/v1/shelves`, `/shelves`, `/shelves/{id}` (web URL) | A saved way to browse the tree that holds a Scope, a Filter, and a Layout. It names folders and rules, never member Entries, and the daemon keeps it for every client | bookmark, album, collection |
-| Folder settings | all | `FolderSetting` | `/api/v1/settings/folder`, "このフォルダ以下に保存" (Save for this folder and below) | Display settings saved for one folder and inherited by the folders under it, applied between the display preferences and a Shelf | per-folder preferences |
+| Folder settings | all | `FolderSetting` | `/api/v1/libraries/{id}/entries/folder-settings`, "このフォルダ以下に保存" (Save for this folder and below) | Display settings saved for one folder and inherited by the folders under it, applied between the display preferences and a Shelf | per-folder preferences |
 | Background work | all | - | - | Work the daemon starts on its own and no request waits for, such as aggregation | job |
 | block | storage | `ArchiveBlockId` | `-` | The unit extracted in one decode. One entry for ZIP and non-solid 7z | - |
 | ResolvedStoragePath | storage | `ResolvedStoragePath` | - | A value that holds the resolved driver, the path within the namespace, and the archive identity for the duration of a request | - |
@@ -106,13 +106,13 @@ Design rationale, implementation status, defects, and external behavior are each
 | Transcoded playback | video | - | - | Playing a video that the server serves while converting it to HLS | transcode playback |
 | Transcode session | video | - | - | The server-side state that holds the ffmpeg process and segments for the transcoded playback of one video | - |
 | Shooting info | video | `ImageExif` | `shooting` | The shooting date and time, camera, lens, focal length, aperture, exposure time, and ISO sensitivity read from an image's Exif | EXIF info |
-| Media info | video | - | `media-info` | The container, codec, duration, and resolution of a video, and the format, dimensions, and shooting info of an image, which the server examines and returns | - |
+| Media info | video | - | `entries/media` | The container, codec, duration, and resolution of a video, and the format, dimensions, and shooting info of an image, which the server examines and returns | - |
 | Timeline date | timeline | `TimelineDate` | `timelineDate` | The date and time, without a time zone, by which the timeline orders Entries, decided from the shooting date and time or `creation_time` (or else the modification time) | - |
 | Timeline date source | timeline | `TimelineDateSource` | `timelineDateSource` | Which of the shooting date and time, `creation_time`, the Entry's modification time, or the archive's modification time the timeline date came from | - |
 | Timeline index | timeline | `TimelineIndex` | `state_dir/timeline/index.db` | A SQLite index, built by aggregation, that holds per Library the Entries to list in the timeline and their timeline dates | timeline cache |
 | Aggregation | timeline | `TimelineScanner` | `/timeline/refresh`, `/timeline/status` | The process that scans a Library, reads the timeline dates of images and videos, and reflects them in the timeline index, passing the names it enumerates to the name index | indexing, scan |
 | [Rating](./terms/rating-tags.md#t-rating) | rating-tags | `Rating` | `rating`, `RatingValue` | The good or bad value a user gives to an image or video. The unrated state is represented as none | star, score |
-| Vocabulary | rating-tags | `RatingTagService::tags` | `GET /tags` | The list of tag words the user has created so far. Words removed from Entries remain and serve as completion candidates while typing | tag list |
+| Vocabulary | rating-tags | `RatingTagService::tags` | `GET /tags/words` | The list of tag words the user has created so far. Words removed from Entries remain and serve as completion candidates while typing | tag list |
 | Tag | rating-tags | `TagName` | `tags` | A word the user freely attaches to an image or video. Up to 32 per Entry, each word up to 64 characters, case-sensitive | label |
 | Content hash | rating-tags | - | - | A full SHA3-256 of an Entry's bytes, used as the identity of ratings and tags. For an entry inside an archive, it is the hash of the extracted entry | content identity, content key |
 

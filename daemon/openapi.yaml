@@ -53,15 +53,15 @@ tags:
     - name: Libraries
       description: Libraries available to the current user.
     - name: Folders
-      description: Folder metadata and folder listing.
+      description: Folder listings, the summary listing, the metadata of several entries, and copying, moving, and deleting folders.
     - name: Files
-      description: File metadata and byte content.
+      description: Copying, moving, and deleting files.
     - name: ImageSocket
       description: The WebSocket through which clients receive thumbnails, sprite sheets, and display images.
     - name: Uploads
       description: Resumable chunked upload sessions.
     - name: Video
-      description: Media information and authenticated HLS playback sessions.
+      description: Authenticated HLS playback sessions.
     - name: Operations
       description: Progress tracking for long-running mutations.
     - name: Timeline
@@ -69,11 +69,13 @@ tags:
     - name: Search
       description: Name, rating, and tag search across one or more Libraries.
     - name: Entries
-      description: The Entries of a Scope of starts in one or more Libraries, read through a Filter.
-    - name: Rating
-      description: The current user's good or bad rating of an image or video.
-    - name: Tags
-      description: The current user's tags on images and videos, and the words the user has created.
+      description: |
+        The Entries of a Scope of starts in one or more Libraries read through a Filter, and one Entry addressed by its
+        Library and path: its metadata, its content, file and folder creation, and the probe for its children.
+    - name: Media
+      description: Media information of images and videos.
+    - name: Ratings & Tags
+      description: The current user's rating and tags of an image or video, and the words the user has created.
     - name: Performance
       description: Client-side timings written to the daemon's performance log.
 
@@ -423,7 +425,7 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
-    /settings/folder:
+    /folder-settings:
         get:
             tags:
                 - Shelves
@@ -441,57 +443,6 @@ paths:
                                 $ref: "#/components/schemas/FolderSettingList"
                 "401":
                     $ref: "#/components/responses/Unauthorized"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-        put:
-            tags:
-                - Shelves
-            summary: Save the settings of a folder
-            description: |
-                Saves the display values of one folder, replacing what it had. The folder
-                is not looked up. The timeline Layout can be saved only in a Shelf.
-            operationId: putFolderSetting
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/FolderSetting"
-            responses:
-                "200":
-                    description: The saved settings.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/FolderSetting"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /settings/folder/delete:
-        post:
-            tags:
-                - Shelves
-            summary: Remove the settings of a folder
-            operationId: deleteFolderSetting
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/LibraryPath"
-            responses:
-                "204":
-                    description: The settings were removed.
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
@@ -695,74 +646,6 @@ paths:
                     $ref: "#/components/responses/Forbidden"
                 "404":
                     $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/folders:
-        get:
-            tags:
-                - Folders
-            summary: Get folder metadata
-            operationId: getFolder
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-            responses:
-                "200":
-                    description: Folder metadata.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/FolderResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-        post:
-            tags:
-                - Folders
-            summary: Create a folder
-            description: |
-                Creates a new folder. With `createParents=true`, missing
-                intermediate folders are created as well. An entry already
-                existing at `path` returns `409`; a missing parent with
-                `createParents=false` returns `404`.
-            operationId: createFolder
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/CreateFolderRequest"
-            responses:
-                "201":
-                    description: Folder created.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/FolderResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
@@ -1166,45 +1049,6 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
-    /libraries/{libraryId}/folders/children:
-        get:
-            tags: [Folders]
-            summary: Probe for a folder-like direct child within a small budget
-            operationId: probeFolderChildren
-            description: |
-                A tri-state hint, independent of loading the child listing.
-                Counts directories and archive hints, not symlink targets.
-                After authentication and path validation, the probe includes
-                boundary checks and worker waiting in a 50 ms response budget,
-                examines at most 128 entries, and stops at the first match.
-                Returns null when busy, incomplete or interrupted. False is
-                returned only after reaching EOF without a matching child.
-                Does not open or extract a new archive just for this probe.
-                A timed-out blocking call retains its work slot until it exits.
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-                - $ref: "#/components/parameters/IncludeHiddenQuery"
-            responses:
-                "200":
-                    description: True, confirmed false, or unknown (null).
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/FolderChildrenProbe"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "501":
-                    description: Child probes are not provided; childProbes is false. No response body.
-
     /libraries/{libraryId}/folders/copy:
         post:
             tags:
@@ -1330,150 +1174,6 @@ paths:
                     $ref: "#/components/responses/Conflict"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/files:
-        get:
-            tags:
-                - Files
-            summary: Get file metadata
-            operationId: getFile
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-            responses:
-                "200":
-                    description: File metadata.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/FileResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-
-    /libraries/{libraryId}/files/content:
-        get:
-            tags:
-                - Files
-            summary: Read file content
-            description: |
-                Streams raw file bytes. Clients may use either HTTP `Range` or the
-                explicit `offset` and `limit` query parameters. If both are provided,
-                `Range` takes precedence. With neither `offset` nor `limit`, the whole
-                file is streamed. With `offset` alone, the window is 1 MiB.
-            operationId: readFileContent
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-                - $ref: "#/components/parameters/RangeHeader"
-                - $ref: "#/components/parameters/OffsetQuery"
-                - $ref: "#/components/parameters/ReadLimitQuery"
-            responses:
-                "200":
-                    description: Full or requested file bytes.
-                    headers:
-                        Accept-Ranges:
-                            $ref: "#/components/headers/AcceptRanges"
-                        Content-Length:
-                            $ref: "#/components/headers/ContentLength"
-                        ETag:
-                            $ref: "#/components/headers/ETag"
-                    content:
-                        application/octet-stream:
-                            schema:
-                                type: string
-                                format: binary
-                "206":
-                    description: Partial file bytes.
-                    headers:
-                        Accept-Ranges:
-                            $ref: "#/components/headers/AcceptRanges"
-                        Content-Range:
-                            $ref: "#/components/headers/ContentRange"
-                        Content-Length:
-                            $ref: "#/components/headers/ContentLength"
-                        ETag:
-                            $ref: "#/components/headers/ETag"
-                    content:
-                        application/octet-stream:
-                            schema:
-                                type: string
-                                format: binary
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "416":
-                    $ref: "#/components/responses/RangeNotSatisfiable"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-        put:
-            tags:
-                - Files
-            summary: Write file content in one request
-            description: |
-                Writes a whole file from the raw request body. The bytes are
-                staged as a hidden `.pxna-tmp-*` file in the target's own
-                directory and renamed into place atomically, so a failed
-                request never leaves a partial file at the target path.
-                Staging next to the target keeps the rename inside one
-                filesystem even when the Library spans mounts.
-                Bodies larger than 32 MiB are rejected with `413`; use an
-                upload session for those.
-            operationId: writeFileContent
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-                - $ref: "#/components/parameters/ConflictQuery"
-            requestBody:
-                required: true
-                content:
-                    application/octet-stream:
-                        schema:
-                            type: string
-                            format: binary
-            responses:
-                "201":
-                    description: File written.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/FileResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "413":
-                    $ref: "#/components/responses/PayloadTooLarge"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "507":
-                    $ref: "#/components/responses/InsufficientStorage"
 
     /libraries/{libraryId}/files/copy:
         post:
@@ -1636,6 +1336,528 @@ paths:
                         application/problem+json:
                             schema:
                                 $ref: "#/components/schemas/Problem"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/entries/metadata:
+        get:
+            tags:
+                - Entries
+            summary: Get the metadata of an Entry
+            description: |
+                Returns one Entry. `view` chooses the face of an archive: `file`
+                is the archive file, and `folder` is its root. Without `view`, a
+                folder is read as a folder and every file, an archive included,
+                as a file. `view=file` on a folder and `view=folder` on a file
+                that is not an archive are `400`.
+            operationId: getEntryMetadata
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/ViewQuery"
+            responses:
+                "200":
+                    description: The Entry.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/entries/content:
+        get:
+            tags:
+                - Entries
+            summary: Read file content
+            description: |
+                Streams raw file bytes. Clients may use either HTTP `Range` or the
+                explicit `offset` and `limit` query parameters. If both are provided,
+                `Range` takes precedence. With neither `offset` nor `limit`, the whole
+                file is streamed. With `offset` alone, the window is 1 MiB.
+            operationId: readFileContent
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/RangeHeader"
+                - $ref: "#/components/parameters/OffsetQuery"
+                - $ref: "#/components/parameters/ReadLimitQuery"
+            responses:
+                "200":
+                    description: Full or requested file bytes.
+                    headers:
+                        Accept-Ranges:
+                            $ref: "#/components/headers/AcceptRanges"
+                        Content-Length:
+                            $ref: "#/components/headers/ContentLength"
+                        ETag:
+                            $ref: "#/components/headers/ETag"
+                    content:
+                        application/octet-stream:
+                            schema:
+                                type: string
+                                format: binary
+                "206":
+                    description: Partial file bytes.
+                    headers:
+                        Accept-Ranges:
+                            $ref: "#/components/headers/AcceptRanges"
+                        Content-Range:
+                            $ref: "#/components/headers/ContentRange"
+                        Content-Length:
+                            $ref: "#/components/headers/ContentLength"
+                        ETag:
+                            $ref: "#/components/headers/ETag"
+                    content:
+                        application/octet-stream:
+                            schema:
+                                type: string
+                                format: binary
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "416":
+                    $ref: "#/components/responses/RangeNotSatisfiable"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+        put:
+            tags:
+                - Entries
+            summary: Write file content in one request
+            description: |
+                Writes a whole file from the raw request body. The bytes are
+                staged as a hidden `.pxna-tmp-*` file in the target's own
+                directory and renamed into place atomically, so a failed
+                request never leaves a partial file at the target path.
+                Staging next to the target keeps the rename inside one
+                filesystem even when the Library spans mounts.
+                `conflict` is `fail`, `skip`, or `overwrite`; a write that may
+                publish under another name is `POST .../entries/files`.
+                Bodies larger than 32 MiB are rejected with `413`; use an
+                upload session for those.
+            operationId: writeFileContent
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/WriteConflictQuery"
+            requestBody:
+                required: true
+                content:
+                    application/octet-stream:
+                        schema:
+                            type: string
+                            format: binary
+            responses:
+                "201":
+                    description: File written.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "413":
+                    $ref: "#/components/responses/PayloadTooLarge"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "507":
+                    $ref: "#/components/responses/InsufficientStorage"
+
+    /libraries/{libraryId}/entries/files:
+        post:
+            tags:
+                - Entries
+            summary: Create a file under a name the daemon may choose
+            description: |
+                Writes a whole file from the raw request body under `path`, or,
+                when an entry already exists there, under another name the
+                daemon chooses, and returns the published Entry. It is the
+                creation counterpart of `PUT .../entries/content`, which writes
+                to the exact path. The staging, the atomic publication, and the
+                32 MiB limit are the same.
+            operationId: createFile
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            requestBody:
+                required: true
+                content:
+                    application/octet-stream:
+                        schema:
+                            type: string
+                            format: binary
+            responses:
+                "201":
+                    description: File created.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "413":
+                    $ref: "#/components/responses/PayloadTooLarge"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "507":
+                    $ref: "#/components/responses/InsufficientStorage"
+
+    /libraries/{libraryId}/entries/folders:
+        post:
+            tags:
+                - Entries
+            summary: Create a folder
+            description: |
+                Creates a new folder. With `createParents=true`, missing
+                intermediate folders are created as well. An entry already
+                existing at `path` returns `409`; a missing parent with
+                `createParents=false` returns `404`.
+            operationId: createFolder
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/CreateFolderRequest"
+            responses:
+                "201":
+                    description: Folder created.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /libraries/{libraryId}/entries/child-probe:
+        get:
+            tags:
+                - Entries
+            summary: Probe whether a folder has a folder-like direct child
+            operationId: probeFolderChildren
+            description: |
+                A tri-state hint, independent of loading the child listing.
+                Counts directories and archive hints, not symlink targets.
+                After authentication and path validation, the probe includes
+                boundary checks and worker waiting in a 50 ms response budget,
+                examines at most 128 entries, and stops at the first match.
+                Returns null when busy, incomplete or interrupted. False is
+                returned only after reaching EOF without a matching child.
+                Does not open or extract a new archive just for this probe.
+                A timed-out blocking call retains its work slot until it exits.
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+                - $ref: "#/components/parameters/IncludeHiddenQuery"
+            responses:
+                "200":
+                    description: True, confirmed false, or unknown (null).
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FolderChildrenProbe"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "501":
+                    description: Child probes are not provided; childProbes is false. No response body.
+
+    /libraries/{libraryId}/entries/media:
+        get:
+            tags:
+                - Media
+            summary: Inspect media information
+            operationId: getMediaInfo
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            responses:
+                "200":
+                    description: Media information of an image or a video.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/MediaInfoResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/entries/rating:
+        get:
+            tags:
+                - Ratings & Tags
+            summary: Get the rating of an image or video
+            description: |
+                Returns the current user's rating. `none` means the entry has not
+                been rated. Ratings are kept per user, so another user's rating
+                never appears here. Reading works the same for a `readonly`
+                Library.
+            operationId: getRating
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            responses:
+                "200":
+                    description: The rating.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/RatingResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+        put:
+            tags:
+                - Ratings & Tags
+            summary: Set the rating of an image or video
+            description: |
+                Replaces the current user's rating. `none` clears it. The rating
+                is stored by the daemon, not on the entry, so it is accepted for a
+                `readonly` Library and for a path inside an archive, and the
+                entry itself is never changed. Only images and videos can be
+                rated; other files are rejected with `400`.
+            operationId: putRating
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/PutRatingRequest"
+            responses:
+                "200":
+                    description: The saved rating.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/RatingResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/entries/tags:
+        get:
+            tags:
+                - Ratings & Tags
+            summary: Get the tags of an image or video
+            description: |
+                Returns the current user's tags on the entry, sorted by word.
+                Tags are kept per user. Reading works the same for a `readonly`
+                Library.
+            operationId: getEntryTags
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            responses:
+                "200":
+                    description: The tags.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryTagsResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+        put:
+            tags:
+                - Ratings & Tags
+            summary: Replace the tags of an image or video
+            description: |
+                Replaces the current user's tags on the entry with the given set.
+                Words are trimmed and duplicates are dropped; a word the user has
+                not used before is created. An invalid word or too many tags is
+                rejected with `400` and nothing is changed. Like a rating, tags
+                are stored by the daemon, so they are accepted for a `readonly`
+                Library and for a path inside an archive.
+            operationId: putEntryTags
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/PutEntryTagsRequest"
+            responses:
+                "200":
+                    description: The saved tags.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryTagsResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+                "504":
+                    $ref: "#/components/responses/GatewayTimeout"
+
+    /libraries/{libraryId}/entries/folder-settings:
+        put:
+            tags:
+                - Shelves
+            summary: Save the settings of a folder
+            description: |
+                Saves the display values of the folder at `path`, replacing what it
+                had. The folder is not looked up. The timeline Layout can be saved only in a Shelf.
+            operationId: putFolderSetting
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/FolderSettingRequest"
+            responses:
+                "200":
+                    description: The saved settings.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FolderSetting"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+        delete:
+            tags:
+                - Shelves
+            summary: Remove the settings of a folder
+            operationId: deleteFolderSetting
+            parameters:
+                - $ref: "#/components/parameters/LibraryIdPath"
+                - $ref: "#/components/parameters/PathQuery"
+            responses:
+                "204":
+                    description: The settings were removed.
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /tags/words:
+        get:
+            tags:
+                - Ratings & Tags
+            summary: List the words the current user has created
+            description: |
+                Returns every word the user has used on any entry, sorted. A word
+                stays in the list after it is removed from the last entry that
+                had it. Clients use the list to complete a word being typed.
+            operationId: listTagWords
+            responses:
+                "200":
+                    description: The words.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/TagsResponse"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
@@ -1878,36 +2100,6 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
-    /libraries/{libraryId}/media-info:
-        get:
-            tags: [Video]
-            summary: Inspect media information
-            operationId: getMediaInfo
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-            responses:
-                "200":
-                    description: Media information of an image or a video.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/MediaInfoResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-
     /libraries/{libraryId}/video/sessions:
         post:
             tags: [Video]
@@ -2030,164 +2222,6 @@ paths:
                     $ref: "#/components/responses/InternalServerError"
                 "504":
                     $ref: "#/components/responses/GatewayTimeout"
-
-    /libraries/{libraryId}/rating:
-        get:
-            tags:
-                - Rating
-            summary: Get the rating of an image or video
-            description: |
-                Returns the current user's rating. `none` means the entry has not
-                been rated. Ratings are kept per user, so another user's rating
-                never appears here. Reading works the same for a `readonly`
-                Library.
-            operationId: getRating
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-            responses:
-                "200":
-                    description: The rating.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/RatingResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-        put:
-            tags:
-                - Rating
-            summary: Set the rating of an image or video
-            description: |
-                Replaces the current user's rating. `none` clears it. The rating
-                is stored by the daemon, not on the entry, so it is accepted for a
-                `readonly` Library and for a path inside an archive, and the
-                entry itself is never changed. Only images and videos can be
-                rated; other files are rejected with `400`.
-            operationId: putRating
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/PutRatingRequest"
-            responses:
-                "200":
-                    description: The saved rating.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/RatingResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-
-    /libraries/{libraryId}/tags:
-        get:
-            tags:
-                - Tags
-            summary: Get the tags of an image or video
-            description: |
-                Returns the current user's tags on the entry, sorted by word.
-                Tags are kept per user. Reading works the same for a `readonly`
-                Library.
-            operationId: getEntryTags
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-            responses:
-                "200":
-                    description: The tags.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/EntryTagsResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-        put:
-            tags:
-                - Tags
-            summary: Replace the tags of an image or video
-            description: |
-                Replaces the current user's tags on the entry with the given set.
-                Words are trimmed and duplicates are dropped; a word the user has
-                not used before is created. An invalid word or too many tags is
-                rejected with `400` and nothing is changed. Like a rating, tags
-                are stored by the daemon, so they are accepted for a `readonly`
-                Library and for a path inside an archive.
-            operationId: putEntryTags
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/PutEntryTagsRequest"
-            responses:
-                "200":
-                    description: The saved tags.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/EntryTagsResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-
-    /tags:
-        get:
-            tags:
-                - Tags
-            summary: List the words the current user has created
-            description: |
-                Returns every word the user has used on any entry, sorted. A word
-                stays in the list after it is removed from the last entry that
-                had it. Clients use the list to complete a word being typed.
-            operationId: listTags
-            responses:
-                "200":
-                    description: The words.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/TagsResponse"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
 
 components:
     securitySchemes:
@@ -2477,6 +2511,26 @@ components:
                 format: int64
                 minimum: 1
                 maximum: 134217728
+
+        WriteConflictQuery:
+            name: conflict
+            in: query
+            required: false
+            description: |
+                How to resolve an existing entry at the exact path. `rename` is
+                not accepted; use `POST .../entries/files`.
+            schema:
+                $ref: "#/components/schemas/WriteConflictPolicy"
+
+        ViewQuery:
+            name: view
+            in: query
+            required: false
+            description: |
+                Which face of the path is meant: `file` or `folder`. Only an
+                archive has both; without it, an archive is its file.
+            schema:
+                $ref: "#/components/schemas/EntryView"
 
         ConflictQuery:
             name: conflict
@@ -2851,6 +2905,15 @@ components:
                     maxItems: 200
                     items:
                         type: string
+        FolderSettingRequest:
+            type: object
+            additionalProperties: false
+            description: The display values to save for the folder named in the query.
+            required: [display]
+            properties:
+                display:
+                    $ref: "#/components/schemas/DisplayValues"
+
         FolderSetting:
             type: object
             additionalProperties: false
@@ -3312,13 +3375,22 @@ components:
                 configuration that violates it at startup.
             example: photos
 
-        FolderResponse:
+        EntryResponse:
             type: object
             required:
-                - folder
+                - entry
             properties:
-                folder:
+                entry:
                     $ref: "#/components/schemas/FileSystemEntry"
+
+        EntryView:
+            type: string
+            description: |
+                The face of a path. `file` is the file, an archive file
+                included; `folder` is a folder or an archive's root.
+            enum:
+                - file
+                - folder
 
         FileResponse:
             type: object
@@ -4110,11 +4182,8 @@ components:
             type: object
             additionalProperties: false
             required:
-                - path
                 - rating
             properties:
-                path:
-                    $ref: "#/components/schemas/RelativePath"
                 rating:
                     $ref: "#/components/schemas/RatingValue"
 
@@ -4141,11 +4210,8 @@ components:
             type: object
             additionalProperties: false
             required:
-                - path
                 - tags
             properties:
-                path:
-                    $ref: "#/components/schemas/RelativePath"
                 tags:
                     type: array
                     maxItems: 32
@@ -4161,6 +4227,18 @@ components:
                     type: array
                     items:
                         $ref: "#/components/schemas/TagName"
+
+        WriteConflictPolicy:
+            type: string
+            description: |
+                How a write to an exact path resolves an existing entry there:
+                `fail` rejects with `409`, `skip` leaves it in place, and
+                `overwrite` replaces it.
+            enum:
+                - fail
+                - skip
+                - overwrite
+            default: fail
 
         ConflictPolicy:
             type: string

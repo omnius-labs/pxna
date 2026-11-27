@@ -16,11 +16,11 @@ export function folderQuery(libraryId: string, path: string) {
         queryKey: ["folder", libraryId, path],
         queryFn: async ({ signal }) =>
             unwrap(
-                await api.GET("/libraries/{libraryId}/folders", {
-                    params: { path: { libraryId }, query: { path } },
+                await api.GET("/libraries/{libraryId}/entries/metadata", {
+                    params: { path: { libraryId }, query: { path, view: "folder" } },
                     signal,
                 }),
-            ).folder,
+            ).entry,
     });
 }
 
@@ -31,7 +31,7 @@ export function mediaInfoQuery(scope: string, scopedPath: string) {
         queryKey: ["media-info", libraryId, path],
         queryFn: async ({ signal }): Promise<MediaInfo> =>
             unwrap(
-                await api.GET("/libraries/{libraryId}/media-info", {
+                await api.GET("/libraries/{libraryId}/entries/media", {
                     params: { path: { libraryId }, query: { path } },
                     signal,
                 }),

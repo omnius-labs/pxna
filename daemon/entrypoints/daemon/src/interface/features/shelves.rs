@@ -119,12 +119,14 @@ impl apis::shelves::Shelves for ApiServer {
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::FolderSetting,
+        path_params: &models::PutFolderSettingPathParams,
+        query_params: &models::PutFolderSettingQueryParams,
+        body: &models::FolderSettingRequest,
     ) -> std::result::Result<apis::shelves::PutFolderSettingResponse, ()> {
         let saved = async {
             let setting = FolderSetting {
-                library_id: body.library_id.clone(),
-                path: ShelfModel::normal_path(&body.library_id, &body.path)?,
+                library_id: path_params.library_id.clone(),
+                path: ShelfModel::normal_path(&path_params.library_id, &query_params.path)?,
                 display: ShelfModel::display_from_model(&body.display),
             };
             self.state.shelves.put_folder_setting(&claims.user.id, &setting).await?;
@@ -143,11 +145,12 @@ impl apis::shelves::Shelves for ApiServer {
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::LibraryPath,
+        path_params: &models::DeleteFolderSettingPathParams,
+        query_params: &models::DeleteFolderSettingQueryParams,
     ) -> std::result::Result<apis::shelves::DeleteFolderSettingResponse, ()> {
         let deleted = async {
-            let path = ShelfModel::normal_path(&body.library_id, &body.path)?;
-            Ok::<_, Error>(self.state.shelves.delete_folder_setting(&claims.user.id, &body.library_id, &path).await?)
+            let path = ShelfModel::normal_path(&path_params.library_id, &query_params.path)?;
+            Ok::<_, Error>(self.state.shelves.delete_folder_setting(&claims.user.id, &path_params.library_id, &path).await?)
         }
         .await;
         Ok(match deleted {
@@ -438,7 +441,7 @@ mod tests {
         }
 
         async fn folder_settings(&self) -> TestResult<Value> {
-            let response = self.send(Method::GET, "/settings/folder", None).await?;
+            let response = self.send(Method::GET, "/folder-settings", None).await?;
             assert_eq!(response.status, StatusCode::OK, "{}", response.body);
             Ok(response.body["settings"].clone())
         }
@@ -446,6 +449,11 @@ mod tests {
 
     fn shelf(name: &str) -> Value {
         json!({"name": name, "scope": {"starts": [{"libraryId": "photos", "path": "/photos"}]}})
+    }
+
+    /// The path of the folder settings of `path`, relative to `/api/v1`.
+    fn setting_uri(library_id: &str, path: &str) -> String {
+        format!("/libraries/{library_id}/entries/folder-settings?path={path}")
     }
 
     fn place(library_id: &str, path: &str) -> Value {
@@ -695,8 +703,8 @@ mod tests {
         let saved = client
             .send(
                 Method::PUT,
-                "/settings/folder",
-                Some(json!({"libraryId": "photos", "path": "x/../photos/a.7z/./dir/", "display": {"wide": {"view": "list", "tileSize": 1}}})),
+                &setting_uri("photos", "x/../photos/a.7z/./dir/"),
+                Some(json!({"display": {"wide": {"view": "list", "tileSize": 1}}})),
             )
             .await?;
         assert_eq!(saved.status, StatusCode::OK, "{}", saved.body);
@@ -706,33 +714,36 @@ mod tests {
         );
 
         let replacement = json!({"libraryId": "photos", "path": "/photos/a.7z/dir", "display": {"archiveOpen": "folder"}});
-        assert_eq!(client.send(Method::PUT, "/settings/folder", Some(replacement.clone())).await?.status, StatusCode::OK);
+        assert_eq!(
+            client
+                .send(Method::PUT, &setting_uri("photos", "/photos/a.7z/dir"), Some(json!({"display": {"archiveOpen": "folder"}})))
+                .await?
+                .status,
+            StatusCode::OK
+        );
         assert_eq!(client.folder_settings().await?, json!([replacement]));
 
-        for refused in [
-            json!({"libraryId": "photos", "path": "/photos/a.7z/dir", "display": {"wide": {"view": "timeline"}}}),
-            json!({"libraryId": "photos", "path": "/photos/a.7z/dir", "display": {"narrow": {"view": "timeline"}}}),
-            json!({"libraryId": "photos", "path": "/..", "display": {}}),
-            json!({"libraryId": "..", "path": "/", "display": {}}),
+        for (library_id, path, display) in [
+            ("photos", "/photos/a.7z/dir", json!({"wide": {"view": "timeline"}})),
+            ("photos", "/photos/a.7z/dir", json!({"narrow": {"view": "timeline"}})),
+            ("photos", "/..", json!({})),
+            ("..", "/", json!({})),
         ] {
-            let response = client.send(Method::PUT, "/settings/folder", Some(refused.clone())).await?;
+            let response = client.send(Method::PUT, &setting_uri(library_id, path), Some(json!({"display": display}))).await?;
             assert_eq!(
                 (response.status, response.body["code"].as_str()),
                 (StatusCode::BAD_REQUEST, Some("InvalidRequest")),
-                "{refused}"
+                "{library_id} {path} {display}"
             );
         }
         assert_eq!(client.folder_settings().await?, json!([replacement]));
 
-        let target = place("photos", "/photos/./a.7z/dir");
-        assert_eq!(
-            client.send(Method::POST, "/settings/folder/delete", Some(target.clone())).await?.status,
-            StatusCode::NO_CONTENT
-        );
+        let target = setting_uri("photos", "/photos/./a.7z/dir");
+        assert_eq!(client.send(Method::DELETE, &target, None).await?.status, StatusCode::NO_CONTENT);
         assert_eq!(client.folder_settings().await?, json!([]));
-        let missing = client.send(Method::POST, "/settings/folder/delete", Some(target)).await?;
+        let missing = client.send(Method::DELETE, &target, None).await?;
         assert_eq!((missing.status, missing.body["code"].as_str()), (StatusCode::NOT_FOUND, Some("NotFound")));
-        let invalid = client.send(Method::POST, "/settings/folder/delete", Some(place("photos", "/.."))).await?;
+        let invalid = client.send(Method::DELETE, &setting_uri("photos", "/.."), None).await?;
         assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
         Ok(())
     }
@@ -767,8 +778,8 @@ mod tests {
         }
 
         async fn save_setting(&self, library_id: &str, path: &str, tile_size: usize) -> TestResult {
-            let body = json!({"libraryId": library_id, "path": path, "display": {"wide": {"tileSize": tile_size}}});
-            let response = self.client.send(Method::PUT, "/settings/folder", Some(body)).await?;
+            let body = json!({"display": {"wide": {"tileSize": tile_size}}});
+            let response = self.client.send(Method::PUT, &setting_uri(library_id, path), Some(body)).await?;
             assert_eq!(response.status, StatusCode::OK, "{}", response.body);
             Ok(())
         }
@@ -981,7 +992,7 @@ mod tests {
         let fixture = fixture(ArchiveOptions::default()).await?;
         let router = router(&fixture);
         assert_eq!(send(&router, Method::GET, "/api/v1/shelves", &[], None).await?.status, StatusCode::UNAUTHORIZED);
-        assert_eq!(send(&router, Method::GET, "/api/v1/settings/folder", &[], None).await?.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(send(&router, Method::GET, "/api/v1/folder-settings", &[], None).await?.status, StatusCode::UNAUTHORIZED);
         let setup = send(&router, Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "cookie")).await?;
         let cookie = cookie(&setup)?;
         let same = [("cookie", cookie.as_str()), ("origin", "http://localhost")];
@@ -991,21 +1002,17 @@ mod tests {
         let shelves = send(&router, Method::GET, "/api/v1/shelves", &same, None).await?;
         assert_eq!(shelves.status, StatusCode::OK);
         let id = shelves.body["shelves"][0]["id"].as_str().ok_or("id")?.to_string();
-        assert_eq!(send(&router, Method::GET, "/api/v1/settings/folder", &same, None).await?.status, StatusCode::OK);
+        assert_eq!(send(&router, Method::GET, "/api/v1/folder-settings", &same, None).await?.status, StatusCode::OK);
 
-        let setting = json!({"libraryId": "photos", "path": "/photos", "display": {}});
+        let setting = json!({"display": {}});
+        let setting_path = format!("/api/v1{}", setting_uri("photos", "/photos"));
         let operations = [
             (Method::POST, "/api/v1/shelves".to_string(), Some(shelf("new")), StatusCode::CREATED),
             (Method::PUT, format!("/api/v1/shelves/{id}"), Some(shelf("replaced")), StatusCode::OK),
             (Method::PUT, "/api/v1/shelves/order".to_string(), Some(json!({"ids": []})), StatusCode::BAD_REQUEST),
             (Method::DELETE, format!("/api/v1/shelves/{id}"), None, StatusCode::NO_CONTENT),
-            (Method::PUT, "/api/v1/settings/folder".to_string(), Some(setting), StatusCode::OK),
-            (
-                Method::POST,
-                "/api/v1/settings/folder/delete".to_string(),
-                Some(place("photos", "/photos")),
-                StatusCode::NO_CONTENT,
-            ),
+            (Method::PUT, setting_path.clone(), Some(setting), StatusCode::OK),
+            (Method::DELETE, setting_path, None, StatusCode::NO_CONTENT),
         ];
         for (method, path, body, answer) in operations {
             for headers in [&missing[..], &foreign[..]] {

@@ -23,5 +23,5 @@ export function originalImageUrl(scope: string, path: string): string {
 /// 単一ファイルの内容。ビューアとダウンロードで同じ URL を使う。
 export function fileContentUrl(scope: string, scopedPath: string): string {
     const { libraryId, path } = entryAddress(scope, scopedPath);
-    return apiUrl(libraryId, "files/content", { path });
+    return apiUrl(libraryId, "entries/content", { path });
 }

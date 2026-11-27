@@ -33,7 +33,7 @@ export function ratingQuery(scope: string, scopedPath: string) {
         queryKey: ["rating", libraryId, path],
         queryFn: async ({ signal }): Promise<Rating> =>
             unwrap(
-                await api.GET("/libraries/{libraryId}/rating", {
+                await api.GET("/libraries/{libraryId}/entries/rating", {
                     params: { path: { libraryId }, query: { path } },
                     signal,
                 }),
@@ -51,7 +51,10 @@ export async function putRating(client: QueryClient, scope: string, scopedPath: 
     client.setQueryData(key, rating);
     try {
         unwrap(
-            await api.PUT("/libraries/{libraryId}/rating", { params: { path: { libraryId } }, body: { path, rating } }),
+            await api.PUT("/libraries/{libraryId}/entries/rating", {
+                params: { path: { libraryId }, query: { path } },
+                body: { rating },
+            }),
         );
     } catch (error) {
         if (previous === undefined) client.removeQueries({ queryKey: key });
@@ -66,7 +69,7 @@ export function entryTagsQuery(scope: string, scopedPath: string) {
         queryKey: ["entry-tags", libraryId, path],
         queryFn: async ({ signal }): Promise<string[]> =>
             unwrap(
-                await api.GET("/libraries/{libraryId}/tags", {
+                await api.GET("/libraries/{libraryId}/entries/tags", {
                     params: { path: { libraryId }, query: { path } },
                     signal,
                 }),
@@ -79,7 +82,7 @@ export function entryTagsQuery(scope: string, scopedPath: string) {
 /// 利用者がこれまでに作った語。タグを入力するときの補完に使う。
 export const tagVocabularyQuery = queryOptions({
     queryKey: ["tag-vocabulary"],
-    queryFn: async ({ signal }): Promise<string[]> => unwrap(await api.GET("/tags", { signal })).tags,
+    queryFn: async ({ signal }): Promise<string[]> => unwrap(await api.GET("/tags/words", { signal })).tags,
     staleTime: 60_000,
     retry: false,
 });
@@ -93,7 +96,10 @@ export async function putEntryTags(
 ): Promise<string[]> {
     const { libraryId, path } = entryAddress(scope, scopedPath);
     const saved = unwrap(
-        await api.PUT("/libraries/{libraryId}/tags", { params: { path: { libraryId } }, body: { path, tags } }),
+        await api.PUT("/libraries/{libraryId}/entries/tags", {
+            params: { path: { libraryId }, query: { path } },
+            body: { tags },
+        }),
     ).tags;
     client.setQueryData(entryTagsQuery(libraryId, path).queryKey, saved);
     client.setQueryData<string[]>(tagVocabularyQuery.queryKey, (current) =>

@@ -151,10 +151,10 @@ A copy inherits the original's ratings and tags, because the same bytes are the 
 
 ## 7. API
 
-Ratings are read and written by specifying the Entry's path, and tags are split into per-Entry reading and writing, and the list of the vocabulary.
+Ratings are read and written by specifying the Entry's path, and tags are split into per-Entry reading and writing, and the list of the vocabulary at `GET /tags/words`.
 The path, parameters, schemas, and status codes of each operation are authoritative in [openapi.yaml](../../daemon/openapi.yaml), and this document writes only the conventions common to the operations.
 
-- For both reading and writing, the path pointing to an Entry is a Library-relative path and goes through the check of the target (§3).
+- For both reading and writing, the Entry is named by its Library in the URL and a Library-relative path in the query, under `/libraries/{id}/entries/rating` and `/libraries/{id}/entries/tags`, and the path goes through the check of the target (§3). A write carries only the value in its body.
 - Writing is a replacement, and on success returns the saved value. The client reflects the returned value on the screen.
 - Authentication uses the same session as other APIs, and ratings and tags read and write only the session user's values.
 - The vocabulary has no Library. A user's words are shared across Libraries.

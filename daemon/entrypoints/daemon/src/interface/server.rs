@@ -9,7 +9,7 @@ use omnius_pxna_interface::{apis, apis::BasicAuthKind};
 
 use crate::{
     interface::{
-        features::{files::FileContentRoute, sockets::image::ImageSocketRoute, uploads::UploadContentRoute, video::VideoSessionRoute},
+        features::{entries::FileContentRoute, sockets::image::ImageSocketRoute, uploads::UploadContentRoute, video::VideoSessionRoute},
         middleware::{OriginCheck, ProblemBody},
         session::{BearerToken, Claims, SessionAuth, SessionCookie},
         web::WebAssets,
@@ -59,6 +59,7 @@ impl ApiServer {
         let generated = omnius_pxna_interface::server::new(Arc::new(Self { state: state.clone() }));
         let api = axum::Router::new()
             .route(FileContentRoute::PATH, axum::routing::get(FileContentRoute::get).put(FileContentRoute::put))
+            .route(FileContentRoute::CREATE_PATH, axum::routing::post(FileContentRoute::post))
             .route(UploadContentRoute::PATH, axum::routing::put(UploadContentRoute::put))
             .route(ImageSocketRoute::PATH, axum::routing::get(ImageSocketRoute::get))
             .route(VideoSessionRoute::PLAYLIST, axum::routing::get(VideoSessionRoute::playlist))
@@ -310,8 +311,12 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn binary(router: &axum::Router, uri: &str, bearer: &str, bytes: Vec<u8>) -> TestResult<HttpResponse> {
+        binary_with(router, Method::PUT, uri, bearer, bytes).await
+    }
+
+    pub(crate) async fn binary_with(router: &axum::Router, method: Method, uri: &str, bearer: &str, bytes: Vec<u8>) -> TestResult<HttpResponse> {
         let request = http::Request::builder()
-            .method(Method::PUT)
+            .method(method)
             .uri(uri)
             .header(http::header::HOST, "localhost")
             .header(http::header::AUTHORIZATION, bearer)
@@ -351,37 +356,43 @@ pub(crate) mod tests {
         let headers = &[("authorization", bearer.as_str())];
         let create = |path: &str, parents: bool| Some(json!({"path": path, "createParents": parents}));
         assert_eq!(
-            send(&router, Method::POST, "/api/v1/libraries/photos/folders", headers, create("/new/deep", false))
+            send(&router, Method::POST, "/api/v1/libraries/photos/entries/folders", headers, create("/new/deep", false))
                 .await?
                 .status,
             StatusCode::NOT_FOUND
         );
         assert_eq!(
-            send(&router, Method::POST, "/api/v1/libraries/photos/folders", headers, create("/new/deep", true))
+            send(&router, Method::POST, "/api/v1/libraries/photos/entries/folders", headers, create("/new/deep", true))
                 .await?
                 .status,
             StatusCode::CREATED
         );
         assert_eq!(
-            send(&router, Method::POST, "/api/v1/libraries/photos/folders", headers, create("/new/deep", true))
+            send(&router, Method::POST, "/api/v1/libraries/photos/entries/folders", headers, create("/new/deep", true))
                 .await?
                 .status,
             StatusCode::CONFLICT
         );
         for (id, path) in [("videos", "/forbidden"), ("photos", "/photos/a.7z/forbidden")] {
             assert_eq!(
-                send(&router, Method::POST, &format!("/api/v1/libraries/{id}/folders"), headers, create(path, true))
+                send(&router, Method::POST, &format!("/api/v1/libraries/{id}/entries/folders"), headers, create(path, true))
                     .await?
                     .status,
                 StatusCode::FORBIDDEN
             );
         }
-        let written = binary(&router, "/api/v1/libraries/photos/files/content?path=/new/deep/file.bin", &bearer, vec![7; 3 * 1024 * 1024]).await?;
+        let written = binary(
+            &router,
+            "/api/v1/libraries/photos/entries/content?path=/new/deep/file.bin",
+            &bearer,
+            vec![7; 3 * 1024 * 1024],
+        )
+        .await?;
         assert_eq!(written.status, StatusCode::CREATED, "生成 router の既定 2 MiB 上限を使わない");
-        assert_eq!(written.body["file"]["path"], "/new/deep/file.bin");
+        assert_eq!(written.body["entry"]["path"], "/new/deep/file.bin");
         let too_large = binary(
             &router,
-            "/api/v1/libraries/photos/files/content?path=/new/too-large.bin",
+            "/api/v1/libraries/photos/entries/content?path=/new/too-large.bin",
             &bearer,
             vec![0; BinaryBody::MAX_BYTES + 1],
         )
@@ -399,7 +410,7 @@ pub(crate) mod tests {
         .await?;
         assert_eq!(moved.status, StatusCode::OK);
         assert_eq!(
-            send(&router, Method::GET, "/api/v1/libraries/photos/files/content?path=/new/moved.bin&limit=2", headers, None)
+            send(&router, Method::GET, "/api/v1/libraries/photos/entries/content?path=/new/moved.bin&limit=2", headers, None)
                 .await?
                 .bytes,
             vec![7, 7]
@@ -1058,20 +1069,16 @@ pub(crate) mod tests {
     fn timeout_maps_to_gateway_timeout_responses_test() {
         let timeout = || ApiError::from(Error::from(omnius_pxna_engine::Error::new(omnius_pxna_engine::ErrorKind::Timeout)));
         assert!(matches!(
-            apis::folders::GetFolderResponse::from(timeout()),
-            apis::folders::GetFolderResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(_)
+            apis::entries::GetEntryMetadataResponse::from(timeout()),
+            apis::entries::GetEntryMetadataResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(_)
         ));
         assert!(matches!(
             apis::folders::ListFolderEntriesResponse::from(timeout()),
             apis::folders::ListFolderEntriesResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(_)
         ));
         assert!(matches!(
-            apis::files::GetFileResponse::from(timeout()),
-            apis::files::GetFileResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(_)
-        ));
-        assert!(matches!(
-            apis::files::ReadFileContentResponse::from(timeout()),
-            apis::files::ReadFileContentResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(_)
+            apis::entries::ReadFileContentResponse::from(timeout()),
+            apis::entries::ReadFileContentResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(_)
         ));
     }
 }

@@ -18,8 +18,8 @@ const ok = (data: unknown) => ({ data, response: new Response() });
 function daemon(initial: { rating?: string; tags?: string[]; vocabulary?: string[] }) {
     const state = { rating: initial.rating ?? "none", tags: initial.tags ?? [], vocabulary: initial.vocabulary ?? [] };
     mocks.get.mockImplementation(async (route: string) => {
-        if (route === "/libraries/{libraryId}/rating") return ok({ rating: state.rating });
-        if (route === "/libraries/{libraryId}/tags") return ok({ tags: state.tags });
+        if (route === "/libraries/{libraryId}/entries/rating") return ok({ rating: state.rating });
+        if (route === "/libraries/{libraryId}/entries/tags") return ok({ tags: state.tags });
         return ok({ tags: state.vocabulary });
     });
     mocks.put.mockImplementation(async (_route: string, options: { body: { tags: string[] } }) => {
@@ -86,7 +86,8 @@ it("Enter で語を足し、足した語だけを含む集合を保存して、�
     await enter();
     await vi.waitFor(() => expect(chips()).toEqual(["cat", "trip"]));
     expect(mocks.put).toHaveBeenCalledOnce();
-    expect(mocks.put.mock.calls[0]?.[1].body).toEqual({ path: "/trip/a.png", tags: ["cat", "trip"] });
+    expect(mocks.put.mock.calls[0]?.[1].params.query).toEqual({ path: "/trip/a.png" });
+    expect(mocks.put.mock.calls[0]?.[1].body).toEqual({ tags: ["cat", "trip"] });
     expect(input().value).toBe("");
 });
 
@@ -164,13 +165,13 @@ it("付いている語を読み終えるまでは入力できず、保存済み�
     const state = daemon({ tags: ["cat"] });
     let release: (() => void) | undefined;
     mocks.get.mockImplementation(async (route: string) => {
-        if (route === "/libraries/{libraryId}/tags") {
+        if (route === "/libraries/{libraryId}/entries/tags") {
             await new Promise<void>((done) => {
                 release = done;
             });
             return ok({ tags: state.tags });
         }
-        return ok(route === "/libraries/{libraryId}/rating" ? { rating: "none" } : { tags: [] });
+        return ok(route === "/libraries/{libraryId}/entries/rating" ? { rating: "none" } : { tags: [] });
     });
     await act(async () =>
         root.render(

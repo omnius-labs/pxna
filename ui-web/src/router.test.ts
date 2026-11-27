@@ -14,7 +14,7 @@ const libraries = (...ids: string[]) => ({
     data: { libraries: ids.map((id) => ({ id, name: id, readonly: false })) },
     response: new Response(null, { status: 200 }),
 });
-const found = () => ({ data: { folder: {} }, response: new Response(null, { status: 200 }) });
+const found = () => ({ data: { entry: {} }, response: new Response(null, { status: 200 }) });
 const failed = (status: number) => ({ error: { code: "NotFound" }, response: new Response(null, { status }) });
 const saveFolder = (libraryId: string, path: string) =>
     window.localStorage.setItem(LAST_FOLDER_KEY, JSON.stringify({ libraryId, path }));
@@ -67,8 +67,10 @@ describe("/ の復元", () => {
         const router = await loadRouterAt("/");
         expect(router.state.location.pathname).toBe("/browse/videos/a/b");
         expect(mocks.get).toHaveBeenCalledWith(
-            "/libraries/{libraryId}/folders",
-            expect.objectContaining({ params: { path: { libraryId: "videos" }, query: { path: "/a/b" } } }),
+            "/libraries/{libraryId}/entries/metadata",
+            expect.objectContaining({
+                params: { path: { libraryId: "videos" }, query: { path: "/a/b", view: "folder" } },
+            }),
         );
     });
 
@@ -76,7 +78,7 @@ describe("/ の復元", () => {
         saveFolder("gone", "/a");
         const router = await loadRouterAt("/");
         expect(router.state.location.pathname).toBe("/browse/photos");
-        expect(mocks.get).not.toHaveBeenCalledWith("/libraries/{libraryId}/folders", expect.anything());
+        expect(mocks.get).not.toHaveBeenCalledWith("/libraries/{libraryId}/entries/metadata", expect.anything());
     });
 
     it("保存したフォルダが 404 なら、その Library のルートへ移る", async () => {

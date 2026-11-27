@@ -445,7 +445,7 @@ A Shelf has an id that the daemon gives it as a TSID string, a name of 1 to 100 
 A Shelf is listed by sending its Scope and Filter to `listEntries`, as an Unsaved Shelf is ([Listing and Search Design §8.1](./design/listing.md#carry-a-scope-and-a-filter-in-the-json-body-of-one-post-request)), and saving a Shelf applies the checks of that body to them, so a saved Shelf can always be sent as it is held.
 Its starts are checked for form only, and one that names nothing is a missing start when the Shelf is listed; a start given twice is kept, because `listEntries` names it once and a move can make two starts the same.
 Whether the timeline suits the Filter's kinds is the client's rule ([Client Design §3.9](./design/client.md#39-display-preferences)), and the daemon does not check it (§11.1 "Check a Shelf as the Body of listEntries, and Its Starts for Form Only").
-The folder settings are read in full with `GET /settings/folder` when a client starts, written one folder at a time with `PUT /settings/folder`, and removed with `POST /settings/folder/delete`, each naming the folder by a Library id and a Library-relative path in the body (§11.1 "Name a Folder of the Folder Settings in the Body of Requests under /settings/folder").
+The folder settings are read in full with `GET /folder-settings` when a client starts, and written one folder at a time with `PUT` and removed with `DELETE` on `/libraries/{id}/entries/folder-settings?path=`, which name the folder as a rating names its Entry ([API Design §14.1](./design/api.md#address-one-entry-under-its-library-with-the-path-in-the-query)).
 A later write replaces an earlier one without a version, as for the display preferences (§11.2 "Optimistic Locking with ETag / If-Match").
 A client resolves a folder's values itself: each unset value is taken from the nearest folder at or above it that sets it, and then from the display preferences; an open Shelf's set values win over both, and inside a Shelf only how an archive opens is taken from folder settings ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
 These requests change no Library, so they respond synchronously and follow, of the conventions of §8, only the `Origin` check of §8.5.
@@ -544,7 +544,8 @@ When operating on a mixed multiple selection, the client splits it into two requ
 
 An archive's path points to different things depending on the namespace.
 In the `folders` API (including direct and recursive listings) it points to the root inside the archive, and in the `files` API it points to the archive's file itself.
-This is so that, at the same path, one can both list its contents and download, copy, or delete it as a file.
+This is so that, at the same path, one can both list its contents and copy or delete it as a file.
+A read of one Entry chooses the face with `view` instead ([API Design §3.1](./design/api.md#31-entry-and-entryref)): `GET /libraries/{id}/entries/metadata?view=folder` reads an archive's root, and the content of an archive is its file.
 
 ### 8.2 Determining Sync and Async
 
@@ -640,15 +641,15 @@ If the configuration were changed to serve the web client from a different origi
 - A mutating operation on a path inside an archive is 403
 - A mutating operation on a `readonly` Library is 403
 
-A Library's `readonly` prohibits changes to the whole Library. An Entry's `metadata.readonly` is separate from the Library's setting, and a normal Entry returns `false` even inside a `readonly` Library. Entries inside an archive, and `GET /folders` that fetches the folders at an archive's root and inside it, return `metadata.readonly=true`. The archive's own file Entry is handled like an ordinary file.
-The client decides whether something can be changed from the logical OR of the Library's `readonly` and the Entry's `metadata.readonly` (for creating a folder, the destination's `GET /folders`). The `kind` of the 403 for a change request is `Forbidden`.
+A Library's `readonly` prohibits changes to the whole Library. An Entry's `metadata.readonly` is separate from the Library's setting, and a normal Entry returns `false` even inside a `readonly` Library. Entries inside an archive, and the folder read with `view=folder` at an archive's root and inside it, return `metadata.readonly=true`. The archive's own file Entry is handled like an ordinary file.
+The client decides whether something can be changed from the logical OR of the Library's `readonly` and the Entry's `metadata.readonly` (for creating a folder, the destination's metadata read with `view=folder`). The `kind` of the 403 for a change request is `Forbidden`.
 
 Copy and move also check the destination side.
 A copy from a readable Library to a `readonly` Library gives 403.
 
 ### 8.7 Uploads
 
-Files of 32 MiB or less are handled by a one-shot `PUT /files/content?path=`.
+Files of 32 MiB or less are handled by a one-shot `PUT /entries/content?path=`, or by `POST /entries/files?path=` when the daemon may publish them under another name (`conflict=rename`).
 Anything larger returns 413 and has the client use an upload session.
 
 The flow of an upload session is as follows.
@@ -1530,23 +1531,6 @@ A tile size means a width in CSS pixels on a wide screen and a number of columns
 One set without the tile size, which would stay in the display preferences only.
 The shape would be smaller, but a shelf of books could not ask for larger covers, or for covers shown whole rather than cropped, so we rejected it.
 
-#### Name a Folder of the Folder Settings in the Body of Requests under /settings/folder
-
-**Decision**
-The folder settings are read with `GET /settings/folder`, written with `PUT /settings/folder`, and removed with `POST /settings/folder/delete`, and the written or removed folder is named in the body by the object of a Library id and a Library-relative path that names a start (§6.5).
-
-**Reason**
-Folder settings are the daemon's own state and change no Library, so they sit with the other settings rather than under a Library's paths.
-Naming the folder by the object that names a start gives the client one shape for a place in a Library, and removing by `POST` with `/delete` follows the deletions of Entries (§8.4).
-
-**Rejected alternative 1**
-`PUT` and `DELETE` on `/libraries/{libraryId}/folder-settings` with the path in the query.
-It would match the paths of the other operations in a Library, but a folder would be named in two parts, unlike a start, so we rejected it.
-
-**Rejected alternative 2**
-`DELETE /settings/folder` with the folder in the body.
-It is the plain verb, but a body of `DELETE` has no defined meaning in OpenAPI 3.0, and a generator may drop it, so we rejected it.
-
 #### Check a Shelf as the Body of listEntries, and Its Starts for Form Only
 
 **Decision**
@@ -1746,7 +1730,7 @@ The daemon has configuration loading, the process lock, and the startup code of 
 If you copy the template `daemon/config/pxna.toml.example` as `pxna.toml` and pass its directory to `--config-dir`, it works as far as loading the configuration and listening on `listen_addr`.
 `pxna.toml` contains actual settings, so it is not put under git management.
 `get_health` returns the daemon's running state.
-The read-side `listLibraries`, `getLibrary`, `getFolder`, `listFolderEntries`, `getFile`, and `readFileContent` are connected to the business logic.
+The read-side `listLibraries`, `getLibrary`, `getEntryMetadata`, `listFolderEntries`, and `readFileContent` are connected to the business logic.
 Paths that take a path call `StorageService` after checking the Library boundary, and can read inside archives too.
 The paths for setup, login, the current user, and logout are also connected, and paths requiring authentication can be called with the session cookie or bearer obtained by setup or login.
 `Origin` validation is applied to mutating requests that carry a cookie.
