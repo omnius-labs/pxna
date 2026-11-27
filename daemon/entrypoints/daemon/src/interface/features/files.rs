@@ -331,12 +331,12 @@ mod tests {
     fn error_kind(response: apis::files::ReadFileContentResponse) -> Option<(u16, models::ErrorKind)> {
         use apis::files::ReadFileContentResponse as R;
         match response {
-            R::Status400_InvalidRequest(body) => Some((400, body.kind)),
-            R::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => Some((403, body.kind)),
-            R::Status404_ResourceNotFound(body) => Some((404, body.kind)),
-            R::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => Some((409, body.kind)),
-            R::Status416_RequestedByteRangeCannotBeSatisfied(body) => Some((416, body.kind)),
-            R::Status500_InternalServerError(body) => Some((500, body.kind)),
+            R::Status400_InvalidRequest(body) => Some((400, body.code)),
+            R::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => Some((403, body.code)),
+            R::Status404_ResourceNotFound(body) => Some((404, body.code)),
+            R::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => Some((409, body.code)),
+            R::Status416_RequestedByteRangeCannotBeSatisfied(body) => Some((416, body.code)),
+            R::Status500_InternalServerError(body) => Some((500, body.code)),
             _ => None,
         }
     }
@@ -433,12 +433,12 @@ mod tests {
         let apis::files::GetFileResponse::Status400_InvalidRequest(body) = get_file(&fixture, "/photos").await else {
             panic!("folder must be rejected");
         };
-        assert_eq!(body.kind, models::ErrorKind::InvalidRequest);
+        assert_eq!(body.code, models::ErrorKind::InvalidRequest);
 
         let apis::files::GetFileResponse::Status404_ResourceNotFound(body) = get_file(&fixture, "/photos/missing.txt").await else {
             panic!("missing file must be 404");
         };
-        assert_eq!(body.kind, models::ErrorKind::NotFound);
+        assert_eq!(body.code, models::ErrorKind::NotFound);
         Ok(())
     }
 }

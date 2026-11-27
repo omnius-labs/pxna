@@ -32,4 +32,4 @@ There is no data loss.
 ## Handling Policy
 
 Copy the engine error's message into the daemon error in the conversion, and keep the current rule that `ApiError` omits the message for 500 responses.
-Add a test that an engine error with a message produces a 4xx `ErrorResponse` with that message, and a test that a 500 response still omits it.
+Add a test that an engine error with a message produces a 4xx `Problem` with that message in `detail`, and a test that a 500 response still omits it.

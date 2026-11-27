@@ -1,18 +1,17 @@
 use std::sync::Arc;
 
 use axum::{
-    Json,
     extract::{State, ws::WebSocketUpgrade, ws::rejection::WebSocketUpgradeRejection},
-    response::{IntoResponse as _, Response},
+    response::Response,
 };
 use axum_extra::extract::CookieJar;
-use http::{HeaderMap, StatusCode};
+use http::HeaderMap;
 
 use omnius_pxna_interface::models;
 
 use super::connection::Connection;
 use crate::{
-    error::ApiError,
+    error::{ApiError, ApiStatus},
     interface::{middleware::OriginCheck, session::SessionAuth},
     prelude::*,
     state::DaemonState,
@@ -37,9 +36,7 @@ impl ImageSocketRoute {
 
         // upgrade は `GET` なので、変更系の要求を守る `Origin` の検証には掛からない。cookie が付いて届く以上、ここで同じ検証をする。
         if !OriginCheck::allows_upgrade(&headers) {
-            let mut body = models::ErrorResponse::new(models::ErrorKind::Forbidden);
-            body.message = Some("origin does not match host".to_string());
-            return (StatusCode::FORBIDDEN, Json(body)).into_response();
+            return ApiError::new(ApiStatus::Forbidden, models::ErrorKind::Forbidden, Some("origin does not match host".to_string())).into_response();
         }
 
         let upgrade = match upgrade {
@@ -48,9 +45,9 @@ impl ImageSocketRoute {
         };
 
         let Some(slot) = state.image_sockets.open(&claims.session.id) else {
-            let mut body = models::ErrorResponse::new(models::ErrorKind::LimitExceeded);
-            body.message = Some("too many open image sockets".to_string());
-            return (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+            let status = http::StatusCode::TOO_MANY_REQUESTS;
+            let body = ApiError::problem(status, models::ErrorKind::LimitExceeded, Some("too many open image sockets".to_string()));
+            return ApiError::problem_response(status, &body);
         };
 
         // 契約を超える大きさの message は、読み込む前に tungstenite が拒む。上限ちょうどの超過は接続側が 4400 で閉じる。

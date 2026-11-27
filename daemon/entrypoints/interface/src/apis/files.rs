@@ -14,16 +14,16 @@ use crate::{models, types::*};
 pub enum CopyFilesResponse {
     /// Copy operation started.
     Status202_CopyOperationStarted(models::OperationResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -34,16 +34,16 @@ pub enum DeleteFilesResponse {
     Status202_DeleteOperationStarted(models::OperationResponse),
     /// File deleted.
     Status204_FileDeleted,
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -52,20 +52,20 @@ pub enum DeleteFilesResponse {
 pub enum GetFileResponse {
     /// File metadata.
     Status200_FileMetadata(models::FileResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::ErrorResponse),
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -76,18 +76,18 @@ pub enum MoveFilesResponse {
     Status200_MovedSynchronously(models::EntryList),
     /// Move operation started.
     Status202_MoveOperationStarted(models::OperationResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -109,22 +109,22 @@ pub enum ReadFileContentResponse {
         content_length: Option<u64>,
         e_tag: Option<String>,
     },
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Requested byte range cannot be satisfied.
-    Status416_RequestedByteRangeCannotBeSatisfied(models::ErrorResponse),
+    Status416_RequestedByteRangeCannotBeSatisfied(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::ErrorResponse),
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -133,22 +133,22 @@ pub enum ReadFileContentResponse {
 pub enum WriteFileContentResponse {
     /// File written.
     Status201_FileWritten(models::FileResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// The request body exceeds the one-shot write limit.
-    Status413_TheRequestBodyExceedsTheOne(models::ErrorResponse),
+    Status413_TheRequestBodyExceedsTheOne(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// The daemon does not have enough disk space.
-    Status507_TheDaemonDoesNotHaveEnoughDiskSpace(models::ErrorResponse),
+    Status507_TheDaemonDoesNotHaveEnoughDiskSpace(models::Problem),
 }
 
 /// Files

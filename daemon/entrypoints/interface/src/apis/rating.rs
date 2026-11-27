@@ -14,16 +14,16 @@ use crate::{models, types::*};
 pub enum GetRatingResponse {
     /// The rating.
     Status200_TheRating(models::RatingResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::ErrorResponse),
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -32,16 +32,16 @@ pub enum GetRatingResponse {
 pub enum PutRatingResponse {
     /// The saved rating.
     Status200_TheSavedRating(models::RatingResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::ErrorResponse),
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 /// Rating

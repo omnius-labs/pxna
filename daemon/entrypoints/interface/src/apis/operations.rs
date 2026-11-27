@@ -15,11 +15,11 @@ pub enum CancelOperationResponse {
     /// Cancellation requested.
     Status202_CancellationRequested(models::OperationResponse),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -29,11 +29,11 @@ pub enum GetOperationResponse {
     /// Operation state.
     Status200_OperationState(models::OperationResponse),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -43,9 +43,9 @@ pub enum ListOperationsResponse {
     /// Known operations.
     Status200_KnownOperations(models::OperationList),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 /// Operations

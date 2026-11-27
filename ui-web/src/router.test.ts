@@ -15,7 +15,7 @@ const libraries = (...ids: string[]) => ({
     response: new Response(null, { status: 200 }),
 });
 const found = () => ({ data: { folder: {} }, response: new Response(null, { status: 200 }) });
-const failed = (status: number) => ({ error: { kind: "NotFound" }, response: new Response(null, { status }) });
+const failed = (status: number) => ({ error: { code: "NotFound" }, response: new Response(null, { status }) });
 const saveFolder = (libraryId: string, path: string) =>
     window.localStorage.setItem(LAST_FOLDER_KEY, JSON.stringify({ libraryId, path }));
 

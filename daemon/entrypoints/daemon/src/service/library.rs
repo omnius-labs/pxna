@@ -230,7 +230,7 @@ impl LibraryBrowser {
                 let mut detail = models::EntryDetailResult::new(path);
                 match result {
                     Ok(entry) => detail.detail = Some(entry),
-                    Err(error) => detail.error = Some(crate::error::ApiError::from_error(&error).body.kind),
+                    Err(error) => detail.error = Some(crate::error::ApiError::from_error(&error).body.code),
                 }
                 detail
             })

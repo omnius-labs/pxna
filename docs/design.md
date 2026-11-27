@@ -349,12 +349,14 @@ The individual definitions and the authoritative responses are in `daemon/openap
 | `InsufficientStorage` | 507    | Insufficient capacity at the write destination                                                                                         |
 | `Timeout`             | 504    | Exceeding the deadline for extracting an archive or generating a thumbnail with ffmpeg                                                 |
 | `InternalServerError` | 500    | Anything else, including an ffprobe output the daemon cannot parse                                                                     |
+| `MethodNotAllowed`    | 405    | A path that exists but does not accept the method                                                                                      |
 
 The reasons for making `UnsupportedType`, `LimitExceeded`, and `PasswordRequired` independent kinds, and for returning `Timeout` as 504, are recorded in §11.1.
 The engine's `Cancelled` is not in the table and falls to `InternalServerError`.
 A successful ffprobe whose output the daemon cannot deserialize is also `InternalServerError`, because the failure is in the daemon rather than a fact about the file.
 
-The generated router reads and checks a JSON body before the handler, and answers a rejected one with a plain-text body rather than an `ErrorResponse`.
+Every error response is a `Problem` served as `application/problem+json`, whose `code` is the API `ErrorKind` of the table and whose `requestId` names the log line of an internal error ([API Design §11.1](./design/api.md#111-errors)).
+The generated router reads and checks a JSON body before the handler and answers a rejected one in plain text, and it and axum answer a missing session, a missing route, and a disallowed method with an empty body; a daemon middleware outside the router turns each of these into a `Problem` with the code of its status, moving a plain-text reason of a 4xx into `detail`.
 A body that is not JSON is 400, one that does not fit the types of the contract, such as one with an unknown value of an enum or without a required property, is 422 ([knowledge](./knowledge/axum-json-rejection.md)), and one with a value outside a range or a length of the contract is 400.
 An enum written inline in a property, such as `rating` and `kinds` of `EntryFilter`, is a string in the generated types, so a value outside it reaches the handler and is `InvalidInput`.
 

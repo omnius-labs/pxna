@@ -55,6 +55,7 @@ export const en = {
         PayloadTooLarge: "The file is too large to send at once.",
         InsufficientStorage: "Not enough disk space.",
         Timeout: "The operation timed out.",
+        MethodNotAllowed: "The server does not accept this request.",
     },
     sort: {
         name: "Name",

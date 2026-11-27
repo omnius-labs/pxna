@@ -91,7 +91,7 @@ async function harness(view: "grid" | "list" = "grid", initial: Entry[] = []) {
     get.mockImplementation(
         async (route: string, options?: { params?: { query?: { path?: string; offset?: number } } }) => {
             if (route.endsWith("/thumbnails"))
-                return { error: { kind: "NotFound" }, response: new Response(null, { status: 404 }) };
+                return { error: { code: "NotFound" }, response: new Response(null, { status: 404 }) };
             if (route === "/libraries") return response({ libraries: [{ id: "ops", name: "Ops", readonly: false }] });
             if (route === "/operations") return response({ operations: [] });
             if (route.endsWith("/folders"))
@@ -233,7 +233,7 @@ it("取り消すと作成せず、409 ではダイアログと入力を残す", 
         await h.key("Escape", first);
         await wait(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
         expect(post).not.toHaveBeenCalled();
-        post.mockResolvedValue({ error: { kind: "Conflict" }, response: new Response(null, { status: 409 }) });
+        post.mockResolvedValue({ error: { code: "Conflict" }, response: new Response(null, { status: 409 }) });
         await h.create();
         const collision = await h.type("dup");
         await h.submit();
@@ -345,7 +345,7 @@ it("名前の変更は、409 の後も入力を保ち、直して送り直せる
         await wait(() => expect(nameInput()).not.toBeNull());
         const input = await h.type("conflict.txt");
         expect(document.activeElement).toBe(input);
-        post.mockResolvedValueOnce({ error: { kind: "Conflict" }, response: new Response(null, { status: 409 }) });
+        post.mockResolvedValueOnce({ error: { code: "Conflict" }, response: new Response(null, { status: 409 }) });
         await h.submit();
         await wait(() => expect(post).toHaveBeenCalledOnce());
         expect(document.activeElement).toBe(input);
@@ -586,7 +586,7 @@ it("混在切り取りの一方が失敗したら拒否された項目と受理�
                 },
             },
             response: new Response(null, { status: 202 }),
-        }).mockResolvedValueOnce({ error: { kind: "Forbidden" }, response: new Response(null, { status: 403 }) });
+        }).mockResolvedValueOnce({ error: { code: "Forbidden" }, response: new Response(null, { status: 403 }) });
         await act(async () =>
             [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
                 .find((button) => button.textContent === "Keep both")!

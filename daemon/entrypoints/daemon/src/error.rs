@@ -282,20 +282,40 @@ pub enum ApiStatus {
     InsufficientStorage,
 }
 
+impl ApiStatus {
+    pub fn status_code(self) -> http::StatusCode {
+        match self {
+            ApiStatus::BadRequest => http::StatusCode::BAD_REQUEST,
+            ApiStatus::Unauthorized => http::StatusCode::UNAUTHORIZED,
+            ApiStatus::Forbidden => http::StatusCode::FORBIDDEN,
+            ApiStatus::NotFound => http::StatusCode::NOT_FOUND,
+            ApiStatus::Conflict => http::StatusCode::CONFLICT,
+            ApiStatus::RangeNotSatisfiable => http::StatusCode::RANGE_NOT_SATISFIABLE,
+            ApiStatus::GatewayTimeout => http::StatusCode::GATEWAY_TIMEOUT,
+            ApiStatus::InternalServerError => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ApiStatus::PayloadTooLarge => http::StatusCode::PAYLOAD_TOO_LARGE,
+            ApiStatus::InsufficientStorage => http::StatusCode::INSUFFICIENT_STORAGE,
+        }
+    }
+}
+
+/// 契約の `Problem` の media type。
+pub const PROBLEM_CONTENT_TYPE: &str = "application/problem+json";
+
 /// daemon の `Error` を、API の `ErrorKind` と HTTP ステータスへ写した値。
 ///
 /// 内部の分類をそのまま外へ出さず、design.md §4.4 の対応表に沿って利用者可視の種別へまとめる。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApiError {
     pub status: ApiStatus,
-    pub body: omnius_pxna_interface::models::ErrorResponse,
+    pub body: omnius_pxna_interface::models::Problem,
 }
 
 impl ApiError {
     pub fn from_error(error: &Error) -> Self {
         use omnius_pxna_interface::models::ErrorKind as ApiErrorKind;
 
-        let (status, kind) = match error.kind() {
+        let (status, code) = match error.kind() {
             ErrorKind::PayloadTooLarge => (ApiStatus::PayloadTooLarge, ApiErrorKind::PayloadTooLarge),
             ErrorKind::IoError if Self::disk_full(error) => (ApiStatus::InsufficientStorage, ApiErrorKind::InsufficientStorage),
             ErrorKind::InvalidInput => (ApiStatus::BadRequest, ApiErrorKind::InvalidRequest),
@@ -313,19 +333,32 @@ impl ApiError {
             _ => (ApiStatus::InternalServerError, ApiErrorKind::InternalServerError),
         };
 
-        let mut body = omnius_pxna_interface::models::ErrorResponse::new(kind);
         if status == ApiStatus::InternalServerError {
-            // 内部の詳細は log にだけ残し、応答へは出さない。
-            tracing::error!(error = ?error, "request failed");
+            let api = Self::new(status, code, None);
+            // 内部の詳細は log にだけ残し、応答へは出さない。応答の `requestId` で log の行を引ける。
+            tracing::error!(error = ?error, request_id = %api.body.request_id, "request failed");
+            api
         } else {
-            body.message = error.message().map(str::to_string);
+            Self::new(status, code, error.message().map(str::to_string))
         }
-
-        Self { status, body }
     }
-}
 
-impl ApiError {
+    pub fn new(status: ApiStatus, code: omnius_pxna_interface::models::ErrorKind, detail: Option<String>) -> Self {
+        Self {
+            status,
+            body: Self::problem(status.status_code(), code, detail),
+        }
+    }
+
+    /// `status` の `Problem`。`requestId` は要求ごとに新しく振る。
+    pub fn problem(status: http::StatusCode, code: omnius_pxna_interface::models::ErrorKind, detail: Option<String>) -> omnius_pxna_interface::models::Problem {
+        let title = status.canonical_reason().unwrap_or("Error").to_string();
+        let request_id = uuid::Uuid::new_v4().simple().to_string();
+        let mut body = omnius_pxna_interface::models::Problem::new("about:blank".to_string(), title, i32::from(status.as_u16()), code, request_id);
+        body.detail = detail;
+        body
+    }
+
     fn disk_full(error: &Error) -> bool {
         let mut source = std::error::Error::source(error);
         while let Some(cause) = source {
@@ -340,34 +373,32 @@ impl ApiError {
     }
 
     pub fn status_code(&self) -> http::StatusCode {
-        match self.status {
-            ApiStatus::BadRequest => http::StatusCode::BAD_REQUEST,
-            ApiStatus::Unauthorized => http::StatusCode::UNAUTHORIZED,
-            ApiStatus::Forbidden => http::StatusCode::FORBIDDEN,
-            ApiStatus::NotFound => http::StatusCode::NOT_FOUND,
-            ApiStatus::Conflict => http::StatusCode::CONFLICT,
-            ApiStatus::RangeNotSatisfiable => http::StatusCode::RANGE_NOT_SATISFIABLE,
-            ApiStatus::GatewayTimeout => http::StatusCode::GATEWAY_TIMEOUT,
-            ApiStatus::InternalServerError => http::StatusCode::INTERNAL_SERVER_ERROR,
-            ApiStatus::PayloadTooLarge => http::StatusCode::PAYLOAD_TOO_LARGE,
-            ApiStatus::InsufficientStorage => http::StatusCode::INSUFFICIENT_STORAGE,
-        }
+        self.status.status_code()
     }
 
-    /// 契約の `ErrorResponse` を本文に持つ応答にする。生成されたルータの外の route が使う。
+    /// 契約の `Problem` を本文に持つ応答にする。生成されたルータの外の route と middleware が使う。
     pub fn into_response(self) -> axum::response::Response {
+        Self::problem_response(self.status_code(), &self.body)
+    }
+
+    pub fn problem_response(status: http::StatusCode, body: &omnius_pxna_interface::models::Problem) -> axum::response::Response {
         use axum::response::IntoResponse as _;
-        (self.status_code(), axum::Json(self.body)).into_response()
+        match serde_json::to_vec(body) {
+            Ok(bytes) => (status, [(http::header::CONTENT_TYPE, PROBLEM_CONTENT_TYPE)], bytes).into_response(),
+            Err(error) => {
+                tracing::error!(?error, "failed to serialize a problem");
+                status.into_response()
+            }
+        }
     }
 
     /// 認証が要る route で、セッションを取り出せなかったときの応答。
     pub fn unauthorized() -> Self {
-        let mut body = omnius_pxna_interface::models::ErrorResponse::new(omnius_pxna_interface::models::ErrorKind::Unauthorized);
-        body.message = Some("Authentication is required.".to_string());
-        Self {
-            status: ApiStatus::Unauthorized,
-            body,
-        }
+        Self::new(
+            ApiStatus::Unauthorized,
+            omnius_pxna_interface::models::ErrorKind::Unauthorized,
+            Some("Authentication is required.".to_string()),
+        )
     }
 }
 
@@ -404,7 +435,7 @@ mod tests {
             let error: Error = omnius_pxna_engine::Error::new(engine_kind.clone()).with_message("detail").into();
             let api = ApiError::from(error);
             assert_eq!(api.status, status, "{engine_kind:?}");
-            assert_eq!(api.body.kind, api_kind, "{engine_kind:?}");
+            assert_eq!(api.body.code, api_kind, "{engine_kind:?}");
         }
     }
 
@@ -418,7 +449,8 @@ mod tests {
 
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
         let body: serde_json::Value = serde_json::from_slice(&bytes)?;
-        assert_eq!(body["kind"], "Timeout");
+        assert_eq!(body["code"], "Timeout");
+        assert_eq!(body["status"], 504);
         Ok(())
     }
 
@@ -429,6 +461,6 @@ mod tests {
             .into();
         let api = ApiError::from(error);
         assert_eq!(api.status, ApiStatus::InternalServerError);
-        assert_eq!(api.body.message, None);
+        assert_eq!(api.body.detail, None);
     }
 }

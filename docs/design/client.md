@@ -493,7 +493,7 @@ Even if the display preferences cannot be read, browsing is not stopped.
 The shape and ranges of the set of values are defined by `openapi.yaml` and validated by the server.
 A `PUT` that contains an out-of-range value is rejected with 400, and the saved values do not change.
 How an archive opens is optional, and a set saved before it existed is read with the default, opening as a folder. `filmstripSize` is required. A set saved before it existed cannot be read, so `GET /preferences` fails with `SerdeError`, the web client runs with the defaults, and the next `PUT` saves the new shape. Deleting only the saved preferences row also resets it; the state directory holds users and ratings and is not deleted.
-The ranges and the values of the enums are written in the contract, so the generated router rejects when it reads the body, a value out of range with 400 and an unknown value of an enum with 422 ([design.md §4.4](../design.md#44-error-model-and-http-mapping)). The body of these rejections is not an `ErrorResponse`, and the web client judges the rejection from the status code alone.
+The ranges and the values of the enums are written in the contract, so the generated router rejects when it reads the body, a value out of range with 400 and an unknown value of an enum with 422 ([design.md §4.4](../design.md#44-error-model-and-http-mapping)). The body of these rejections is a `Problem` whose `code` is `InvalidRequest`, and the web client judges the rejection from the status code alone.
 
 The display preferences have two sets: for wide screens and for narrow screens.
 The web client decides which set to use by the screen width (768 CSS px), and switches sets when the width changes.
@@ -587,7 +587,7 @@ The choice is read before the first render, so the screen does not flash in anot
 Strings live in [en.ts](../../ui-web/src/i18n/locales/en.ts) and [ja.ts](../../ui-web/src/i18n/locales/ja.ts). The type checker requires `ja.ts` to have the same keys as `en.ts`, and a test requires the same placeholders.
 Counts use plural keys: English has `_one` and `_other`, and Japanese has only `_other`. Dates and the names of months follow the language.
 Strings are read with `t` at render time, so changing the language rebuilds the whole screen. Open menus and other transient state are lost, and server state stays in the `QueryClient`.
-The `message` of an API error is English text for logs. The client shows a translation chosen by the error's `kind` and falls back to `message` only when the response has no `kind`.
+The `detail` of an API error is English text for logs. The client shows a translation chosen by the error's `code` and falls back to `detail` only when the response has no `code`.
 The daemon and the API are not translated.
 
 ## 4. Thumbnail Requests

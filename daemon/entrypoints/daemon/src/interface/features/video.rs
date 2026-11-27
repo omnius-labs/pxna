@@ -274,7 +274,7 @@ mod tests {
             None,
         )
         .await?;
-        assert_eq!((broken.status, broken.body["kind"].as_str()), (StatusCode::BAD_REQUEST, Some("UnsupportedType")));
+        assert_eq!((broken.status, broken.body["code"].as_str()), (StatusCode::BAD_REQUEST, Some("UnsupportedType")));
         Ok(())
     }
 

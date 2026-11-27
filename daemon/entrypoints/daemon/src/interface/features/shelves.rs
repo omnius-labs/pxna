@@ -600,14 +600,14 @@ mod tests {
         for refused in [json!([ids[0], ids[1]]), json!([ids[0], ids[0], ids[1], ids[2]]), json!([ids[0], ids[1], "shf_unknown"])] {
             let response = client.send(Method::PUT, "/shelves/order", Some(json!({ "ids": refused }))).await?;
             assert_eq!(response.status, StatusCode::BAD_REQUEST, "{refused}");
-            assert_eq!(response.body["kind"], "InvalidRequest", "{refused}");
+            assert_eq!(response.body["code"], "InvalidRequest", "{refused}");
         }
 
         let path = format!("/shelves/{id}");
         assert_eq!(client.send(Method::DELETE, &path, None).await?.status, StatusCode::NO_CONTENT);
         assert_eq!(names(&client.shelves().await?), ["Plain", "Timeline"]);
         for response in [client.send(Method::DELETE, &path, None).await?, client.send(Method::PUT, &path, Some(shelf("x"))).await?] {
-            assert_eq!((response.status, response.body["kind"].as_str()), (StatusCode::NOT_FOUND, Some("NotFound")));
+            assert_eq!((response.status, response.body["code"].as_str()), (StatusCode::NOT_FOUND, Some("NotFound")));
         }
         Ok(())
     }
@@ -664,7 +664,7 @@ mod tests {
         for name in ["", "   ", &"x".repeat(101)] {
             let response = client.send(Method::POST, "/shelves", Some(shelf(name))).await?;
             assert_eq!(
-                (response.status, response.body["kind"].as_str()),
+                (response.status, response.body["code"].as_str()),
                 (StatusCode::BAD_REQUEST, Some("InvalidRequest")),
                 "{name:?}"
             );
@@ -683,7 +683,7 @@ mod tests {
             client.create(shelf(&format!("shelf {index}"))).await?;
         }
         let response = client.send(Method::POST, "/shelves", Some(shelf("one too many"))).await?;
-        assert_eq!((response.status, response.body["kind"].as_str()), (StatusCode::BAD_REQUEST, Some("InvalidRequest")));
+        assert_eq!((response.status, response.body["code"].as_str()), (StatusCode::BAD_REQUEST, Some("InvalidRequest")));
         assert_eq!(client.shelves().await?.len(), 200);
         Ok(())
     }
@@ -717,7 +717,7 @@ mod tests {
         ] {
             let response = client.send(Method::PUT, "/settings/folder", Some(refused.clone())).await?;
             assert_eq!(
-                (response.status, response.body["kind"].as_str()),
+                (response.status, response.body["code"].as_str()),
                 (StatusCode::BAD_REQUEST, Some("InvalidRequest")),
                 "{refused}"
             );
@@ -731,7 +731,7 @@ mod tests {
         );
         assert_eq!(client.folder_settings().await?, json!([]));
         let missing = client.send(Method::POST, "/settings/folder/delete", Some(target)).await?;
-        assert_eq!((missing.status, missing.body["kind"].as_str()), (StatusCode::NOT_FOUND, Some("NotFound")));
+        assert_eq!((missing.status, missing.body["code"].as_str()), (StatusCode::NOT_FOUND, Some("NotFound")));
         let invalid = client.send(Method::POST, "/settings/folder/delete", Some(place("photos", "/.."))).await?;
         assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
         Ok(())

@@ -104,7 +104,7 @@ mod tests {
         let apis::libraries::GetLibraryResponse::Status404_ResourceNotFound(body) = get_library(&fixture, "missing").await else {
             panic!("unknown library must be 404");
         };
-        assert_eq!(body.kind, models::ErrorKind::NotFound);
+        assert_eq!(body.code, models::ErrorKind::NotFound);
         Ok(())
     }
 }

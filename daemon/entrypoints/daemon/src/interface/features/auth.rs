@@ -153,7 +153,13 @@ mod tests {
         let unknown_user = send(&router, Method::POST, "/api/v1/auth/login", &[], credentials("nobody", "password1", "cookie")).await?;
         assert_eq!(wrong_password.status, StatusCode::UNAUTHORIZED);
         assert_eq!(unknown_user.status, StatusCode::UNAUTHORIZED);
-        assert_eq!(wrong_password.body, unknown_user.body, "ユーザ名の有無を本文から区別できない");
+        // `requestId` は要求ごとに違うので、それを除いた本文を比べる。
+        let without_id = |body: &serde_json::Value| {
+            let mut body = body.clone();
+            body.as_object_mut().map(|body| body.remove("requestId"));
+            body
+        };
+        assert_eq!(without_id(&wrong_password.body), without_id(&unknown_user.body), "ユーザ名の有無を本文から区別できない");
         Ok(())
     }
 

@@ -1,6 +1,6 @@
 import { t } from "i18next";
 import { createContext, useContext, useSyncExternalStore } from "react";
-import { ApiError, api, unwrap } from "../api/client";
+import { ApiError, api, problemError, unwrap } from "../api/client";
 import { describeError } from "../i18n/errors";
 import type { ConflictPolicy, TransferDestination } from "./collision";
 import { fetchFolderPage } from "./entries";
@@ -34,10 +34,7 @@ async function writeBytes(url: string, body: Blob, signal: AbortSignal): Promise
         headers: { "Content-Type": "application/octet-stream" },
     });
     if (!response.ok) {
-        const error = (await response.json().catch(() => undefined)) as
-            | { kind?: ApiError["kind"]; message?: string }
-            | undefined;
-        throw new ApiError(response.status, error?.kind, error?.message);
+        throw problemError(response.status, await response.json().catch(() => undefined));
     }
     return response;
 }

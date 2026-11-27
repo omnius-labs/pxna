@@ -227,7 +227,7 @@ mod tests {
 
         for tile_size in [0, 6, 300] {
             let rejected = send(&router, Method::PUT, "/api/v1/preferences", headers, Some(preferences(tile_size))).await?;
-            // 範囲は契約に書いてあり、生成されたルータが本文を読んだ時点で拒否する。この 400 の本文は `ErrorResponse` ではない。
+            // 範囲は契約に書いてあり、生成されたルータが本文を読んだ時点で拒否する。その平文の 400 は、外側の middleware が `Problem` にする。
             assert_eq!(rejected.status, StatusCode::BAD_REQUEST, "{tile_size}");
         }
         for filmstrip_size in [0, 6] {

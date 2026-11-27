@@ -150,7 +150,7 @@ it("保存に失敗したら、入力と元の語を残す", async () => {
     await render();
     await vi.waitFor(() => expect(chips()).toEqual(["cat"]));
     mocks.put.mockResolvedValue({
-        error: { kind: "InvalidRequest", message: "x" },
+        error: { code: "InvalidRequest", detail: "x" },
         response: new Response(null, { status: 400 }),
     });
     await type("trip");
