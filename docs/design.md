@@ -353,6 +353,10 @@ The reasons for making `UnsupportedType`, `LimitExceeded`, and `PasswordRequired
 The engine's `Cancelled` is not in the table and falls to `InternalServerError`.
 A successful ffprobe whose output the daemon cannot deserialize is also `InternalServerError`, because the failure is in the daemon rather than a fact about the file.
 
+The generated router reads and checks a JSON body before the handler, and answers a rejected one with a plain-text body rather than an `ErrorResponse`.
+A body that is not JSON is 400, one that does not fit the types of the contract, such as one with an unknown value of an enum or without a required property, is 422 ([knowledge](./knowledge/axum-json-rejection.md)), and one with a value outside a range or a length of the contract is 400.
+An enum written inline in a property, such as `rating` and `kinds` of `EntryFilter`, is a string in the generated types, so a value outside it reaches the handler and is `InvalidInput`.
+
 ## 5. Storage Layer
 
 This is the layer that actually reads and writes the contents of a Library.

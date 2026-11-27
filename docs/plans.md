@@ -30,9 +30,6 @@ During implementation, advance the state of the child and of this document, and 
 | [restore-last-folder](./plans/restore-last-folder.md) | Opening `/` returns to the last folder instead of asking for a Library | Done | - |
 | [search-condition-panel](./plans/search-condition-panel.md) | Every Library, or chosen ones, can be searched by name, rating, and several tags with the conditions in the left area | Done | - |
 | [viewer-display-modes](./plans/viewer-display-modes.md) | A work can be viewed in the wide-screen viewer's gallery and focus modes, and the mode returns on the next opening | Done | - |
-| [entries-request-body](./plans/entries-request-body.md) | A client reads a Scope and its months by sending the Scope and the Filter as JSON in the shapes a Shelf holds them | Done | - |
-| [shelves-and-folder-settings](./plans/shelves-and-folder-settings.md) | Every device reads and edits the same Shelves and folder settings, a new owner finds the Timeline Shelf, and both follow the daemon's own renames, moves, and deletes | Done | entries-request-body |
 
 The thumbnail and image socket plans form a chain: `thumbnail-store-batching` and `source-jobs` follow `thumbnail-fanout-and-viewer-settings`, and `image-socket-server` follows `source-jobs`.
-`shelves-and-folder-settings` follows `entries-request-body`, whose Scope and Filter it stores.
-The `viewer-touch-gestures`, `restore-last-folder`, `viewer-display-modes`, and `entries-request-body` plans are independent of each other and of them.
+The `viewer-touch-gestures`, `restore-last-folder`, and `viewer-display-modes` plans are independent of each other and of them.
