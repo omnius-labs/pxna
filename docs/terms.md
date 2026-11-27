@@ -21,7 +21,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | --- | --- | --- | --- | --- | --- |
 | ConflictPolicy | all | `ConflictPolicy` | `conflict` | How to handle an existing entry at the destination (fail, skip, overwrite, rename) | - |
 | [Entry](#t-entry) | all | `FsEntry` | `FileSystemEntry` | Collective name for a file, folder, or symbolic link in a Library | file |
-| [EntryRef](#t-entry-ref) | all | `EntryRef` | `libraryId`, `path`, `view` | A Library id, a Library-relative path, and the view that chooses between an archive file and its root | entry address |
+| [EntryRef](#t-entry-ref) | all | `EntryRef` | `libraryId`, `path`, `view` | A Library id, a Library-relative path, and the View that chooses between an archive file and its root | entry address |
 | View | all | - | `view` | Which face of a path a request means: `file` or `folder`. For an archive, `file` is the archive file and `folder` is its root | archive mode |
 | Image socket | all | `ImageSocket` | `/api/v1/sockets/image` | The WebSocket, one per browser tab, through which a client wants thumbnails, sprite sheets, and display images and receives them | thumbnail socket, image channel |
 | [Library](#t-library) | all | `LibraryConfig` | `libraryId` | One directory the daemon exposes | root |
@@ -284,11 +284,12 @@ If the column is read as a listing's Scope, a term marked `listing` looks like s
 #### View and kind
 
 **Boundary**
-`view` chooses the file face or the folder face of a path, while `kind` is the Entry's own type (`file`, `folder`, or `link`).
-A folder and an archive root both have `view=folder`, but their `kind` differs: the archive root has `container=archiveRoot`.
+`view` is part of a request and chooses which face of a path it means, while `kind` is the type of the Entry that comes back (`file`, `folder`, or `link`).
+Only an archive has two faces: under `view=file` it is a `file` Entry with the archive hint, and under `view=folder` the same path is read as the folder of its root.
+The web client's URL parameter `view`, which names the Entry the Viewer shows, is neither; it never reaches the API.
 
 **What goes wrong if they are confused**
-If `view` is read as `kind`, an archive file and its root look like the same Entry.
+If `view` is read as `kind`, an archive file and its root look like the same Entry, and a request that omits `view` seems to need the Entry's kind first.
 
 ## 4. Individual Terms
 
@@ -302,10 +303,10 @@ The engine's driver uses `FsEntry`, `StorageService` uses `NestedFsEntry`, which
 #### EntryRef
 
 **Names by layer**
-The v2 API uses the schema `EntryRef`. v1 carries the same three values separately: the Library id is a path parameter, the path is a query or body field, and the endpoint namespace chooses the file or folder face.
+The API uses the schema `EntryRef` where a path has two faces. Where it has one, a request carries the Library id and the path alone, as `LibraryPath` in a body or as a path parameter and a query in a URL.
 
 **Why this name**
-The name is the address of an Entry, not an Entry's identity. A rename changes it, and ratings and tags use `contentId` instead; see [API Design](./design/api.md#31-entry-and-entryref).
+The name is the address of an Entry, not an Entry's identity. A rename changes it, while ratings and tags are identified by the content hash ([Rating and Tag Design §6.1](./design/rating-tags.md#61-what-is-stored)); see [API Design §3.1](./design/api.md#31-entry-and-entryref).
 
 <a id="t-library"></a>
 #### Library

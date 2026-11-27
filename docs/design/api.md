@@ -2,8 +2,7 @@
 
 ## 1. About This Document
 
-This document defines the target structure of the Pxna HTTP API: the resource model, URL hierarchy, method conventions, listing and mutation contracts, upload and operation lifecycles, error shape, tag grouping, and migration from v1.
-It is the design for the next major API, not a description of the current `daemon/openapi.yaml`.
+This document defines the structure of the Pxna HTTP API that replaces the current contract in place: the resource model, URL hierarchy, method conventions, listing and mutation contracts, upload and operation lifecycles, error shape, tag grouping, and the mapping from the current paths.
 The intended readers are developers changing the API contract, the generated interface, the daemon handlers, or a client.
 
 This document assumes the vocabulary of [terms.md](../terms.md#2-term-list).
@@ -13,14 +12,16 @@ Definitions of words are not in this document.
 
 | Document | What it covers |
 | --- | --- |
-| This document | The target v2 resource model, URL hierarchy, method conventions, listing and mutation contracts, upload and operation lifecycles, error shape, tag grouping, and v1 migration |
-| [design.md](../design.md#8-conventions-for-mutating-apis) | The current v1 conventions for mutating APIs. This document supersedes them only for v2; v1 remains as recorded there |
-| [daemon/openapi.yaml](../../daemon/openapi.yaml) | The authoritative v1 contract: paths, parameters, schemas, status codes |
+| This document | The resource model, URL hierarchy, method conventions, listing and mutation contracts, upload and operation lifecycles, error shape, tag grouping, and the mapping from the current paths, together with the decisions behind them |
+| [design.md](../design.md#8-conventions-for-mutating-apis) | The conventions of the current contract for mutating APIs, the error kinds and their statuses (§4.4), CSRF (§8.5), and the cross-cutting decisions this document leaves in place |
+| [daemon/openapi.yaml](../../daemon/openapi.yaml) | The authoritative contract that is served: paths, parameters, schemas, status codes |
 | [Storage Layer Design](./storage.md#1-about-this-document) | Path and archive resolution, staging, atomic publication, and the limits this document assumes |
-| [Listing and Search Design](./listing.md#1-about-this-document) | Snapshot construction, name matching, the name index, and recursive limits behind the listing contract |
-| [Timeline Design](./timeline.md#1-about-this-document) | Timeline dates, aggregation, the timeline index, and the freshness this document exposes |
-| [Rating and Tag Design](./rating-tags.md#1-about-this-document) | What can be rated and tagged, value rules, storage, and how marks follow changes |
-| [Client Design](./client.md#1-about-this-document) | How the web client consumes the API and how it migrates |
+| [Listing and Search Design](./listing.md#1-about-this-document) | Snapshots, name matching, the name index, and recursion limits behind the listing contract |
+| [Timeline Design](./timeline.md#1-about-this-document) | Timeline dates, aggregation, and the timeline index behind the timeline contract |
+| [Video Playback Design](./video.md#1-about-this-document) | Transcode sessions and their concurrency |
+| [Image Socket Design](./image-socket.md#1-about-this-document) | The only path for thumbnails, sprite sheets, and display images |
+| [Rating and Tag Design](./rating-tags.md#1-about-this-document) | What can be rated and tagged, value rules, and the content hash that identifies marks |
+| [Client Design](./client.md#1-about-this-document) | How the web client consumes the API |
 | [terms.md](../terms.md#2-term-list) | Definitions of terms, spelling, aliases, and boundaries between neighboring terms |
 | [issues.md](../issues.md) | Confirmed defects. This document is not a defect list |
 
@@ -28,149 +29,124 @@ Definitions of words are not in this document.
 
 ### 1.2 Tense of This Document
 
-§3 through §13 describe the target v2 API in the present tense.
-§14 records the decisions and deferred items behind that target.
-§15 records what is implemented and in what order the work is expected to proceed.
-If you want to know what works today, read §15 first.
+§3 through §13 describe the finished API in the present tense.
+§14 records the decisions and deferred items behind it.
+§15 records what is implemented, and which statements in other design documents still describe the current contract.
+If you want to know what works now, read §15 first.
 
 ## 2. Responsibility and Boundary
 
-The API layer owns the HTTP contract: how a Library and an Entry are addressed, which method expresses which intent, how a page is selected, how a mutation reports its result, how an error is shaped, and how clients discover limits and optional features.
+The API layer owns the HTTP contract: how a Library and an Entry are addressed, which method expresses which intent, how a page is selected, how a batch command reports its result, how an error is shaped, and how operations are grouped.
 It does not own how a path is resolved inside an archive, how a listing snapshot is built, how the name index answers a condition, how a timeline date is chosen, how a thumbnail is generated, or how marks are stored.
-Those concerns stay in [Storage Layer Design](./storage.md#1-about-this-document), [Listing and Search Design](./listing.md#1-about-this-document), [Timeline Design](./timeline.md#1-about-this-document), [Thumbnail Design](./thumbnail.md#1-about-this-document), [Video Playback Design](./video.md#1-about-this-document), and [Rating and Tag Design](./rating-tags.md#1-about-this-document).
+Those concerns stay in the documents of §1.1.
 
-The target is served under `/api/v2`, alongside the frozen `/api/v1`.
-A v1 path is never reinterpreted as a v2 path.
-The v1 contract stays in `daemon/openapi.yaml`; the v2 contract is a separate OpenAPI document so that the generated v1 interface does not silently change.
-The deployment premise is unchanged: a single owner, a LAN-first daemon, and the web client served from the same origin as the API.
-Cross-origin browser access is not a goal, and the design does not add CORS support for arbitrary origins.
+The API stays under `/api/v1`, and `daemon/openapi.yaml` is rewritten in place; no second version is served alongside it (§14.1).
+Every capability of the current contract has a place in this structure, and the structure adds none of its own; the additions it leaves out are deferred in §14.2.
+The deployment premise is unchanged: a single owner, a LAN-first daemon, and the web client served from the same origin as the API ([design.md §10.1](../design.md#101-web)).
 
 ## 3. Resource Model
 
 ### 3.1 Entry and EntryRef
 
-The API keeps one Entry type; it does not split files and folders into separate top-level resources.
-The API addresses an Entry by an `EntryRef`; the vocabulary and the external form are defined in [terms.md](../terms.md#2-term-list).
+The API keeps one Entry type, `FileSystemEntry`, and one namespace for it; files and folders are not separate top-level resources.
 
-A request uses the `view` field to choose the file face or the folder face of a path.
-For `/photos/a.zip`, `view=file` names the archive file and `view=folder` names the archive's root.
-For a real folder, `view=folder` is the normal value; `view=file` is invalid.
-For a normal file, `view=file` is the normal value; `view=folder` is invalid.
-When `view` is omitted, a folder is treated as `folder`, a file as `file`, and an archive as `file`; the last rule is the safe default because it never lists or expands an archive by accident.
+A request names an Entry by its Library id and its Library-relative path.
+Where a path has two faces, the request also carries `view`, and the three together are an `EntryRef`.
+Only an archive has two faces: `view=file` names the archive file, and `view=folder` names its root.
+For a folder, `view=folder` is the only valid value; for any other file, `view=file` is.
+When `view` is omitted, a folder is `folder` and every file, an archive included, is `file`, so an omitted `view` never lists, copies, or deletes the inside of an archive by accident.
 
-The Entry carries `container` to make the archive relationship visible:
+`view` appears only where both faces are meaningful: the single Entry read (§6.5), and the sources and targets of copy, move, and delete (§7).
+An operation that reads or writes one face only does not take it:
 
-| `container` | Meaning |
+| Face | Operations |
 | --- | --- |
-| `local` | The Entry is in the Library's local filesystem |
-| `archive` | The Entry is inside an archive |
-| `archiveRoot` | The Entry is the root view of an archive |
+| Folder only | The starts of a Scope, the child probe, folder creation, and the folder settings. An archive given here is its root |
+| File only | Content, media information, ratings, and tags. An archive given here is the archive file |
 
-`metadata.readonly` is the effective value.
-The server combines the Library's `readonly`, the archive boundary, and the archive root rule; a client does not combine them itself.
-`metadata.readonlyReason` is `library`, `archive`, or null.
-
-For an image or a video, the Entry may carry `contentId`.
-`contentId` is the identity used by ratings and tags.
-It is derived from the content, not from the path, so a daemon-driven move or copy keeps the marks and a path reused by a different file does not inherit them.
-An Entry without `contentId` cannot be rated or tagged.
+The readonly rules are those of [design.md §8.6](../design.md#86-archives-and-readonly).
 
 ### 3.2 Library and Path
 
-A path is always relative to the Library named in the same `EntryRef`.
-It starts with `/`, has no empty segment, no `.` or `..`, and is at most 4,096 characters.
-The root is `/`.
+A path is always relative to the Library named in the same request, starts with `/`, and is checked by the Library boundary of [design.md §4.3](../design.md#43-resolving-library-and-archive-boundaries).
+An archive's contents are addressed by joining paths, as in `/photos/a.zip/dir/x.png`.
 
-An archive is addressed by plain concatenation, as in `/photos/a.zip/dir/x.png`.
-The boundary between the archive and its contents is resolved by probing the filesystem, which is unambiguous because a file and a directory cannot share a name in one directory.
-`view` chooses between the archive file and the archive root; it does not change the path grammar.
-
-A path is an address, not a stable identity.
-A rename changes it.
-Ratings and tags therefore use `contentId` for identity, while the API still addresses the Entry by path.
+A path is an address, not an identity.
+A rename changes it, and ratings and tags are identified inside the daemon by the content hash of [Rating and Tag Design §6.1](./rating-tags.md#61-what-is-stored), which the API does not expose.
 
 ### 3.3 Scope and Filter
 
-A listing request has a Scope, a Filter, listing options, a sort, and a page.
+A listing request carries a Scope, a Filter, the listing options, the sort, and a page.
 
-A Scope names what is read:
-
-| Field | Meaning |
-| --- | --- |
-| `starts` | One to 64 `EntryRef` values. Each start is a folder view; an archive start is its root |
-| `recursive` | Whether the listing reads descendants of each start |
-| `insideArchives` | Whether the listing reads archives under the starts like folders, down to the configured nesting limit |
-
-A Filter names what is kept:
+The Scope names what is read:
 
 | Field | Meaning |
 | --- | --- |
-| `query` | Whitespace-separated terms that must all occur in the name after NFKC normalization and case folding |
-| `rating` | `good`, `bad`, or `none` for the current user; only images and videos match |
-| `tags` | Up to 32 tag words; all must be present; only images and videos match |
-| `kinds` | `file`, `folder`, `link`, `image`, `video`, `archive`, or `other`; `other` is a file that is not an image, video, or archive |
-| `hidden` | `exclude`, `include`, or `only`; the default is `exclude` |
+| `starts` | One to 64 places, each a Library id and a Library-relative path, read as folders |
+| `recursive` | Whether the descendants of each start are read |
+| `insideArchives` | Whether archives under the starts are read like folders; nothing without `recursive` |
 
-The listing options are `foldersFirst` and `fields`.
-`fields` is `full` or `summary`; `summary` returns only the path, name, kind, archive hint, and effective readonly value.
-The summary projection is the replacement for the separate summary listing API.
+The Filter names what is kept: `query`, `rating`, `tags`, and `kinds`, with the meanings of [Listing and Search Design §3](./listing.md#3-sorting-and-filtering) and [Rating and Tag Design §7.1](./rating-tags.md#71-filtering-listings).
 
-The sort is `name`, `kind`, `size`, `modifiedAt`, or `timelineDate`.
-`order` is `asc` or `desc`.
-`timelineDate` is descending only.
-Entries that compare equal are ordered by `libraryId` and then by `path`, so a page is deterministic.
+The listing options are `foldersFirst`, `includeHidden`, and `fields`.
+`includeHidden` reads the Entries whose names start with `.` and the Entries inside them, and is `false` by default.
+`fields` is `full` by default, or `summary` for the summary of direct children (§6.1).
+The sort is `name`, `kind`, `size`, `modified_at`, or `timeline_date`, and `order` is `asc` or `desc`; `timeline_date` is descending only.
 
-A start that does not exist, that names a file rather than a folder view, or that names an unknown Library is not a request failure.
-It is returned in `warnings.missingStarts` with a reason, and the other starts are listed.
-The same rule applies to a start cut off at the entry limit and to a start that was walked because the name index was not usable.
+A saved Shelf holds a Scope and a Filter of these shapes, so a Shelf is read by sending them as it holds them.
+`includeHidden` is an option rather than a part of the Scope (§14.1), so a Shelf keeps excluding hidden Entries; the tree is the listing that sets it.
+A snapshot is still built per value of it ([Listing and Search Design §4.1](./listing.md#41-the-unit-that-is-built)), and a recursive listing that reads hidden Entries is walked, because the name index holds no hidden Entries.
+With `sort=timeline_date`, `includeHidden=true` is `400`, because the timeline index holds no hidden Entries either and the listing could not return them.
 
 ## 4. URL Hierarchy
 
-All paths are relative to `/api/v2`.
+All paths are relative to `/api/v1`.
 
-```
-/api/v2
+```text
+/api/v1
 ├─ GET    /health
 ├─ GET    /capabilities
-├─ POST   /setup
 ├─ GET    /setup/status
+├─ POST   /setup
 ├─ POST   /auth/login
 ├─ GET    /auth/session
 ├─ DELETE /auth/session
-├─ GET    /auth/sessions
-├─ DELETE /auth/sessions/{sessionId}
-├─ PUT    /auth/password
 ├─ GET    /preferences
 ├─ PUT    /preferences
+├─ GET    /shelves
+├─ POST   /shelves
+├─ PUT    /shelves/order
+├─ PUT    /shelves/{shelfId}
+├─ DELETE /shelves/{shelfId}
+├─ GET    /folder-settings
 ├─ GET    /libraries
 ├─ GET    /libraries/{libraryId}
 │
 ├─ GET    /libraries/{libraryId}/entries/metadata?path=&view=
 ├─ GET    /libraries/{libraryId}/entries/content?path=
-├─ HEAD   /libraries/{libraryId}/entries/content?path=
 ├─ PUT    /libraries/{libraryId}/entries/content?path=&conflict=
-├─ POST   /libraries/{libraryId}/entries/files?path=&conflict=
+├─ POST   /libraries/{libraryId}/entries/files?path=
 ├─ POST   /libraries/{libraryId}/entries/folders
-├─ GET    /libraries/{libraryId}/entries/child-probe?path=&hidden=
-├─ GET    /libraries/{libraryId}/entries/media?path=&view=
-├─ GET    /libraries/{libraryId}/entries/thumbnail?path=&view=&size=&shape=
-├─ GET    /libraries/{libraryId}/entries/rating?path=&view=
-├─ PUT    /libraries/{libraryId}/entries/rating?path=&view=
-├─ GET    /libraries/{libraryId}/entries/tags?path=&view=
-├─ PUT    /libraries/{libraryId}/entries/tags?path=&view=
+├─ GET    /libraries/{libraryId}/entries/child-probe?path=&includeHidden=
+├─ GET    /libraries/{libraryId}/entries/media?path=
+├─ GET    /libraries/{libraryId}/entries/rating?path=
+├─ PUT    /libraries/{libraryId}/entries/rating?path=
+├─ GET    /libraries/{libraryId}/entries/tags?path=
+├─ PUT    /libraries/{libraryId}/entries/tags?path=
+├─ PUT    /libraries/{libraryId}/entries/folder-settings?path=
+├─ DELETE /libraries/{libraryId}/entries/folder-settings?path=
 │
 ├─ POST   /libraries/{libraryId}/uploads
-├─ GET    /libraries/{libraryId}/uploads
-├─ GET    /uploads/{uploadId}
-├─ DELETE /uploads/{uploadId}
-├─ PUT    /uploads/{uploadId}/content?offset=
-├─ POST   /uploads/{uploadId}/commit
+├─ GET    /libraries/{libraryId}/uploads/{uploadId}
+├─ DELETE /libraries/{libraryId}/uploads/{uploadId}
+├─ PUT    /libraries/{libraryId}/uploads/{uploadId}/content?offset=
+├─ POST   /libraries/{libraryId}/uploads/{uploadId}/commit
 │
 ├─ POST   /libraries/{libraryId}/video/sessions
 ├─ GET    /libraries/{libraryId}/video/sessions/{sessionId}
 ├─ DELETE /libraries/{libraryId}/video/sessions/{sessionId}
 ├─ GET    /libraries/{libraryId}/video/sessions/{sessionId}/playlist.m3u8
-├─ GET    /libraries/{libraryId}/video/sessions/{sessionId}/segments/{name}
+├─ GET    /libraries/{libraryId}/video/sessions/{sessionId}/segments/{segmentName}
 │
 ├─ POST   /entries
 ├─ POST   /entries/months
@@ -179,8 +155,8 @@ All paths are relative to `/api/v2`.
 ├─ POST   /entries/move
 ├─ POST   /entries/delete
 │
+├─ GET    /timeline/status?libraryIds=
 ├─ POST   /timeline/scans
-├─ GET    /libraries/{libraryId}/timeline
 │
 ├─ GET    /operations
 ├─ GET    /operations/{operationId}
@@ -191,82 +167,66 @@ All paths are relative to `/api/v2`.
 └─ POST   /performance/client-timings
 ```
 
-The hierarchy follows one rule: a single-Entry or single-Library operation is library-scoped, while a query or a command that can span Libraries is global.
-The rule is what makes `POST /entries/copy` carry both source and destination Libraries without putting one of them in the path.
+The hierarchy follows one rule: an operation on one Entry, or on one Library's upload or video session, is under `/libraries/{libraryId}` with the path in the query, while a read or a command whose body names its Libraries is global.
+The rule is what lets `POST /entries/copy` carry its source and its destination in the same shape, and what puts a rating, the tags, and the folder settings of one Entry beside its metadata.
+The daemon's own state that names no Entry, such as the display preferences, the Shelves, and the list of folder settings, is global as well.
 
 ## 5. Method Conventions
 
 ### 5.1 Read Methods
 
-`GET` and `HEAD` are used for a single Entry's metadata, content, media information, rating, tags, and thumbnail.
-They are cacheable and support conditional requests as described in §11.3.
+`GET` is used for every read that a URI can carry: one Entry's metadata, content, media information, rating, tags, and folder settings, and the status and lists of the daemon's own state.
 
 A read that carries a structured body uses `POST`.
-The three operations are `POST /entries`, `POST /entries/months`, and `POST /entries/metadata`.
-They change no state.
-`POST` is used because the body is too large or too structured for a URI: a Scope may name up to 64 starts with paths up to 4,096 characters, and a metadata batch may carry up to 200 references.
-The v2 CSRF check treats these three paths as read-only and does not require `Origin`; the check remains on the mutation paths.
+The three operations are `POST /entries`, `POST /entries/months`, and `POST /entries/metadata`, and they change no state.
+A Scope may name 64 starts with paths of up to 4,096 characters, and a metadata batch 200 places, which a URI cannot carry reliably.
+These reads meet the same `Origin` check as every other `POST` that carries a session cookie ([design.md §8.5](../design.md#85-csrf)); the web client sends `Origin` on them, and bearer requests are not checked.
 
-The HTTP `QUERY` method (RFC 10008) would express these reads as safe and idempotent.
-It is not adopted for v2 now; §14.2 records the conditions under which it is revisited.
-A client must therefore treat these three operations as reads by contract, not by method.
+The HTTP `QUERY` method would state that these reads are safe and idempotent; it is deferred in §14.2.
+A client treats the three operations as reads by contract, not by method.
 
 ### 5.2 Mutation Methods
 
-`PUT` is used when the target is identified by the request and the effect is idempotent.
-This covers content at an exact path, display preferences, an Entry's rating, and an Entry's tags.
-`PUT` content accepts `fail`, `overwrite`, and `skip`; `rename` is a creation command and is handled by `POST /libraries/{libraryId}/entries/files`.
+`PUT` replaces a target that the request identifies, and its effect is idempotent.
+It covers content at an exact path, the display preferences, a Shelf, the order of the Shelves, an Entry's rating, an Entry's tags, and a folder's settings.
 
-`POST` is used for creation with a server-chosen name, batch commands, and actions.
-This covers folder creation, copy, move, delete, upload sessions, video sessions, login, setup, timeline scans, and operation cancellation.
+`POST` creates under a name the server may choose, starts a batch command, or performs an action.
+It covers file creation under a chosen name, folder creation, Shelf creation, copy, move, delete, upload sessions, video sessions, login, setup, timeline scans, and cancellation.
 
-`DELETE` is used for a lifecycle resource: the current session, another session, an upload session, and a video session.
-File and folder deletion is a batch command under `POST /entries/delete`; the API does not use `DELETE` for it because the target list, conflict policy, and recursive flag are carried together.
-
-Every batch command returns `202` with an Operation, including a command that completes immediately.
-The Operation body carries the terminal state when the work is already done, so a client does not have to poll.
-This removes the v1 choice between `200` and `202` for the same copy, move, or delete operation.
+`DELETE` removes a resource that its URL identifies: the current session, a Shelf, a folder's settings, an upload session, and a video session.
+Deleting Entries is the batch command `POST /entries/delete`, because its targets and its `recursive` flag are carried together ([design.md §8.4](../design.md#84-deletion)).
 
 ### 5.3 Status Codes
 
-| Status | Use |
-| --- | --- |
-| 200 | A read, a replacement, or a preference, rating, or tag write |
-| 201 | A created Entry, upload, session, or video session |
-| 202 | An Operation was accepted; inspect `operation.status` for whether it is already terminal |
-| 204 | A lifecycle resource was deleted, or a write had no body |
-| 304 | A conditional read or listing is unchanged |
-| 400 | The request syntax or a field value is invalid |
-| 401 | The session is missing, expired, or invalid; `WWW-Authenticate` is present for bearer |
-| 403 | The Library is readonly, the path is inside an archive, or the operation is not permitted |
-| 404 | The target does not exist for a single-Entry read |
-| 409 | The request conflicts with the current state, such as a non-empty folder without `recursive` |
-| 412 | A precondition such as `If-Match` or `ifSnapshot` failed |
-| 413 | The body exceeds the one-shot or chunk limit |
-| 415 | The media type is not supported for the request |
-| 422 | The syntax is valid but the combination cannot be processed, such as `timelineDate` with an offset page |
-| 429 | A rate or concurrency limit was reached; `Retry-After` is present |
-| 504 | A blocking extraction or probe exceeded its deadline; `Retry-After` is present |
+The statuses are those of the current contract, with the error kinds mapped as in [design.md §4.4](../design.md#44-error-model-and-http-mapping).
+This structure fixes three of them.
 
-A missing target in a batch command is not a top-level `404`.
-It is reported in the Operation result so that a retry after a lost response remains successful.
+- Every batch command answers `202` with an Operation, including one that finishes before the response (§7.4).
+- A request for a video session that the daemon ended to make way for another is `410` (§9.3).
+- A missing route, a method the route does not allow, and a body the generated router rejects answer with the Problem shape of §11.1, not with an empty or plain-text body.
 
 ## 6. Listings
 
 ### 6.1 One Listing API
 
-`POST /entries` is the only cross-Library listing API.
-A single-Library folder tree uses the same operation with one start, `fields=summary`, and `hidden=include`.
-The v1 folder listing, search listing, and timeline listing are not carried into v2.
+`POST /entries` is the only listing operation.
+A folder, a search, the timeline, a Shelf, and the summary of a folder's direct children are all one Scope, Filter, sort, and page:
+
+| Listing | Request |
+| --- | --- |
+| A folder | One start, `recursive=false` |
+| The tree | One start, `recursive=false`, `kinds` of `folder` and `archive`, `includeHidden` as the tree shows |
+| A search | The chosen starts, `recursive=true`, the Filter |
+| The timeline | The chosen Libraries' roots, `recursive=true`, `insideArchives=true`, `kinds` of `image` and `video`, `sort=timeline_date` |
+| A Shelf | The Shelf's Scope and Filter as saved |
+| The summary of direct children | One start, `recursive=false`, `fields=summary`, `sort` of `name` or `kind` |
 
 A request has this shape:
 
 ```json
 {
   "scope": {
-    "starts": [
-      { "libraryId": "photos", "path": "/", "view": "folder" }
-    ],
+    "starts": [{ "libraryId": "photos", "path": "/" }],
     "recursive": true,
     "insideArchives": true
   },
@@ -274,67 +234,32 @@ A request has this shape:
     "query": "trip",
     "rating": "good",
     "tags": ["family"],
-    "kinds": ["image", "video"],
-    "hidden": "exclude"
+    "kinds": ["image", "video"]
   },
-  "options": {
-    "foldersFirst": false,
-    "fields": "full"
-  },
-  "sort": "timelineDate",
+  "options": { "foldersFirst": false, "includeHidden": false, "fields": "full" },
+  "sort": "timeline_date",
   "order": "desc",
-  "page": {
-    "kind": "cursor",
-    "limit": 200
-  }
+  "page": { "kind": "cursor", "limit": 200 }
 }
 ```
 
-The response is an Entry page, defined in §6.3.
+The listing reads the same snapshots, name index, and timeline index as before ([Listing and Search Design](./listing.md#1-about-this-document)); this structure changes how a listing is requested and returned, not how it is built.
 
-The listing reads the same snapshots and name index as v1.
-It does not change how a listing is built; it changes how a listing is requested and returned.
-A listing with no name, rating, or tag condition may answer from the timeline index; the response says whether the answer was indexed and when the aggregation was taken.
+`fields=summary` keeps the rules of the summary listing ([Listing and Search Design §8.1](./listing.md#make-the-summary-listing-of-direct-children-a-separate-response-from-the-existing-detail-listing)): it reads the direct children of one start in name or kind order, and its items are `EntrySummary` values with the path, name, kind, and archive hint, not `FileSystemEntry` values with placeholder sizes and times.
+A summary request with `recursive`, several starts, or another sort is `400`.
+The details of the listed Entries are read with `POST /entries/metadata` (§6.5).
 
 ### 6.2 Page Anchors
 
 A page request is a discriminated union:
 
-| `kind` | Fields | Valid when |
+| `kind` | Anchors | Valid with |
 | --- | --- | --- |
-| `offset` | `offset`, `limit` | Any sort except `timelineDate` |
-| `cursor` | `after` or `before`, `limit` | `timelineDate` |
-| `month` | `month`, `limit` | `timelineDate` |
-| `around` | `entry`, `limit` | `timelineDate`; the Entry is near the middle of the page |
+| `offset` | `offset`, or `locate` naming an Entry | Every sort except `timeline_date` |
+| `cursor` | `after` or `before`, `month`, or `around` naming an Entry | `timeline_date` |
 
-At most one anchor is given.
-`offset` and `cursor` may not be combined.
-`month` and `around` are not accepted with a non-timeline sort.
-`limit` defaults to 200 and is at most 1,000.
-
-The response echoes the effective page:
-
-```json
-{
-  "kind": "offset",
-  "offset": 0,
-  "limit": 200,
-  "totalCount": 1234,
-  "snapshot": "..."
-}
-```
-
-```json
-{
-  "kind": "cursor",
-  "previous": null,
-  "next": "eyJkYXRlIjoiMjAyNi0wNS0wMVQxMjozNDo1NiJ9"
-}
-```
-
-A cursor is a base64url string.
-A `month` or `around` request returns a cursor page with an `anchor` object that names the month or the Entry.
-`totalCount` is present only for an offset page.
+At most one anchor is given, and `limit` defaults to 200 with a maximum of 1,000.
+The rules of each anchor, and why the two kinds exist, are in [Listing and Search Design §4.5](./listing.md#45-locating-an-entry), [§4.6](./listing.md#46-pages-in-timeline-date-order), and the decision "Cut Pages by Offset, and by Cursor in Timeline-Date Order" there.
 
 ### 6.3 Entry Page
 
@@ -346,468 +271,253 @@ Every listing returns the same envelope:
     {
       "libraryId": "photos",
       "entry": { "...": "FileSystemEntry" },
-      "timelineDate": "2026-05-01T12:34:56+09:00",
+      "timelineDate": "2026-05-01T12:34:56",
       "timelineDateSource": "exif"
     }
   ],
-  "page": {
-    "kind": "cursor",
-    "previous": null,
-    "next": "..."
-  },
+  "page": { "kind": "offset", "offset": 0, "totalCount": 1234, "snapshot": "..." },
   "warnings": {
     "cutOffStarts": [],
     "walkedStarts": [],
-    "missingStarts": [
-      {
-        "start": { "libraryId": "photos", "path": "/missing", "view": "folder" },
-        "reason": "notFound"
-      }
-    ],
-    "indexed": true,
-    "asOf": "2026-11-26T03:04:05Z"
+    "missingStarts": [{ "libraryId": "photos", "path": "/missing" }]
   }
 }
 ```
 
-- `items` always carries `libraryId` and the Entry, so a single-Library result uses the same type as a multi-Library result.
-- `timelineDate` and `timelineDateSource` are present only when the sort is `timelineDate`.
-- `warnings` is always present. Each warning has a `reason`: `notFound`, `notFolder`, `unknownLibrary`, `entryLimit`, or `indexUnavailable`.
-- `indexed` says whether every start answered from the name or timeline index.
-- `asOf` is the aggregation time when an index answered; it is absent for a full walk.
-- The response carries an `ETag` derived from the snapshot, so a client can revalidate with `If-None-Match` and receive `304`.
-
-A `fields=summary` page replaces the v1 summary listing.
-Its items carry the path, name, kind, archive hint, and effective readonly value, and omit sizes and timestamps.
+- Every item carries its `libraryId`, so a listing of one start has the same type as a listing of several.
+- `timelineDate` and `timelineDateSource` are present only with `sort=timeline_date`, in the form of [Timeline Design §4](./timeline.md#4-timeline-dates).
+- `page` echoes the effective page. An `offset` page carries `offset`, `totalCount`, and `snapshot`; a `cursor` page carries `previous` and `next`, either absent at an end.
+- `snapshot` identifies the snapshot an `offset` page was cut from, and a client detects a change by comparing it between pages, as it does now. A `cursor` page has none, because it follows the timeline index by cursor rather than a snapshot ([Listing and Search Design §4.6](./listing.md#46-pages-in-timeline-date-order)).
+- The response carries no `ETag`, because a `POST` is not revalidated.
+- `warnings` is always present, with the three lists of starts that [Listing and Search Design §5.3](./listing.md#53-listing-several-starts) defines.
 
 ### 6.4 Child Probe
 
-`GET /libraries/{libraryId}/entries/child-probe?path=&hidden=` returns a tri-state hint:
-
-```json
-{
-  "hasChildren": true,
-  "maxAgeMs": 500
-}
-```
+`GET /libraries/{libraryId}/entries/child-probe?path=&includeHidden=` returns whether a folder has a child to show in the tree, as `{hasChildren, maxAgeMs}`.
 
 `hasChildren` is `true`, `false`, or `null`.
-`false` means the probe reached the end without a matching child; `null` means the result is unknown because the probe was busy, incomplete, or interrupted.
-`maxAgeMs` is zero when the result is unknown and otherwise the remaining validity of the cached result.
-
-The probe does not open or extract an archive for this request alone.
-A timed-out blocking call keeps its work slot until it exits.
+`false` means the probe reached the end without a child; `null` means the answer is not known now, and a client treats it as "may have children", not as `false`.
+`maxAgeMs` is how long the answer may be reused.
+The name says that it is a probe, not a listing; the children themselves are read with `POST /entries`.
 
 ### 6.5 Months and Metadata
 
-`POST /entries/months` takes the same Scope and Filter as `/entries` and returns month counts:
+`POST /entries/months` takes the same Scope and Filter as `POST /entries` and returns the count of each month that the matching `timeline_date` listing would return.
 
-```json
-{
-  "timeZone": "Asia/Tokyo",
-  "months": [
-    { "month": "2026-05", "count": 123 }
-  ]
-}
-```
+`GET /libraries/{libraryId}/entries/metadata?path=&view=` returns one Entry.
+It replaces the separate file and folder reads, and `view` chooses an archive's face (§3.1).
 
-The `timeZone` is explicit and defaults to the value in `GET /capabilities`.
-A month count is the number of Entries that the matching `timelineDate` listing returns for that month.
-
-`POST /entries/metadata` takes up to 200 references and returns one result per reference:
-
-```json
-{
-  "items": [
-    {
-      "ref": { "libraryId": "photos", "path": "/a.jpg", "view": "file" },
-      "entry": { "...": "FileSystemEntry" },
-      "error": null
-    },
-    {
-      "ref": { "libraryId": "photos", "path": "/missing.jpg", "view": "file" },
-      "entry": null,
-      "error": { "code": "NotFound" }
-    }
-  ]
-}
-```
-
-The request succeeds with `200` even when individual entries fail.
-The per-item `error` is a code, not a full Problem document, because the request itself succeeded.
+`POST /entries/metadata` takes 1 to 200 places, each a Library id and a Library-relative path, and returns one result per place in request order, each either the Entry as a listing shows it or an error kind.
+The request succeeds with `200` even when some places fail, and the rules of the current batch ([Listing and Search Design §8.1](./listing.md#make-the-summary-listing-of-direct-children-a-separate-response-from-the-existing-detail-listing)) apply unchanged.
 
 ## 7. Mutations
 
 ### 7.1 Copy and Move
 
-Copy and move are cross-Library commands:
+`POST /entries/copy` and `POST /entries/move` take the same body:
 
 ```json
 {
   "sources": [
-    { "libraryId": "photos", "path": "/a.jpg", "view": "file" },
+    { "libraryId": "photos", "path": "/a.jpg" },
     { "libraryId": "photos", "path": "/2026/a.zip", "view": "folder" }
   ],
-  "destination": {
-    "libraryId": "photos",
-    "path": "/backup",
-    "view": "folder"
-  },
+  "destination": { "libraryId": "backup", "folderPath": "/2026" },
   "conflict": "fail"
 }
 ```
 
-- A source with `view=folder` copies or moves the tree; an archive root copies or moves the archive's contents.
-- A source with `view=file` copies or moves the file; an archive copies the archive file itself.
-- A destination with `view=folder` is a folder destination and keeps each source's name.
-- A destination with `view=file` is an exact target and is valid only with one source.
-- `conflict` is `fail`, `skip`, `overwrite`, or `rename`.
-- The response is `202` with an Operation. The Operation result carries `entries`, `skipped`, `failed`, `missing`, and `warnings`.
-- `rename` reports the actual published paths in `entries`.
+- `sources` is 1 to 1,000 `EntryRef` values in one Library. A source with `view=folder` is a folder, or an archive's root whose contents are copied or moved; any other source is a file, an archive file included.
+- `destination` names its Library and exactly one of `folderPath`, into which each source keeps its name, or `path`, an exact target valid only with one source. A destination is never inside an archive, so it takes no `view`.
+- `conflict` is the policy of [design.md §8.3](../design.md#83-conflict-policy), and the tree rules there apply to a folder source.
+- The checks the current commands make before they start keep their statuses. The response is then `202` with an Operation (§7.4).
 
-A copy or move whose destination is inside a source is rejected before the Operation starts.
-A cross-Library move copies the bytes and then removes the source; the Operation reports a partial result if it fails midway.
+A mixed selection of files and folders is one request.
 
 ### 7.2 Delete
 
-Delete is one cross-Library command:
+`POST /entries/delete` takes 1 to 1,000 `EntryRef` targets in one Library and `recursive`:
 
 ```json
 {
   "targets": [
-    { "libraryId": "photos", "path": "/a.jpg", "view": "file" },
+    { "libraryId": "photos", "path": "/a.jpg" },
     { "libraryId": "photos", "path": "/old", "view": "folder" }
   ],
   "recursive": true
 }
 ```
 
-- A missing target is reported in `result.missing`; it is not a top-level `404`.
-- A non-empty folder with `recursive=false` is a `409` before the Operation starts.
-- An archive root (`view=folder` on an archive) cannot be deleted; it is a `400`.
-- Duplicate or nested targets are normalized and deduplicated; the removed duplicates are reported in `warnings`.
-- The response is `202` with an Operation. Entries already deleted are not rolled back.
-
-The v1 rule that a non-empty folder without `recursive` is a `409` is kept.
-The v1 behaviour that returned `400` was a contract mismatch; v2 makes the contract and the status agree.
+The rules of [design.md §8.4](../design.md#84-deletion) apply: a non-empty folder needs `recursive=true`, and a target in a `readonly` Library or inside an archive is `403`.
+An archive's root (`view=folder` on an archive) is inside the archive, so deleting it is `403`; the archive itself is deleted with `view=file`.
+The response is `202` with an Operation.
 
 ### 7.3 Write and Create
 
-A one-shot file write addresses an exact path:
+`PUT /libraries/{libraryId}/entries/content?path=&conflict=` writes the body to the exact path.
+`conflict` is `fail`, `skip`, or `overwrite`; `rename` is not accepted, because a write that may publish under another name is not idempotent.
+The size limit and the switch to an upload session are those of [design.md §8.7](../design.md#87-uploads).
 
-```
-PUT /libraries/{libraryId}/entries/content?path=/new.jpg&conflict=overwrite
-Content-Type: image/jpeg
-```
+`POST /libraries/{libraryId}/entries/files?path=` writes the body under the path, or under a name the daemon chooses when the path exists, and returns `201` with the published Entry.
+It is the former `conflict=rename` of the one-shot write.
 
-```json
-{
-  "outcome": "created",
-  "entry": { "...": "FileSystemEntry" }
-}
-```
-
-- `outcome` is `created`, `replaced`, or `skipped`.
-- A new Entry returns `201`; a replacement or skip returns `200`.
-- `conflict` is `fail`, `overwrite`, or `skip`. `rename` is not accepted here because `PUT` would no longer be idempotent.
-- A body over 32 MiB returns `413`; use an upload session.
-
-A create that may choose a different name is a command:
-
-```
-POST /libraries/{libraryId}/entries/files?path=/new.jpg&conflict=rename
-Content-Type: image/jpeg
-```
-
-This accepts the same conflict policies as the v1 write, but because it can publish under another name it is a `POST`.
-It returns `201` with the published Entry.
-An `Idempotency-Key` is required for this operation.
-
-A folder is created with:
-
-```json
-{
-  "path": "/new/deep",
-  "parents": true
-}
-```
-
-`POST /libraries/{libraryId}/entries/folders` returns `201` with the Entry; an existing path returns `409`.
+`POST /libraries/{libraryId}/entries/folders` creates a folder from `{path, createParents}` and returns `201` with the Entry.
 
 ### 7.4 Operation Results
 
-An Operation is the single result shape for batch work:
+An Operation is the one result of every batch command: copy, move, delete, and timeline scan.
+A command always answers `202` with `{operation}`, whether or not the work has finished.
+When it has, the body already carries the terminal status and the result, and a client does not poll.
 
-```json
-{
-  "operation": {
-    "id": "op_...",
-    "kind": "copy",
-    "status": "succeeded",
-    "createdAt": "2026-11-26T03:00:00Z",
-    "startedAt": "2026-11-26T03:00:00Z",
-    "finishedAt": "2026-11-26T03:00:01Z",
-    "progress": { "processed": 2, "total": 2, "bytes": 12345 },
-    "result": {
-      "entries": [
-        { "libraryId": "photos", "path": "/backup/a.jpg" }
-      ],
-      "skipped": [],
-      "failed": [],
-      "missing": [],
-      "warnings": [],
-      "destination": { "libraryId": "photos", "path": "/backup", "view": "folder" }
-    }
-  }
-}
-```
-
-`result` is absent until the Operation is terminal.
-A `202` body may already carry `status=succeeded` and `result`; a client then skips polling.
-A failure in one entry does not discard the others; `status` is `failed` when `failed` is non-empty.
+The Operation keeps the fields and states of [design.md §8.3](../design.md#83-conflict-policy) and [§8.8](../design.md#88-operations): `processedCount`, `totalCount`, `skippedCount`, `failedEntries`, the published `resultEntries`, and the destination Library.
+A failure in one entry does not discard the others.
+Operations stay in memory, as they are now; persisting them is deferred in [design.md §11.2](../design.md#persisting-operations).
 
 ## 8. Uploads and Operations
 
 ### 8.1 Uploads
 
-An upload session is a resumable write lifecycle:
-
-```
-POST   /libraries/{libraryId}/uploads
-GET    /libraries/{libraryId}/uploads
-GET    /uploads/{uploadId}
-PUT    /uploads/{uploadId}/content?offset=
-POST   /uploads/{uploadId}/commit
-DELETE /uploads/{uploadId}
-```
-
-A create request carries `path`, `size`, `conflict`, and an optional `sha256`.
-`offset` must equal `committedSize`; a mismatch is a `409`.
-`commit` verifies the declared size and the digest, rechecks the destination conflict, and publishes atomically.
-A conflict at commit does not abort the session; the client may retry with an explicit `conflict` in the commit body.
-An expired session is `410 Gone`.
-Sessions and staging files survive a daemon restart; `GET /libraries/{libraryId}/uploads` lists the active sessions so a client can resume.
-
-The chunk limit is 32 MiB.
-A chunk over the limit is a `400` with `LimitExceeded`.
+An upload session keeps its library-scoped lifecycle and its rules ([design.md §8.7](../design.md#87-uploads)): create, read, append a chunk at `offset`, commit, and delete.
+A session is a write that the client advances explicitly, not an Operation.
 
 ### 8.2 Operations
 
-All long-running batch work uses the same resource:
+`GET /operations`, `GET /operations/{operationId}`, and `POST /operations/{operationId}/cancel` serve every batch command, with the state transitions of [design.md §8.8](../design.md#88-operations).
 
-```
-GET  /operations
-GET  /operations/{operationId}
-POST /operations/{operationId}/cancel
-```
-
-`GET /operations` supports `kind`, `status`, `libraryId`, `limit`, and `cursor`.
-Operations are persisted, so a restart does not lose a finished result.
-`POST` commands accept an `Idempotency-Key`; a retry with the same key and body returns the original Operation, and the same key with a different body is a `422`.
-A `202` carries `Location` and, when not terminal, `Retry-After`.
-
-Timeline scans are Operations of kind `timelineScan`.
-Video sessions are not Operations; they are long-lived streaming resources with their own create, get, and delete lifecycle.
-Uploads are not Operations; they are write sessions that the client advances explicitly.
-This leaves three lifecycle models with clear meanings: batch Operation, upload session, and streaming session.
+The API therefore has three lifecycles with distinct meanings: the batch Operation, the upload session, and the streaming video session.
 
 ## 9. Timeline, Media, and Video
 
 ### 9.1 Timeline
 
-Timeline reads use `POST /entries` with `sort=timelineDate`.
-There is no separate timeline entry listing.
-The timeline index remains the source when the Filter has no name, rating, or tag condition; `warnings.indexed` and `warnings.asOf` say whether that answer was used.
+The timeline is read with `POST /entries` and `sort=timeline_date` (§6.1), and its months with `POST /entries/months`; there is no separate timeline listing.
 
-A scan is started with:
-
-```json
-{
-  "libraryIds": ["photos", "videos"]
-}
-```
-
-`POST /timeline/scans` returns `202` with an Operation of kind `timelineScan`.
-`GET /libraries/{libraryId}/timeline` returns a lightweight status projection:
-
-```json
-{
-  "running": false,
-  "processedFiles": 1234,
-  "completedAt": "2026-11-26T03:00:00Z",
-  "timeZone": "Asia/Tokyo"
-}
-```
-
-The Operation is authoritative for completion; the status projection is for clients that do not want to poll an Operation.
-
-`timelineDate` is an RFC 3339 string with an offset, such as `2026-05-01T12:34:56+09:00`.
-The daemon's configured zone is returned by `GET /capabilities` and by the timeline status.
-A client never has to infer the zone from a bare local time.
+`POST /timeline/scans` takes `{libraryIds}`, starts aggregation of each Library as the current refresh does ([Timeline Design §6.3](./timeline.md#63-when-aggregation-starts)), and answers `202` with an Operation of kind `timelineScan`.
+A Library already being aggregated joins its running scan instead of starting another.
+Aggregation that the daemon starts by itself creates no Operation.
+`GET /timeline/status?libraryIds=` keeps its per-Library projection of whether aggregation runs, how many files it has processed, and when it last completed, for a client that shows the state without holding an Operation.
 
 ### 9.2 Media
 
-`GET /libraries/{libraryId}/entries/media?path=&view=` returns a `MediaInfo` union of image and video information.
-It works for an Entry inside an archive.
+`GET /libraries/{libraryId}/entries/media?path=` returns the media information of an image or a video, as `getMediaInfo` does now ([Video Playback Design §3](./video.md#3-media-info)).
+It belongs to the Media tag with the image socket and the video sessions.
 
-`GET /libraries/{libraryId}/entries/thumbnail?path=&view=&size=&shape=` returns a cacheable image with `ETag`.
-The image socket remains the high-throughput path for a grid; the thumbnail endpoint is the simple REST path for a client that cannot keep a socket open.
-The two share the same cache keys.
+Thumbnails, sprite sheets, and display images have no HTTP path; they are served only over the image socket ([Image Socket Design §2.1](./image-socket.md#21-what-is-not-built)).
 
 ### 9.3 Video
 
-Video sessions are library-scoped:
+Video sessions keep their library-scoped lifecycle: create, read, delete, the playlist, and the segments.
 
-```
-POST   /libraries/{libraryId}/video/sessions
-GET    /libraries/{libraryId}/video/sessions/{sessionId}
-DELETE /libraries/{libraryId}/video/sessions/{sessionId}
-GET    .../playlist.m3u8
-GET    .../segments/{name}
-```
+When a new session would exceed `max_concurrent_transcodes`, the daemon still ends the oldest session to make way ([Video Playback Design §5.4](./video.md#54-concurrency)).
+The ended session does not disappear silently: its read, playlist, and segments answer `410` with the error kind `SessionEvicted`, so the client that owned it can tell an ended session from one that never existed or expired, which stay `404`.
+The daemon remembers an ended session's id for `session_idle_timeout_secs` ([Video Playback Design §5.1](./video.md#51-transcode-sessions)), the time after which an idle session would have expired anyway, so the record is bounded by the same limit as the sessions.
 
-A create request names one Entry.
-The response carries the session id, duration, and playlist URL.
-`GET` returns the current state, so a client can recover after a lost create response.
-The concurrent session limit is enforced with `429` and `Retry-After`; the daemon does not silently evict the oldest session.
-
-## 10. Ratings, Tags, and Preferences
+## 10. Ratings, Tags, Folder Settings, and Preferences
 
 ### 10.1 Ratings and Tags
 
-Ratings and tags are Entry-scoped data:
+A rating and the tags are data of one image or video, addressed beside its metadata:
 
-```
-GET /libraries/{libraryId}/entries/rating?path=&view=
-PUT /libraries/{libraryId}/entries/rating?path=&view=
-GET /libraries/{libraryId}/entries/tags?path=&view=
-PUT /libraries/{libraryId}/entries/tags?path=&view=
-```
-
-The `path` is in the query for both the read and the write, so the target is in one place.
-A `PUT` body carries only the value:
-
-```json
-{ "rating": "good" }
+```text
+GET /libraries/{libraryId}/entries/rating?path=
+PUT /libraries/{libraryId}/entries/rating?path=
+GET /libraries/{libraryId}/entries/tags?path=
+PUT /libraries/{libraryId}/entries/tags?path=
 ```
 
-```json
-{ "tags": ["family", "trip"] }
-```
+The path is in the query for both the read and the write, and a `PUT` body carries only the value, `{"rating": "good"}` or `{"tags": ["family", "trip"]}`.
+The value rules and the targets are those of [Rating and Tag Design](./rating-tags.md#3-targets); the daemon resolves the Entry to its content hash before reading or writing.
 
-`rating` is `good`, `bad`, or `none`; `none` clears it.
-Only images and videos can be rated or tagged; a folder or other file is a `400`.
-The server resolves the Entry's `contentId` and stores the mark against it.
-A daemon-driven move or copy keeps the marks; a path reused by a different file does not inherit them.
-An Entry without `contentId` cannot be rated or tagged.
-
-`GET /tags/words` returns the user's tag vocabulary:
-
-```json
-{
-  "words": ["family", "trip"]
-}
-```
-
-A word remains after it is removed from the last Entry that used it.
-The vocabulary is separate from the tags of one Entry.
+`GET /tags/words` returns the user's vocabulary, which is separate from the tags of one Entry.
 
 ### 10.2 Preferences
 
 `GET /preferences` and `PUT /preferences` keep the full-replacement contract.
-`GET` returns an `ETag`; `PUT` accepts `If-Match` and returns `412` when the saved value changed.
-The read returns the defaults when nothing has been saved.
 
-## 11. Errors, Pagination, and Idempotency
+### 10.3 Shelves and Folder Settings
+
+The Shelves keep their paths and their whole-replacement rules ([design.md §6.5](../design.md#65-shelves-and-folder-settings)); a Shelf's `scope` and `filter` are the Scope and the Filter of §3.3.
+
+The folder settings are data of one folder, addressed like a rating:
+
+```text
+GET    /folder-settings
+PUT    /libraries/{libraryId}/entries/folder-settings?path=
+DELETE /libraries/{libraryId}/entries/folder-settings?path=
+```
+
+`GET /folder-settings` returns every folder setting of the user with its Library id and path, because the client resolves the values of a folder itself.
+A `PUT` body carries only the display values, and a `DELETE` removes the folder's settings.
+
+## 11. Errors and Conditional Requests
 
 ### 11.1 Errors
 
-Every error uses `application/problem+json`:
+Every error is `application/problem+json`:
 
 ```json
 {
-  "type": "https://pxna.dev/problems/conflict",
+  "type": "about:blank",
   "title": "Conflict",
   "status": 409,
   "code": "Conflict",
   "detail": "The destination already exists.",
-  "instance": "/api/v2/entries/copy",
-  "requestId": "req_...",
-  "errors": [
-    { "pointer": "/destination/path", "code": "AlreadyExists" }
-  ]
+  "requestId": "...",
+  "errors": [{ "pointer": "/destination/folderPath", "code": "InvalidRequest" }]
 }
 ```
 
-- `code` is the stable client-facing branch, equivalent to the v1 `ErrorKind`.
-- `detail` never contains a host path; host paths are logged by `requestId`.
-- `errors` is present for field validation and names the JSON Pointer.
-- A `404` from routing, a `405`, a `413`, a `415`, and a `429` use the same shape; there is no plain-text error.
-- `401` carries `WWW-Authenticate` for a bearer request.
-- `429`, `503`, and `504` carry `Retry-After`.
+- `code` is the API error kind of [design.md §4.4](../design.md#44-error-model-and-http-mapping), and a client branches on it.
+- `detail` never contains a host path; the daemon logs the host path under `requestId`.
+- `errors` names each failing field by JSON Pointer when the daemon's own checks know the field; a body that the generated router rejects carries the router's message in `detail`, because the router reports no field.
+- A missing route, a method not allowed, a body the generated router rejects, an authentication failure, and a size limit use the same shape; no error is plain text or an empty body.
+- `requestId` is present on every error.
 
-A per-item error inside a successful batch is a compact `{ code, detail? }`, not a Problem document.
+A per-item failure inside a successful response, such as one place of `POST /entries/metadata`, is the error kind alone, not a Problem.
 
-### 11.2 Pagination
+### 11.2 Conditional Requests
 
-A page is the discriminated union in §6.2.
-`limit` defaults to 200 and is at most 1,000.
-An offset page returns `totalCount` and `snapshot`.
-A cursor page returns `previous` and `next`; the cursors are base64url.
-An `around` or `month` request returns the effective cursor page and an `anchor`.
-A snapshot is opaque and changes when any listing that contributes to it changes.
-
-### 11.3 Conditional Requests and Idempotency
-
-- Content returns `ETag`, `Last-Modified`, and `Accept-Ranges`, and handles `If-None-Match`, `If-Modified-Since`, `If-Range`, and `Range`.
-- A listing returns an `ETag` derived from its snapshot; `If-None-Match` returns `304`.
-- Preferences return an `ETag`; `If-Match` protects a replacement.
-- A destructive batch accepts `ifSnapshot`; a mismatch is `412`.
-- `POST` mutations accept `Idempotency-Key`; the key and a hash of the request are stored with the Operation for 24 hours.
-- A retry with the same key and body returns the original Operation with `202`; the same key with a different body is `422`.
+Content keeps `ETag`, `Last-Modified`, `Range`, and the conditional reads of the current contract.
+No other response carries an `ETag`; an `offset` page of a listing detects changes by `snapshot` (§6.3).
+Preconditions on writes, such as `If-Match` on the display preferences or a snapshot that a destructive command must still match, are deferred in [design.md §11.2](../design.md#optimistic-locking-with-etag--if-match).
 
 ## 12. Grouping and Tags
 
-The v2 contract has eleven tags.
-Each tag groups operations a reader would look for together, and each tag description covers every operation under it.
+The contract has twelve tags.
+Each groups the operations a reader looks for together, and each tag description covers every operation under it.
 
 | Tag | Operations |
 | --- | --- |
 | Meta | `GET /health`, `GET /capabilities`, `GET /setup/status` |
-| Auth | `POST /setup`, `POST /auth/login`, `GET/DELETE /auth/session`, `GET /auth/sessions`, `DELETE /auth/sessions/{sessionId}`, `PUT /auth/password` |
-| Libraries | `GET /libraries`, `GET /libraries/{id}` |
-| Entries | `POST /entries`, `/entries/months`, `/entries/metadata`, `GET .../entries/metadata`, `GET/HEAD/PUT .../entries/content`, `POST .../entries/files`, `POST .../entries/folders`, `GET .../entries/child-probe`, `POST /entries/copy`, `POST /entries/move`, `POST /entries/delete` |
+| Auth | `POST /setup`, `POST /auth/login`, `GET /auth/session`, `DELETE /auth/session` |
+| Libraries | `GET /libraries`, `GET /libraries/{libraryId}` |
+| Entries | `POST /entries`, `/entries/months`, `/entries/metadata`, `/entries/copy`, `/entries/move`, `/entries/delete`, and `.../entries/metadata`, `content`, `files`, `folders`, `child-probe` |
 | Uploads | The upload lifecycle |
-| Operations | `GET /operations`, `GET /operations/{id}`, `POST /operations/{id}/cancel` |
-| Timeline | `POST /timeline/scans`, `GET /libraries/{id}/timeline` |
-| Media | `GET .../entries/media`, `GET .../entries/thumbnail`, `GET /sockets/image`, video sessions |
-| Ratings & Tags | `GET/PUT .../entries/rating`, `GET/PUT .../entries/tags`, `GET /tags/words` |
-| Preferences | `GET/PUT /preferences` |
+| Operations | `GET /operations`, `GET /operations/{operationId}`, `POST /operations/{operationId}/cancel` |
+| Timeline | `GET /timeline/status`, `POST /timeline/scans` |
+| Media | `.../entries/media`, `GET /sockets/image`, and the video sessions |
+| Ratings & Tags | `.../entries/rating`, `.../entries/tags`, `GET /tags/words` |
+| Shelves | The Shelves, `GET /folder-settings`, and `.../entries/folder-settings` |
+| Preferences | `GET /preferences`, `PUT /preferences` |
 | Performance | `POST /performance/client-timings` |
 
-The following v1 groupings do not carry into v2:
+The tags are ordered as a reader follows them: Meta, Auth, Libraries, Entries, Uploads, Operations, Timeline, Media, Ratings & Tags, Shelves, Preferences, Performance.
+The generated interface is split by tag, so the same grouping decides where the handlers and their tests live ([design.md §4.2](../design.md#42-openapi-driven-code-generation)).
 
-- `GET /capabilities` leaves `Libraries`; it is a meta operation, not a Library read.
-- `POST /libraries/{id}/entries/details` becomes `POST /entries/metadata` under Entries.
-- `GET /libraries/{id}/media-info` becomes `GET .../entries/media` under Media; the tag is not `Video`.
-- `GET /tags` becomes `GET /tags/words`; the vocabulary is separate from an Entry's tags.
-- `GET /folders/children` becomes `GET .../entries/child-probe`; the name says it is a probe, not a listing.
-- `Search` and `Folders` no longer own listing operations; listings are Entries. `Timeline` keeps only the scan and status operations; the timeline entry listing is Entries, and the scan itself is an Operation.
-- `Files` and `Folders` no longer exist as tags; the Entry's `kind` and `view` carry the distinction.
+## 13. Mapping from the Current Contract
 
-The tag order is the order a reader follows: Meta, Auth, Libraries, Entries, Uploads, Operations, Timeline, Media, Ratings & Tags, Preferences, Performance.
+The contract is replaced in place, area by area, and each area moves its daemon handlers, its contract, and the web client together.
+The iOS app follows the contract it is built against, in its own repository.
 
-## 13. Migration from v1
-
-v1 and v2 are served together.
-v1 is frozen: it receives only critical fixes, and every v1 response carries `Deprecation` and `Sunset` once a removal date exists.
-The web client moves first, then the native client; v1 is removed after both have used v2 for one release.
-
-| v1 | v2 |
+| Current | Replacement |
 | --- | --- |
-| `GET /libraries/{id}/files?path=` | `GET /libraries/{id}/entries/metadata?path=&view=file` |
+| `GET /auth/me` | `GET /auth/session` |
+| `GET /libraries/{id}/files?path=` | `GET /libraries/{id}/entries/metadata?path=` |
 | `GET /libraries/{id}/folders?path=` | `GET /libraries/{id}/entries/metadata?path=&view=folder` |
-| `GET/PUT /libraries/{id}/files/content` | `GET/PUT /libraries/{id}/entries/content` |
+| `GET /libraries/{id}/files/content` | `GET /libraries/{id}/entries/content` |
+| `PUT /libraries/{id}/files/content` with `conflict` of `fail`, `skip`, or `overwrite` | `PUT /libraries/{id}/entries/content` |
+| `PUT /libraries/{id}/files/content` with `conflict=rename` | `POST /libraries/{id}/entries/files` |
+| `POST /libraries/{id}/folders` | `POST /libraries/{id}/entries/folders` |
 | `POST /libraries/{id}/files/copy` and `/folders/copy` | `POST /entries/copy` |
 | `POST /libraries/{id}/files/move` and `/folders/move` | `POST /entries/move` |
 | `POST /libraries/{id}/files/delete` and `/folders/delete` | `POST /entries/delete` |
@@ -816,210 +526,307 @@ The web client moves first, then the native client; v1 is removed after both hav
 | `GET /libraries/{id}/folders/children` | `GET /libraries/{id}/entries/child-probe` |
 | `POST /libraries/{id}/entries/details` | `POST /entries/metadata` |
 | `GET /search/entries` | `POST /entries` with the same Filter |
-| `GET /timeline/entries` | `POST /entries` with `sort=timelineDate` |
-| `GET /timeline/months` and `POST /entries/months` | `POST /entries/months` |
-| `GET /timeline/status` and `POST /timeline/refresh` | `GET /libraries/{id}/timeline` and `POST /timeline/scans` |
+| `GET /timeline/entries` | `POST /entries` with `sort=timeline_date` |
+| `GET /timeline/months` | `POST /entries/months` |
+| `POST /timeline/refresh` | `POST /timeline/scans` |
+| `GET /libraries/{id}/media-info` | `GET /libraries/{id}/entries/media` |
 | `GET/PUT /libraries/{id}/rating` | `GET/PUT /libraries/{id}/entries/rating` |
 | `GET/PUT /libraries/{id}/tags` | `GET/PUT /libraries/{id}/entries/tags` |
 | `GET /tags` | `GET /tags/words` |
-| `GET /libraries/{id}/media-info` | `GET /libraries/{id}/entries/media` |
+| `GET /settings/folder` | `GET /folder-settings` |
+| `PUT /settings/folder` and `POST /settings/folder/delete` | `PUT` and `DELETE /libraries/{id}/entries/folder-settings` |
 
-`daemon/openapi.yaml` remains the v1 contract.
-The v2 contract is added as a separate document and a separate generated interface; a path in v1 is not silently redirected to v2.
-The v2 implementation starts at the service layer and wraps the existing listing, mutation, upload, and operation services rather than duplicating them.
+Paths not in the table keep their place.
+No current path is redirected; a removed path answers `404` in the Problem shape.
 
 ## 14. Design Decisions
 
 ### 14.1 Decided
 
-#### Use one Entry resource with a view discriminator
+#### Replace the Contract in Place Instead of Serving a Second Version
 
 **Decision**
-Files, folders, links, archive files, and archive roots are all Entries.
-A request that can mean either an archive file or its root carries `view=file` or `view=folder`.
+The structure of this document replaces `daemon/openapi.yaml` under `/api/v1`, area by area, with the daemon and the web client changed in the same change.
+No second version is served alongside it, and removed paths carry no deprecation period.
 
 **Reason**
-The v1 split into `/files` and `/folders` doubles the mutation endpoints and makes the same `/a.zip` mean different things by endpoint.
-A `view` on the reference keeps the archive ambiguity explicit without a second namespace.
+Pxna is not yet in use, the web client ships in the same image as the daemon, and the iOS app follows the contract it is built against, so no client needs the old paths after a change.
+A second version would double the contract, the generated interface, and the handlers for as long as both are served, to protect clients that do not exist.
 
 **Rejected alternatives**
-A trailing slash on the path was rejected because forgetting it would turn an archive-root operation into a file operation, which is unsafe for delete.
-Keeping the two namespaces was rejected because it preserves six mutation endpoints and the source-library asymmetry.
+Serving `/api/v2` beside a frozen `/api/v1` with `Deprecation` and `Sunset` was rejected for that cost.
+Building the whole replacement first and switching the web client at once was rejected because the web client would be broken on `main` until the switch.
 
-#### Use POST for body-carrying reads and defer QUERY
+#### Keep One Entry Namespace, with a View Where a Path Has Two Faces
 
 **Decision**
-`POST /entries`, `POST /entries/months`, and `POST /entries/metadata` are the read operations.
-They change no state.
-The HTTP `QUERY` method is not adopted for v2 now.
+Files, folders, links, archive files, and archive roots are all Entries in one namespace.
+A request that can mean either an archive file or its root carries `view`, and an omitted `view` means the archive file (§3.1).
+This replaces the separate namespaces of [design.md §8.1](../design.md#81-namespaces).
 
 **Reason**
-A Scope can carry 64 starts with paths up to 4,096 characters, and a metadata batch can carry 200 references; a URI cannot hold them reliably.
-`QUERY` would express the intended safety, but the repository's OpenAPI 3.0.3 pipeline, custom generator, and axum 0.8 `MethodFilter` do not support it without hand-written routing and client work.
-The v2 contract does not need the semantics yet, and the migration cost is not justified.
-The cost is that automatic retry and cache semantics are not available; the contract must state that these POSTs are reads.
+The two namespaces doubled the copy, move, and delete commands, split a mixed selection into two requests, and made the same `/a.zip` mean different things by endpoint.
+`view` keeps the archive ambiguity explicit in the request, and only where it exists.
+The validation that the namespaces chose by endpoint is chosen by the face the request names.
 
 **Rejected alternatives**
-`GET` with query parameters was rejected because the worst-case body does not fit a URL.
-`QUERY` is recorded as a deferred item in §14.2 rather than rejected permanently.
+A trailing slash on the path was rejected because forgetting it would turn an operation on an archive's root into one on the archive file, which is unsafe for delete.
+Keeping the namespaces and only aligning the transfer body was rejected because it keeps six commands and two requests per mixed selection.
+Carrying `view` on every request was rejected because an operation with one face would accept a value it can only refuse.
 
-#### Use one listing operation and one Entry page
+#### Address One Entry Under Its Library with the Path in the Query
 
 **Decision**
-`POST /entries` is the only listing operation.
-Every listing returns `items`, `page`, and `warnings`, with the page as a discriminated union.
+An operation on one Entry, including the daemon's own data about it (the rating, the tags, and the folder settings), is under `/libraries/{libraryId}/entries/` with the path in the query.
+A read or a command whose body names its Libraries is global.
+This replaces the decision of [design.md §11.1](../design.md#name-a-folder-of-the-folder-settings-in-the-body-of-requests-under-settingsfolder) that named a folder of the folder settings in the body of requests under `/settings/folder`.
 
 **Reason**
-v1 has five listing operations, four page shapes, and three entry wrappers.
-One operation makes the tree, search, and timeline share a store and a decoder.
-The Scope and Filter already express the differences.
+The current contract put the same concept in different places: the path of a rating was in the query to read and in the body to write, and the folder settings named a folder in a body while the rating named an Entry in the query.
+One rule, decided by what an operation targets rather than by whether it changes a Library, lets a client build every single-Entry request the same way.
+The objection that a folder is named in two parts, unlike a start, now applies equally to every single-Entry operation, so it no longer marks an exception.
 
 **Rejected alternatives**
-Keeping the legacy search and timeline listing endpoints was rejected because they are subsets of the same Scope and Filter and double every fix.
-Keeping separate envelopes was rejected because the client would still need one decoder per listing.
+Keeping the folder settings under `/settings/folder` with the folder in the body was rejected because it would be the one single-Entry operation in another shape.
+Putting every single-Entry operation in a body was rejected because a `GET` has no body, and the reads would become `POST`.
 
-#### Return 202 with an Operation for every batch mutation
+#### Use POST for Body-Carrying Reads, Check Them Like Any POST, and Defer QUERY
 
 **Decision**
-Copy, move, delete, and timeline scans return `202` with an Operation, even when the work finishes immediately.
-The Operation body carries the terminal state when it is already done.
+`POST /entries`, `POST /entries/months`, and `POST /entries/metadata` are reads that change no state.
+They meet the `Origin` check of [design.md §8.5](../design.md#85-csrf) like every other `POST`.
 
 **Reason**
-v1 chooses between `200` and `202` by source count and Library, so a client cannot use one retry rule.
-A single status with a terminal body gives one rule and one place for `skipped`, `failed`, and `missing`.
+A Scope of 64 starts and a batch of 200 places do not fit a URI reliably, and the decision "Carry a Scope and a Filter in the JSON Body of One POST Request" of [Listing and Search Design §8.1](./listing.md#carry-a-scope-and-a-filter-in-the-json-body-of-one-post-request) already chose a body for them.
+The check depends only on the method and the session cookie; the web client sends `Origin` on every `POST`, and bearer requests are not checked, so an exception for these paths would help no client.
 
 **Rejected alternatives**
-Synchronous `200` for small batches was rejected because the threshold is a server implementation detail and would still split the client.
-Synchronous `204` for deletes was rejected because it cannot report partial results.
+Exempting the three paths from the `Origin` check was rejected because it adds a path-based exception to a security check for no client.
+`QUERY` is deferred in §14.2, not rejected.
 
-#### Use Problem Details for every error
+#### List Through One Operation into One Entry Page
 
 **Decision**
-All errors use `application/problem+json` with `code`, `detail`, `requestId`, and optional field errors.
+`POST /entries` is the only listing operation, and every listing returns `items`, a discriminated `page`, and `warnings` (§6).
+An `offset` page carries `snapshot` for detecting a change, as now; listings carry no `ETag`.
 
 **Reason**
-v1 returns plain text for validation and extraction failures, empty bodies for routing failures, and a JSON `ErrorResponse` elsewhere.
-A generated client cannot rely on one decoder.
+The current contract has five listing operations, four page envelopes, and three entry wrappers for the same Entries, so a fix to a page field is repeated per schema and a client keeps one store per listing.
+The Scope and the Filter already express every difference, and the summary of direct children is a projection of the same request.
+A `POST` is not revalidated by HTTP caches, and the web client already compares the `snapshot` of offset pages.
 
 **Rejected alternatives**
-Keeping `ErrorResponse` and adding fields was rejected because the routing and extractor failures would still bypass it unless every path is wrapped; a new media type makes the boundary explicit.
+Keeping a `GET` for one folder beside `POST /entries` was rejected because a listing would again have two entrances, and no client relies on HTTP caching of a listing.
+Keeping the per-use operations with one shared envelope was rejected because their filters and defaults would still differ.
+An `ETag` with `304` on the listing was rejected because a conditional `POST` is outside HTTP's caching model.
 
-#### Expose a cacheable REST thumbnail endpoint
+#### Carry `includeHidden` as a Listing Option, Not in the Scope
 
 **Decision**
-v2 provides `GET /libraries/{libraryId}/entries/thumbnail?path=&view=&size=&shape=` as a cacheable image response with `ETag`.
-The image socket remains the high-throughput path for a grid.
+`includeHidden` is a listing option of `POST /entries` (§3.3), and a Scope has no field for it.
 
 **Reason**
-A client that cannot keep a WebSocket open still needs thumbnails, and an HTTP endpoint can be revalidated with the same cache keys as the socket.
-A single REST path also makes the API usable by a generic client.
+A Shelf holds a Scope and a Filter and is read by sending them as it holds them; with the field in the Scope, the Shelves' table would have to store it and every saved Shelf would gain a value it has never had.
+The tree is the only listing that reads hidden Entries, and it is not a Shelf.
 
 **Rejected alternatives**
-Socket-only delivery was rejected because it forces every client to implement the binary protocol for a single image.
-A separate thumbnail service was rejected because the socket already shares the cache keys.
+Putting `includeHidden` in the Scope, where `recursive` is, was rejected because it changes the stored form of the Shelves for a value no Shelf uses.
 
-#### Key ratings and tags by content identity
+#### Keep the Timeline Status a Global Read over Several Libraries
 
 **Decision**
-Ratings and tags are stored against `contentId` for images and videos.
-The API still addresses the Entry by path.
+The status of aggregation stays `GET /timeline/status?libraryIds=`, returning one projection per Library.
 
 **Reason**
-A path changes on an external rename and can be reused by a different file.
-Content identity keeps marks with the content and avoids inheriting a mark from a deleted file.
+The web client shows the state of the chosen Libraries together, and the rule of §4 puts a read that names its Libraries under the global path.
 
 **Rejected alternatives**
-Path-keyed marks were rejected because the loss on rename is visible to the user and cannot be repaired reliably after the fact.
+`GET /libraries/{libraryId}/timeline` per Library was rejected because a client would send one request per Library for one screen.
 
-#### Persist uploads and operations
+#### Group Operations into Twelve Tags by the Resource a Reader Looks For
 
 **Decision**
-Upload sessions and Operations are stored in SQLite and survive a daemon restart.
+The contract has the twelve tags of §12. The Shelves and the folder settings keep a tag of their own, `GET /capabilities` and `GET /setup/status` move to Meta, and the session read is `GET /auth/session`, beside `DELETE /auth/session`.
 
 **Reason**
-A client that loses a response can resume an upload or read the result of a copy after a restart.
-Without persistence, a lost response or a restart leaves the client unable to distinguish an unknown id from a lost result.
+The current tags follow the order in which features were added: a reader looking for a listing has to open four tags, image media information sits under Video, and Libraries holds the capabilities.
+The Shelves and the folder settings are the daemon's own state that the Shelves screen reads together, which no other tag covers.
+`GET /auth/me` and `DELETE /auth/session` read and end the same session under two names; one path for one resource lets a reader find both.
 
 **Rejected alternatives**
-Keeping them in memory was rejected because a restart during a long copy or a large upload loses the only record of the work.
+The eleven tags of the first proposal were rejected because they had no place for the Shelves and the folder settings.
+Keeping `GET /auth/me` was rejected because the read and the delete of the session would stay under different paths.
 
-#### Serve v2 alongside v1 and freeze v1
+#### Answer Every Batch Command with 202 and an Operation
 
 **Decision**
-`/api/v1` remains the current contract; `/api/v2` is added as a separate contract and generated interface.
-v1 is frozen except for critical fixes and is removed after the web and native clients have used v2 for one release.
+Copy, move, delete, and timeline scans answer `202` with an Operation, even when the work finishes before the response; the body then carries the terminal state.
+This replaces the decision "Decide Sync and Async by the Shape of the Request" of [design.md §11.1](../design.md#decide-sync-and-async-by-the-shape-of-the-request).
 
 **Reason**
-A breaking API change cannot be made in place for two clients.
-A separate base path and a separate contract make the migration observable.
+The current contract chooses `200`, `202`, or `204` for the same command by the number of sources and the Libraries, so a client needs a branch per status and has no single place for skipped and failed entries.
+A terminal body keeps the one round trip that the earlier decision protected for a rename within a Library.
 
 **Rejected alternatives**
-Changing v1 in place was rejected because it breaks clients without a migration window.
-A single generated interface for both versions was rejected because the tag and method split would make the generator and handlers ambiguous.
+Deciding by the shape of the request, the earlier decision, was rejected for the branches it leaves in every client.
+A synchronous `204` for a delete was rejected because it cannot report a partial result.
+
+#### Make a Timeline Scan an Operation
+
+**Decision**
+A scan that a client asks for is an Operation of kind `timelineScan`, started by `POST /timeline/scans`, while `GET /timeline/status` stays as a projection (§9.1).
+
+**Reason**
+The refresh and the status were a fourth lifecycle with its own polling, unlike every other long-running request.
+
+**Rejected alternatives**
+Removing the status projection was rejected because a client that shows aggregation started by the daemon itself has no Operation to read.
+
+#### Use Problem Details for Every Error
+
+**Decision**
+Every error is `application/problem+json` with `code`, `detail`, `requestId`, and the failing fields (§11.1).
+
+**Reason**
+The current contract documents `ErrorResponse`, but the generated router answers a rejected body in plain text, a missing route and a disallowed method with an empty body, and a 401 only gets a body from an outer middleware, while `requestId` is never set.
+A generated client cannot decode every error with one type.
+
+**Rejected alternatives**
+Keeping `ErrorResponse` and wrapping the failing paths was rejected because the routing and extraction failures would bypass it unless each is wrapped by hand; a media type of its own makes the boundary visible.
+
+#### End the Oldest Video Session and Answer It with 410
+
+**Decision**
+The daemon keeps ending the oldest transcode session to make way for a new one, and answers requests for the ended session with `410` and `SessionEvicted` (§9.3).
+
+**Reason**
+The limit defaults to one session, and opening a new video means the previous one was finished or abandoned ([Video Playback Design §5.4](./video.md#54-concurrency)); a session whose `DELETE` was lost would otherwise block the next video until it expired.
+The defect was only that the owner of the ended session could not tell what happened.
+
+**Rejected alternatives**
+Refusing a new session with `429` and `Retry-After` was rejected because a lost `DELETE` would block playback.
+Keeping the silent `404` was rejected because it is indistinguishable from an unknown session.
+
+#### Keep Images on the Image Socket Only
+
+**Decision**
+The API has no HTTP path for thumbnails, sprite sheets, or display images.
+
+**Reason**
+The image socket is their only path by the decision of [Image Socket Design](./image-socket.md#carry-thumbnails-and-display-images-over-one-websocket-per-tab), and no client needs another.
+
+**Rejected alternatives**
+A cacheable `GET .../entries/thumbnail` for clients that cannot keep a WebSocket was rejected because no such client exists and it would reverse that decision without a new reason.
+
+#### Keep the Identity of Ratings and Tags Inside the Daemon
+
+**Decision**
+The API addresses a rating and the tags by the Entry's path and does not expose the content hash that identifies them.
+
+**Reason**
+The daemon resolves the path to the content hash before reading or writing ([Rating and Tag Design §6.1](./rating-tags.md#61-what-is-stored)), so a client never needs the hash, and the change of identity in M26 of [design.md §12.2](../design.md#122-roadmap) does not change the contract.
+
+**Rejected alternatives**
+A `contentId` on the Entry was rejected because no client uses it, and it would make the daemon's storage key part of the contract.
 
 ### 14.2 Deferred
 
-#### Adopting the HTTP QUERY method
+#### Adopting the HTTP QUERY Method
 
-**Current**
-`POST /entries`, `POST /entries/months`, and `POST /entries/metadata` are read-only POSTs.
-They are safe and idempotent in effect, but HTTP cannot express that.
+**Current state**
+The three body-carrying reads are `POST` (§5.1).
 
-**Why it is not decided now**
-RFC 10008 defines `QUERY`, and OpenAPI 3.2 has a `query` operation, but this repository uses OpenAPI 3.0.3 and a custom generator.
-axum 0.8's `MethodFilter` has no `QUERY`, so routing would need a hand-written path or an `any` handler with a method check.
-The v2 contract does not need the semantics yet, and no client currently needs automatic retry of a listing.
+**Why not decide now**
+The repository's OpenAPI 3.0.3 pipeline and its generator have no `QUERY` operation, and axum's method filter has no `QUERY`, so routing it needs hand-written work; no client needs automatic retry or caching of these reads.
 
-**Conditions for deciding**
-Adopt `QUERY` when the OpenAPI pipeline supports query operations, axum has a first-class method filter, and a client needs the safe-method semantics for automatic retry or cache revalidation.
-At that point, add a `QUERY` alias to the three read operations, keep `POST` during a migration window, and deprecate it.
+**Condition for deciding**
+When the OpenAPI pipeline and axum support `QUERY`, and a client needs safe-method semantics for these reads.
 
-#### Content identity for ratings and tags
+#### Commands with Sources in Several Libraries
 
-**Current**
-The v2 API shape uses `contentId`, but the hash input, the cache key, and the invalidation rule are not decided.
+**Current state**
+The sources of a copy or move and the targets of a delete are in one Library (§7.1, §7.2).
 
-**Why it is not decided now**
-The content hash depends on the M26 work in the roadmap and on how an archive Entry's content is keyed without re-reading the archive on every request.
+**Why not decide now**
+The current commands have one source Library, the Operation reports one, and no screen selects Entries across Libraries.
 
-**Conditions for deciding**
-When M26 is implemented, define the hash input, the cache key, and how a content change invalidates a mark.
+**Condition for deciding**
+When a client offers a selection across Libraries, such as from a Shelf with starts in several Libraries.
 
-#### Removing v1
+#### Idempotency Keys for Commands
 
-**Current**
-v1 is the current contract and v2 is the target.
+**Current state**
+A command retried after a lost response may run twice, and its result can be found only through `GET /operations`.
 
-**Why it is not decided now**
-The web client and the native client have different release cycles, and no removal date has been agreed.
+**Why not decide now**
+A key is worth keeping only as long as the Operation it names, and Operations stay in memory ([design.md §11.2](../design.md#persisting-operations)).
 
-**Conditions for deciding**
-When both clients have used v2 for one release and no external client is known to call v1.
-At that point, set `Sunset`, keep the v1 contract for read-only compatibility for one release, and remove it.
+**Condition for deciding**
+When Operations are persisted.
+
+#### Managing Sessions and the Password Through the API
+
+**Current state**
+The API reads and revokes only the current session, and has no password change.
+
+**Why not decide now**
+The current contract has neither, and this structure adds no capability of its own (§2).
+
+**Condition for deciding**
+When the owner needs to revoke a session of another device, or to change the password without the daemon's command line.
+
+#### Resuming an Upload Across Restarts, and Retrying a Commit with Another Policy
+
+**Current state**
+Upload sessions are in memory, so there is nothing to list after a restart, and a commit that meets a conflict ends with `409`.
+
+**Why not decide now**
+Listing sessions to resume needs them persisted, which is the question of [design.md §11.2](../design.md#persisting-operations), and no client has asked for a commit-time policy.
+
+**Condition for deciding**
+When an upload interrupted by a daemon restart has to be resumed, or a client needs to resolve a commit-time conflict without uploading again.
+
+#### Cancelling a Timeline Scan
+
+**Current state**
+`POST /operations/{operationId}/cancel` on a `timelineScan` answers its current state and stops nothing.
+
+**Why not decide now**
+A scan runs to its end once started and takes no cancellation, and the next scan skips the files it already read ([Timeline Design §6.1](./timeline.md#61-scanning-and-skipping-rereads)).
+
+**Condition for deciding**
+When the control of background work ([design.md §11.2](../design.md#controlling-background-work)) is decided.
 
 ## 15. Current State and Remaining Work
 
-v1 is implemented.
-The current API is still v1 in `daemon/openapi.yaml`.
-v2 is a target: the resource model, URL hierarchy, and contracts in §3 through §13 are not implemented.
-`daemon/openapi.yaml` remains the authoritative contract until a v2 OpenAPI document is added.
+### 15.1 Current Code
 
-The review and this target design are the prerequisites; they are already recorded.
-The remaining work is expected in this order.
+`daemon/openapi.yaml` serves the contract this document replaces, and none of §3 through §13 is implemented.
+Until each area is replaced, the following statements in other documents describe the current contract, and this document the replacement:
+
+- The namespaces of [design.md §8.1](../design.md#81-namespaces) and the sync and async table of [§8.2](../design.md#82-determining-sync-and-async), with the decision "Decide Sync and Async by the Shape of the Request"
+- The folder settings under `/settings/folder` in [design.md §6.5](../design.md#65-shelves-and-folder-settings), with the decision "Name a Folder of the Folder Settings in the Body of Requests under /settings/folder"
+- The plain-text and empty error bodies in [design.md §4.4](../design.md#44-error-model-and-http-mapping)
+- The folder, summary, search, and timeline listings named in [Listing and Search Design](./listing.md#1-about-this-document) and [Timeline Design](./timeline.md#1-about-this-document)
+- The silent end of a transcode session in [Video Playback Design §5.4](./video.md#54-concurrency), and the error kinds of [design.md §4.4](../design.md#44-error-model-and-http-mapping), which lack `SessionEvicted`
+- The paths of the one-shot write in [design.md §8.7](../design.md#87-uploads), of the deletions in [§8.4](../design.md#84-deletion) and the decision "Delete Moves the Entry to a Library-Local Trash, Unified on POST", and the example path in the introduction of [§8](../design.md#8-conventions-for-mutating-apis)
+- The refresh, the status, and the four timeline endpoints in [Timeline Design §6.3](./timeline.md#63-when-aggregation-starts) and [§10.1](./timeline.md#101-current-code)
+- The external representations of Folder settings, Media info, Aggregation, and Vocabulary in the term list of [terms.md](../terms.md#2-term-list), and the names of the API in its Timeline entry
+
+Each area's change rewrites the statements it replaces.
+
+### 15.2 Roadmap
+
+The work is M34 of [design.md §12.2](../design.md#122-roadmap).
 The order is provisional; only the dependencies must hold.
 
-| Step | Content | Depends on |
+| No. | Content | Dependencies assumed |
 | --- | --- | --- |
-| A1 | Write the v2 OpenAPI document from §3 through §13 | None |
-| A2 | Implement `EntryRef`, `view`, and effective readonly over the existing storage and listing services | A1 |
-| A3 | Implement `POST /entries`, `/entries/months`, `/entries/metadata`, the Entry page, and the child probe | A2 |
-| A4 | Implement `POST /entries/copy`, `/move`, `/delete`, and the Operation result | A2 |
-| A5 | Implement upload listing and commit conflict handling, and persist uploads and Operations | A4 |
-| A6 | Implement Problem Details, idempotency keys, conditional requests, and the v2 tag set | A1 |
-| A7 | Migrate the web client, then the native client; freeze and later remove v1 | A3, A4, A5, A6 |
-
-The v2 implementation wraps the existing services.
-It does not duplicate path resolution, listing snapshots, the name index, timeline aggregation, or staging.
+| A1 | Problem Details for every error, including the generated router's rejections | None |
+| A2 | One Entry namespace with `view`, the single-Entry operations, ratings, tags, and folder settings beside them, and `GET /tags/words` | None |
+| A3 | `POST /entries` with the Entry page and `fields=summary`, the months and the metadata batch, and the removal of the folder, summary, search, and timeline listings | A2 |
+| A4 | `POST /entries/copy`, `move`, and `delete`, `202` with an Operation for every batch command, and timeline scans as Operations | A2 |
+| A5 | `410 SessionEvicted`, `GET /auth/session`, and the twelve tags with the tags left empty removed | A2, A3, A4 |
 
 Defects are not recorded here.
 See [issues.md](../issues.md).

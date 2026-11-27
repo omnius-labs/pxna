@@ -367,3 +367,10 @@ The target names it `entries/child-probe` and documents the tri-state and `maxAg
 - The web client uses the legacy listing paths consistently at [entries.ts](../../ui-web/src/library/entries.ts#L138), [entries.ts](../../ui-web/src/library/entries.ts#L151), [timeline.ts](../../ui-web/src/library/timeline.ts#L410), and [timeline.ts](../../ui-web/src/library/timeline.ts#L497); no web client call site depends on `/entries`, which supports treating it as a target rather than a compatibility constraint. The native client was not examined.
 
 ## 6. Afterwards
+
+- 2026-11-27: API Design was rewritten to replace the contract in place under `/api/v1` instead of serving a v2 beside a frozen v1, because Pxna is not yet in use; the Handling of R-1 to R-10 now points to that rewrite, whose section numbers are unchanged
+- 2026-11-27: R-3 is handled with twelve tags, adding Shelves for the Shelves and folder settings, which were implemented after the target commit
+- 2026-11-27: R-5 is handled by keeping the end of the oldest video session and answering the ended session with `410` and `SessionEvicted`, not with `429`; Operations stay in memory, as the deferred item "Persisting Operations" of design.md keeps them
+- 2026-11-27: R-7 is handled without exposing `contentId`; the content hash stays inside the daemon and remains M26 of design.md
+- 2026-11-27: R-8 is handled without exempting the three reads from the `Origin` check
+- 2026-11-27: The additions of the first target that the current contract lacks (session management, password change, upload listing, a REST thumbnail endpoint, idempotency keys, and conditional writes) were left out; API Design records them as deferred or rejected

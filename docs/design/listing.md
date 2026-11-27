@@ -989,7 +989,7 @@ The contract would have one sort parameter, but it would promise the folder list
 `/capabilities` has no field for `listEntries` or its per-month counts.
 
 **Reason**
-The capabilities let a client fall back when an optional browsing feature is absent ([openapi.yaml](../../daemon/openapi.yaml), `getCapabilities`), and `listEntries` is not optional: it replaces the search and timeline APIs ([design.md §12.2](../design.md#122-roadmap), M31), so a client has nothing to fall back to without it.
+The capabilities let a client fall back when an optional browsing feature is absent ([openapi.yaml](../../daemon/openapi.yaml), `getCapabilities`), and `listEntries` is not optional: it replaces the search and timeline APIs ([design.md §12.2](../design.md#122-roadmap), M34), so a client has nothing to fall back to without it.
 
 **Rejected alternative**
 A field `entries`.
@@ -1081,6 +1081,6 @@ Only the dependencies must be respected.
 | L5 | Remove the search API that `listEntries` replaces (§8.1) once no client calls it | L4 | Not started |
 | L6 | Carry the Scope and the Filter of `listEntries` and `listEntryMonths` in a POST body, with starts and Entries as objects of a Library id and a Library-relative path (§3, §8.1) | L4 | Done |
 
-L1 corresponds to M19, L2 to M24, L3 to M27, L4 to M28, L5 to part of M31, and L6 to part of M29 of [design.md §12.2](../design.md#122-roadmap).
+L1 corresponds to M19, L2 to M24, L3 to M27, L4 to M28, L5 to part of M34, and L6 to part of M29 of [design.md §12.2](../design.md#122-roadmap).
 
 For confirmed defects, see [issues.md](../issues.md).
