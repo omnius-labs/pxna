@@ -34,6 +34,7 @@ where
         + apis::rating::Rating<E, Claims = C>
         + apis::search::Search<E, Claims = C>
         + apis::setup::Setup<E>
+        + apis::shelves::Shelves<E, Claims = C>
         + apis::tags::Tags<E, Claims = C>
         + apis::timeline::Timeline<E, Claims = C>
         + apis::uploads::Uploads<E, Claims = C>
@@ -99,8 +100,13 @@ where
         .route("/api/v1/performance/client-timings", post(report_client_timings::<I, A, E, C>))
         .route("/api/v1/preferences", get(get_preferences::<I, A, E, C>).put(put_preferences::<I, A, E, C>))
         .route("/api/v1/search/entries", get(list_search_entries::<I, A, E, C>))
+        .route("/api/v1/settings/folder", get(list_folder_settings::<I, A, E, C>).put(put_folder_setting::<I, A, E, C>))
+        .route("/api/v1/settings/folder/delete", post(delete_folder_setting::<I, A, E, C>))
         .route("/api/v1/setup", post(create_initial_setup::<I, A, E>))
         .route("/api/v1/setup/status", get(get_setup_status::<I, A, E>))
+        .route("/api/v1/shelves", get(list_shelves::<I, A, E, C>).post(create_shelf::<I, A, E, C>))
+        .route("/api/v1/shelves/order", put(reorder_shelves::<I, A, E, C>))
+        .route("/api/v1/shelves/{shelf_id}", delete(delete_shelf::<I, A, E, C>).put(replace_shelf::<I, A, E, C>))
         .route("/api/v1/sockets/image", get(get_image_socket::<I, A, E, C>))
         .route("/api/v1/tags", get(list_tags::<I, A, E, C>))
         .route("/api/v1/timeline/entries", get(list_timeline_entries::<I, A, E, C>))
@@ -6081,6 +6087,1059 @@ where
                 response.body(Body::from(body_content))
             }
             apis::setup::GetSetupStatusResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct CreateShelfBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::ShelfInput,
+}
+
+#[tracing::instrument(skip_all)]
+fn create_shelf_validation(body: models::ShelfInput) -> std::result::Result<(models::ShelfInput,), ValidationErrors> {
+    let b = CreateShelfBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// CreateShelf - POST /api/v1/shelves
+#[tracing::instrument(skip_all)]
+async fn create_shelf<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+    Json(body): Json<models::ShelfInput>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::shelves::Shelves<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || create_shelf_validation(body)).await.unwrap();
+
+    let Ok((body,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().create_shelf(&method, &host, &cookies, &claims, &body).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::shelves::CreateShelfResponse::Status201_TheCreatedShelf(body) => {
+                let mut response = response.status(201);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::CreateShelfResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::CreateShelfResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::CreateShelfResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct DeleteFolderSettingBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::LibraryPath,
+}
+
+#[tracing::instrument(skip_all)]
+fn delete_folder_setting_validation(body: models::LibraryPath) -> std::result::Result<(models::LibraryPath,), ValidationErrors> {
+    let b = DeleteFolderSettingBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// DeleteFolderSetting - POST /api/v1/settings/folder/delete
+#[tracing::instrument(skip_all)]
+async fn delete_folder_setting<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+    Json(body): Json<models::LibraryPath>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::shelves::Shelves<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || delete_folder_setting_validation(body)).await.unwrap();
+
+    let Ok((body,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().delete_folder_setting(&method, &host, &cookies, &claims, &body).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::shelves::DeleteFolderSettingResponse::Status204_TheSettingsWereRemoved => {
+                let mut response = response.status(204);
+                response.body(Body::empty())
+            }
+            apis::shelves::DeleteFolderSettingResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::DeleteFolderSettingResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::DeleteFolderSettingResponse::Status404_ResourceNotFound(body) => {
+                let mut response = response.status(404);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::DeleteFolderSettingResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn delete_shelf_validation(path_params: models::DeleteShelfPathParams) -> std::result::Result<(models::DeleteShelfPathParams,), ValidationErrors> {
+    path_params.validate()?;
+
+    Ok((path_params,))
+}
+/// DeleteShelf - DELETE /api/v1/shelves/{shelfId}
+#[tracing::instrument(skip_all)]
+async fn delete_shelf<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    Path(path_params): Path<models::DeleteShelfPathParams>,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::shelves::Shelves<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || delete_shelf_validation(path_params)).await.unwrap();
+
+    let Ok((path_params,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().delete_shelf(&method, &host, &cookies, &claims, &path_params).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::shelves::DeleteShelfResponse::Status204_TheShelfWasDeleted => {
+                let mut response = response.status(204);
+                response.body(Body::empty())
+            }
+            apis::shelves::DeleteShelfResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::DeleteShelfResponse::Status404_ResourceNotFound(body) => {
+                let mut response = response.status(404);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::DeleteShelfResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn list_folder_settings_validation() -> std::result::Result<(), ValidationErrors> {
+    Ok(())
+}
+/// ListFolderSettings - GET /api/v1/settings/folder
+#[tracing::instrument(skip_all)]
+async fn list_folder_settings<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::shelves::Shelves<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || list_folder_settings_validation()).await.unwrap();
+
+    let Ok(()) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().list_folder_settings(&method, &host, &cookies, &claims).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::shelves::ListFolderSettingsResponse::Status200_TheFolderSettings(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ListFolderSettingsResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ListFolderSettingsResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn list_shelves_validation() -> std::result::Result<(), ValidationErrors> {
+    Ok(())
+}
+/// ListShelves - GET /api/v1/shelves
+#[tracing::instrument(skip_all)]
+async fn list_shelves<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::shelves::Shelves<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || list_shelves_validation()).await.unwrap();
+
+    let Ok(()) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().list_shelves(&method, &host, &cookies, &claims).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::shelves::ListShelvesResponse::Status200_TheShelves(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ListShelvesResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ListShelvesResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct PutFolderSettingBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::FolderSetting,
+}
+
+#[tracing::instrument(skip_all)]
+fn put_folder_setting_validation(body: models::FolderSetting) -> std::result::Result<(models::FolderSetting,), ValidationErrors> {
+    let b = PutFolderSettingBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// PutFolderSetting - PUT /api/v1/settings/folder
+#[tracing::instrument(skip_all)]
+async fn put_folder_setting<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+    Json(body): Json<models::FolderSetting>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::shelves::Shelves<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || put_folder_setting_validation(body)).await.unwrap();
+
+    let Ok((body,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().put_folder_setting(&method, &host, &cookies, &claims, &body).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::shelves::PutFolderSettingResponse::Status200_TheSavedSettings(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::PutFolderSettingResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::PutFolderSettingResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::PutFolderSettingResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct ReorderShelvesBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::ShelfOrder,
+}
+
+#[tracing::instrument(skip_all)]
+fn reorder_shelves_validation(body: models::ShelfOrder) -> std::result::Result<(models::ShelfOrder,), ValidationErrors> {
+    let b = ReorderShelvesBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// ReorderShelves - PUT /api/v1/shelves/order
+#[tracing::instrument(skip_all)]
+async fn reorder_shelves<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+    Json(body): Json<models::ShelfOrder>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::shelves::Shelves<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || reorder_shelves_validation(body)).await.unwrap();
+
+    let Ok((body,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().reorder_shelves(&method, &host, &cookies, &claims, &body).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::shelves::ReorderShelvesResponse::Status200_TheShelvesInTheNewOrder(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ReorderShelvesResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ReorderShelvesResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ReorderShelvesResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct ReplaceShelfBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::ShelfInput,
+}
+
+#[tracing::instrument(skip_all)]
+fn replace_shelf_validation(
+    path_params: models::ReplaceShelfPathParams,
+    body: models::ShelfInput,
+) -> std::result::Result<(models::ReplaceShelfPathParams, models::ShelfInput), ValidationErrors> {
+    path_params.validate()?;
+    let b = ReplaceShelfBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((path_params, body))
+}
+/// ReplaceShelf - PUT /api/v1/shelves/{shelfId}
+#[tracing::instrument(skip_all)]
+async fn replace_shelf<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    Path(path_params): Path<models::ReplaceShelfPathParams>,
+    State(api_impl): State<I>,
+    Json(body): Json<models::ShelfInput>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::shelves::Shelves<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || replace_shelf_validation(path_params, body)).await.unwrap();
+
+    let Ok((path_params, body)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().replace_shelf(&method, &host, &cookies, &claims, &path_params, &body).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::shelves::ReplaceShelfResponse::Status200_TheSavedShelf(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ReplaceShelfResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ReplaceShelfResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ReplaceShelfResponse::Status404_ResourceNotFound(body) => {
+                let mut response = response.status(404);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::shelves::ReplaceShelfResponse::Status500_InternalServerError(body) => {
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();

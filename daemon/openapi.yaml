@@ -48,6 +48,8 @@ tags:
       description: Password login and session management.
     - name: Preferences
       description: Display preferences the owner saves on the server.
+    - name: Shelves
+      description: The current user's Shelves and folder settings, which every client reads and edits.
     - name: Libraries
       description: Libraries available to the current user.
     - name: Folders
@@ -287,6 +289,210 @@ paths:
                     $ref: "#/components/responses/InvalidRequest"
                 "401":
                     $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /shelves:
+        get:
+            tags:
+                - Shelves
+            summary: List the Shelves
+            description: |
+                Returns the current user's Shelves in their order. The first read of a
+                user while a Library is configured creates the default Shelf Timeline,
+                which is not created again once it is deleted. It starts at the roots of
+                the Libraries in `timelineLibraries` of the display preferences, or of
+                every Library when none of them is configured, at most 64. A user
+                who already has 200 Shelves gets it at a later read, once there is
+                room.
+            operationId: listShelves
+            responses:
+                "200":
+                    description: The Shelves.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/ShelfList"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+        post:
+            tags:
+                - Shelves
+            summary: Create a Shelf
+            description: |
+                Creates a Shelf and puts it last. The Scope and the Filter are checked as
+                the body of `listEntryMonths` is, and the starts for form only, so a
+                start may name nothing. A user has at most 200 Shelves.
+            operationId: createShelf
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/ShelfInput"
+            responses:
+                "201":
+                    description: The created Shelf.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Shelf"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /shelves/order:
+        put:
+            tags:
+                - Shelves
+            summary: Reorder the Shelves
+            description: |
+                Orders the Shelves as given. `ids` names every Shelf of the user exactly
+                once, and any other list is refused.
+            operationId: reorderShelves
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/ShelfOrder"
+            responses:
+                "200":
+                    description: The Shelves in the new order.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/ShelfList"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /shelves/{shelfId}:
+        put:
+            tags:
+                - Shelves
+            summary: Replace a Shelf
+            description: |
+                Replaces a Shelf whole, keeping its id and position, with the checks of
+                `createShelf`.
+            operationId: replaceShelf
+            parameters:
+                - $ref: "#/components/parameters/ShelfIdPath"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/ShelfInput"
+            responses:
+                "200":
+                    description: The saved Shelf.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Shelf"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+        delete:
+            tags:
+                - Shelves
+            summary: Delete a Shelf
+            operationId: deleteShelf
+            parameters:
+                - $ref: "#/components/parameters/ShelfIdPath"
+            responses:
+                "204":
+                    description: The Shelf was deleted.
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /settings/folder:
+        get:
+            tags:
+                - Shelves
+            summary: List the folder settings
+            description: |
+                Returns the display values the current user saved for folders. A client
+                resolves the values of a folder itself.
+            operationId: listFolderSettings
+            responses:
+                "200":
+                    description: The folder settings.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FolderSettingList"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+        put:
+            tags:
+                - Shelves
+            summary: Save the settings of a folder
+            description: |
+                Saves the display values of one folder, replacing what it had. The folder
+                is not looked up. The timeline Layout can be saved only in a Shelf.
+            operationId: putFolderSetting
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/FolderSetting"
+            responses:
+                "200":
+                    description: The saved settings.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FolderSetting"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /settings/folder/delete:
+        post:
+            tags:
+                - Shelves
+            summary: Remove the settings of a folder
+            operationId: deleteFolderSetting
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/LibraryPath"
+            responses:
+                "204":
+                    description: The settings were removed.
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "404":
+                    $ref: "#/components/responses/NotFound"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
@@ -2019,6 +2225,15 @@ components:
                 type: string
                 pattern: '^[0-9]+\.ts$'
 
+        ShelfIdPath:
+            name: shelfId
+            in: path
+            required: true
+            description: Identifier the daemon gave the Shelf.
+            schema:
+                type: string
+                minLength: 1
+
         LibraryIdPath:
             name: libraryId
             in: path
@@ -2482,8 +2697,8 @@ components:
             additionalProperties: false
             description: |
                 Display preferences. `wide` and `narrow` are chosen by the
-                width of the screen (768 CSS px); `sort` and `timelineLibraries`
-                do not depend on it.
+                width of the screen (768 CSS px); `sort`, `archiveOpen`, and
+                `timelineLibraries` do not depend on it.
             required: [wide, narrow, sort]
             properties:
                 wide:
@@ -2492,6 +2707,8 @@ components:
                     $ref: "#/components/schemas/DisplaySet"
                 sort:
                     $ref: "#/components/schemas/SortPreference"
+                archiveOpen:
+                    $ref: "#/components/schemas/ArchiveOpen"
                 timelineLibraries:
                     type: array
                     minItems: 1
@@ -2502,6 +2719,118 @@ components:
                         as saved, and clients ignore them.
                     items:
                         $ref: "#/components/schemas/LibraryId"
+        DisplayLayout:
+            type: string
+            description: How a listing is laid out.
+            enum:
+                - grid
+                - list
+                - timeline
+        DisplayValueSet:
+            type: object
+            additionalProperties: false
+            description: The values chosen by the width of the screen. An absent value is taken from the layer below.
+            properties:
+                view:
+                    $ref: "#/components/schemas/DisplayLayout"
+                tileSize:
+                    type: integer
+                    format: int32
+                    minimum: 1
+                    maximum: 5
+                    description: Tile size step from 1 (smallest) to 5 (largest).
+                thumbnailShape:
+                    $ref: "#/components/schemas/ThumbnailShape"
+        DisplayValues:
+            type: object
+            additionalProperties: false
+            description: |
+                The display values a Shelf or the settings of a folder hold, in
+                the shape of the display preferences. Every value is optional.
+            properties:
+                wide:
+                    $ref: "#/components/schemas/DisplayValueSet"
+                narrow:
+                    $ref: "#/components/schemas/DisplayValueSet"
+                sort:
+                    $ref: "#/components/schemas/SortPreference"
+                archiveOpen:
+                    $ref: "#/components/schemas/ArchiveOpen"
+        ShelfInput:
+            type: object
+            additionalProperties: false
+            required: [name, scope]
+            properties:
+                name:
+                    type: string
+                    description: 1 to 100 characters after surrounding whitespace is trimmed.
+                scope:
+                    $ref: "#/components/schemas/EntryScope"
+                filter:
+                    $ref: "#/components/schemas/EntryFilter"
+                display:
+                    $ref: "#/components/schemas/DisplayValues"
+        Shelf:
+            type: object
+            additionalProperties: false
+            description: |
+                A saved Shelf. Its Scope and Filter can be sent to `listEntries`
+                as they are. The path of each start is returned in normal form,
+                with `.` and `..` resolved.
+            required: [id, name, scope, filter, display]
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                scope:
+                    $ref: "#/components/schemas/EntryScope"
+                filter:
+                    $ref: "#/components/schemas/EntryFilter"
+                display:
+                    $ref: "#/components/schemas/DisplayValues"
+        ShelfList:
+            type: object
+            additionalProperties: false
+            required: [shelves]
+            properties:
+                shelves:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/Shelf"
+        ShelfOrder:
+            type: object
+            additionalProperties: false
+            required: [ids]
+            properties:
+                ids:
+                    type: array
+                    maxItems: 200
+                    items:
+                        type: string
+        FolderSetting:
+            type: object
+            additionalProperties: false
+            description: |
+                The display values saved for one folder. The path is returned in
+                normal form, with `.` and `..` resolved.
+            required: [libraryId, path, display]
+            properties:
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                display:
+                    $ref: "#/components/schemas/DisplayValues"
+        FolderSettingList:
+            type: object
+            additionalProperties: false
+            required: [settings]
+            properties:
+                settings:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/FolderSetting"
         DisplaySet:
             type: object
             additionalProperties: false
@@ -2538,6 +2867,15 @@ components:
             enum:
                 - grid
                 - list
+        ArchiveOpen:
+            type: string
+            description: |
+                How an archive opens: `folder` browses its contents like a
+                folder, and `viewer` opens them in the viewer. An archive opens
+                as a folder when the value is absent.
+            enum:
+                - folder
+                - viewer
         OriginalImageMode:
             type: string
             description: |
@@ -3146,9 +3484,10 @@ components:
         LibraryPath:
             type: object
             description: |
-                A place in a Library: a start of a Scope, or an Entry. The path
-                is kept as it was given, so a response names a start by the
-                path it was sent with.
+                A place in a Library: a start of a Scope, an Entry, or a folder.
+                A listing keeps the path of a start as it was given, so its
+                response names a start by the path it was sent with. A saved
+                Shelf and the folder settings return their paths in normal form.
             required:
                 - libraryId
                 - path

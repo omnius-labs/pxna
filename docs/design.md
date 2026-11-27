@@ -354,6 +354,10 @@ The reasons for making `UnsupportedType`, `LimitExceeded`, and `PasswordRequired
 The engine's `Cancelled` is not in the table and falls to `InternalServerError`.
 A successful ffprobe whose output the daemon cannot deserialize is also `InternalServerError`, because the failure is in the daemon rather than a fact about the file.
 
+The generated router reads and checks a JSON body before the handler, and answers a rejected one with a plain-text body rather than an `ErrorResponse`.
+A body that is not JSON is 400, one that does not fit the types of the contract, such as one with an unknown value of an enum or without a required property, is 422 ([knowledge](./knowledge/axum-json-rejection.md)), and one with a value outside a range or a length of the contract is 400.
+An enum written inline in a property, such as `rating` and `kinds` of `EntryFilter`, is a string in the generated types, so a value outside it reaches the handler and is `InvalidInput`.
+
 ## 5. Storage Layer
 
 This is the layer that actually reads and writes the contents of a Library.
@@ -429,22 +433,38 @@ They are held in three tables.
 
 The display values are the Layout, the sort, the tile size, the thumbnail shape, and how an archive opens, in the shape of the display preferences: the Layout, the tile size, and the thumbnail shape per set of the wide and narrow screens, and the sort and how an archive opens once ([Client Design §3.9](./design/client.md#39-display-preferences)).
 Any value can be left unset, which means it is taken from the layer below.
+The Layout of a Shelf can be the timeline, and that of folder settings only the grid or the list.
 A folder inside an archive has settings by its joined path, as any other folder ([§11.1](#represent-paths-inside-archives-by-joining-paths)).
+A start and a folder are stored by their Library-relative path in normal form, with `.` and `..` resolved, and are returned in that form (§11.1 "Store Starts and Folders by the Normal Form of Their Paths").
 
-The Shelves are read in full, created, replaced whole, and deleted one at a time, and their order is replaced as a whole; the paths and schemas are defined in `openapi.yaml` by M29 of §12.2, which adds them.
-A Shelf is listed by sending its Scope and Filter to `listEntries`, as an Unsaved Shelf is ([Listing and Search Design §8.1](./design/listing.md#carry-a-scope-and-a-filter-in-the-json-body-of-one-post-request)).
-The folder settings are read in full when a client starts, and written or removed one folder at a time.
+The Shelves are read in full with `GET /shelves`, created with `POST /shelves`, replaced whole with `PUT /shelves/{shelfId}`, and deleted with `DELETE /shelves/{shelfId}`, and their order is replaced with `PUT /shelves/order`, which names every Shelf of the user exactly once; a new Shelf goes last (§11.1 "Replace the Order of the Shelves by Naming Every Shelf Once").
+A Shelf has an id that the daemon gives it as a TSID string, a name of 1 to 100 characters after surrounding whitespace is trimmed, a Scope and a Filter in the shapes `listEntries` takes, and the display values, and a user has at most 200 Shelves.
+`POST /shelves` answers 201 with the created Shelf, and replacing or deleting a Shelf the user does not have is `NotFound`, as is removing the settings of a folder that has none.
+A Shelf is listed by sending its Scope and Filter to `listEntries`, as an Unsaved Shelf is ([Listing and Search Design §8.1](./design/listing.md#carry-a-scope-and-a-filter-in-the-json-body-of-one-post-request)), and saving a Shelf applies the checks of that body to them, so a saved Shelf can always be sent as it is held.
+Its starts are checked for form only, and one that names nothing is a missing start when the Shelf is listed; a start given twice is kept, because `listEntries` names it once and a move can make two starts the same.
+Whether the timeline suits the Filter's kinds is the client's rule ([Client Design §3.9](./design/client.md#39-display-preferences)), and the daemon does not check it (§11.1 "Check a Shelf as the Body of listEntries, and Its Starts for Form Only").
+The folder settings are read in full with `GET /settings/folder` when a client starts, written one folder at a time with `PUT /settings/folder`, and removed with `POST /settings/folder/delete`, each naming the folder by a Library id and a Library-relative path in the body (§11.1 "Name a Folder of the Folder Settings in the Body of Requests under /settings/folder").
+A later write replaces an earlier one without a version, as for the display preferences (§11.2 "Optimistic Locking with ETag / If-Match").
 A client resolves a folder's values itself: each unset value is taken from the nearest folder at or above it that sets it, and then from the display preferences; an open Shelf's set values win over both, and inside a Shelf only how an archive opens is taken from folder settings ([§11.1](#resolve-display-settings-over-the-display-preferences-folder-settings-and-the-shelf)).
 These requests change no Library, so they respond synchronously and follow, of the conventions of §8, only the `Origin` check of §8.5.
 
 The daemon's own changes keep both in step with the tree.
 At the point where `LibraryMutation` reassigns the rows of the indexes, a rename or move reassigns the folder settings and the Shelf starts at or under the old path to the new one, and a delete removes the folder settings at or under the path and keeps the Shelf starts.
+A move that replaces its destination first removes the folder settings at or under it, as it removes the ratings and tags there, while a Shelf start that named the destination keeps naming it.
+A move across Libraries, of several Entries, or of a folder onto an existing folder to merge them goes entry by entry instead of renaming a folder, and each file it moves is reassigned as it moves.
+A folder's own settings and the Shelf starts naming it are reassigned once the folder has left its source, so a folder that stays, because an Entry in it was skipped or failed, keeps them there.
+Moving into an existing folder merges into it and replaces nothing of it, so a destination folder that has settings keeps them and the moved folder's are dropped.
+Where such a move creates a folder, including one that takes the place of a file or an archive, it first removes the folder settings at or under it.
+It does not carry a setting or a start under a moved folder that already names nothing (§11.1 "Carry a Folder Moved Entry by Entry When It Leaves Its Source").
 Changes made outside Pxna are not followed, so a folder renamed outside loses its settings, and a Shelf start that no longer names a folder is a missing start.
 `listEntries` lists a Shelf without its missing starts and names them ([Listing and Search Design §5.3](./design/listing.md#53-listing-several-starts)), and the client shows the Shelf with a notice that leads to editing it.
 
 The default Shelf is created once, by the first read of the Shelves of a user whose row in the `users` table does not yet record it; the same transaction creates the Shelf and sets that record, so two clients reading first at the same time create it once, and a deleted default Shelf is not created again.
 It is named Timeline, it reads descendants and the insides of archives, its Filter keeps images and videos, and its Layout is the timeline ([Client Design §5.1](./design/client.md#enter-through-the-libraries-and-the-shelves)).
 Its starts are the roots of the Libraries in `timelineLibraries` of the display preferences that still exist, or of every Library at that moment when none is saved or none of the saved ones exists, and `timelineLibraries` is not read afterwards.
+Display preferences that cannot be read count as none saved, as they do for a client, which then runs with the defaults ([Client Design §3.9](./design/client.md#39-display-preferences)).
+Of more than 64 such Libraries, the first 64 in the order of the configuration are its starts, and a read while no Library is configured creates and records nothing, so the default Shelf is created by the first read after a Library is configured.
+A read by a user who already has 200 Shelves creates and records nothing either, so the default Shelf is created by the first read after there is room.
 A Library added later is therefore not in the default Shelf until the owner adds it (§11.1 "Create the Default Shelf Once from timelineLibraries").
 
 ## 7. Authentication and Sessions
@@ -1442,16 +1462,42 @@ A deleted folder's settings have nothing left to apply to, while a missing start
 Leaving the Shelf starts as they are on a move.
 Moves would touch one table fewer, but a Shelf would lose a folder the owner only moved through Pxna, so we rejected it.
 
+#### Carry a Folder Moved Entry by Entry When It Leaves Its Source
+
+**Decision**
+In a move that goes entry by entry, a folder's own settings and the Shelf starts naming it are reassigned once the folder has left its source.
+A folder that stays keeps them, and a destination folder that has settings keeps its own (§6.5).
+
+**Reason**
+Such a move creates or merges the destination folders and moves the files one by one, so there is no rename of the folder to follow.
+A folder that has not left is still where the owner sees it, so what names it stays with it.
+A destination folder that existed is the same folder after the merge, so its settings do not change for an Entry the owner moved into it.
+
+**Rejected alternative 1**
+Reassigning the whole subtree at once with the top folder.
+It would be one step, but a merge would remove the destination's settings, and a partly moved folder would lose the settings of what stayed.
+
+**Rejected alternative 2**
+Replacing the destination folder's settings with the moved folder's.
+The moved folder would look as it did, but a folder that was not replaced would change, so we rejected it.
+
+**Rejected alternative 3**
+Following only renames within one Library.
+The entry-by-entry moves would need no rule, but every move across Libraries would drop the folder's settings and leave its starts missing, so we rejected it.
+
 #### Create the Default Shelf Once from timelineLibraries
 
 **Decision**
 The first read of the Shelves of a user whose row in the `users` table does not record the default Shelf creates the default Shelf Timeline and sets that record in the same transaction, and it is not created again (§6.5).
 Its starts are the roots of the Libraries in `timelineLibraries` that still exist, or of every Library at that moment when none is saved or none remains, and a Library added later is not added to it.
+A read while no Library is configured, or by a user who has the most Shelves, creates and records nothing.
 
 **Reason**
 Creating it at the first read takes over the Libraries the owner chose for the timeline, and it works for a user who is registered after the daemon starts.
 A record on the user's row is one value per user that the creating transaction sets, so a deleted default Shelf stays deleted, as an owner who deleted it meant, and two first reads at once create it once.
 Ids of Libraries removed from the configuration name nothing, and a Shelf names its folders, so it lists what it was made with, like any other Shelf.
+A Shelf with no start cannot exist, and recording the default Shelf without creating it would leave an owner who configures the first Library later without one.
+An owner who made 200 Shelves before the first read keeps that limit, and by recording nothing still gets the default Shelf once one is deleted.
 
 **Rejected alternative 1**
 Creating it in the migration that adds the tables.
@@ -1465,6 +1511,10 @@ It needs no record, but an owner who deleted every Shelf would get the default o
 A start that means every Library, so that a Library added later joins the default Shelf.
 The earlier timeline behaved so while nothing was saved, but a Shelf would then hold a rule no other Shelf has, and the owner can add the new Library's root in one step, so we rejected it.
 
+**Rejected alternative 4**
+Recording the default Shelf as created by a read while no Library is configured.
+It would need no case of its own, but the owner would never get the default Shelf, so we rejected it.
+
 #### Hold Folder Settings and Shelves in the Shape of the Display Preferences
 
 **Decision**
@@ -1477,6 +1527,69 @@ A tile size means a width in CSS pixels on a wide screen and a number of columns
 **Rejected alternative**
 One set without the tile size, which would stay in the display preferences only.
 The shape would be smaller, but a shelf of books could not ask for larger covers, or for covers shown whole rather than cropped, so we rejected it.
+
+#### Name a Folder of the Folder Settings in the Body of Requests under /settings/folder
+
+**Decision**
+The folder settings are read with `GET /settings/folder`, written with `PUT /settings/folder`, and removed with `POST /settings/folder/delete`, and the written or removed folder is named in the body by the object of a Library id and a Library-relative path that names a start (§6.5).
+
+**Reason**
+Folder settings are the daemon's own state and change no Library, so they sit with the other settings rather than under a Library's paths.
+Naming the folder by the object that names a start gives the client one shape for a place in a Library, and removing by `POST` with `/delete` follows the deletions of Entries (§8.4).
+
+**Rejected alternative 1**
+`PUT` and `DELETE` on `/libraries/{libraryId}/folder-settings` with the path in the query.
+It would match the paths of the other operations in a Library, but a folder would be named in two parts, unlike a start, so we rejected it.
+
+**Rejected alternative 2**
+`DELETE /settings/folder` with the folder in the body.
+It is the plain verb, but a body of `DELETE` has no defined meaning in OpenAPI 3.0, and a generator may drop it, so we rejected it.
+
+#### Check a Shelf as the Body of listEntries, and Its Starts for Form Only
+
+**Decision**
+Saving a Shelf applies to its Scope and Filter the checks that `listEntryMonths` applies to its body, and checks its starts for form only, not for whether they name a folder; whether the timeline suits the Filter's kinds is not checked (§6.5).
+
+**Reason**
+A Shelf is sent to `listEntries` as it is held, so applying the same checks means a saved Shelf never fails that request by its shape, and keeps the two rules from drifting apart.
+A start that names nothing is already a missing start, which the listing names and the client leads to editing, while a check at saving would refuse to save a Shelf whose folder was removed outside Pxna until each such start was removed.
+The conditions bar changes the kinds and the Layout one at a time, and a pair that does not suit is still answered by the rules of `listEntries`.
+
+**Rejected alternative 1**
+Checking at saving that every start names a folder or an archive.
+A mistyped start would be caught, but a Shelf with a start removed outside Pxna could not be saved again, so we rejected it.
+
+**Rejected alternative 2**
+Checks of the Shelves' own in the engine.
+They would keep the engine self-contained, but they could come to accept a Shelf that `listEntries` refuses, so we rejected it.
+
+**Rejected alternative 3**
+Refusing the timeline in a Shelf whose Filter names other kinds than images and videos.
+No such pair would be stored, but an edit that changes the kinds before the Layout could not be saved in between, so we rejected it.
+
+#### Store Starts and Folders by the Normal Form of Their Paths
+
+**Decision**
+A Shelf start and a folder of the folder settings are stored by their Library-relative path with `.` and `..` resolved, and returned in that form (§6.5).
+
+**Reason**
+A rename or move finds the rows at or under its path by the prefix of the path, as it finds the ratings and tags, which are stored in the same form, so a path stored as given, such as `/a/../b`, would not be found.
+
+**Rejected alternative**
+Storing a start as it was given.
+A client would read back the string it sent, but such a start would not follow a move, so we rejected it.
+
+#### Replace the Order of the Shelves by Naming Every Shelf Once
+
+**Decision**
+`PUT /shelves/order` accepts only a list that names every Shelf of the user exactly once, and refuses any other with `InvalidInput`; a new Shelf goes last (§6.5).
+
+**Reason**
+A client that has not read a Shelf created on another device sends a list without it, and refusing that list lets the client reread and reorder what the owner sees, instead of the daemon putting the Shelf where the owner did not choose.
+
+**Rejected alternative**
+Putting the Shelves the list does not name after the ones it names.
+It would never refuse a list, but where a Shelf created elsewhere goes would depend on the timing of the two devices, so we rejected it.
 
 ### 11.2 Deferred
 
@@ -1543,9 +1656,10 @@ In that case, not only the operation's state but also a record of processed entr
 
 **Current state**
 `openapi.yaml` defines `ETag` on read responses, but does not accept conditional updates.
+The display preferences, the Shelves, and the folder settings are replaced without a version, and the later write wins.
 
 **Why not decide now**
-In a single-owner configuration, simultaneous updates to the same file happen rarely.
+In a single-owner configuration, simultaneous updates to the same file, or to the same Shelf from two devices, happen rarely.
 
 **Conditions for deciding**
 When simultaneous editing from multiple clients actually becomes a problem.
@@ -1654,7 +1768,9 @@ The implementation status of the storage layer, listing and search, thumbnails, 
 The container passes build and smoke tests in native CI for amd64 and arm64.
 
 The library-local trash and the content hash for ratings and tags are not implemented; they are M25 and M26 in §12.2.
-The documents describe browsing through the tree and the Shelves (§2, §6.5), while the code reads a Scope through `listEntries` in every order and counts its months, with the Scope and the Filter in a POST body in the shapes a Shelf holds, but has no Shelves, and the web client still reads the timeline through `listTimelineEntries` and `listTimelineMonths` over chosen Libraries; M29 to M31 in §12.2 close that gap.
+The documents describe browsing through the tree and the Shelves (§2, §6.5).
+The daemon stores and serves the Shelves and the folder settings, creates the default Shelf, and keeps both in step with its own renames, moves, and deletes, while no client reads them yet.
+The code reads a Scope through `listEntries` in every order and counts its months, with the Scope and the Filter in a POST body in the shapes a Shelf holds, and the web client still reads the timeline through `listTimelineEntries` and `listTimelineMonths` over chosen Libraries; M30 and M31 in §12.2 close that gap.
 The local AI assistance of §2 is a deferred item in §11.2.
 
 ### 12.2 Roadmap
@@ -1693,7 +1809,7 @@ M7 is a retired number and is not used.
 | M26 | Identify ratings and tags by a lazily computed content hash, cache it with the file's metadata or the archive identity and inner path, and share ratings and tags among identical content | M2, M10, M18, M22 | Not started |
 | M27 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while the index is not usable, as in [Listing and Search Design §5.1](./design/listing.md#51-name-index) | M19 | Done |
 | M28 | Implement `listEntries` over a Scope and a Filter, with pages by `offset` and by cursor in timeline-date order, the starts cut off, walked, and missing, and the per-month counts over the same Scope and Filter ([Listing and Search Design §4.6](./design/listing.md#46-pages-in-timeline-date-order), [§5.3](./design/listing.md#53-listing-several-starts), [Timeline Design §7](./design/timeline.md#7-reading)) | M24, M27 | Done |
-| M29 | Carry the Scope and the Filter of `listEntries` in the shapes a Shelf holds ([Listing and Search Design §9.2](./design/listing.md#92-roadmap), L6), and implement the storage and API of Shelves and folder settings, their reassignment by the daemon's own changes, and the default Shelf (§6.5) | M2, M3, M11 | Not started |
+| M29 | Carry the Scope and the Filter of `listEntries` in the shapes a Shelf holds ([Listing and Search Design §9.2](./design/listing.md#92-roadmap), L6), and implement the storage and API of Shelves and folder settings, their reassignment by the daemon's own changes, and the default Shelf (§6.5) | M2, M3, M11 | Done |
 | M30 | Rebuild the web client around the Libraries and the Shelves: the left area, the conditions bar and the Unsaved Shelf, the timeline Layout, folder settings, and how archives open ([Client Design §3](./design/client.md#3-screens)) | M28, M29 | Not started |
 | M31 | Remove the listing and month APIs that `listEntries` replaces ([Listing and Search Design §8.1](./design/listing.md#list-the-entries-of-a-scope-through-one-api)) once the web client and the iOS app read `listEntries` | M30 | Not started |
 | M32 | Decide and implement the control of background work (§11.2 "Controlling Background Work"), including what the Shelves list before the owner opts in to aggregation | M27, M30 | Not started |
@@ -1702,7 +1818,7 @@ M7 is a retired number and is not used.
 The first milestone is the state in which M1, M2, M4, and M6 are in place and you can browse a Library in a browser with the tree and the thumbnail grid.
 M3 is not included in this milestone, but may proceed in parallel.
 
-The items that still block the positioning in §2 are the Shelves (M29 to M31), then M32 (control of background work), M25 (library-local trash), M26 (content hash for ratings and tags), and M33 (exporting ratings and tags), in that order of priority, which the dependencies of the table do not enforce; M15 (viewer touch operations), M19 (name index), M27 (the insides of archives in the name index), and M28 (`listEntries` in every order and its months), which came first, are done.
+The items that still block the positioning in §2 are the Shelves (M30 and M31), then M32 (control of background work), M25 (library-local trash), M26 (content hash for ratings and tags), and M33 (exporting ratings and tags), in that order of priority, which the dependencies of the table do not enforce; M15 (viewer touch operations), M19 (name index), M27 (the insides of archives in the name index), and M28 (`listEntries` in every order and its months), which came first, are done.
 M31 also needs the iOS app to read `listEntries`, which it does in its own repository.
 
 The breakdown of M4 is in [Thumbnail Design §11.2](./design/thumbnail.md#112-roadmap), of M5 in [Storage Layer Design §10.2](./design/storage.md#102-roadmap), of M8 in [Video Playback Design §8.2](./design/video.md#82-roadmap), of M10 in [Listing and Search Design §9.2](./design/listing.md#92-roadmap), and of M11 only V4 of [Video Playback Design §8.2](./design/video.md#82-roadmap); the thumbnail output and the display preferences API are done and have no remaining work.

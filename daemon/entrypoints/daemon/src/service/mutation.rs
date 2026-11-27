@@ -3,7 +3,7 @@ use std::{io, path::Path, sync::Arc};
 
 use omnius_pxna_engine::{
     model::{FsEntryDetail, NestedPathBuf},
-    service::{ConflictPolicy, Publish, RatingTagService, ResolvedStoragePath, StagingFile, StorageService},
+    service::{ConflictPolicy, Publish, RatingTagService, ResolvedStoragePath, ShelfService, StagingFile, StorageService},
 };
 use omnius_pxna_interface::models;
 
@@ -31,6 +31,7 @@ pub struct LibraryMutation {
     snapshots: Arc<ListingSnapshots>,
     timeline: Arc<TimelineService>,
     rating_tags: Arc<RatingTagService>,
+    shelves: Arc<ShelfService>,
 }
 
 impl LibraryMutation {
@@ -41,6 +42,7 @@ impl LibraryMutation {
         snapshots: Arc<ListingSnapshots>,
         timeline: Arc<TimelineService>,
         rating_tags: Arc<RatingTagService>,
+        shelves: Arc<ShelfService>,
     ) -> Self {
         Self {
             libraries: libraries.to_vec(),
@@ -49,10 +51,11 @@ impl LibraryMutation {
             snapshots,
             timeline,
             rating_tags,
+            shelves,
         }
     }
 
-    /// 変更の終わりに、一覧のスナップショットを捨て、タイムラインへ変更した Entry を知らせ、なくなった Entry の評価とタグを消す。
+    /// 変更の終わりに、一覧のスナップショットを捨て、タイムラインへ変更した Entry を知らせ、なくなった Entry の評価とタグとフォルダの設定を消す。
     ///
     /// タイムラインは、もう存在しない Entry の行を消し終えてから戻る。
     pub async fn apply_changes(&self, invalidation: &ListingInvalidation) {
@@ -63,9 +66,9 @@ impl LibraryMutation {
         self.forget_missing(&entries).await;
     }
 
-    /// 変更した Entry のうち、ファイルシステムからなくなったものの評価とタグを消す。フォルダと archive のときは、配下の行も消える。
+    /// 変更した Entry のうち、ファイルシステムからなくなったものの評価とタグとフォルダの設定を消す。フォルダと archive のときは、配下の行も消える。Shelf の start は残す。
     ///
-    /// 移動は先に `renamed` と `moved_across` が行を付け替えているので、移動元の path に消すものは残っていない。
+    /// 移動は先に `renamed`、`moved_across`、`folder_left` が行を付け替えているので、移動元の path に移すべきものは残っていない。
     /// ファイルの操作は済んでいるので、消すのに失敗しても操作は失敗にしない。
     async fn forget_missing(&self, entries: &std::collections::HashMap<String, Vec<String>>) {
         for (id, paths) in entries {
@@ -75,8 +78,14 @@ impl LibraryMutation {
             for path in paths {
                 let local = library.path.join(path.trim_start_matches('/'));
                 let gone = matches!(tokio::fs::symlink_metadata(&local).await, Err(error) if error.kind() == io::ErrorKind::NotFound);
-                if gone && let Err(error) = self.rating_tags.forget(id, path).await {
+                if !gone {
+                    continue;
+                }
+                if let Err(error) = self.rating_tags.forget(id, path).await {
                     warn!(library = id, path, ?error, "rating tags: cannot forget a removed entry");
+                }
+                if let Err(error) = self.shelves.forget(id, path).await {
+                    warn!(library = id, path, ?error, "shelves: cannot forget the settings of a removed folder");
                 }
             }
         }
@@ -92,12 +101,40 @@ impl LibraryMutation {
         self.moved_across(id, src, id, dst).await;
     }
 
-    /// 移動した Entry の評価とタグを、移動先の path へ付け替える。Library をまたぐ移動にも使う。
+    /// 移動した Entry の評価とタグ、フォルダの設定、Shelf の start を、移動先の path へ付け替える。Library をまたぐ移動にも使う。
     ///
     /// ファイルの操作は済んでいるので、付け替えに失敗しても操作は失敗にしない。
     pub async fn moved_across(&self, src_library: &str, src: &str, dst_library: &str, dst: &str) {
         if let Err(error) = self.rating_tags.moved(src_library, src, dst_library, dst).await {
             warn!(src_library, src, dst_library, dst, ?error, "rating tags: cannot carry marks to the destination");
+        }
+        if let Err(error) = self.shelves.moved(src_library, src, dst_library, dst).await {
+            warn!(src_library, src, dst_library, dst, ?error, "shelves: cannot carry settings and starts to the destination");
+        }
+    }
+
+    /// A move that goes entry by entry created the folder `path`, so no folder settings left at or under it, nor those of what it replaced, apply to it.
+    ///
+    /// As with the other reassignments, a failure does not fail the operation.
+    pub async fn folder_created(&self, library: &str, path: &str) {
+        if let Err(error) = self.shelves.forget(library, path).await {
+            warn!(library, path, ?error, "shelves: cannot clear the settings at a created folder");
+        }
+    }
+
+    /// A move that goes entry by entry removed the folder `src` after moving all of it into `dst`, so what names the folder itself follows.
+    ///
+    /// As with the other reassignments, a failure does not fail the operation.
+    pub async fn folder_left(&self, src_library: &str, src: &str, dst_library: &str, dst: &str) {
+        if let Err(error) = self.shelves.moved_folder(src_library, src, dst_library, dst).await {
+            warn!(
+                src_library,
+                src,
+                dst_library,
+                dst,
+                ?error,
+                "shelves: cannot carry a folder's settings and starts to the destination"
+            );
         }
     }
 
