@@ -6,8 +6,12 @@ import { refreshLibrary } from "./listing";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock("../api/client", async (importOriginal) => {
+    const { answerEntries } = await import("../testing/listingApi");
     const actual = await importOriginal<typeof import("../api/client")>();
-    return { ...actual, api: { GET: get } };
+    return {
+        ...actual,
+        api: { GET: get, POST: (route: string, options: never) => answerEntries(get)(route, options) },
+    };
 });
 
 function entry(name: string): Entry {

@@ -8,10 +8,17 @@ import { emptySelection, type Selection, selectionBytes } from "./selection";
 import { useEntryInteraction } from "./useEntryInteraction";
 
 const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: { GET: get, POST: post },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: {
+            GET: get,
+            POST: (route: string, options: never) =>
+                route.startsWith("/entries") ? answerEntries(get, post)(route, options) : post(route, options),
+        },
+    };
+});
 
 async function harness() {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

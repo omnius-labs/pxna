@@ -11,18 +11,22 @@ import type { Selection } from "./selection";
 import { type SelectionProgress, useEntryInteraction } from "./useEntryInteraction";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: {
-        GET: (route: string, options?: unknown) =>
-            route === "/capabilities"
-                ? Promise.resolve({
-                      data: { summaryListing: false, entryDetails: false, childProbes: false },
-                      response: new Response(),
-                  })
-                : get(route, options),
-    },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: {
+            POST: (route: string, options: never) => answerEntries(get)(route, options),
+            GET: (route: string, options?: unknown) =>
+                route === "/capabilities"
+                    ? Promise.resolve({
+                          data: { summaryListing: false, entryDetails: false, childProbes: false },
+                          response: new Response(),
+                      })
+                    : get(route, options),
+        },
+    };
+});
 afterEach(() => get.mockReset());
 const page = (offset: number, snapshot = "one"): FolderListing => ({
     entries: Array.from({ length: Math.min(200, 401 - offset) }, (_, i) => ({

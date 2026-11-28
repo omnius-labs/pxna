@@ -9,19 +9,23 @@ import { stubChangingMatchMedia, stubResizeObserver } from "../testing/preferenc
 import { Tree } from "./Tree";
 
 const { get, post, navigate } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), navigate: vi.fn() }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: {
-        GET: (route: string, options?: unknown) =>
-            route === "/capabilities"
-                ? Promise.resolve({
-                      data: { summaryListing: false, entryDetails: false, childProbes: false },
-                      response: new Response(),
-                  })
-                : get(route, options),
-        POST: post,
-    },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: {
+            GET: (route: string, options?: unknown) =>
+                route === "/capabilities"
+                    ? Promise.resolve({
+                          data: { summaryListing: false, entryDetails: false, childProbes: false },
+                          response: new Response(),
+                      })
+                    : get(route, options),
+            POST: (route: string, options: never) =>
+                route.startsWith("/entries") ? answerEntries(get, post)(route, options) : post(route, options),
+        },
+    };
+});
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }));
 // jsdom は layout を計算しないので、viewport と scroll だけを固定する。
 vi.mock("@tanstack/react-virtual", async () => {

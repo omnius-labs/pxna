@@ -27,38 +27,6 @@ pub enum GetTimelineStatusResponse {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
-pub enum ListTimelineEntriesResponse {
-    /// Timeline entries.
-    Status200_TimelineEntries(models::TimelineListing),
-    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::Problem),
-    /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::Problem),
-    /// Resource not found.
-    Status404_ResourceNotFound(models::Problem),
-    /// Internal server error.
-    Status500_InternalServerError(models::Problem),
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[must_use]
-#[allow(clippy::large_enum_variant)]
-pub enum ListTimelineMonthsResponse {
-    /// Entry counts per month.
-    Status200_EntryCountsPerMonth(models::TimelineMonths),
-    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::Problem),
-    /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::Problem),
-    /// Resource not found.
-    Status404_ResourceNotFound(models::Problem),
-    /// Internal server error.
-    Status500_InternalServerError(models::Problem),
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[must_use]
-#[allow(clippy::large_enum_variant)]
 pub enum RefreshTimelineResponse {
     /// The scans are running.
     Status202_TheScansAreRunning(models::TimelineStatuses),
@@ -90,32 +58,6 @@ pub trait Timeline<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Erro
         claims: &Self::Claims,
         query_params: &models::GetTimelineStatusQueryParams,
     ) -> Result<GetTimelineStatusResponse, E>;
-
-    /// List timeline entries.
-    ///
-    /// ListTimelineEntries - GET /api/v1/timeline/entries
-    async fn list_timeline_entries(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        query_params: &models::ListTimelineEntriesQueryParams,
-    ) -> Result<ListTimelineEntriesResponse, E>;
-
-    /// List the months that have timeline entries.
-    ///
-    /// ListTimelineMonths - GET /api/v1/timeline/months
-    async fn list_timeline_months(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        query_params: &models::ListTimelineMonthsQueryParams,
-    ) -> Result<ListTimelineMonthsResponse, E>;
 
     /// Start full timeline scans.
     ///

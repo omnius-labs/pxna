@@ -9,10 +9,8 @@ use crate::{
     error::{ApiError, ApiStatus},
     interface::{ApiServer, session::Claims},
     prelude::*,
-    service::timeline::{TimelineAnchor, TimelineCursor, TimelineListedRow, TimelineStatus},
+    service::timeline::TimelineStatus,
 };
-
-const DEFAULT_LIMIT: usize = 200;
 
 #[allow(unused_variables)]
 #[async_trait]
@@ -39,50 +37,6 @@ impl apis::timeline::Timeline for ApiServer {
         .await;
         Ok(match statuses {
             Ok(statuses) => apis::timeline::GetTimelineStatusResponse::Status200_StateOfTheScans(statuses),
-            Err(error) => ApiError::from(error).into(),
-        })
-    }
-
-    async fn list_timeline_entries(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        query_params: &models::ListTimelineEntriesQueryParams,
-    ) -> std::result::Result<apis::timeline::ListTimelineEntriesResponse, ()> {
-        let listing = async {
-            let library_ids = Self::library_ids(&query_params.library_ids);
-            let anchor = Self::anchor(query_params)?;
-            let limit = query_params.limit.map(|limit| limit as usize).unwrap_or(DEFAULT_LIMIT);
-            let page = self.state.timeline.page(&library_ids, &anchor, limit).await?;
-            let entries = page.rows.iter().map(Self::entry).collect::<Vec<_>>();
-            let mut listing = models::TimelineListing::new(entries);
-            listing.previous = page.previous.map(|cursor| cursor.encode());
-            listing.next = page.next.map(|cursor| cursor.encode());
-            Ok::<_, Error>(listing)
-        }
-        .await;
-        Ok(match listing {
-            Ok(listing) => apis::timeline::ListTimelineEntriesResponse::Status200_TimelineEntries(listing),
-            Err(error) => ApiError::from(error).into(),
-        })
-    }
-
-    async fn list_timeline_months(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        query_params: &models::ListTimelineMonthsQueryParams,
-    ) -> std::result::Result<apis::timeline::ListTimelineMonthsResponse, ()> {
-        let library_ids = Self::library_ids(&query_params.library_ids);
-        Ok(match self.state.timeline.months(&library_ids).await {
-            Ok(months) => {
-                let months = months.into_iter().map(|(month, count)| models::TimelineMonth::new(month, count)).collect();
-                apis::timeline::ListTimelineMonthsResponse::Status200_EntryCountsPerMonth(models::TimelineMonths::new(months))
-            }
             Err(error) => ApiError::from(error).into(),
         })
     }
@@ -118,74 +72,14 @@ impl ApiServer {
         ids.iter().map(|id| id.0.clone()).collect()
     }
 
-    /// `after`、`before`、`month`、`around` のうち、指定できるのは 1 つだけである。`around` には `aroundLibraryId` が要る。
-    fn anchor(query: &models::ListTimelineEntriesQueryParams) -> Result<TimelineAnchor> {
-        let given = [query.after.is_some(), query.before.is_some(), query.month.is_some(), query.around.is_some()];
-        if given.iter().filter(|given| **given).count() > 1 {
-            return Err(Error::new(ErrorKind::InvalidInput).with_message("at most one of after, before, month and around can be given"));
-        }
-        if query.around.is_some() != query.around_library_id.is_some() {
-            return Err(Error::new(ErrorKind::InvalidInput).with_message("around and aroundLibraryId must be given together"));
-        }
-        Ok(if let Some(after) = &query.after {
-            TimelineAnchor::After(TimelineCursor::parse(after)?)
-        } else if let Some(before) = &query.before {
-            TimelineAnchor::Before(TimelineCursor::parse(before)?)
-        } else if let Some(month) = &query.month {
-            TimelineAnchor::Month(month.clone())
-        } else if let (Some(around), Some(library)) = (&query.around, &query.around_library_id) {
-            if !query.library_ids.iter().any(|id| &id.0 == library) {
-                return Err(Error::new(ErrorKind::InvalidInput).with_message("aroundLibraryId must be one of libraryIds"));
-            }
-            TimelineAnchor::Around {
-                library: library.clone(),
-                path: format!("/{}", crate::service::library::LibraryRelativePath::parse(around)?.segments().join("/")),
-            }
-        } else {
-            TimelineAnchor::Newest
-        })
-    }
-
     fn status(status: TimelineStatus) -> models::TimelineStatus {
         let mut model = models::TimelineStatus::new(status.library_id, status.running, status.processed_files);
         model.completed_at = status.completed_at;
         model
     }
-
-    /// 索引の行を、フォルダの一覧と同じ形の Entry に Library と並びの日時を足した応答にする。
-    fn entry(listed: &TimelineListedRow) -> models::TimelineEntry {
-        models::TimelineEntry::new(
-            listed.library.clone(),
-            listed.file_system_entry(),
-            listed.row.date.text(),
-            listed.row.date.source.as_str().to_string(),
-        )
-    }
 }
 
 impl From<ApiError> for apis::timeline::GetTimelineStatusResponse {
-    fn from(error: ApiError) -> Self {
-        match error.status {
-            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
-            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
-            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
-            _ => Self::Status500_InternalServerError(error.body),
-        }
-    }
-}
-
-impl From<ApiError> for apis::timeline::ListTimelineEntriesResponse {
-    fn from(error: ApiError) -> Self {
-        match error.status {
-            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
-            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
-            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
-            _ => Self::Status500_InternalServerError(error.body),
-        }
-    }
-}
-
-impl From<ApiError> for apis::timeline::ListTimelineMonthsResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -253,9 +147,26 @@ mod tests {
         let last = send(&router, Method::GET, &format!("/api/v1/timeline/status?{both}"), headers, None).await?;
         assert!(done, "the scans did not finish: {}", last.body);
 
-        let entries = send(&router, Method::GET, &format!("/api/v1/timeline/entries?{both}"), headers, None).await?;
-        assert_eq!(entries.status, StatusCode::OK);
-        let listed = entries.body["entries"]
+        // The timeline is read through `listEntries`: the roots of the Libraries, with the insides of archives, in timeline-date order.
+        let timeline = |libraries: &[&str], page: serde_json::Value| {
+            let starts = libraries.iter().map(|id| json!({"libraryId": id, "path": "/"})).collect::<Vec<_>>();
+            json!({
+                "scope": {"starts": starts, "recursive": true, "insideArchives": true},
+                "filter": {"kinds": ["image", "video"]},
+                "sort": "timeline_date",
+                "page": page,
+            })
+        };
+        let entries = send(
+            &router,
+            Method::POST,
+            "/api/v1/entries",
+            headers,
+            Some(timeline(&["photos", "videos"], json!({"kind": "cursor"}))),
+        )
+        .await?;
+        assert_eq!(entries.status, StatusCode::OK, "{}", entries.body);
+        let listed = entries.body["items"]
             .as_array()
             .cloned()
             .unwrap_or_default()
@@ -264,10 +175,12 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(listed.contains(&"photos/photos/p.png".to_string()), "{listed:?}");
         assert!(listed.contains(&"videos/v.png".to_string()), "{listed:?}");
-        let only = send(&router, Method::GET, "/api/v1/timeline/entries?libraryIds=videos", headers, None).await?;
-        assert_eq!(only.body["entries"].as_array().map(Vec::len), Some(1));
+        let only = send(&router, Method::POST, "/api/v1/entries", headers, Some(timeline(&["videos"], json!({"kind": "cursor"})))).await?;
+        assert_eq!(only.body["items"].as_array().map(Vec::len), Some(1));
 
-        let months = send(&router, Method::GET, &format!("/api/v1/timeline/months?{both}"), headers, None).await?;
+        let mut months_body = timeline(&["photos", "videos"], json!(null));
+        months_body.as_object_mut().ok_or("object")?.retain(|key, _| key == "scope" || key == "filter");
+        let months = send(&router, Method::POST, "/api/v1/entries/months", headers, Some(months_body)).await?;
         let total = months.body["months"]
             .as_array()
             .cloned()
@@ -279,24 +192,23 @@ mod tests {
 
         let around = send(
             &router,
-            Method::GET,
-            &format!("/api/v1/timeline/entries?{both}&around=v.png&aroundLibraryId=videos&limit=1"),
+            Method::POST,
+            "/api/v1/entries",
             headers,
-            None,
+            Some(timeline(
+                &["photos", "videos"],
+                json!({"kind": "cursor", "limit": 1, "around": {"libraryId": "videos", "path": "/v.png"}}),
+            )),
         )
         .await?;
-        assert_eq!(around.body["entries"][0]["libraryId"], "videos");
+        assert_eq!(around.body["items"][0]["libraryId"], "videos");
 
-        for (uri, expected) in [
-            ("/api/v1/timeline/entries?libraryIds=photos&libraryIds=nope", StatusCode::NOT_FOUND),
-            ("/api/v1/timeline/months?libraryIds=nope", StatusCode::NOT_FOUND),
-            ("/api/v1/timeline/status?libraryIds=nope", StatusCode::NOT_FOUND),
-            ("/api/v1/timeline/entries", StatusCode::BAD_REQUEST),
-            ("/api/v1/timeline/entries?libraryIds=photos&around=v.png", StatusCode::BAD_REQUEST),
-            ("/api/v1/timeline/entries?libraryIds=photos&around=v.png&aroundLibraryId=videos", StatusCode::BAD_REQUEST),
-            ("/api/v1/libraries/photos/timeline/entries", StatusCode::NOT_FOUND),
-        ] {
-            assert_eq!(send(&router, Method::GET, uri, headers, None).await?.status, expected, "{uri}");
+        assert_eq!(
+            send(&router, Method::GET, "/api/v1/timeline/status?libraryIds=nope", headers, None).await?.status,
+            StatusCode::NOT_FOUND
+        );
+        for removed in ["/api/v1/timeline/entries?libraryIds=photos", "/api/v1/timeline/months?libraryIds=photos"] {
+            assert_eq!(send(&router, Method::GET, removed, headers, None).await?.status, StatusCode::NOT_FOUND, "{removed}");
         }
         let rejected = send(&router, Method::POST, "/api/v1/timeline/refresh", headers, Some(json!({"libraryIds": ["photos", "nope"]}))).await?;
         assert_eq!(rejected.status, StatusCode::NOT_FOUND);

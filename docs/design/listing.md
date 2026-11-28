@@ -32,7 +32,7 @@ If you want to know what works now, read §9 first.
 ## 2. Responsibilities and Boundaries
 
 This document covers the span from receiving the inside of a folder or archive that a checked `NestedPath` points to, to returning the Entries of the requested range as a response.
-`listFolderEntries` returns detail listings. The advance display of direct children's names and kinds uses the summary listing.
+`listEntries` returns detail listings, and with `fields` of `summary` the summary listing that the advance display of direct children's names and kinds uses.
 `listEntries` reads a Scope through a Filter (§5), and merges the listings of its starts into one sequence (§5.3); search is such a listing whose Filter has a name condition.
 A recursive listing with conditions, or one whose Scope reads the insides of archives, is answered from the name index without walking the file system (§5.1, §5.2).
 
@@ -170,7 +170,7 @@ The server finds the Entry's position in the sequence a page is cut from (§4.2)
 The page starts at the largest multiple of `limit` that is not greater than the position, so a page found by `locate` is the page that the same `limit` and an `offset` would return, and the two kinds of page can be joined.
 Every response cut by `offset` carries the `offset` it was cut at, which is how the client learns which page it received.
 
-For `listFolderEntries` and `listFolderSummaries`, `locate` is the path of the Entry relative to the listed folder, so a direct child is its name, and a descendant in a `recursive` listing is its path below the folder.
+`locate` names the Entry by its Library id and its Library-relative path, as a start is named, in the summary listing too.
 For `listEntries`, whose starts can be in several Libraries, `locate` names the Entry as a start is named: an object of its Library id and its Library-relative path.
 `locate` together with `offset` is `InvalidInput`, and so is `locate` in timeline-date order, where `around` takes its place (§4.6).
 
@@ -360,7 +360,7 @@ If it is the same or larger, a cut-off recursive snapshot alone would exceed the
 #### Place Folder-Like Entries First in Folder Listings and Allow Filtering
 
 **Decision**
-`listFolderEntries` places folder-like Entries first when `foldersFirst` is specified, and sorts the folder-like Entries and the rest each by `sort` and `order`.
+`listEntries` places folder-like Entries first when `foldersFirst` is specified, and sorts the folder-like Entries and the rest each by `sort` and `order`.
 When `foldersOnly` is specified, it returns only folder-like Entries.
 Both default to false.
 Whether something is an archive is determined by the `archive` hint in the file detail, without reading the file's contents.
@@ -375,7 +375,7 @@ A method in which the client fetches all pages and then separates them.
 The API would not change, but for a large folder the first display would wait for fetching all pages, so we rejected it.
 
 **Rejected alternative 2**
-A method in which `listFolderEntries` always returns folder-like Entries first.
+A method in which a folder listing always returns folder-like Entries first.
 There would be fewer specifications, but even when `sort=size` or the like is specified, folder-like Entries would come first and the specified order could not be obtained, so we rejected it.
 
 **Rejected alternative 3**
@@ -412,7 +412,7 @@ The per-page scan goes away, but as with rejected alternative 2, one cannot jump
 #### Locate an Entry from Its Position in the Snapshot
 
 **Decision**
-A page request can name an Entry with `locate` in place of `offset`. The server returns the page of the same snapshot that holds it, with the `offset` the page was cut at (§4.5). `listFolderEntries`, `listFolderSummaries`, and `listEntries` outside timeline-date order accept it, and every response cut by `offset` carries `offset`.
+A page request can name an Entry with `locate` in place of `offset`. The server returns the page of the same snapshot that holds it, with the `offset` the page was cut at (§4.5). `listEntries` outside timeline-date order accepts it, its summary included, and every page cut by `offset` carries `offset`.
 
 **Reason**
 The position of an Entry is a property of the snapshot's sequence, which only the server holds, so asking for it costs one request however far down the Entry is.
@@ -456,7 +456,7 @@ It also needs no stat on every request, but external changes would not be visibl
 
 **Decision**
 Name search is the name condition of a Filter, and search underneath is a Scope whose descendants are read.
-`listFolderEntries` accepts `query`, and `listEntries` applies the same condition to the listing of each start of a Scope and merges them (§5.3); search opens an Unsaved Shelf over it.
+`listEntries` applies the name condition to the listing of each start of a Scope and merges them (§5.3); search opens an Unsaved Shelf over it.
 Search has no mechanism of its own apart from listings.
 
 **Reason**
@@ -1046,14 +1046,14 @@ When a user reports that a search or the first full aggregation of a Library is 
 
 The summary listing, the detail-fetching batch, and the persistent browse index are implemented in [summary.rs](../../daemon/entrypoints/daemon/src/service/listing/summary.rs) and below. The existing detail listing and required metadata are kept, and the summary listing holds names and kinds in separate columns. If the persistent side cannot be used, it returns to enumeration.
 
-`listFolderEntries` cuts a page by `offset` and `limit` from the `ListingSnapshot` held by `ListingSnapshots` in [snapshot.rs](../../daemon/entrypoints/daemon/src/service/listing/snapshot.rs).
+The listing of one start is a `ListingSnapshot` held by `ListingSnapshots` in [snapshot.rs](../../daemon/entrypoints/daemon/src/service/listing/snapshot.rs), whose orders `listEntries` merges and cuts pages from.
 Sorting and name matching, the per-level walk that does not descend into hidden folders, and cutting off recursion are handled by [listing.rs](../../daemon/entrypoints/daemon/src/service/listing.rs).
 A listing with `query` uses the same snapshots.
 
 The `[listing]` configuration, checking freshness by the target's version and elapsed time, sharing the scan among concurrent requests, stopping the scan when all requests have disconnected, and discarding by capacity and expiry work according to the rules of §4 through §7.
 `LibraryBrowser` reads snapshots, and `LibraryMutation` and `OperationService` discard ancestors' snapshots after the daemon's own changes.
 
-`listSearchEntries` is implemented by [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs) and `LibraryBrowser::search_entries`: each Library's listing comes from the same snapshots as `listFolderEntries`, and `SearchResults` merges their sorted, filtered orders on every page (§5.3). `listFolderEntries` accepts only the name condition; rating and tag conditions are accepted only by the search API.
+The merge of whole Libraries in [search.rs](../../daemon/entrypoints/daemon/src/service/listing/search.rs), which the search API answered through, is kept only for the tests of the name index; `listEntries` merges its starts the same way (§5.3), and accepts rating and tag conditions in the Filter.
 
 `listEntries` answers the orders cut from snapshots over a Scope and a Filter at `POST /entries` ([entries.rs](../../daemon/entrypoints/daemon/src/interface/features/entries.rs)), whose JSON body carries `scope` and `filter` in the shapes a Shelf holds them and the sort and the page beside them: up to 64 starts in one or more Libraries, each an object of a Library id and a path, `recursive` and `insideArchives`, the Filter's name, rating, tag, and kind, the sorts by name, kind, size, modification time, and timeline date, and pages by `offset` or by `locate` as an object of a Library id and a path, or by cursor in timeline-date order. `ScopeStart`, `Scope`, and `ResolvedScope` in [scope.rs](../../daemon/entrypoints/daemon/src/service/listing/scope.rs) build each start from its Library id and path, keep the path as given so that the response names the starts cut off, walked, and missing by it, and drop the starts that other starts cover, and `LibraryBrowser::resolve_scope` turns an unknown Library, a path that does not exist, and a plain file into missing starts. Each start has its own snapshot, keyed also by whether the insides are read; `ListOptions` carries the kinds, which a walk applies when it cuts a page and the name index applies in its query, so a recursive listing without a kind returns no folder and no archive that it read like a folder. An archive start is walked inside, and descends into nested archives down to `max_nested_depth` only with the insides ([listing.rs](../../daemon/entrypoints/daemon/src/service/listing.rs)). [merge.rs](../../daemon/entrypoints/daemon/src/service/listing/merge.rs) merges the per-start listings, which the search API uses too, and `ScopeResults` builds the response with `cutOffStarts`, `walkedStarts`, and `missingStarts`. `/capabilities` does not announce `listEntries`.
 
@@ -1078,7 +1078,7 @@ Only the dependencies must be respected.
 | L2 | Implement `locate` and the response's `offset` in the three listing APIs (§4.5) | None | Done |
 | L3 | Hold the insides of archives in the name index, replace an archive's rows by `ArchiveIdentity`, and keep walks out of archives while it is not usable (§5.1, §5.2) | L1 | Done |
 | L4 | Implement `listEntries` over a Scope and a Filter with pages by `offset` and by cursor, the starts cut off, walked, and missing, and `locate` in the form of a start (§3, §4.5, §4.6, §5.3) | L2, L3 | Done |
-| L5 | Remove the search API that `listEntries` replaces (§8.1) once no client calls it | L4 | Not started |
+| L5 | Remove the search API that `listEntries` replaces (§8.1) once no client calls it | L4 | Done |
 | L6 | Carry the Scope and the Filter of `listEntries` and `listEntryMonths` in a POST body, with starts and Entries as objects of a Library id and a Library-relative path (§3, §8.1) | L4 | Done |
 
 L1 corresponds to M19, L2 to M24, L3 to M27, L4 to M28, L5 to part of M34, and L6 to part of M29 of [design.md §12.2](../design.md#122-roadmap).

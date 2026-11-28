@@ -1,6 +1,6 @@
 use omnius_pxna_interface::models;
 
-use crate::service::listing::{ListOptions, ListingSource, MergedPage, MergedSources};
+use crate::service::listing::{ListOptions, ListingSource, MergedPage, MergedSources, SearchItem, SearchPage};
 
 /// A Library's listing for the search API, which has no starts.
 pub type SearchSource = ListingSource;
@@ -19,22 +19,22 @@ impl SearchResults {
     }
 
     /// `options` の並べ方、`offset`、`limit` でページを切る。条件は Library ごとの `ListingSource` が持つ。
-    pub fn page(&self, options: &ListOptions) -> models::SearchListing {
+    pub fn page(&self, options: &ListOptions) -> SearchPage {
         self.listing(self.merged.page(options))
     }
 
     /// Finds the position of the Entry at `path` and cuts the page that holds it at a multiple of `limit`.
     /// `library_id` selects the Library when the same path is in several.
-    pub fn locate(&self, options: &ListOptions, library_id: &str, path: &str) -> Option<models::SearchListing> {
+    pub fn locate(&self, options: &ListOptions, library_id: &str, path: &str) -> Option<SearchPage> {
         self.merged.locate(options, library_id, path).map(|page| self.listing(page))
     }
 
-    fn listing(&self, page: MergedPage) -> models::SearchListing {
+    fn listing(&self, page: MergedPage) -> SearchPage {
         let sources = self.merged.sources();
         let entries = page
             .entries
             .into_iter()
-            .map(|merged| models::SearchEntry::new(sources[merged.source].library_id().to_string(), merged.entry))
+            .map(|merged| SearchItem::new(sources[merged.source].library_id().to_string(), merged.entry))
             .collect();
         let truncated = sources
             .iter()
@@ -42,7 +42,7 @@ impl SearchResults {
             .map(|source| models::LibraryId(source.library_id().to_string()))
             .collect();
         let indexed = sources.iter().all(ListingSource::is_indexed);
-        models::SearchListing::new(entries, page.total_count, page.offset, self.merged.snapshot_id(), truncated, indexed)
+        SearchPage::new(entries, page.total_count, page.offset, self.merged.snapshot_id(), truncated, indexed)
     }
 }
 
@@ -54,10 +54,10 @@ mod tests {
     use omnius_core_base::clock::FakeClockUtc;
 
     use super::*;
-    use crate::service::listing::{ListingEntries, ListingSnapshot, ListingSnapshots, SnapshotKey, tests::entry};
+    use crate::service::listing::{ListingEntries, ListingSnapshot, ListingSnapshots, SearchQuery, SnapshotKey, tests::entry};
 
     fn options(offset: u64, limit: u32) -> ListOptions {
-        let query = models::ListSearchEntriesQueryParams {
+        let query = SearchQuery {
             library_ids: vec![],
             path: None,
             recursive: None,
@@ -98,7 +98,7 @@ mod tests {
         (SearchResults::new(sources), vec![a, b])
     }
 
-    fn keys(listing: &models::SearchListing) -> Vec<String> {
+    fn keys(listing: &SearchPage) -> Vec<String> {
         listing.entries.iter().map(|entry| format!("{}:{}", entry.library_id, entry.entry.name)).collect()
     }
 

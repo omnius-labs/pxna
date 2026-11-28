@@ -19,8 +19,10 @@ use crate::{prelude::*, service::library::EntryConverter};
 mod kind;
 mod merge;
 mod name_index;
+mod page;
 mod scope;
 mod scope_results;
+#[cfg(test)]
 mod search;
 mod snapshot;
 mod summary;
@@ -29,8 +31,10 @@ mod timeline_order;
 pub use kind::*;
 pub use merge::*;
 pub use name_index::*;
+pub use page::*;
 pub use scope::*;
 pub use scope_results::*;
+#[cfg(test)]
 pub use search::*;
 pub use snapshot::*;
 pub use summary::*;
@@ -62,7 +66,8 @@ pub struct ListOptions {
 }
 
 impl ListOptions {
-    pub fn from_query(query: &models::ListFolderEntriesQueryParams) -> Result<Self> {
+    #[cfg(test)]
+    pub fn from_query(query: &FolderQuery) -> Result<Self> {
         Ok(Self {
             recursive: query.recursive.unwrap_or(false),
             include_hidden: query.include_hidden.unwrap_or(false),
@@ -81,7 +86,8 @@ impl ListOptions {
     }
 
     /// 検索の条件。隠し Entry は含めず、フォルダ扱いの Entry だけに絞る指定は受け付けない。
-    pub fn from_search(query: &models::ListSearchEntriesQueryParams) -> Result<Self> {
+    #[cfg(test)]
+    pub fn from_search(query: &SearchQuery) -> Result<Self> {
         let tags = query.tag.iter().map(|tag| tag.0.as_str()).collect::<Vec<_>>();
         Ok(Self {
             recursive: query.recursive.unwrap_or(false),
@@ -100,28 +106,48 @@ impl ListOptions {
         })
     }
 
-    /// The conditions of `listEntries`. Hidden Entries are never included, as in the search API, and the Filter's kinds and the Scope's reading of archives apply.
+    /// The conditions of `listEntries`. Hidden Entries are included only with `includeHidden`, and the Filter's kinds and the Scope's reading of archives apply.
     ///
-    /// `sort` of `timeline_date` reads the timeline in descending order only, so an ascending `order`, `foldersFirst`, and `offset` with it are `InvalidInput`.
+    /// A page is cut by `offset` in every order except `timeline_date`, and by cursor in it. `sort` of `timeline_date` reads the timeline in descending order only,
+    /// so an ascending `order`, `foldersFirst`, `includeHidden`, an `offset` page, and `offset` with it are `InvalidInput`.
     pub fn from_entries(request: &models::EntryListRequest) -> Result<Self> {
         let timeline = request.sort.as_deref() == Some("timeline_date");
+        let listing = request.options.as_ref();
+        let folders_first = listing.and_then(|options| options.folders_first);
+        let include_hidden = listing.and_then(|options| options.include_hidden).unwrap_or(false);
+        let page = request.page.as_ref();
+        let cursor = match page.map(|page| &page.kind) {
+            Some(models::EntryPageKind::Cursor) => true,
+            Some(models::EntryPageKind::Offset) => false,
+            None => timeline,
+        };
         let sort = if timeline {
             if request.order.as_deref().is_some_and(|order| order != "desc") {
                 return Err(Error::new(ErrorKind::InvalidInput).with_message("timeline_date is read in descending order only"));
             }
-            if request.folders_first.is_some() {
+            if folders_first.is_some() {
                 return Err(Error::new(ErrorKind::InvalidInput).with_message("foldersFirst cannot be given with sort=timeline_date"));
             }
-            if request.offset.is_some() {
+            if include_hidden {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message("includeHidden cannot be given with sort=timeline_date"));
+            }
+            if !cursor {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message("a page in timeline_date order is a cursor page"));
+            }
+            if page.is_some_and(|page| page.offset.is_some()) {
                 return Err(Error::new(ErrorKind::InvalidInput).with_message("offset cannot be given with sort=timeline_date"));
             }
             ListSort::parse(None, None, false)?
         } else {
-            ListSort::parse(request.sort.as_deref(), request.order.as_deref(), request.folders_first.unwrap_or(false))?
+            if cursor {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message("a page is a cursor page only with sort=timeline_date"));
+            }
+            ListSort::parse(request.sort.as_deref(), request.order.as_deref(), folders_first.unwrap_or(false))?
         };
         let mut options = Self::scoped_request(&request.scope, request.filter.as_ref(), sort)?;
-        options.offset = request.offset.unwrap_or(0);
-        options.limit = Self::parse_limit(request.limit)?;
+        options.include_hidden = include_hidden;
+        options.offset = page.and_then(|page| page.offset).unwrap_or(0);
+        options.limit = Self::parse_limit(page.and_then(|page| page.limit))?;
         options.timeline = timeline;
         Ok(options)
     }
@@ -274,11 +300,12 @@ impl ListOptions {
     }
 
     #[cfg(test)]
-    pub fn paginate(&self, entries: &ListingEntries, snapshot: String) -> models::FolderListing {
+    pub fn paginate(&self, entries: &ListingEntries, snapshot: String) -> FolderPage {
         self.page(entries, &self.sort.indices(entries), snapshot)
     }
 
-    pub fn page(&self, entries: &ListingEntries, indices: &[usize], snapshot: String) -> models::FolderListing {
+    #[cfg(test)]
+    pub fn page(&self, entries: &ListingEntries, indices: &[usize], snapshot: String) -> FolderPage {
         let kept = self.kept_kinds(entries.read_archives);
         let mut total = 0_u64;
         let mut page = Vec::new();
@@ -292,12 +319,13 @@ impl ListOptions {
             }
             total += 1;
         }
-        models::FolderListing::new(page, total, self.offset, self.selection.snapshot_id(snapshot), entries.truncated)
+        FolderPage::new(page, total, self.offset, self.selection.snapshot_id(snapshot), entries.truncated)
     }
 
+    #[cfg(test)]
     /// Finds the position of the Entry at `path` and cuts the page that holds it at a multiple of `limit`.
     /// The position counts after the conditions are applied, and an Entry outside them gives `None`.
-    pub fn locate(&self, entries: &ListingEntries, indices: &[usize], path: &str, snapshot: String) -> Option<models::FolderListing> {
+    pub fn locate(&self, entries: &ListingEntries, indices: &[usize], path: &str, snapshot: String) -> Option<FolderPage> {
         let matching = self.matching(entries, indices);
         let position = matching.iter().position(|&index| entries.entries[index].entry.path == path)? as u64;
         let limit = self.limit as u64;
@@ -308,7 +336,7 @@ impl ListOptions {
             .take(self.limit)
             .map(|&index| entries.entries[index].entry.clone())
             .collect();
-        Some(models::FolderListing::new(
+        Some(FolderPage::new(
             page,
             matching.len() as u64,
             offset,
@@ -868,8 +896,8 @@ pub(crate) mod tests {
         e.file = Some(Nullable::Present(models::FileSystemEntryFileDetail::new(archive)));
         e
     }
-    pub fn query(offset: Option<u64>, limit: Option<u32>) -> models::ListFolderEntriesQueryParams {
-        models::ListFolderEntriesQueryParams {
+    pub fn query(offset: Option<u64>, limit: Option<u32>) -> FolderQuery {
+        FolderQuery {
             path: "/".to_string(),
             recursive: None,
             offset,
@@ -883,10 +911,10 @@ pub(crate) mod tests {
             folders_only: None,
         }
     }
-    fn list(query: &models::ListFolderEntriesQueryParams, entries: Vec<models::FileSystemEntry>) -> Result<models::FolderListing> {
+    fn list(query: &FolderQuery, entries: Vec<models::FileSystemEntry>) -> Result<FolderPage> {
         Ok(ListOptions::from_query(query)?.paginate(&ListingEntries::from_entries(entries), "test".to_string()))
     }
-    fn names(listing: &models::FolderListing) -> Vec<&str> {
+    fn names(listing: &FolderPage) -> Vec<&str> {
         listing.entries.iter().map(|e| e.name.as_str()).collect()
     }
 
@@ -978,13 +1006,13 @@ pub(crate) mod tests {
         Ok(())
     }
     /// The options of a `listEntries` listing over `query`, with the Filter's kinds and the Scope's choice of reading the insides of archives.
-    pub fn scoped(query: &models::ListFolderEntriesQueryParams, kinds: &[EntryKind], inside_archives: bool) -> ListOptions {
+    pub fn scoped(query: &FolderQuery, kinds: &[EntryKind], inside_archives: bool) -> ListOptions {
         ListOptions::from_query(query).unwrap().with_scope(EntryKinds::of(kinds.iter().copied()), inside_archives)
     }
     fn mixed() -> Vec<models::FileSystemEntry> {
         vec![folder("dir"), file("pack.zip", true), entry("notes.txt"), entry("a.png"), entry("clip.mp4")]
     }
-    fn recursive_query() -> models::ListFolderEntriesQueryParams {
+    fn recursive_query() -> FolderQuery {
         let mut q = query(None, Some(100));
         q.recursive = Some(true);
         q
@@ -1275,7 +1303,7 @@ pub(crate) mod tests {
         );
         Ok(())
     }
-    async fn scan_test(root: &Path, include_hidden: bool, limit: usize) -> Result<models::FolderListing> {
+    async fn scan_test(root: &Path, include_hidden: bool, limit: usize) -> Result<FolderPage> {
         let rng = ChaCha20Rng::seed_from_u64(1);
         let provider = Arc::new(Mutex::new(TsidProviderImpl::new(ClockUtc, rng, 16)));
         let runtime = Arc::new(ArchiveRuntime::open(ArchiveOptions::default(), &root.join("cache")).await?);

@@ -18,18 +18,22 @@ import {
 } from "./listing";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: {
-        GET: (route: string, options?: unknown) =>
-            route === "/capabilities"
-                ? Promise.resolve({
-                      data: { summaryListing: false, entryDetails: false, childProbes: false },
-                      response: new Response(),
-                  })
-                : get(route, options),
-    },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: {
+            POST: (route: string, options: never) => answerEntries(get)(route, options),
+            GET: (route: string, options?: unknown) =>
+                route === "/capabilities"
+                    ? Promise.resolve({
+                          data: { summaryListing: false, entryDetails: false, childProbes: false },
+                          response: new Response(),
+                      })
+                    : get(route, options),
+        },
+    };
+});
 afterEach(() => get.mockReset());
 const page = (snapshot = "one", count = 1000): FolderListing => ({
     entries: [{ name: "a", path: "/a", kind: "folder", metadata: { size: 1, readonly: false } }],

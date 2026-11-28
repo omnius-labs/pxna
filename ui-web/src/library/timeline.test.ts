@@ -14,10 +14,13 @@ import {
 } from "./timeline";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: { GET: get },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: { POST: (route: string, options: never) => answerEntries(get)(route, options), GET: get },
+    };
+});
 afterEach(() => get.mockReset());
 
 function item(name: string, date = "2025-05-01T00:00:00", libraryId = "photos") {

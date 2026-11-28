@@ -20,7 +20,10 @@ use omnius_pxna_interface::models;
 use serde::{Deserialize, Serialize};
 use tracing::{Instrument as _, Span, field::Empty};
 
-use super::{EntryKinds, EntryPosition, ListOptions, ListSort, ListSortKey, ListingInvalidation, MarkFilter, MarkSelection, NameFilter, SnapshotVersion, SortValue};
+use super::{
+    EntryKinds, EntryPosition, ListOptions, ListSort, ListSortKey, ListingInvalidation, MarkFilter, MarkSelection, NameFilter, SnapshotVersion, SortValue, SummaryPage,
+    SummaryQuery,
+};
 use crate::{
     config::ListingConfig,
     prelude::*,
@@ -36,7 +39,44 @@ type SummaryFuture = BoxFuture<'static, std::result::Result<Arc<SummarySnapshot>
 pub struct SummaryOptions(ListOptions);
 
 impl SummaryOptions {
-    pub fn from_query(query: &models::ListFolderSummariesQueryParams) -> Result<Self> {
+    /// The summary that `listEntries` returns with `fields` of `summary`: the direct children of its one start, in name or kind order, through a name
+    /// condition and, for the tree, the kinds of folders and archives. Anything else is `InvalidInput`.
+    pub fn from_entries(request: &models::EntryListRequest) -> Result<Self> {
+        let invalid = |message: &str| Error::new(ErrorKind::InvalidInput).with_message(message.to_string());
+        let [_] = request.scope.starts.as_slice() else {
+            return Err(invalid("a summary lists one start"));
+        };
+        if request.scope.recursive.unwrap_or(false) {
+            return Err(invalid("a summary lists the direct children of its start"));
+        }
+        let filter = request.filter.as_ref();
+        if filter.is_some_and(|filter| filter.rating.is_some() || filter.tags.as_ref().is_some_and(|tags| !tags.is_empty())) {
+            return Err(invalid("a summary takes no rating or tag condition"));
+        }
+        let kinds = filter.and_then(|filter| filter.kinds.clone()).unwrap_or_default();
+        let folders_only = match kinds.as_slice() {
+            [] => false,
+            [a, b] if (a == "folder" && b == "archive") || (a == "archive" && b == "folder") => true,
+            _ => return Err(invalid("a summary takes no kinds, or folders and archives")),
+        };
+        let page = request.page.as_ref();
+        if page.is_some_and(|page| matches!(page.kind, models::EntryPageKind::Cursor)) {
+            return Err(invalid("a summary is an offset page"));
+        }
+        let options = request.options.as_ref();
+        Self::from_query(&SummaryQuery {
+            offset: page.and_then(|page| page.offset),
+            query: filter.and_then(|filter| filter.query.clone()),
+            limit: page.and_then(|page| page.limit),
+            sort: request.sort.clone(),
+            order: request.order.clone(),
+            include_hidden: options.and_then(|options| options.include_hidden),
+            folders_first: options.and_then(|options| options.folders_first),
+            folders_only: Some(folders_only),
+        })
+    }
+
+    pub fn from_query(query: &SummaryQuery) -> Result<Self> {
         let sort = ListSort::parse(query.sort.as_deref(), query.order.as_deref(), query.folders_first.unwrap_or(false))?;
         if !matches!(sort.key, ListSortKey::Name | ListSortKey::Kind) {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("summary sort must be name or kind"));
@@ -244,7 +284,7 @@ impl SummaryData {
         matching
     }
 
-    fn page(&self, options: &SummaryOptions, id: &str) -> models::FolderSummaryListing {
+    fn page(&self, options: &SummaryOptions, id: &str) -> SummaryPage {
         let options = &options.0;
         let matching = self.matching(options);
         let page = matching
@@ -253,11 +293,11 @@ impl SummaryData {
             .take(options.limit)
             .map(|&index| self.entries[index].entry.clone())
             .collect();
-        models::FolderSummaryListing::new(page, matching.len() as u64, options.offset, id.to_string(), false)
+        SummaryPage::new(page, matching.len() as u64, options.offset, id.to_string())
     }
 
     /// Finds the position of the Entry at `path` and cuts the page that holds it at a multiple of `limit`.
-    fn locate(&self, options: &SummaryOptions, id: &str, path: &str) -> Option<models::FolderSummaryListing> {
+    fn locate(&self, options: &SummaryOptions, id: &str, path: &str) -> Option<SummaryPage> {
         let options = &options.0;
         let matching = self.matching(options);
         let position = matching.iter().position(|&index| self.entries[index].entry.path == path)? as u64;
@@ -269,7 +309,7 @@ impl SummaryData {
             .take(options.limit)
             .map(|&index| self.entries[index].entry.clone())
             .collect();
-        Some(models::FolderSummaryListing::new(page, matching.len() as u64, offset, id.to_string(), false))
+        Some(SummaryPage::new(page, matching.len() as u64, offset, id.to_string()))
     }
 }
 
@@ -284,11 +324,11 @@ pub struct SummarySnapshot {
 }
 
 impl SummarySnapshot {
-    pub fn page(&self, options: &SummaryOptions) -> models::FolderSummaryListing {
+    pub fn page(&self, options: &SummaryOptions) -> SummaryPage {
         self.data.page(options, &self.id)
     }
 
-    pub fn locate(&self, options: &SummaryOptions, path: &str) -> Option<models::FolderSummaryListing> {
+    pub fn locate(&self, options: &SummaryOptions, path: &str) -> Option<SummaryPage> {
         self.data.locate(options, &self.id, path)
     }
 
@@ -663,11 +703,11 @@ mod tests {
         std::fs::write(root.join("known.txt"), b"known")?;
         std::os::unix::fs::symlink(root.join("absent"), root.join("broken"))?;
         let details = state.library.entry_details("test", &["/known.txt".into(), "/broken".into(), "/absent".into()]).await?;
-        assert_eq!(details.results.len(), 3);
-        assert_eq!(details.results[0].detail.as_ref().unwrap().metadata.size, 5);
-        assert_eq!(details.results[1].detail.as_ref().unwrap().kind, models::FileSystemEntryKind::Link);
-        assert_eq!(details.results[2].error, Some(models::ErrorKind::NotFound));
-        for result in details.results {
+        assert_eq!(details.len(), 3);
+        assert_eq!(details[0].detail.as_ref().unwrap().metadata.size, 5);
+        assert_eq!(details[1].detail.as_ref().unwrap().kind, models::FileSystemEntryKind::Link);
+        assert_eq!(details[2].error, Some(models::ErrorKind::NotFound));
+        for result in details {
             assert_ne!(result.detail.is_some(), result.error.is_some());
         }
         assert!(state.library.entry_details("test", &[]).await.is_err());
@@ -700,7 +740,7 @@ mod tests {
         );
         assert!(summary.entries.iter().any(|entry| entry.path == "/test.7z/hint.zip" && entry.archive));
         let result = state.library.entry_details("test", &["/test.7z/dir/a.txt".into()]).await?;
-        let detail = result.results[0].detail.as_ref().unwrap();
+        let detail = result[0].detail.as_ref().unwrap();
         assert_eq!(detail.path, "/test.7z/dir/a.txt");
         assert_eq!(detail.metadata.size, 3);
         assert!(detail.metadata.readonly);

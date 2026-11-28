@@ -51,70 +51,6 @@ pub enum DeleteFoldersResponse {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
-pub enum GetEntryDetailsResponse {
-    /// Exactly one detail or error kind per requested path.
-    Status200_ExactlyOneDetailOrErrorKindPerRequestedPath(models::EntryDetailsResponse),
-    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::Problem),
-    /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::Problem),
-    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
-    /// Resource not found.
-    Status404_ResourceNotFound(models::Problem),
-    /// The request body exceeds the one-shot write limit.
-    Status413_TheRequestBodyExceedsTheOne(models::Problem),
-    /// Internal server error.
-    Status500_InternalServerError(models::Problem),
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[must_use]
-#[allow(clippy::large_enum_variant)]
-pub enum ListFolderEntriesResponse {
-    /// Folder entries.
-    Status200_FolderEntries(models::FolderListing),
-    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::Problem),
-    /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::Problem),
-    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
-    /// Resource not found.
-    Status404_ResourceNotFound(models::Problem),
-    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
-    /// Internal server error.
-    Status500_InternalServerError(models::Problem),
-    /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[must_use]
-#[allow(clippy::large_enum_variant)]
-pub enum ListFolderSummariesResponse {
-    /// Names and kinds from one summary snapshot.
-    Status200_NamesAndKindsFromOneSummarySnapshot(models::FolderSummaryListing),
-    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::Problem),
-    /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::Problem),
-    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
-    /// Resource not found.
-    Status404_ResourceNotFound(models::Problem),
-    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
-    /// Internal server error.
-    Status500_InternalServerError(models::Problem),
-    /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[must_use]
-#[allow(clippy::large_enum_variant)]
 pub enum MoveFoldersResponse {
     /// Moved synchronously.
     Status200_MovedSynchronously(models::EntryList),
@@ -167,48 +103,6 @@ pub trait Folders<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
         path_params: &models::DeleteFoldersPathParams,
         body: &models::DeleteFoldersRequest,
     ) -> Result<DeleteFoldersResponse, E>;
-
-    /// Read current details for up to 200 entries.
-    ///
-    /// GetEntryDetails - POST /api/v1/libraries/{libraryId}/entries/details
-    async fn get_entry_details(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::GetEntryDetailsPathParams,
-        body: &models::EntryDetailsRequest,
-    ) -> Result<GetEntryDetailsResponse, E>;
-
-    /// List folder entries.
-    ///
-    /// ListFolderEntries - GET /api/v1/libraries/{libraryId}/folders/entries
-    async fn list_folder_entries(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::ListFolderEntriesPathParams,
-        query_params: &models::ListFolderEntriesQueryParams,
-    ) -> Result<ListFolderEntriesResponse, E>;
-
-    /// List names and kinds without detailed metadata.
-    ///
-    /// ListFolderSummaries - GET /api/v1/libraries/{libraryId}/folders/summaries
-    async fn list_folder_summaries(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::ListFolderSummariesPathParams,
-        query_params: &models::ListFolderSummariesQueryParams,
-    ) -> Result<ListFolderSummariesResponse, E>;
 
     /// Move or rename folders.
     ///

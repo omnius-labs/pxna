@@ -7,10 +7,17 @@ import { folderListingStore } from "./listing";
 import { selectionBytes, selectionItem, selectionValue } from "./selection";
 
 const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: { GET: get, POST: post },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: {
+            GET: get,
+            POST: (route: string, options: never) =>
+                route.startsWith("/entries") ? answerEntries(get, post)(route, options) : post(route, options),
+        },
+    };
+});
 const cleanups: (() => void)[] = [];
 afterEach(() => {
     for (const stop of cleanups.splice(0)) stop();

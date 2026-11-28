@@ -1730,13 +1730,13 @@ The daemon has configuration loading, the process lock, and the startup code of 
 If you copy the template `daemon/config/pxna.toml.example` as `pxna.toml` and pass its directory to `--config-dir`, it works as far as loading the configuration and listening on `listen_addr`.
 `pxna.toml` contains actual settings, so it is not put under git management.
 `get_health` returns the daemon's running state.
-The read-side `listLibraries`, `getLibrary`, `getEntryMetadata`, `listFolderEntries`, and `readFileContent` are connected to the business logic.
+The read-side `listLibraries`, `getLibrary`, `getEntryMetadata`, `listEntries`, and `readFileContent` are connected to the business logic.
 Paths that take a path call `StorageService` after checking the Library boundary, and can read inside archives too.
 The paths for setup, login, the current user, and logout are also connected, and paths requiring authentication can be called with the session cookie or bearer obtained by setup or login.
 `Origin` validation is applied to mutating requests that carry a cookie.
 The 6 read-side paths are verified by tests that call handlers directly, and the authentication paths by tests that go through the HTTP router.
 The content response is returned as a stream by a hand-written route and carries the requested range and `ETag`.
-`listFolderEntries` puts the MIME types of images and videos in the listing's `metadata.contentType`.
+`listEntries` puts the MIME types of images and videos in the listing's `metadata.contentType`.
 The engine's `Timeout` is returned as a 504 `Timeout`.
 When `[web] dir` is set, the daemon serves the web build output outside `/api`.
 
@@ -1756,7 +1756,7 @@ The container passes build and smoke tests in native CI for amd64 and arm64.
 The library-local trash and the content hash for ratings and tags are not implemented; they are M25 and M26 in §12.2.
 The documents describe browsing through the tree and the Shelves (§2, §6.5).
 The daemon stores and serves the Shelves and the folder settings, creates the default Shelf, and keeps both in step with its own renames, moves, and deletes, while no client reads them yet.
-The code reads a Scope through `listEntries` in every order and counts its months, with the Scope and the Filter in a POST body in the shapes a Shelf holds, and the web client still reads the timeline through `listTimelineEntries` and `listTimelineMonths` over chosen Libraries; M34 and M30 in §12.2 close that gap.
+The code reads a Scope through `listEntries` in every order and counts its months, with the Scope and the Filter in a POST body in the shapes a Shelf holds, and the web client reads a folder, the tree, a search, and the timeline through it on its current screens; M30 in §12.2 rebuilds the screens around the Shelves.
 The structure of [API Design](./design/api.md#15-current-state-and-remaining-work) is not implemented, and its §15.1 lists the statements of this document that still describe the current contract.
 The local AI assistance of §2 is a deferred item in §11.2.
 

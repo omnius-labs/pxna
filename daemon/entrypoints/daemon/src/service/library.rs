@@ -19,10 +19,13 @@ use crate::{
     config::LibraryConfig,
     prelude::*,
     service::listing::{
-        ArchiveWalk, ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, ListingSource, MarkSelection, NameIndex, ResolvedScope, ResolvedStart, Scope, ScopeListing,
-        ScopeResults, ScopeStart, SearchResults, SearchSource, SnapshotKey, SnapshotVersion, StartResolution, SummaryData, SummaryKey, SummaryOptions, SummarySnapshot,
+        ArchiveWalk, EntryDetail, ListOptions, ListingEntries, ListingSnapshot, ListingSnapshots, ListingSource, MarkSelection, NameIndex, ResolvedScope, ResolvedStart, Scope,
+        ScopeListing, ScopeResults, ScopeStart, SnapshotKey, SnapshotVersion, StartResolution, SummaryData, SummaryKey, SummaryOptions, SummaryPage, SummarySnapshot,
     },
 };
+
+#[cfg(test)]
+use crate::service::listing::{FolderPage, SearchPage, SearchResults, SearchSource};
 
 mod children;
 pub use children::ChildProbeCache;
@@ -76,37 +79,16 @@ impl LibraryBrowser {
         EntryConverter::new(&library.path).convert(&entry)
     }
 
-    pub async fn list_folder_entries(&self, library_id: &str, path: &str, options: &ListOptions) -> Result<models::FolderListing> {
+    #[cfg(test)]
+    pub async fn list_folder_entries(&self, library_id: &str, path: &str, options: &ListOptions) -> Result<FolderPage> {
         Ok(self.snapshot(library_id, path, options).await?.page(options))
     }
 
-    /// `entry` is relative to the start of the listing; returns the page that holds it.
-    pub async fn list_folder_entries_located(&self, library_id: &str, path: &str, options: &ListOptions, entry: &str) -> Result<models::FolderListing> {
-        self.snapshot(library_id, path, options)
-            .await?
-            .locate(options, entry)
-            .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message(format!("entry not found in the listing: {entry}")))
-    }
-
+    #[cfg(test)]
     /// Library ごとの一覧を並べ方の順にまとめる。`libraries` は要求の順の Library の id と、その Library の評価とタグで引いた条件の組である。
     /// 起点の `path` は Library が 1 つのときだけ指定でき、複数のときは各 Library のルートから探す。
-    pub async fn search_entries(&self, libraries: Vec<(String, ListOptions)>, path: &str, options: &ListOptions) -> Result<models::SearchListing> {
+    pub async fn search_entries(&self, libraries: Vec<(String, ListOptions)>, path: &str, options: &ListOptions) -> Result<SearchPage> {
         Ok(self.search_results(libraries, path).await?.page(options))
-    }
-
-    /// `entry` is relative to the start of the listing; returns the page that holds the Entry of `library_id`.
-    pub async fn search_entries_located(
-        &self,
-        libraries: Vec<(String, ListOptions)>,
-        path: &str,
-        options: &ListOptions,
-        library_id: &str,
-        entry: &str,
-    ) -> Result<models::SearchListing> {
-        self.search_results(libraries, path)
-            .await?
-            .locate(options, library_id, entry)
-            .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message(format!("entry not found in the listing: {entry}")))
     }
 
     /// The page of `options` of the Entries of the starts of `scope`, merged in the order of the sort. `selections` holds, by Library id, the rating and tag selection
@@ -155,6 +137,7 @@ impl LibraryBrowser {
         .await
     }
 
+    #[cfg(test)]
     async fn search_results(&self, libraries: Vec<(String, ListOptions)>, path: &str) -> Result<SearchResults> {
         let mut seen = HashSet::new();
         for (library_id, _) in &libraries {
@@ -175,12 +158,12 @@ impl LibraryBrowser {
         Ok(SearchResults::new(sources))
     }
 
-    pub async fn list_folder_summaries(&self, library_id: &str, path: &str, options: &SummaryOptions) -> Result<models::FolderSummaryListing> {
+    pub async fn list_folder_summaries(&self, library_id: &str, path: &str, options: &SummaryOptions) -> Result<SummaryPage> {
         Ok(self.summary_snapshot(library_id, path, options).await?.page(options))
     }
 
     /// `entry` is relative to the start of the listing; returns the page that holds it.
-    pub async fn list_folder_summaries_located(&self, library_id: &str, path: &str, options: &SummaryOptions, entry: &str) -> Result<models::FolderSummaryListing> {
+    pub async fn list_folder_summaries_located(&self, library_id: &str, path: &str, options: &SummaryOptions, entry: &str) -> Result<SummaryPage> {
         self.summary_snapshot(library_id, path, options)
             .await?
             .locate(options, entry)
@@ -201,7 +184,7 @@ impl LibraryBrowser {
             .await
     }
 
-    pub async fn entry_details(&self, library_id: &str, paths: &[String]) -> Result<models::EntryDetailsResponse> {
+    pub async fn entry_details(&self, library_id: &str, paths: &[String]) -> Result<Vec<EntryDetail>> {
         let library = self.library(library_id)?;
         if paths.is_empty() || paths.len() > 200 {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("paths must contain 1-200 entries"));
@@ -227,7 +210,7 @@ impl LibraryBrowser {
                     EntryConverter::new(&library.path).convert(&entry)
                 }
                 .await;
-                let mut detail = models::EntryDetailResult::new(path);
+                let mut detail = EntryDetail::new(path);
                 match result {
                     Ok(entry) => detail.detail = Some(entry),
                     Err(error) => detail.error = Some(crate::error::ApiError::from_error(&error).body.code),
@@ -237,7 +220,7 @@ impl LibraryBrowser {
             .buffered(4)
             .collect::<Vec<_>>()
             .await;
-        Ok(models::EntryDetailsResponse::new(results))
+        Ok(results)
     }
 
     /// thumbnail の対象になる path を解決する。file、フォルダ、archive のどれでもよく、種別ごとの扱いは engine が決める。
@@ -294,6 +277,7 @@ impl LibraryBrowser {
 }
 
 impl LibraryBrowser {
+    #[cfg(test)]
     async fn snapshot(&self, library_id: &str, path: &str, options: &ListOptions) -> Result<Arc<ListingSnapshot>> {
         let library = self.library(library_id)?;
         let (folder, entry) = self.resolve_folder(library, path).await?;

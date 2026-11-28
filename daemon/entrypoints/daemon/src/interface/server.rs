@@ -454,14 +454,17 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    async fn cached_listing(state: &DaemonState, path: &str, recursive: bool) -> TestResult<models::FolderListing> {
+    async fn cached_listing(state: &DaemonState, path: &str, recursive: bool) -> TestResult<crate::service::listing::FolderPage> {
         let mut query = crate::service::listing::tests::query(None, None);
         query.recursive = Some(recursive);
         let options = ListOptions::from_query(&query)?;
         Ok(state.library.list_folder_entries("photos", path, &options).await?)
     }
 
-    async fn prime_listings(state: &DaemonState, clock: &omnius_core_base::clock::FakeClockUtc) -> TestResult<Vec<(String, bool, models::FolderListing, std::time::SystemTime)>> {
+    async fn prime_listings(
+        state: &DaemonState,
+        clock: &omnius_core_base::clock::FakeClockUtc,
+    ) -> TestResult<Vec<(String, bool, crate::service::listing::FolderPage, std::time::SystemTime)>> {
         let latest = ["", "changes", "changes/nested"]
             .iter()
             .map(|path| std::fs::metadata(state.conf.libraries[0].path.join(path)).and_then(|metadata| metadata.modified()))
@@ -483,7 +486,10 @@ pub(crate) mod tests {
         Ok(listings)
     }
 
-    async fn changed_listings(state: &DaemonState, before: Vec<(String, bool, models::FolderListing, std::time::SystemTime)>) -> TestResult<Vec<models::FolderListing>> {
+    async fn changed_listings(
+        state: &DaemonState,
+        before: Vec<(String, bool, crate::service::listing::FolderPage, std::time::SystemTime)>,
+    ) -> TestResult<Vec<crate::service::listing::FolderPage>> {
         let mut listings = Vec::new();
         for (path, recursive, old, modified) in before {
             let folder = state.conf.libraries[0].path.join(path.trim_start_matches('/'));
@@ -877,14 +883,13 @@ pub(crate) mod tests {
         let login = send(&router, Method::POST, "/api/v1/auth/login", &[], credentials("owner", "password1", "bearer")).await?;
         let bearer = bearer(&login)?;
         let auth = [("authorization", bearer.as_str())];
+        // The timeline of a Library is `listEntries` over its root, with the insides of archives, in timeline-date order.
+        let scope = json!({"starts": [{"libraryId": "photos", "path": "/"}], "recursive": true, "insideArchives": true});
+        let timeline = |page: Value| json!({"scope": scope, "filter": {"kinds": ["image", "video"]}, "sort": "timeline_date", "page": page});
 
         assert_eq!(
-            send(&router, Method::GET, "/api/v1/timeline/months?libraryIds=photos", &[], None).await?.status,
+            send(&router, Method::POST, "/api/v1/entries/months", &[], Some(json!({"scope": scope}))).await?.status,
             StatusCode::UNAUTHORIZED
-        );
-        assert_eq!(
-            send(&router, Method::GET, "/api/v1/timeline/months?libraryIds=missing", &auth, None).await?.status,
-            StatusCode::NOT_FOUND
         );
 
         let refresh = send(&router, Method::POST, "/api/v1/timeline/refresh", &auth, Some(json!({"libraryIds": ["photos"]}))).await?;
@@ -899,25 +904,33 @@ pub(crate) mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
 
-        let entries = send(&router, Method::GET, "/api/v1/timeline/entries?libraryIds=photos", &auth, None).await?;
-        assert_eq!(entries.status, StatusCode::OK);
-        let mut paths = entries.body["entries"]
+        let entries = send(&router, Method::POST, "/api/v1/entries", &auth, Some(timeline(json!({"kind": "cursor"})))).await?;
+        assert_eq!(entries.status, StatusCode::OK, "{}", entries.body);
+        let mut paths = entries.body["items"]
             .as_array()
-            .ok_or("entries is missing")?
+            .ok_or("items is missing")?
             .iter()
             .map(|entry| entry["entry"]["path"].as_str().unwrap_or_default().to_string())
             .collect::<Vec<_>>();
         paths.sort();
         assert_eq!(paths, ["/photos/a.7z/dir/x.png", "/photos/outer.7z/inner.7z/x.png"], "画像だけを並べ、archive の中も含める");
-        let first = &entries.body["entries"][0];
+        let first = &entries.body["items"][0];
         assert!(first["timelineDate"].as_str().is_some_and(|date| date.len() == 19));
         assert!(["modified", "archiveModified"].contains(&first["timelineDateSource"].as_str().unwrap_or_default()));
         assert_eq!(first["entry"]["metadata"]["contentType"], "image/png");
         assert_eq!(first["entry"]["metadata"]["readonly"], true);
         assert_eq!(first["libraryId"], "photos");
-        assert!(entries.body.get("previous").is_none() && entries.body.get("next").is_none());
+        assert_eq!(entries.body["page"]["kind"], "cursor");
+        assert!(entries.body["page"].get("previous").is_none() && entries.body["page"].get("next").is_none());
 
-        let months = send(&router, Method::GET, "/api/v1/timeline/months?libraryIds=photos", &auth, None).await?;
+        let months = send(
+            &router,
+            Method::POST,
+            "/api/v1/entries/months",
+            &auth,
+            Some(json!({"scope": scope, "filter": {"kinds": ["image", "video"]}})),
+        )
+        .await?;
         assert_eq!(
             months.body["months"]
                 .as_array()
@@ -928,31 +941,31 @@ pub(crate) mod tests {
             2
         );
 
-        let one = send(&router, Method::GET, "/api/v1/timeline/entries?libraryIds=photos&limit=1", &auth, None).await?;
-        let next = one.body["next"].as_str().ok_or("next cursor is missing")?.to_string();
-        assert!(one.body.get("previous").is_none());
+        let one = send(&router, Method::POST, "/api/v1/entries", &auth, Some(timeline(json!({"kind": "cursor", "limit": 1})))).await?;
+        let next = one.body["page"]["next"].as_str().ok_or("next cursor is missing")?.to_string();
+        assert!(one.body["page"].get("previous").is_none());
         let second = send(
             &router,
-            Method::GET,
-            &format!("/api/v1/timeline/entries?libraryIds=photos&limit=1&after={}", next.replace(':', "%3A").replace('/', "%2F")),
+            Method::POST,
+            "/api/v1/entries",
             &auth,
-            None,
+            Some(timeline(json!({"kind": "cursor", "limit": 1, "after": next}))),
         )
         .await?;
         assert_eq!(second.status, StatusCode::OK);
-        assert_ne!(second.body["entries"][0]["entry"]["path"], one.body["entries"][0]["entry"]["path"]);
-        assert!(second.body.get("next").is_none());
+        assert_ne!(second.body["items"][0]["entry"]["path"], one.body["items"][0]["entry"]["path"]);
+        assert!(second.body["page"].get("next").is_none());
 
-        for query in [
-            "after=x&month=2024-01",
-            "after=invalid",
-            "month=2024-13",
-            "around=/photos/missing.png&aroundLibraryId=photos",
+        for page in [
+            json!({"kind": "cursor", "after": "x", "month": "2024-01"}),
+            json!({"kind": "cursor", "after": "invalid"}),
+            json!({"kind": "cursor", "month": "2024-13"}),
+            json!({"kind": "cursor", "around": {"libraryId": "photos", "path": "/photos/missing.png"}}),
         ] {
-            let response = send(&router, Method::GET, &format!("/api/v1/timeline/entries?libraryIds=photos&{query}"), &auth, None).await?;
+            let response = send(&router, Method::POST, "/api/v1/entries", &auth, Some(timeline(page.clone()))).await?;
             assert!(
                 response.status == StatusCode::BAD_REQUEST || response.status == StatusCode::NOT_FOUND,
-                "{query}: {}",
+                "{page}: {}",
                 response.status
             );
         }
@@ -1073,8 +1086,8 @@ pub(crate) mod tests {
             apis::entries::GetEntryMetadataResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(_)
         ));
         assert!(matches!(
-            apis::folders::ListFolderEntriesResponse::from(timeout()),
-            apis::folders::ListFolderEntriesResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(_)
+            apis::entries::ListEntriesResponse::from(timeout()),
+            apis::entries::ListEntriesResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(_)
         ));
         assert!(matches!(
             apis::entries::ReadFileContentResponse::from(timeout()),

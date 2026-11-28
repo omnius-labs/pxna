@@ -406,22 +406,45 @@ async function fetchPage(
     query: { before?: string; after?: string; month?: string; around?: string; aroundLibraryId?: string },
     signal?: AbortSignal,
 ): Promise<TimelineChunk> {
+    const { around, aroundLibraryId, ...cursor } = query;
     const listing = unwrap(
-        await api.GET("/timeline/entries", {
-            params: { query: { libraryIds: [...libraryIds], ...query, limit: TIMELINE_PAGE_SIZE } },
+        await api.POST("/entries", {
+            body: {
+                ...timelineScope(libraryIds),
+                sort: "timeline_date",
+                page: {
+                    kind: "cursor",
+                    ...cursor,
+                    ...(around === undefined ? {} : { around: { libraryId: aroundLibraryId ?? "", path: around } }),
+                    limit: TIMELINE_PAGE_SIZE,
+                },
+            },
             signal,
         }),
     );
     return {
-        items: listing.entries.map((item) => ({
+        items: (listing.items ?? []).map((item) => ({
             entry: { ...item.entry, path: scopedKey(item.libraryId, item.entry.path) },
             libraryId: item.libraryId,
             path: item.entry.path,
-            date: item.timelineDate,
-            source: item.timelineDateSource,
+            // A page in timeline-date order dates every item.
+            date: item.timelineDate ?? "",
+            source: item.timelineDateSource ?? "",
         })),
-        previous: listing.previous,
-        next: listing.next,
+        previous: listing.page.previous,
+        next: listing.page.next,
+    };
+}
+
+/// The timeline of Libraries is `listEntries` over their roots, the insides of archives included, through the images and videos.
+function timelineScope(libraryIds: readonly string[]) {
+    return {
+        scope: {
+            starts: libraryIds.map((libraryId) => ({ libraryId, path: "/" })),
+            recursive: true,
+            insideArchives: true,
+        },
+        filter: { kinds: ["image", "video"] as ("image" | "video")[] },
     };
 }
 
@@ -493,12 +516,7 @@ export function timelineMonthsQuery(libraryIds: readonly string[]) {
     return queryOptions({
         queryKey: ["timeline", "months", libraryIds],
         queryFn: async ({ signal }): Promise<TimelineMonth[]> =>
-            unwrap(
-                await api.GET("/timeline/months", {
-                    params: { query: { libraryIds: [...libraryIds] } },
-                    signal,
-                }),
-            ).months,
+            unwrap(await api.POST("/entries/months", { body: timelineScope(libraryIds), signal })).months,
     });
 }
 

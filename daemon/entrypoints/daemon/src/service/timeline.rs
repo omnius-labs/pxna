@@ -238,6 +238,7 @@ impl TimelineService {
         })
     }
 
+    #[cfg(test)]
     /// `library_ids` の Entry を 1 本の並びにしたページ。どれかの Library がなければ `NotFound` にする。
     pub async fn page(&self, library_ids: &[String], anchor: &TimelineAnchor, limit: usize) -> Result<TimelinePage> {
         self.libraries(library_ids)?;
@@ -257,6 +258,7 @@ impl TimelineService {
         snapshot.timeline(library_id, options, &self.index).await
     }
 
+    #[cfg(test)]
     /// `library_ids` の月ごとの件数の和。どれかの Library がなければ `NotFound` にする。
     pub async fn months(&self, library_ids: &[String]) -> Result<Vec<(String, u64)>> {
         self.libraries(library_ids)?;
