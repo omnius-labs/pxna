@@ -9,7 +9,7 @@ use omnius_pxna_interface::{apis, apis::BasicAuthKind};
 
 use crate::{
     interface::{
-        features::{entries::FileContentRoute, sockets::image::ImageSocketRoute, uploads::UploadContentRoute, video::VideoSessionRoute},
+        features::{entries::FileContentRoute, media::VideoSessionRoute, sockets::image::ImageSocketRoute, uploads::UploadContentRoute},
         middleware::{OriginCheck, ProblemBody},
         session::{BearerToken, Claims, SessionAuth, SessionCookie},
         web::WebAssets,
@@ -1025,7 +1025,7 @@ pub(crate) mod tests {
         assert_eq!(foreign.status, StatusCode::FORBIDDEN);
 
         assert_eq!(
-            send(&router, Method::GET, "/api/v1/auth/me", &[("cookie", &cookie)], None).await?.status,
+            send(&router, Method::GET, "/api/v1/auth/session", &[("cookie", &cookie)], None).await?.status,
             StatusCode::OK,
             "失効していない"
         );

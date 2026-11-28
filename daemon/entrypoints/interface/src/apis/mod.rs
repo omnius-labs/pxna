@@ -1,18 +1,15 @@
 pub mod auth;
 pub mod entries;
-pub mod health;
-pub mod image_socket;
 pub mod libraries;
 pub mod media;
+pub mod meta;
 pub mod operations;
 pub mod performance;
 pub mod preferences;
 pub mod ratings_tags;
-pub mod setup;
 pub mod shelves;
 pub mod timeline;
 pub mod uploads;
-pub mod video;
 
 /// Cookie Authentication.
 #[async_trait::async_trait]

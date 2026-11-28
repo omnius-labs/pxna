@@ -23,19 +23,16 @@ where
     I: AsRef<A> + Clone + Send + Sync + 'static,
     A: apis::auth::Auth<E, Claims = C>
         + apis::entries::Entries<E, Claims = C>
-        + apis::health::Health<E>
-        + apis::image_socket::ImageSocket<E, Claims = C>
         + apis::libraries::Libraries<E, Claims = C>
         + apis::media::Media<E, Claims = C>
+        + apis::meta::Meta<E, Claims = C>
         + apis::operations::Operations<E, Claims = C>
         + apis::performance::Performance<E, Claims = C>
         + apis::preferences::Preferences<E, Claims = C>
         + apis::ratings_tags::RatingsTags<E, Claims = C>
-        + apis::setup::Setup<E>
         + apis::shelves::Shelves<E, Claims = C>
         + apis::timeline::Timeline<E, Claims = C>
         + apis::uploads::Uploads<E, Claims = C>
-        + apis::video::Video<E, Claims = C>
         + apis::CookieAuthentication<Claims = C>
         + apis::ApiAuthBasic<Claims = C>
         + Send
@@ -47,8 +44,7 @@ where
     // build our application with a route
     Router::new()
         .route("/api/v1/auth/login", post(login::<I, A, E, C>))
-        .route("/api/v1/auth/me", get(get_current_user::<I, A, E, C>))
-        .route("/api/v1/auth/session", delete(delete_current_session::<I, A, E, C>))
+        .route("/api/v1/auth/session", delete(delete_current_session::<I, A, E, C>).get(get_current_session::<I, A, E, C>))
         .route("/api/v1/capabilities", get(get_capabilities::<I, A, E, C>))
         .route("/api/v1/entries", post(list_entries::<I, A, E, C>))
         .route("/api/v1/entries/copy", post(copy_entries::<I, A, E, C>))
@@ -57,7 +53,7 @@ where
         .route("/api/v1/entries/months", post(list_entry_months::<I, A, E, C>))
         .route("/api/v1/entries/move", post(move_entries::<I, A, E, C>))
         .route("/api/v1/folder-settings", get(list_folder_settings::<I, A, E, C>))
-        .route("/api/v1/health", get(get_health::<I, A, E>))
+        .route("/api/v1/health", get(get_health::<I, A, E, C>))
         .route("/api/v1/libraries", get(list_libraries::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}", get(get_library::<I, A, E, C>))
         .route("/api/v1/libraries/{library_id}/entries/child-probe", get(probe_folder_children::<I, A, E, C>))
@@ -100,8 +96,8 @@ where
         .route("/api/v1/operations/{operation_id}/cancel", post(cancel_operation::<I, A, E, C>))
         .route("/api/v1/performance/client-timings", post(report_client_timings::<I, A, E, C>))
         .route("/api/v1/preferences", get(get_preferences::<I, A, E, C>).put(put_preferences::<I, A, E, C>))
-        .route("/api/v1/setup", post(create_initial_setup::<I, A, E>))
-        .route("/api/v1/setup/status", get(get_setup_status::<I, A, E>))
+        .route("/api/v1/setup", post(create_initial_setup::<I, A, E, C>))
+        .route("/api/v1/setup/status", get(get_setup_status::<I, A, E, C>))
         .route("/api/v1/shelves", get(list_shelves::<I, A, E, C>).post(create_shelf::<I, A, E, C>))
         .route("/api/v1/shelves/order", put(reorder_shelves::<I, A, E, C>))
         .route("/api/v1/shelves/{shelf_id}", delete(delete_shelf::<I, A, E, C>).put(replace_shelf::<I, A, E, C>))
@@ -110,6 +106,151 @@ where
         .route("/api/v1/timeline/scans", post(start_timeline_scans::<I, A, E, C>))
         .route("/api/v1/timeline/status", get(get_timeline_status::<I, A, E, C>))
         .with_state(api_impl)
+}
+
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct CreateInitialSetupBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::InitialSetupRequest,
+}
+
+#[tracing::instrument(skip_all)]
+fn create_initial_setup_validation(body: models::InitialSetupRequest) -> std::result::Result<(models::InitialSetupRequest,), ValidationErrors> {
+    let b = CreateInitialSetupBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((body,))
+}
+/// CreateInitialSetup - POST /api/v1/setup
+#[tracing::instrument(skip_all)]
+async fn create_initial_setup<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    State(api_impl): State<I>,
+    Json(body): Json<models::InitialSetupRequest>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::auth::Auth<E, Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || create_initial_setup_validation(body)).await.unwrap();
+
+    let Ok((body,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().create_initial_setup(&method, &host, &cookies, &body).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::auth::CreateInitialSetupResponse::Status201_OwnerAndAuthenticatedSessionCreated { body, set_cookie } => {
+                if let Some(set_cookie) = set_cookie {
+                    let set_cookie = match header::IntoHeaderValue(set_cookie).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .body(Body::from(format!("An internal server error occurred handling set_cookie header - {e}")))
+                                .map_err(|e| {
+                                    error!(error = ?e);
+                                    StatusCode::INTERNAL_SERVER_ERROR
+                                });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers.insert(HeaderName::from_static("set-cookie"), set_cookie);
+                    }
+                }
+                let mut response = response.status(201);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::auth::CreateInitialSetupResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::auth::CreateInitialSetupResponse::Status409_TheInitialOwnerHasAlreadyBeenRegistered(body) => {
+                let mut response = response.status(409);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::auth::CreateInitialSetupResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 #[tracing::instrument(skip_all)]
@@ -229,12 +370,12 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-fn get_current_user_validation() -> std::result::Result<(), ValidationErrors> {
+fn get_current_session_validation() -> std::result::Result<(), ValidationErrors> {
     Ok(())
 }
-/// GetCurrentUser - GET /api/v1/auth/me
+/// GetCurrentSession - GET /api/v1/auth/session
 #[tracing::instrument(skip_all)]
-async fn get_current_user<I, A, E, C>(
+async fn get_current_session<I, A, E, C>(
     method: Method,
     TypedHeader(host): TypedHeader<Host>,
     cookies: CookieJar,
@@ -258,7 +399,7 @@ where
     };
 
     #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_current_user_validation()).await.unwrap();
+    let validation = tokio::task::spawn_blocking(move || get_current_session_validation()).await.unwrap();
 
     let Ok(()) = validation else {
         return Response::builder()
@@ -267,13 +408,13 @@ where
             .map_err(|_| StatusCode::BAD_REQUEST);
     };
 
-    let result = api_impl.as_ref().get_current_user(&method, &host, &cookies, &claims).await;
+    let result = api_impl.as_ref().get_current_session(&method, &host, &cookies, &claims).await;
 
     let mut response = Response::builder();
 
     let resp = match result {
         Ok(rsp) => match rsp {
-            apis::auth::GetCurrentUserResponse::Status200_CurrentAuthenticatedUserAndSession(body) => {
+            apis::auth::GetCurrentSessionResponse::Status200_CurrentAuthenticatedUserAndSession(body) => {
                 let mut response = response.status(200);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -290,7 +431,7 @@ where
                 .unwrap()?;
                 response.body(Body::from(body_content))
             }
-            apis::auth::GetCurrentUserResponse::Status401_MissingOrInvalidAuthentication(body) => {
+            apis::auth::GetCurrentSessionResponse::Status401_MissingOrInvalidAuthentication(body) => {
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -307,7 +448,7 @@ where
                 .unwrap()?;
                 response.body(Body::from(body_content))
             }
-            apis::auth::GetCurrentUserResponse::Status500_InternalServerError(body) => {
+            apis::auth::GetCurrentSessionResponse::Status500_InternalServerError(body) => {
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -3017,340 +3158,6 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-fn get_health_validation() -> std::result::Result<(), ValidationErrors> {
-    Ok(())
-}
-/// GetHealth - GET /api/v1/health
-#[tracing::instrument(skip_all)]
-async fn get_health<I, A, E>(method: Method, TypedHeader(host): TypedHeader<Host>, cookies: CookieJar, State(api_impl): State<I>) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::health::Health<E> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_health_validation()).await.unwrap();
-
-    let Ok(()) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl.as_ref().get_health(&method, &host, &cookies).await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::health::GetHealthResponse::Status200_TheDaemonIsRunning(body) => {
-                let mut response = response.status(200);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::health::GetHealthResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[tracing::instrument(skip_all)]
-fn get_image_socket_validation() -> std::result::Result<(), ValidationErrors> {
-    Ok(())
-}
-/// GetImageSocket - GET /api/v1/sockets/image
-#[tracing::instrument(skip_all)]
-async fn get_image_socket<I, A, E, C>(
-    method: Method,
-    TypedHeader(host): TypedHeader<Host>,
-    cookies: CookieJar,
-    headers: HeaderMap,
-    State(api_impl): State<I>,
-) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::image_socket::ImageSocket<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    // Authentication
-    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
-    let claims_in_auth_header = api_impl
-        .as_ref()
-        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
-        .await;
-    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
-    let Some(claims) = claims else {
-        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
-    };
-
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_image_socket_validation()).await.unwrap();
-
-    let Ok(()) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl.as_ref().get_image_socket(&method, &host, &cookies, &claims).await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::image_socket::GetImageSocketResponse::Status101_TheConnectionIsUpgradedToAWebSocket => {
-                let mut response = response.status(101);
-                response.body(Body::empty())
-            }
-            apis::image_socket::GetImageSocketResponse::Status400_InvalidRequest(body) => {
-                let mut response = response.status(400);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::image_socket::GetImageSocketResponse::Status401_MissingOrInvalidAuthentication(body) => {
-                let mut response = response.status(401);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::image_socket::GetImageSocketResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
-                let mut response = response.status(403);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::image_socket::GetImageSocketResponse::Status429_TheSessionAlreadyHasTheMostImageSocketsItMayKeepOpen(body) => {
-                let mut response = response.status(429);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::image_socket::GetImageSocketResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[tracing::instrument(skip_all)]
-fn get_capabilities_validation() -> std::result::Result<(), ValidationErrors> {
-    Ok(())
-}
-/// GetCapabilities - GET /api/v1/capabilities
-#[tracing::instrument(skip_all)]
-async fn get_capabilities<I, A, E, C>(
-    method: Method,
-    TypedHeader(host): TypedHeader<Host>,
-    cookies: CookieJar,
-    headers: HeaderMap,
-    State(api_impl): State<I>,
-) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::libraries::Libraries<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    // Authentication
-    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
-    let claims_in_auth_header = api_impl
-        .as_ref()
-        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
-        .await;
-    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
-    let Some(claims) = claims else {
-        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
-    };
-
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_capabilities_validation()).await.unwrap();
-
-    let Ok(()) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl.as_ref().get_capabilities(&method, &host, &cookies, &claims).await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::libraries::GetCapabilitiesResponse::Status200_OptionalBrowsingFeaturesImplementedByThisDaemon(body) => {
-                let mut response = response.status(200);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::libraries::GetCapabilitiesResponse::Status401_MissingOrInvalidAuthentication(body) => {
-                let mut response = response.status(401);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::libraries::GetCapabilitiesResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[tracing::instrument(skip_all)]
 fn get_library_validation(path_params: models::GetLibraryPathParams) -> std::result::Result<(models::GetLibraryPathParams,), ValidationErrors> {
     path_params.validate()?;
 
@@ -3607,6 +3414,567 @@ where
     })
 }
 
+#[derive(validator::Validate)]
+#[allow(dead_code)]
+struct CreateVideoSessionBodyValidator<'a> {
+    #[validate(nested)]
+    body: &'a models::VideoSessionCreateRequest,
+}
+
+#[tracing::instrument(skip_all)]
+fn create_video_session_validation(
+    path_params: models::CreateVideoSessionPathParams,
+    body: models::VideoSessionCreateRequest,
+) -> std::result::Result<(models::CreateVideoSessionPathParams, models::VideoSessionCreateRequest), ValidationErrors> {
+    path_params.validate()?;
+    let b = CreateVideoSessionBodyValidator { body: &body };
+    b.validate()?;
+
+    Ok((path_params, body))
+}
+/// CreateVideoSession - POST /api/v1/libraries/{libraryId}/video/sessions
+#[tracing::instrument(skip_all)]
+async fn create_video_session<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    Path(path_params): Path<models::CreateVideoSessionPathParams>,
+    State(api_impl): State<I>,
+    Json(body): Json<models::VideoSessionCreateRequest>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::media::Media<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || create_video_session_validation(path_params, body)).await.unwrap();
+
+    let Ok((path_params, body)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().create_video_session(&method, &host, &cookies, &claims, &path_params, &body).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::media::CreateVideoSessionResponse::Status201_VideoSessionCreated(body) => {
+                let mut response = response.status(201);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::CreateVideoSessionResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::CreateVideoSessionResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::CreateVideoSessionResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::CreateVideoSessionResponse::Status404_ResourceNotFound(body) => {
+                let mut response = response.status(404);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::CreateVideoSessionResponse::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => {
+                let mut response = response.status(409);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::CreateVideoSessionResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::CreateVideoSessionResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
+                let mut response = response.status(504);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn delete_video_session_validation(path_params: models::DeleteVideoSessionPathParams) -> std::result::Result<(models::DeleteVideoSessionPathParams,), ValidationErrors> {
+    path_params.validate()?;
+
+    Ok((path_params,))
+}
+/// DeleteVideoSession - DELETE /api/v1/libraries/{libraryId}/video/sessions/{sessionId}
+#[tracing::instrument(skip_all)]
+async fn delete_video_session<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    Path(path_params): Path<models::DeleteVideoSessionPathParams>,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::media::Media<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || delete_video_session_validation(path_params)).await.unwrap();
+
+    let Ok((path_params,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().delete_video_session(&method, &host, &cookies, &claims, &path_params).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::media::DeleteVideoSessionResponse::Status204_VideoSessionEnded => {
+                let mut response = response.status(204);
+                response.body(Body::empty())
+            }
+            apis::media::DeleteVideoSessionResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::DeleteVideoSessionResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::DeleteVideoSessionResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::DeleteVideoSessionResponse::Status404_ResourceNotFound(body) => {
+                let mut response = response.status(404);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::DeleteVideoSessionResponse::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => {
+                let mut response = response.status(409);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::DeleteVideoSessionResponse::Status410_TheVideoSessionWasEndedToMakeWayForANewerOne(body) => {
+                let mut response = response.status(410);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::DeleteVideoSessionResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::DeleteVideoSessionResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
+                let mut response = response.status(504);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn get_image_socket_validation() -> std::result::Result<(), ValidationErrors> {
+    Ok(())
+}
+/// GetImageSocket - GET /api/v1/sockets/image
+#[tracing::instrument(skip_all)]
+async fn get_image_socket<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::media::Media<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || get_image_socket_validation()).await.unwrap();
+
+    let Ok(()) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().get_image_socket(&method, &host, &cookies, &claims).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::media::GetImageSocketResponse::Status101_TheConnectionIsUpgradedToAWebSocket => {
+                let mut response = response.status(101);
+                response.body(Body::empty())
+            }
+            apis::media::GetImageSocketResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetImageSocketResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetImageSocketResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetImageSocketResponse::Status429_TheSessionAlreadyHasTheMostImageSocketsItMayKeepOpen(body) => {
+                let mut response = response.status(429);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetImageSocketResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
 #[tracing::instrument(skip_all)]
 fn get_media_info_validation(
     path_params: models::GetMediaInfoPathParams,
@@ -3781,6 +4149,684 @@ where
             }
             apis::media::GetMediaInfoResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
                 let mut response = response.status(504);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn get_video_playlist_validation(path_params: models::GetVideoPlaylistPathParams) -> std::result::Result<(models::GetVideoPlaylistPathParams,), ValidationErrors> {
+    path_params.validate()?;
+
+    Ok((path_params,))
+}
+/// GetVideoPlaylist - GET /api/v1/libraries/{libraryId}/video/sessions/{sessionId}/playlist.m3u8
+#[tracing::instrument(skip_all)]
+async fn get_video_playlist<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    Path(path_params): Path<models::GetVideoPlaylistPathParams>,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::media::Media<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || get_video_playlist_validation(path_params)).await.unwrap();
+
+    let Ok((path_params,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().get_video_playlist(&method, &host, &cookies, &claims, &path_params).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::media::GetVideoPlaylistResponse::Status200_VODPlaylist(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/vnd.apple.mpegurl"));
+                }
+
+                let body_content = body;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoPlaylistResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoPlaylistResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoPlaylistResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoPlaylistResponse::Status404_ResourceNotFound(body) => {
+                let mut response = response.status(404);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoPlaylistResponse::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => {
+                let mut response = response.status(409);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoPlaylistResponse::Status410_TheVideoSessionWasEndedToMakeWayForANewerOne(body) => {
+                let mut response = response.status(410);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoPlaylistResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoPlaylistResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
+                let mut response = response.status(504);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn get_video_segment_validation(path_params: models::GetVideoSegmentPathParams) -> std::result::Result<(models::GetVideoSegmentPathParams,), ValidationErrors> {
+    path_params.validate()?;
+
+    Ok((path_params,))
+}
+/// GetVideoSegment - GET /api/v1/libraries/{libraryId}/video/sessions/{sessionId}/segments/{segmentName}
+#[tracing::instrument(skip_all)]
+async fn get_video_segment<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    Path(path_params): Path<models::GetVideoSegmentPathParams>,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::media::Media<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || get_video_segment_validation(path_params)).await.unwrap();
+
+    let Ok((path_params,)) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().get_video_segment(&method, &host, &cookies, &claims, &path_params).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::media::GetVideoSegmentResponse::Status200_MPEGTransportStreamSegment(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("video/mp2t"));
+                }
+
+                let body_content = body.0;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoSegmentResponse::Status400_InvalidRequest(body) => {
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoSegmentResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoSegmentResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoSegmentResponse::Status404_ResourceNotFound(body) => {
+                let mut response = response.status(404);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoSegmentResponse::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => {
+                let mut response = response.status(409);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoSegmentResponse::Status410_TheVideoSessionWasEndedToMakeWayForANewerOne(body) => {
+                let mut response = response.status(410);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoSegmentResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::media::GetVideoSegmentResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
+                let mut response = response.status(504);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn get_capabilities_validation() -> std::result::Result<(), ValidationErrors> {
+    Ok(())
+}
+/// GetCapabilities - GET /api/v1/capabilities
+#[tracing::instrument(skip_all)]
+async fn get_capabilities<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::meta::Meta<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || get_capabilities_validation()).await.unwrap();
+
+    let Ok(()) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().get_capabilities(&method, &host, &cookies, &claims).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::meta::GetCapabilitiesResponse::Status200_OptionalBrowsingFeaturesImplementedByThisDaemon(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::meta::GetCapabilitiesResponse::Status401_MissingOrInvalidAuthentication(body) => {
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::meta::GetCapabilitiesResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn get_health_validation() -> std::result::Result<(), ValidationErrors> {
+    Ok(())
+}
+/// GetHealth - GET /api/v1/health
+#[tracing::instrument(skip_all)]
+async fn get_health<I, A, E, C>(method: Method, TypedHeader(host): TypedHeader<Host>, cookies: CookieJar, State(api_impl): State<I>) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::meta::Meta<E, Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || get_health_validation()).await.unwrap();
+
+    let Ok(()) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().get_health(&method, &host, &cookies).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::meta::GetHealthResponse::Status200_TheDaemonIsRunning(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::meta::GetHealthResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn get_setup_status_validation() -> std::result::Result<(), ValidationErrors> {
+    Ok(())
+}
+/// GetSetupStatus - GET /api/v1/setup/status
+#[tracing::instrument(skip_all)]
+async fn get_setup_status<I, A, E, C>(method: Method, TypedHeader(host): TypedHeader<Host>, cookies: CookieJar, State(api_impl): State<I>) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::meta::Meta<E, Claims = C> + Send + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || get_setup_status_validation()).await.unwrap();
+
+    let Ok(()) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl.as_ref().get_setup_status(&method, &host, &cookies).await;
+
+    let mut response = Response::builder();
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::meta::GetSetupStatusResponse::Status200_CurrentSetupStatus(body) => {
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::meta::GetSetupStatusResponse::Status500_InternalServerError(body) => {
+                let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
@@ -5337,227 +6383,6 @@ where
             }
             apis::ratings_tags::PutRatingResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
                 let mut response = response.status(504);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[derive(validator::Validate)]
-#[allow(dead_code)]
-struct CreateInitialSetupBodyValidator<'a> {
-    #[validate(nested)]
-    body: &'a models::InitialSetupRequest,
-}
-
-#[tracing::instrument(skip_all)]
-fn create_initial_setup_validation(body: models::InitialSetupRequest) -> std::result::Result<(models::InitialSetupRequest,), ValidationErrors> {
-    let b = CreateInitialSetupBodyValidator { body: &body };
-    b.validate()?;
-
-    Ok((body,))
-}
-/// CreateInitialSetup - POST /api/v1/setup
-#[tracing::instrument(skip_all)]
-async fn create_initial_setup<I, A, E>(
-    method: Method,
-    TypedHeader(host): TypedHeader<Host>,
-    cookies: CookieJar,
-    State(api_impl): State<I>,
-    Json(body): Json<models::InitialSetupRequest>,
-) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::setup::Setup<E> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || create_initial_setup_validation(body)).await.unwrap();
-
-    let Ok((body,)) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl.as_ref().create_initial_setup(&method, &host, &cookies, &body).await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::setup::CreateInitialSetupResponse::Status201_OwnerAndAuthenticatedSessionCreated { body, set_cookie } => {
-                if let Some(set_cookie) = set_cookie {
-                    let set_cookie = match header::IntoHeaderValue(set_cookie).try_into() {
-                        Ok(val) => val,
-                        Err(e) => {
-                            return Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(Body::from(format!("An internal server error occurred handling set_cookie header - {e}")))
-                                .map_err(|e| {
-                                    error!(error = ?e);
-                                    StatusCode::INTERNAL_SERVER_ERROR
-                                });
-                        }
-                    };
-
-                    {
-                        let mut response_headers = response.headers_mut().unwrap();
-                        response_headers.insert(HeaderName::from_static("set-cookie"), set_cookie);
-                    }
-                }
-                let mut response = response.status(201);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::setup::CreateInitialSetupResponse::Status400_InvalidRequest(body) => {
-                let mut response = response.status(400);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::setup::CreateInitialSetupResponse::Status409_TheInitialOwnerHasAlreadyBeenRegistered(body) => {
-                let mut response = response.status(409);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::setup::CreateInitialSetupResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[tracing::instrument(skip_all)]
-fn get_setup_status_validation() -> std::result::Result<(), ValidationErrors> {
-    Ok(())
-}
-/// GetSetupStatus - GET /api/v1/setup/status
-#[tracing::instrument(skip_all)]
-async fn get_setup_status<I, A, E>(method: Method, TypedHeader(host): TypedHeader<Host>, cookies: CookieJar, State(api_impl): State<I>) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::setup::Setup<E> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_setup_status_validation()).await.unwrap();
-
-    let Ok(()) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl.as_ref().get_setup_status(&method, &host, &cookies).await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::setup::GetSetupStatusResponse::Status200_CurrentSetupStatus(body) => {
-                let mut response = response.status(200);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::setup::GetSetupStatusResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
@@ -7804,784 +8629,6 @@ where
             }
             apis::uploads::WriteUploadContentResponse::Status507_TheDaemonDoesNotHaveEnoughDiskSpace(body) => {
                 let mut response = response.status(507);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[derive(validator::Validate)]
-#[allow(dead_code)]
-struct CreateVideoSessionBodyValidator<'a> {
-    #[validate(nested)]
-    body: &'a models::VideoSessionCreateRequest,
-}
-
-#[tracing::instrument(skip_all)]
-fn create_video_session_validation(
-    path_params: models::CreateVideoSessionPathParams,
-    body: models::VideoSessionCreateRequest,
-) -> std::result::Result<(models::CreateVideoSessionPathParams, models::VideoSessionCreateRequest), ValidationErrors> {
-    path_params.validate()?;
-    let b = CreateVideoSessionBodyValidator { body: &body };
-    b.validate()?;
-
-    Ok((path_params, body))
-}
-/// CreateVideoSession - POST /api/v1/libraries/{libraryId}/video/sessions
-#[tracing::instrument(skip_all)]
-async fn create_video_session<I, A, E, C>(
-    method: Method,
-    TypedHeader(host): TypedHeader<Host>,
-    cookies: CookieJar,
-    headers: HeaderMap,
-    Path(path_params): Path<models::CreateVideoSessionPathParams>,
-    State(api_impl): State<I>,
-    Json(body): Json<models::VideoSessionCreateRequest>,
-) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::video::Video<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    // Authentication
-    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
-    let claims_in_auth_header = api_impl
-        .as_ref()
-        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
-        .await;
-    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
-    let Some(claims) = claims else {
-        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
-    };
-
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || create_video_session_validation(path_params, body)).await.unwrap();
-
-    let Ok((path_params, body)) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl.as_ref().create_video_session(&method, &host, &cookies, &claims, &path_params, &body).await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::video::CreateVideoSessionResponse::Status201_VideoSessionCreated(body) => {
-                let mut response = response.status(201);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::CreateVideoSessionResponse::Status400_InvalidRequest(body) => {
-                let mut response = response.status(400);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::CreateVideoSessionResponse::Status401_MissingOrInvalidAuthentication(body) => {
-                let mut response = response.status(401);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::CreateVideoSessionResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
-                let mut response = response.status(403);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::CreateVideoSessionResponse::Status404_ResourceNotFound(body) => {
-                let mut response = response.status(404);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::CreateVideoSessionResponse::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => {
-                let mut response = response.status(409);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::CreateVideoSessionResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::CreateVideoSessionResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
-                let mut response = response.status(504);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[tracing::instrument(skip_all)]
-fn delete_video_session_validation(path_params: models::DeleteVideoSessionPathParams) -> std::result::Result<(models::DeleteVideoSessionPathParams,), ValidationErrors> {
-    path_params.validate()?;
-
-    Ok((path_params,))
-}
-/// DeleteVideoSession - DELETE /api/v1/libraries/{libraryId}/video/sessions/{sessionId}
-#[tracing::instrument(skip_all)]
-async fn delete_video_session<I, A, E, C>(
-    method: Method,
-    TypedHeader(host): TypedHeader<Host>,
-    cookies: CookieJar,
-    headers: HeaderMap,
-    Path(path_params): Path<models::DeleteVideoSessionPathParams>,
-    State(api_impl): State<I>,
-) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::video::Video<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    // Authentication
-    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
-    let claims_in_auth_header = api_impl
-        .as_ref()
-        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
-        .await;
-    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
-    let Some(claims) = claims else {
-        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
-    };
-
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || delete_video_session_validation(path_params)).await.unwrap();
-
-    let Ok((path_params,)) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl.as_ref().delete_video_session(&method, &host, &cookies, &claims, &path_params).await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::video::DeleteVideoSessionResponse::Status204_VideoSessionEnded => {
-                let mut response = response.status(204);
-                response.body(Body::empty())
-            }
-            apis::video::DeleteVideoSessionResponse::Status400_InvalidRequest(body) => {
-                let mut response = response.status(400);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::DeleteVideoSessionResponse::Status401_MissingOrInvalidAuthentication(body) => {
-                let mut response = response.status(401);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::DeleteVideoSessionResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
-                let mut response = response.status(403);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::DeleteVideoSessionResponse::Status404_ResourceNotFound(body) => {
-                let mut response = response.status(404);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::DeleteVideoSessionResponse::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => {
-                let mut response = response.status(409);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::DeleteVideoSessionResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::DeleteVideoSessionResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
-                let mut response = response.status(504);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[tracing::instrument(skip_all)]
-fn get_video_playlist_validation(path_params: models::GetVideoPlaylistPathParams) -> std::result::Result<(models::GetVideoPlaylistPathParams,), ValidationErrors> {
-    path_params.validate()?;
-
-    Ok((path_params,))
-}
-/// GetVideoPlaylist - GET /api/v1/libraries/{libraryId}/video/sessions/{sessionId}/playlist.m3u8
-#[tracing::instrument(skip_all)]
-async fn get_video_playlist<I, A, E, C>(
-    method: Method,
-    TypedHeader(host): TypedHeader<Host>,
-    cookies: CookieJar,
-    headers: HeaderMap,
-    Path(path_params): Path<models::GetVideoPlaylistPathParams>,
-    State(api_impl): State<I>,
-) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::video::Video<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    // Authentication
-    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
-    let claims_in_auth_header = api_impl
-        .as_ref()
-        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
-        .await;
-    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
-    let Some(claims) = claims else {
-        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
-    };
-
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_video_playlist_validation(path_params)).await.unwrap();
-
-    let Ok((path_params,)) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl.as_ref().get_video_playlist(&method, &host, &cookies, &claims, &path_params).await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::video::GetVideoPlaylistResponse::Status200_VODPlaylist(body) => {
-                let mut response = response.status(200);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/vnd.apple.mpegurl"));
-                }
-
-                let body_content = body;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoPlaylistResponse::Status400_InvalidRequest(body) => {
-                let mut response = response.status(400);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoPlaylistResponse::Status401_MissingOrInvalidAuthentication(body) => {
-                let mut response = response.status(401);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoPlaylistResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
-                let mut response = response.status(403);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoPlaylistResponse::Status404_ResourceNotFound(body) => {
-                let mut response = response.status(404);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoPlaylistResponse::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => {
-                let mut response = response.status(409);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoPlaylistResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoPlaylistResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
-                let mut response = response.status(504);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-        },
-        Err(why) => {
-            // Application code returned an error. This should not happen, as the implementation should
-            // return a valid response.
-            return api_impl.as_ref().handle_error(&method, &host, &cookies, why).await;
-        }
-    };
-
-    resp.map_err(|e| {
-        error!(error = ?e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
-}
-
-#[tracing::instrument(skip_all)]
-fn get_video_segment_validation(path_params: models::GetVideoSegmentPathParams) -> std::result::Result<(models::GetVideoSegmentPathParams,), ValidationErrors> {
-    path_params.validate()?;
-
-    Ok((path_params,))
-}
-/// GetVideoSegment - GET /api/v1/libraries/{libraryId}/video/sessions/{sessionId}/segments/{segmentName}
-#[tracing::instrument(skip_all)]
-async fn get_video_segment<I, A, E, C>(
-    method: Method,
-    TypedHeader(host): TypedHeader<Host>,
-    cookies: CookieJar,
-    headers: HeaderMap,
-    Path(path_params): Path<models::GetVideoSegmentPathParams>,
-    State(api_impl): State<I>,
-) -> Result<Response, StatusCode>
-where
-    I: AsRef<A> + Send + Sync,
-    A: apis::video::Video<E, Claims = C> + apis::CookieAuthentication<Claims = C> + apis::ApiAuthBasic<Claims = C> + Send + Sync,
-    E: std::fmt::Debug + Send + Sync + 'static,
-{
-    // Authentication
-    let claims_in_cookie = api_impl.as_ref().extract_claims_from_cookie(&cookies, "__Host-pxna_session").await;
-    let claims_in_auth_header = api_impl
-        .as_ref()
-        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
-        .await;
-    let claims = None.or(claims_in_cookie).or(claims_in_auth_header);
-    let Some(claims) = claims else {
-        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
-    };
-
-    #[allow(clippy::redundant_closure)]
-    let validation = tokio::task::spawn_blocking(move || get_video_segment_validation(path_params)).await.unwrap();
-
-    let Ok((path_params,)) = validation else {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(validation.unwrap_err().to_string()))
-            .map_err(|_| StatusCode::BAD_REQUEST);
-    };
-
-    let result = api_impl.as_ref().get_video_segment(&method, &host, &cookies, &claims, &path_params).await;
-
-    let mut response = Response::builder();
-
-    let resp = match result {
-        Ok(rsp) => match rsp {
-            apis::video::GetVideoSegmentResponse::Status200_MPEGTransportStreamSegment(body) => {
-                let mut response = response.status(200);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("video/mp2t"));
-                }
-
-                let body_content = body.0;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoSegmentResponse::Status400_InvalidRequest(body) => {
-                let mut response = response.status(400);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoSegmentResponse::Status401_MissingOrInvalidAuthentication(body) => {
-                let mut response = response.status(401);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoSegmentResponse::Status403_TheRequestedResourceCannotBeAccessedOrWritten(body) => {
-                let mut response = response.status(403);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoSegmentResponse::Status404_ResourceNotFound(body) => {
-                let mut response = response.status(404);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoSegmentResponse::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(body) => {
-                let mut response = response.status(409);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoSegmentResponse::Status500_InternalServerError(body) => {
-                let mut response = response.status(500);
-                {
-                    let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                }
-
-                let body_content = tokio::task::spawn_blocking(move || {
-                    serde_json::to_vec(&body).map_err(|e| {
-                        error!(error = ?e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })
-                })
-                .await
-                .unwrap()?;
-                response.body(Body::from(body_content))
-            }
-            apis::video::GetVideoSegmentResponse::Status504_ExtractionOrThumbnailGenerationTimedOut(body) => {
-                let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));

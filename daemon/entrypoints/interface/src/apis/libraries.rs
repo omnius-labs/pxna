@@ -11,18 +11,6 @@ use crate::{models, types::*};
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
-pub enum GetCapabilitiesResponse {
-    /// Optional browsing features implemented by this daemon.
-    Status200_OptionalBrowsingFeaturesImplementedByThisDaemon(models::Capabilities),
-    /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::Problem),
-    /// Internal server error.
-    Status500_InternalServerError(models::Problem),
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[must_use]
-#[allow(clippy::large_enum_variant)]
 pub enum GetLibraryResponse {
     /// Library metadata.
     Status200_LibraryMetadata(models::LibraryResponse),
@@ -53,11 +41,6 @@ pub enum ListLibrariesResponse {
 #[allow(clippy::ptr_arg)]
 pub trait Libraries<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHandler<E> {
     type Claims;
-
-    /// Get optional browsing capabilities.
-    ///
-    /// GetCapabilities - GET /api/v1/capabilities
-    async fn get_capabilities(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> Result<GetCapabilitiesResponse, E>;
 
     /// Get a Library.
     ///

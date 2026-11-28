@@ -2,7 +2,7 @@
 
 ## 1. About This Document
 
-This document defines the structure of the Pxna HTTP API that replaces the current contract in place: the resource model, URL hierarchy, method conventions, listing and mutation contracts, upload and operation lifecycles, error shape, tag grouping, and the mapping from the current paths.
+This document defines the structure of the Pxna HTTP API that replaces the previous contract in place: the resource model, URL hierarchy, method conventions, listing and mutation contracts, upload and operation lifecycles, error shape, tag grouping, and the mapping from the current paths.
 The intended readers are developers changing the API contract, the generated interface, the daemon handlers, or a client.
 
 This document assumes the vocabulary of [terms.md](../terms.md#2-term-list).
@@ -13,7 +13,7 @@ Definitions of words are not in this document.
 | Document | What it covers |
 | --- | --- |
 | This document | The resource model, URL hierarchy, method conventions, listing and mutation contracts, upload and operation lifecycles, error shape, tag grouping, and the mapping from the current paths, together with the decisions behind them |
-| [design.md](../design.md#8-conventions-for-mutating-apis) | The conventions of the current contract for mutating APIs, the error kinds and their statuses (§4.4), CSRF (§8.5), and the cross-cutting decisions this document leaves in place |
+| [design.md](../design.md#8-conventions-for-mutating-apis) | The conventions for mutating APIs, the error kinds and their statuses (§4.4), CSRF (§8.5), and the cross-cutting decisions this document leaves in place |
 | [daemon/openapi.yaml](../../daemon/openapi.yaml) | The authoritative contract that is served: paths, parameters, schemas, status codes |
 | [Storage Layer Design](./storage.md#1-about-this-document) | Path and archive resolution, staging, atomic publication, and the limits this document assumes |
 | [Listing and Search Design](./listing.md#1-about-this-document) | Snapshots, name matching, the name index, and recursion limits behind the listing contract |
@@ -31,7 +31,7 @@ Definitions of words are not in this document.
 
 §3 through §13 describe the finished API in the present tense.
 §14 records the decisions and deferred items behind it.
-§15 records what is implemented, and which statements in other design documents still describe the current contract.
+§15 records what is implemented, and which statements in other design documents still describe a replaced contract.
 If you want to know what works now, read §15 first.
 
 ## 2. Responsibility and Boundary
@@ -41,7 +41,7 @@ It does not own how a path is resolved inside an archive, how a listing snapshot
 Those concerns stay in the documents of §1.1.
 
 The API stays under `/api/v1`, and `daemon/openapi.yaml` is rewritten in place; no second version is served alongside it (§14.1).
-Every capability of the current contract has a place in this structure, and the structure adds none of its own; the additions it leaves out are deferred in §14.2.
+Every capability of the previous contract has a place in this structure, and the structure adds none of its own; the additions it leaves out are deferred in §14.2.
 The deployment premise is unchanged: a single owner, a LAN-first daemon, and the web client served from the same origin as the API ([design.md §10.1](../design.md#101-web)).
 
 ## 3. Resource Model
@@ -143,7 +143,6 @@ All paths are relative to `/api/v1`.
 ├─ POST   /libraries/{libraryId}/uploads/{uploadId}/commit
 │
 ├─ POST   /libraries/{libraryId}/video/sessions
-├─ GET    /libraries/{libraryId}/video/sessions/{sessionId}
 ├─ DELETE /libraries/{libraryId}/video/sessions/{sessionId}
 ├─ GET    /libraries/{libraryId}/video/sessions/{sessionId}/playlist.m3u8
 ├─ GET    /libraries/{libraryId}/video/sessions/{sessionId}/segments/{segmentName}
@@ -198,7 +197,7 @@ Deleting Entries is the batch command `POST /entries/delete`, because its target
 
 ### 5.3 Status Codes
 
-The statuses are those of the current contract, with the error kinds mapped as in [design.md §4.4](../design.md#44-error-model-and-http-mapping).
+The statuses are those of the previous contract, with the error kinds mapped as in [design.md §4.4](../design.md#44-error-model-and-http-mapping).
 This structure fixes three of them.
 
 - Every batch command answers `202` with an Operation, including one that finishes before the response (§7.4).
@@ -408,10 +407,10 @@ Thumbnails, sprite sheets, and display images have no HTTP path; they are served
 
 ### 9.3 Video
 
-Video sessions keep their library-scoped lifecycle: create, read, delete, the playlist, and the segments.
+Video sessions keep their library-scoped lifecycle: create, delete, the playlist, and the segments.
 
 When a new session would exceed `max_concurrent_transcodes`, the daemon still ends the oldest session to make way ([Video Playback Design §5.4](./video.md#54-concurrency)).
-The ended session does not disappear silently: its read, playlist, and segments answer `410` with the error kind `SessionEvicted`, so the client that owned it can tell an ended session from one that never existed or expired, which stay `404`.
+The ended session does not disappear silently: its playlist, its segments, and its deletion answer `410` with the error kind `SessionEvicted`, so the client that owned it can tell an ended session from one that never existed or expired, which stay `404`.
 The daemon remembers an ended session's id for `session_idle_timeout_secs` ([Video Playback Design §5.1](./video.md#51-transcode-sessions)), the time after which an idle session would have expired anyway, so the record is bounded by the same limit as the sessions.
 
 ## 10. Ratings, Tags, Folder Settings, and Preferences
@@ -478,7 +477,7 @@ A per-item failure inside a successful response, such as one place of `POST /ent
 
 ### 11.2 Conditional Requests
 
-Content keeps `ETag`, `Last-Modified`, `Range`, and the conditional reads of the current contract.
+Content keeps `ETag`, `Last-Modified`, `Range`, and the conditional reads of the previous contract.
 No other response carries an `ETag`; an `offset` page of a listing detects changes by `snapshot` (§6.3).
 Preconditions on writes, such as `If-Match` on the display preferences or a snapshot that a destructive command must still match, are deferred in [design.md §11.2](../design.md#optimistic-locking-with-etag--if-match).
 
@@ -505,12 +504,12 @@ Each groups the operations a reader looks for together, and each tag description
 The tags are ordered as a reader follows them: Meta, Auth, Libraries, Entries, Uploads, Operations, Timeline, Media, Ratings & Tags, Shelves, Preferences, Performance.
 The generated interface is split by tag, so the same grouping decides where the handlers and their tests live ([design.md §4.2](../design.md#42-openapi-driven-code-generation)).
 
-## 13. Mapping from the Current Contract
+## 13. Mapping from the Previous Contract
 
 The contract is replaced in place, area by area, and each area moves its daemon handlers, its contract, and the web client together.
 The iOS app follows the contract it is built against, in its own repository.
 
-| Current | Replacement |
+| Previous | Replacement |
 | --- | --- |
 | `GET /auth/me` | `GET /auth/session` |
 | `GET /libraries/{id}/files?path=` | `GET /libraries/{id}/entries/metadata?path=` |
@@ -583,7 +582,7 @@ A read or a command whose body names its Libraries is global.
 This replaced the earlier decision that named a folder of the folder settings in the body of requests under `/settings/folder`.
 
 **Reason**
-The current contract put the same concept in different places: the path of a rating was in the query to read and in the body to write, and the folder settings named a folder in a body while the rating named an Entry in the query.
+The previous contract put the same concept in different places: the path of a rating was in the query to read and in the body to write, and the folder settings named a folder in a body while the rating named an Entry in the query.
 One rule, decided by what an operation targets rather than by whether it changes a Library, lets a client build every single-Entry request the same way.
 The objection that a folder is named in two parts, unlike a start, now applies equally to every single-Entry operation, so it no longer marks an exception.
 
@@ -612,7 +611,7 @@ Exempting the three paths from the `Origin` check was rejected because it adds a
 An `offset` page carries `snapshot` for detecting a change, as now; listings carry no `ETag`.
 
 **Reason**
-The current contract has five listing operations, four page envelopes, and three entry wrappers for the same Entries, so a fix to a page field is repeated per schema and a client keeps one store per listing.
+The previous contract had five listing operations, four page envelopes, and three entry wrappers for the same Entries, so a fix to a page field is repeated per schema and a client keeps one store per listing.
 The Scope and the Filter already express every difference, and the summary of direct children is a projection of the same request.
 A `POST` is not revalidated by HTTP caches, and the web client already compares the `snapshot` of offset pages.
 
@@ -665,7 +664,7 @@ Copy, move, delete, and timeline scans answer `202` with an Operation, even when
 This replaces the decision "Decide Sync and Async by the Shape of the Request" that design.md §11.1 recorded.
 
 **Reason**
-The current contract chooses `200`, `202`, or `204` for the same command by the number of sources and the Libraries, so a client needs a branch per status and has no single place for skipped and failed entries.
+The previous contract chose `200`, `202`, or `204` for the same command by the number of sources and the Libraries, so a client needs a branch per status and has no single place for skipped and failed entries.
 A terminal body keeps the one round trip that the earlier decision protected for a rename within a Library.
 
 **Rejected alternatives**
@@ -689,7 +688,7 @@ Removing the status projection was rejected because a client that shows aggregat
 Every error is `application/problem+json` with `code`, `detail`, and `requestId` (§11.1).
 
 **Reason**
-The current contract documents `ErrorResponse`, but the generated router answers a rejected body in plain text, a missing route and a disallowed method with an empty body, and a 401 only gets a body from an outer middleware, while `requestId` is never set.
+The previous contract documented `ErrorResponse`, but the generated router answers a rejected body in plain text, a missing route and a disallowed method with an empty body, and a 401 only gets a body from an outer middleware, while `requestId` is never set.
 A generated client cannot decode every error with one type.
 
 **Rejected alternatives**
@@ -771,7 +770,7 @@ When Operations are persisted.
 The API reads and revokes only the current session, and has no password change.
 
 **Why not decide now**
-The current contract has neither, and this structure adds no capability of its own (§2).
+The previous contract had neither, and this structure adds no capability of its own (§2).
 
 **Condition for deciding**
 When the owner needs to revoke a session of another device, or to change the password without the daemon's command line.
@@ -802,25 +801,21 @@ When the control of background work ([design.md §11.2](../design.md#controlling
 
 ### 15.1 Current Code
 
-`daemon/openapi.yaml` answers every error with the Problem of §11.1 (A1), serves the single-Entry operations of §4 with `view`, ratings, tags, and folder settings beside them (A2), lists only through `POST /entries` into the Entry page, with its summary and the metadata batch (A3), and runs copy, move, delete, and timeline scans as Operations answered with `202` (A4); the rest of §3 through §13 is not implemented, and the contract it serves is otherwise the one this document replaces.
-Until each area is replaced, the following statements in other documents describe the current contract, and this document the replacement:
-
-- The silent end of a transcode session in [Video Playback Design §5.4](./video.md#54-concurrency), and the error kinds of [design.md §4.4](../design.md#44-error-model-and-http-mapping), which lack `SessionEvicted`
-
-Each area's change rewrites the statements it replaces.
+`daemon/openapi.yaml` serves the contract of §3 through §13: every error as the Problem of §11.1 (A1), the single-Entry operations of §4 with `view`, ratings, tags, and folder settings beside them (A2), every listing through `POST /entries` into the Entry page, with its summary and the metadata batch (A3), copy, move, delete, and timeline scans as Operations answered with `202` (A4), and ended video sessions answered with `410`, `GET /auth/session`, and the twelve tags of §12 (A5).
+No statement in other design documents describes the replaced contract.
 
 ### 15.2 Roadmap
 
 The work is M34 of [design.md §12.2](../design.md#122-roadmap).
 The order is provisional; only the dependencies must hold.
 
-| No. | Content | Dependencies assumed |
-| --- | --- | --- |
-| A1 | Problem Details for every error, including the generated router's rejections | None |
-| A2 | One Entry namespace with `view`, the single-Entry operations, ratings, tags, and folder settings beside them, and `GET /tags/words` | None |
-| A3 | `POST /entries` with the Entry page and `fields=summary`, the months and the metadata batch, and the removal of the folder, summary, search, and timeline listings | A2 |
-| A4 | `POST /entries/copy`, `move`, and `delete`, `202` with an Operation for every batch command, and timeline scans as Operations | A2 |
-| A5 | `410 SessionEvicted`, `GET /auth/session`, and the twelve tags with the tags left empty removed | A2, A3, A4 |
+| No. | Content | Dependencies assumed | State |
+| --- | --- | --- | --- |
+| A1 | Problem Details for every error, including the generated router's rejections | None | Done |
+| A2 | One Entry namespace with `view`, the single-Entry operations, ratings, tags, and folder settings beside them, and `GET /tags/words` | None | Done |
+| A3 | `POST /entries` with the Entry page and `fields=summary`, the months and the metadata batch, and the removal of the folder, summary, search, and timeline listings | A2 | Done |
+| A4 | `POST /entries/copy`, `move`, and `delete`, `202` with an Operation for every batch command, and timeline scans as Operations | A2 | Done |
+| A5 | `410 SessionEvicted`, `GET /auth/session`, and the twelve tags with the tags left empty removed | A2, A3, A4 | Done |
 
 Defects are not recorded here.
 See [issues.md](../issues.md).

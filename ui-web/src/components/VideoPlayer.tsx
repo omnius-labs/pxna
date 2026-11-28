@@ -6,7 +6,7 @@ import { describeError } from "../i18n/errors";
 import { mediaInfoQuery } from "../library/queries";
 import { entryAddress } from "../location";
 import { originalImageUrl } from "../viewer/urls";
-import { acquireVideoSession, playbackMode } from "../viewer/video";
+import { acquireVideoSession, playbackFailure, playbackMode } from "../viewer/video";
 
 interface VideoPlayerProps {
     libraryId: string;
@@ -75,7 +75,7 @@ export function VideoPlayer({ libraryId, path, onDone }: VideoPlayerProps) {
                     if (data.fatal && !closed) {
                         hls.destroy();
                         release?.();
-                        setError(t("video.playFailed"));
+                        setError(t(playbackFailure(data.response?.code)));
                     }
                 });
                 hls.loadSource(session.playlistUrl);

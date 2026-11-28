@@ -1,3 +1,4 @@
+//! The daemon's liveness, the optional features it implements, and whether its owner is registered.
 use async_trait::async_trait;
 use axum_extra::extract::CookieJar;
 use headers::Host;
@@ -6,56 +7,37 @@ use http::Method;
 use omnius_pxna_interface::{apis, models};
 
 use crate::{
-    error::{ApiError, ApiStatus},
-    interface::{ApiServer, features::auth::AuthConverter, session::SessionCookie},
+    error::ApiError,
+    interface::{ApiServer, session::Claims},
     prelude::*,
 };
 
 #[allow(unused_variables)]
 #[async_trait]
-impl apis::setup::Setup for ApiServer {
-    async fn create_initial_setup(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        body: &models::InitialSetupRequest,
-    ) -> std::result::Result<apis::setup::CreateInitialSetupResponse, ()> {
-        let transport = AuthConverter::transport(body.session_transport);
-        Ok(match self.state.auth.create_owner(&body.username, &body.password, transport).await.map_err(Error::from) {
-            Ok(issued) => {
-                let (body, set_cookie) = AuthConverter::issued(&issued, SessionCookie::from_config(&self.state.conf.web));
-                apis::setup::CreateInitialSetupResponse::Status201_OwnerAndAuthenticatedSessionCreated { body, set_cookie }
-            }
-            Err(error) => ApiError::from(error).into(),
-        })
+impl apis::meta::Meta for ApiServer {
+    type Claims = Claims;
+
+    async fn get_capabilities(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> std::result::Result<apis::meta::GetCapabilitiesResponse, ()> {
+        Ok(apis::meta::GetCapabilitiesResponse::Status200_OptionalBrowsingFeaturesImplementedByThisDaemon(
+            models::Capabilities::new(true, true, true, self.state.conf.logging.performance),
+        ))
     }
 
-    async fn get_setup_status(&self, method: &Method, host: &Host, cookies: &CookieJar) -> std::result::Result<apis::setup::GetSetupStatusResponse, ()> {
+    async fn get_health(&self, method: &Method, host: &Host, cookies: &CookieJar) -> std::result::Result<apis::meta::GetHealthResponse, ()> {
+        Ok(apis::meta::GetHealthResponse::Status200_TheDaemonIsRunning(models::HealthResponse::new(true)))
+    }
+
+    async fn get_setup_status(&self, method: &Method, host: &Host, cookies: &CookieJar) -> std::result::Result<apis::meta::GetSetupStatusResponse, ()> {
         Ok(match self.state.auth.is_initialized().await.map_err(Error::from) {
-            Ok(initialized) => apis::setup::GetSetupStatusResponse::Status200_CurrentSetupStatus(models::SetupStatus::new(initialized)),
+            Ok(initialized) => apis::meta::GetSetupStatusResponse::Status200_CurrentSetupStatus(models::SetupStatus::new(initialized)),
             Err(error) => ApiError::from(error).into(),
         })
     }
 }
 
-impl From<ApiError> for apis::setup::GetSetupStatusResponse {
+impl From<ApiError> for apis::meta::GetSetupStatusResponse {
     fn from(error: ApiError) -> Self {
         Self::Status500_InternalServerError(error.body)
-    }
-}
-
-impl From<ApiError> for apis::setup::CreateInitialSetupResponse {
-    fn from(mut error: ApiError) -> Self {
-        match error.status {
-            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
-            // オーナーがすでにいるときの engine の `AlreadyExists` を、契約の `AlreadyInitialized` として返す。
-            ApiStatus::Conflict => {
-                error.body.code = models::ErrorKind::AlreadyInitialized;
-                Self::Status409_TheInitialOwnerHasAlreadyBeenRegistered(error.body)
-            }
-            _ => Self::Status500_InternalServerError(error.body),
-        }
     }
 }
 

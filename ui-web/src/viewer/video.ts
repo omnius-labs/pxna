@@ -15,6 +15,11 @@ export function playbackMode(
     return hlsSupported ? "hls-js" : "unsupported";
 }
 
+/// 再生が止まった理由の文言の鍵。daemon が新しい再生のためにセッションを終えたときは `410` が返る。
+export function playbackFailure(status: number | undefined): "video.sessionEvicted" | "video.playFailed" {
+    return status === 410 ? "video.sessionEvicted" : "video.playFailed";
+}
+
 interface PendingSession {
     references: number;
     promise: Promise<VideoSession>;

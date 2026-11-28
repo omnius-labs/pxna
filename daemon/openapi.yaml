@@ -39,37 +39,33 @@ servers:
       description: Local development daemon
 
 tags:
-    - name: Health
-      description: Daemon liveness checks.
-    - name: Setup
-      description: One-time owner registration.
+    - name: Meta
+      description: The daemon's liveness, the optional features it implements, and whether its owner is registered.
     - name: Auth
-      description: Password login and session management.
-    - name: Preferences
-      description: Display preferences the owner saves on the server.
-    - name: Shelves
-      description: The current user's Shelves and folder settings, which every client reads and edits.
+      description: Registering the owner, password login, and reading and revoking the current session.
     - name: Libraries
       description: Libraries available to the current user.
-    - name: ImageSocket
-      description: The WebSocket through which clients receive thumbnails, sprite sheets, and display images.
-    - name: Uploads
-      description: Resumable chunked upload sessions.
-    - name: Video
-      description: Authenticated HLS playback sessions.
-    - name: Operations
-      description: Progress and results of copies, moves, deletions, and timeline scans.
-    - name: Timeline
-      description: The state of the timeline's aggregation of Libraries, and starting it.
     - name: Entries
       description: |
         The Entries of a Scope of starts in one or more Libraries read through a Filter, the metadata of several Entries, copying,
         moving, and deleting Entries, and one Entry addressed by its Library and path: its metadata, its content, file and folder
         creation, and the probe for its children.
+    - name: Uploads
+      description: Resumable chunked upload sessions.
+    - name: Operations
+      description: Progress and results of copies, moves, deletions, and timeline scans.
+    - name: Timeline
+      description: The state of the timeline's aggregation of Libraries, and starting it.
     - name: Media
-      description: Media information of images and videos.
+      description: |
+        Media information of an image or video, the WebSocket through which clients receive thumbnails, sprite sheets, and display
+        images, and authenticated HLS playback sessions.
     - name: Ratings & Tags
       description: The current user's rating and tags of an image or video, and the words the user has created.
+    - name: Shelves
+      description: The current user's Shelves and folder settings, which every client reads and edits.
+    - name: Preferences
+      description: Display preferences the owner saves on the server.
     - name: Performance
       description: Client-side timings written to the daemon's performance log.
 
@@ -81,7 +77,7 @@ paths:
     /health:
         get:
             tags:
-                - Health
+                - Meta
             summary: Check daemon health
             operationId: getHealth
             security: []
@@ -100,7 +96,7 @@ paths:
     /setup/status:
         get:
             tags:
-                - Setup
+                - Meta
             summary: Get initial setup status
             description: Checks whether the owner has already been registered.
             operationId: getSetupStatus
@@ -125,7 +121,7 @@ paths:
     /setup:
         post:
             tags:
-                - Setup
+                - Auth
             summary: Register the initial owner
             description: |
                 Creates the only owner and an authenticated session. This operation
@@ -197,12 +193,12 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
-    /auth/me:
+    /auth/session:
         get:
             tags:
                 - Auth
             summary: Get the current user and session
-            operationId: getCurrentUser
+            operationId: getCurrentSession
             responses:
                 "200":
                     description: Current authenticated user and session.
@@ -214,8 +210,6 @@ paths:
                     $ref: "#/components/responses/Unauthorized"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
-
-    /auth/session:
         delete:
             tags:
                 - Auth
@@ -886,7 +880,8 @@ paths:
 
     /capabilities:
         get:
-            tags: [Libraries]
+            tags:
+                - Meta
             summary: Get optional browsing capabilities
             operationId: getCapabilities
             description: |
@@ -937,7 +932,7 @@ paths:
     /sockets/image:
         get:
             tags:
-                - ImageSocket
+                - Media
             summary: Open the image socket
             description: |
                 Upgrades the connection to a WebSocket, through which the
@@ -1738,8 +1733,14 @@ paths:
 
     /libraries/{libraryId}/video/sessions:
         post:
-            tags: [Video]
+            tags: [Media]
             summary: Start an HLS conversion session
+            description: |
+                Starts converting a video for playback. When the new session
+                would exceed the daemon's limit on concurrent conversions, the
+                oldest session is ended to make way; its requests then answer
+                `410` with `SessionEvicted` until the session would have
+                expired by idleness anyway, after which they answer `404`.
             operationId: createVideoSession
             parameters:
                 - $ref: "#/components/parameters/LibraryIdPath"
@@ -1773,8 +1774,12 @@ paths:
 
     /libraries/{libraryId}/video/sessions/{sessionId}:
         delete:
-            tags: [Video]
+            tags: [Media]
             summary: End an HLS conversion session
+            description: |
+                Ends the session and its conversion. A session the daemon ended
+                to make way for a newer one answers `410` with
+                `SessionEvicted`, like its playlist and segments.
             operationId: deleteVideoSession
             parameters:
                 - $ref: "#/components/parameters/LibraryIdPath"
@@ -1792,6 +1797,8 @@ paths:
                     $ref: "#/components/responses/NotFound"
                 "409":
                     $ref: "#/components/responses/Conflict"
+                "410":
+                    $ref: "#/components/responses/SessionEvicted"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
                 "504":
@@ -1799,7 +1806,7 @@ paths:
 
     /libraries/{libraryId}/video/sessions/{sessionId}/playlist.m3u8:
         get:
-            tags: [Video]
+            tags: [Media]
             summary: Read the full VOD playlist
             operationId: getVideoPlaylist
             parameters:
@@ -1822,6 +1829,8 @@ paths:
                     $ref: "#/components/responses/NotFound"
                 "409":
                     $ref: "#/components/responses/Conflict"
+                "410":
+                    $ref: "#/components/responses/SessionEvicted"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
                 "504":
@@ -1829,7 +1838,7 @@ paths:
 
     /libraries/{libraryId}/video/sessions/{sessionId}/segments/{segmentName}:
         get:
-            tags: [Video]
+            tags: [Media]
             summary: Read a completed transport stream segment
             operationId: getVideoSegment
             parameters:
@@ -1854,6 +1863,8 @@ paths:
                     $ref: "#/components/responses/NotFound"
                 "409":
                     $ref: "#/components/responses/Conflict"
+                "410":
+                    $ref: "#/components/responses/SessionEvicted"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
                 "504":
@@ -2135,6 +2146,23 @@ components:
                         status: 404
                         code: NotFound
                         detail: Entry not found.
+                        requestId: 0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c
+
+        SessionEvicted:
+            description: |
+                The video session was ended to make way for a newer one.
+                `code` is `SessionEvicted`; an unknown or expired session is
+                `404`.
+            content:
+                application/problem+json:
+                    schema:
+                        $ref: "#/components/schemas/Problem"
+                    example:
+                        type: about:blank
+                        title: Gone
+                        status: 410
+                        code: SessionEvicted
+                        detail: The video session was ended to make way for a newer one.
                         requestId: 0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c
 
         AlreadyInitialized:
@@ -3952,6 +3980,8 @@ components:
                 thumbnail did not finish within the daemon's time limit. The
                 result is not cached, so repeating the same request can hit the
                 same limit again; no `Retry-After` is returned.
+                `SessionEvicted` means that the daemon ended a video session to
+                make way for a newer one.
             enum:
                 - InternalServerError
                 - InvalidRequest
@@ -3968,3 +3998,4 @@ components:
                 - InsufficientStorage
                 - Timeout
                 - MethodNotAllowed
+                - SessionEvicted

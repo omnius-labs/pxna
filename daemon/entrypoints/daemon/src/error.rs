@@ -101,6 +101,8 @@ pub enum ErrorKind {
     RangeNotSatisfiable,
     PayloadTooLarge,
     Unauthenticated,
+    /// The target existed and was ended by the daemon, such as a video session ended to make way for a newer one.
+    Gone,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -138,6 +140,7 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::RangeNotSatisfiable => write!(fmt, "range not satisfiable"),
             ErrorKind::PayloadTooLarge => write!(fmt, "payload too large"),
             ErrorKind::Unauthenticated => write!(fmt, "unauthenticated"),
+            ErrorKind::Gone => write!(fmt, "gone"),
         }
     }
 }
@@ -280,6 +283,7 @@ pub enum ApiStatus {
     InternalServerError,
     PayloadTooLarge,
     InsufficientStorage,
+    Gone,
 }
 
 impl ApiStatus {
@@ -295,6 +299,7 @@ impl ApiStatus {
             ApiStatus::InternalServerError => http::StatusCode::INTERNAL_SERVER_ERROR,
             ApiStatus::PayloadTooLarge => http::StatusCode::PAYLOAD_TOO_LARGE,
             ApiStatus::InsufficientStorage => http::StatusCode::INSUFFICIENT_STORAGE,
+            ApiStatus::Gone => http::StatusCode::GONE,
         }
     }
 }
@@ -326,6 +331,8 @@ impl ApiError {
             ErrorKind::ReadOnly => (ApiStatus::Forbidden, ApiErrorKind::Forbidden),
             ErrorKind::Unauthenticated => (ApiStatus::Unauthorized, ApiErrorKind::Unauthorized),
             ErrorKind::NotFound => (ApiStatus::NotFound, ApiErrorKind::NotFound),
+            // daemon が終わらせたものは Video セッションだけで、契約の種別も `SessionEvicted` だけである。
+            ErrorKind::Gone => (ApiStatus::Gone, ApiErrorKind::SessionEvicted),
             ErrorKind::SourceChanged | ErrorKind::AlreadyExists => (ApiStatus::Conflict, ApiErrorKind::Conflict),
             ErrorKind::RangeNotSatisfiable => (ApiStatus::RangeNotSatisfiable, ApiErrorKind::RangeNotSatisfiable),
             // archive の展開か ffmpeg による生成が期限を過ぎた。Cancelled は応答を受け取る相手がいないので 500 のままにする。

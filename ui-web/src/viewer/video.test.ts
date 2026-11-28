@@ -6,7 +6,7 @@ vi.mock("../api/client", () => ({
     unwrap: (result: { data: unknown }) => result.data,
 }));
 
-import { acquireVideoSession, playbackMode, type VideoSession } from "./video";
+import { acquireVideoSession, playbackFailure, playbackMode, type VideoSession } from "./video";
 
 const session = (id: string): VideoSession => ({
     id,
@@ -26,6 +26,14 @@ describe("playback selection", () => {
         expect(playbackMode(mime, (type) => (type.includes("mpegurl") ? "maybe" : ""), true)).toBe("native-hls");
         expect(playbackMode(mime, () => "", true)).toBe("hls-js");
         expect(playbackMode(mime, () => "", false)).toBe("unsupported");
+    });
+});
+
+describe("playback failure", () => {
+    it("reports a session the daemon ended for a newer one apart from other failures", () => {
+        expect(playbackFailure(410)).toBe("video.sessionEvicted");
+        expect(playbackFailure(404)).toBe("video.playFailed");
+        expect(playbackFailure(undefined)).toBe("video.playFailed");
     });
 });
 

@@ -5,7 +5,7 @@ import { imageSource } from "../images/source";
 
 export const currentUserQuery = queryOptions({
     queryKey: ["auth", "me"],
-    queryFn: async () => unwrap(await api.GET("/auth/me")),
+    queryFn: async () => unwrap(await api.GET("/auth/session")),
     retry: false,
     staleTime: Infinity,
 });

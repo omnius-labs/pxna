@@ -486,9 +486,12 @@ impl From<ApiError> for apis::entries::ListEntryMonthsResponse {
             ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
             ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
             ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
-            ApiStatus::Conflict | ApiStatus::RangeNotSatisfiable | ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => {
-                Self::Status500_InternalServerError(error.body)
-            }
+            ApiStatus::Conflict
+            | ApiStatus::RangeNotSatisfiable
+            | ApiStatus::PayloadTooLarge
+            | ApiStatus::InsufficientStorage
+            | ApiStatus::Gone
+            | ApiStatus::InternalServerError => Self::Status500_InternalServerError(error.body),
         }
     }
 }
@@ -512,9 +515,12 @@ impl From<ApiError> for apis::entries::ListEntriesResponse {
             ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
             ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
             ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
-            ApiStatus::Conflict | ApiStatus::RangeNotSatisfiable | ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => {
-                Self::Status500_InternalServerError(error.body)
-            }
+            ApiStatus::Conflict
+            | ApiStatus::RangeNotSatisfiable
+            | ApiStatus::PayloadTooLarge
+            | ApiStatus::InsufficientStorage
+            | ApiStatus::Gone
+            | ApiStatus::InternalServerError => Self::Status500_InternalServerError(error.body),
         }
     }
 }
@@ -528,7 +534,7 @@ impl From<ApiError> for apis::entries::GetEntryMetadataResponse {
             ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
             ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
             ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
-            ApiStatus::RangeNotSatisfiable | ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => {
+            ApiStatus::RangeNotSatisfiable | ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::Gone | ApiStatus::InternalServerError => {
                 Self::Status500_InternalServerError(error.body)
             }
         }
@@ -545,7 +551,7 @@ impl From<ApiError> for apis::entries::ReadFileContentResponse {
             ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
             ApiStatus::RangeNotSatisfiable => Self::Status416_RequestedByteRangeCannotBeSatisfied(error.body),
             ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
-            ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => Self::Status500_InternalServerError(error.body),
+            ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::Gone | ApiStatus::InternalServerError => Self::Status500_InternalServerError(error.body),
         }
     }
 }
