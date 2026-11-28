@@ -20,34 +20,32 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     error::ApiError,
     prelude::*,
-    service::{library::LibraryRelativePath, listing::ListingInvalidation, mutation::LibraryMutation},
+    service::{library::LibraryRelativePath, listing::ListingInvalidation, mutation::LibraryMutation, timeline::ScanHandle},
 };
 
 struct OperationRecord {
     model: models::Operation,
     cancel: CancellationToken,
     changes: Arc<Mutex<ListingInvalidation>>,
+    /// The progress of the timeline scan that a `timelineScan` follows, which identifies the scan.
+    scan: Option<Arc<std::sync::atomic::AtomicU64>>,
 }
 
 struct Transfer {
     src_library: String,
     dst_library: String,
-    pairs: Vec<(String, String)>,
-    folder: bool,
+    pairs: Vec<TransferPair>,
     moving: bool,
     conflict: ConflictPolicy,
     swept: Mutex<HashSet<PathBuf>>,
     changes: Arc<Mutex<ListingInvalidation>>,
 }
 
-pub enum MoveResult {
-    Completed(Vec<models::FileSystemEntry>),
-    Started(models::Operation),
-}
-
-pub enum DeleteResult {
-    Completed,
-    Started(models::Operation),
+/// One source and where it goes. `folder` is the face the source was named with.
+struct TransferPair {
+    src: String,
+    dst: String,
+    folder: bool,
 }
 
 /// ツリーを単件操作へ分解し、部分結果と協調キャンセルを所有する。
@@ -80,6 +78,20 @@ impl OperationService {
         service
     }
 
+    /// Whether an Entry named with `view` is a folder: a folder or an archive's root. Any other view is the file.
+    fn is_folder(view: Option<models::EntryView>) -> bool {
+        view == Some(models::EntryView::Folder)
+    }
+
+    /// The one Library of the given Entries. Sources in several Libraries are not accepted.
+    fn one_library(refs: &[models::EntryRef]) -> Result<&str> {
+        let first = refs.first().ok_or_else(|| Error::new(ErrorKind::InvalidInput).with_message("name at least one Entry"))?;
+        if refs.iter().any(|entry| entry.library_id != first.library_id) {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message("the Entries must be in one Library"));
+        }
+        Ok(&first.library_id)
+    }
+
     pub fn get(&self, id: &str) -> Result<models::Operation> {
         self.reap();
         Ok(self.record(id)?.lock().model.clone())
@@ -95,6 +107,10 @@ impl OperationService {
     pub fn cancel(&self, id: &str) -> Result<models::Operation> {
         let record = self.record(id)?;
         let mut record = record.lock();
+        // A timeline scan runs to its end, so cancelling it answers its state.
+        if record.model.kind == models::OperationKind::TimelineScan {
+            return Ok(record.model.clone());
+        }
         if matches!(record.model.status, models::OperationStatus::Pending | models::OperationStatus::Running) {
             record.cancel.cancel();
             if record.model.status == models::OperationStatus::Pending {
@@ -105,74 +121,100 @@ impl OperationService {
         Ok(record.model.clone())
     }
 
-    pub async fn copy(self: &Arc<Self>, library: &str, request: &models::EntryTransferRequest, folder: bool) -> Result<models::Operation> {
-        let transfer = self.prepare(library, request, folder, false).await?;
+    pub async fn copy(self: &Arc<Self>, request: &models::EntryTransferRequest) -> Result<models::Operation> {
+        let transfer = self.prepare(request, false).await?;
         Ok(self.start_transfer(transfer))
     }
 
-    pub async fn move_entries(self: &Arc<Self>, library: &str, request: &models::EntryTransferRequest, folder: bool) -> Result<MoveResult> {
-        let transfer = self.prepare(library, request, folder, true).await?;
+    /// One source moving within its Library is renamed before the response, so its Operation is already terminal.
+    pub async fn move_entries(self: &Arc<Self>, request: &models::EntryTransferRequest) -> Result<models::Operation> {
+        let transfer = self.prepare(request, true).await?;
         if transfer.pairs.len() != 1 || transfer.src_library != transfer.dst_library {
-            return Ok(MoveResult::Started(self.start_transfer(transfer)));
+            return Ok(self.start_transfer(transfer));
         }
-        let (src, dst) = &transfer.pairs[0];
-        let source = self.mutation.source(library, src, folder, true).await?;
-        let destination = self.mutation.destination(library, dst, false).await?;
-        let merge =
-            folder && transfer.conflict == ConflictPolicy::Overwrite && tokio::fs::symlink_metadata(LibraryMutation::local(&destination)?).await.is_ok_and(|meta| meta.is_dir());
-        if !merge {
-            let published = self.mutation.storage.rename(source.path(), &destination, transfer.conflict).await?;
-            if let Publish::Published { dst: published_dst } = &published {
-                let published_dst = self.mutation.relative(library, &LibraryMutation::nested(Path::new(published_dst))?)?;
-                self.mutation.renamed(library, src, &published_dst).await;
-                // 衝突で別名になったときは、実際の宛先も変更として知らせ、判定し直させる。
-                transfer.changes.lock().include_entry(library, &published_dst)?;
-                let changes = transfer.changes.lock().clone();
-                self.mutation.apply_changes(&changes).await;
-            }
-            return Ok(MoveResult::Completed(match published {
-                Publish::Published { dst } => vec![self.mutation.entry(library, &LibraryMutation::nested(Path::new(&dst))?).await?],
-                Publish::Skipped => Vec::new(),
-            }));
+        let record = self.transfer_record(&transfer);
+        record.lock().model.status = models::OperationStatus::Running;
+        let pair = &transfer.pairs[0];
+        match self.rename(&transfer, pair, &record).await {
+            Ok(entries) => record.lock().model.result_entries.get_or_insert_with(Vec::new).extend(entries),
+            Err(error) => Self::failure(&record, &pair.src, error),
         }
-        // 同名フォルダへの overwrite は各子を rename してマージする。バイト列のコピーは伴わない。
-        let result = self
-            .transfer_entry(&transfer, source, src.clone(), LibraryMutation::local(&destination)?.to_path_buf(), None)
-            .await;
-        let changes = transfer.changes.lock().clone();
-        self.mutation.apply_changes(&changes).await;
-        let mut result = result?;
-        result.truncate(1);
-        Ok(MoveResult::Completed(result))
+        self.finish(&record).await;
+        Ok(record.lock().model.clone())
     }
 
-    pub async fn delete_entries(self: &Arc<Self>, library: &str, paths: &[models::RelativePath], folder: bool, recursive: bool) -> Result<DeleteResult> {
-        if paths.is_empty() {
-            return Err(Error::new(ErrorKind::InvalidInput).with_message("srcPaths must not be empty"));
+    /// A metadata-only rename of one source within its Library. An `overwrite` onto a folder of the same name merges into it by renaming each child.
+    async fn rename(&self, transfer: &Transfer, pair: &TransferPair, record: &Arc<Mutex<OperationRecord>>) -> Result<Vec<models::FileSystemEntry>> {
+        let library = &transfer.src_library;
+        let source = self.mutation.source(library, &pair.src, pair.folder, true).await?;
+        let destination = self.mutation.destination(library, &pair.dst, false).await?;
+        let merge = pair.folder
+            && transfer.conflict == ConflictPolicy::Overwrite
+            && tokio::fs::symlink_metadata(LibraryMutation::local(&destination)?).await.is_ok_and(|meta| meta.is_dir());
+        if merge {
+            let mut result = self
+                .transfer_entry(
+                    transfer,
+                    source,
+                    pair.src.clone(),
+                    LibraryMutation::local(&destination)?.to_path_buf(),
+                    Some(record.clone()),
+                )
+                .await?;
+            result.truncate(1);
+            return Ok(result);
         }
-        self.mutation.library(library, true)?;
-        for path in paths {
-            self.mutation.source(library, &path.0, folder, true).await?;
-        }
-        if (folder && !recursive) || (!folder && paths.len() == 1) {
-            for path in paths {
-                self.mutation.delete(library, &path.0, folder).await?;
+        match self.mutation.storage.rename(source.path(), &destination, transfer.conflict).await? {
+            Publish::Published { dst } => {
+                let dst = LibraryMutation::nested(Path::new(&dst))?;
+                let published = self.mutation.relative(library, &dst)?;
+                self.mutation.renamed(library, &pair.src, &published).await;
+                // 衝突で別名になったときは、実際の宛先も変更として知らせ、判定し直させる。
+                transfer.changes.lock().include_entry(library, &published)?;
+                Self::processed(Some(record));
+                Ok(vec![self.mutation.entry(library, &dst).await?])
             }
-            return Ok(DeleteResult::Completed);
+            Publish::Skipped => {
+                Self::skipped(Some(record));
+                Ok(Vec::new())
+            }
         }
-        let kind = if folder {
-            models::OperationKind::DeleteFolders
-        } else {
-            models::OperationKind::DeleteFiles
-        };
-        let record = self.create(library, kind);
-        for path in paths {
-            record.lock().changes.lock().include_entry(library, &path.0)?;
+    }
+
+    /// One file, or folders without `recursive`, are deleted before the response; anything else runs in the background.
+    pub async fn delete_entries(self: &Arc<Self>, request: &models::EntryDeleteRequest) -> Result<models::Operation> {
+        let library = Self::one_library(&request.targets)?.to_string();
+        let recursive = request.recursive.unwrap_or(false);
+        self.mutation.library(&library, true)?;
+        let mut targets = Vec::new();
+        for target in &request.targets {
+            let folder = Self::is_folder(target.view);
+            let source = self.mutation.source(&library, &target.path, folder, true).await?;
+            // A folder that is not empty needs `recursive`, which is checked before anything is deleted.
+            if folder && !recursive && source.find_entries(false, WorkClass::Foreground).await?.next().await.is_some() {
+                return Err(Error::new(ErrorKind::InvalidInput).with_message("folder is not empty; recursive=true is required"));
+            }
+            targets.push((target.path.clone(), folder));
+        }
+        let record = self.create(&library, models::OperationKind::Delete);
+        for (path, _) in &targets {
+            record.lock().changes.lock().include_entry(&library, path)?;
+        }
+        let files = targets.iter().filter(|(_, folder)| !folder).count();
+        let trees = recursive && targets.iter().any(|(_, folder)| *folder);
+        if files <= 1 && !trees {
+            record.lock().model.status = models::OperationStatus::Running;
+            for (path, folder) in &targets {
+                match self.mutation.delete(&library, path, *folder).await {
+                    Ok(()) => Self::processed(Some(&record)),
+                    Err(error) => Self::failure(&record, path, error),
+                }
+            }
+            self.finish(&record).await;
+            return Ok(record.lock().model.clone());
         }
         let model = record.lock().model.clone();
         let service = self.clone();
-        let library = library.to_string();
-        let paths = paths.iter().map(|path| path.0.clone()).collect::<Vec<_>>();
         tokio::spawn(async move {
             let cancel = record.lock().cancel.clone();
             let permit = tokio::select! { permit = service.permits.clone().acquire_owned() => permit.ok(), _ = cancel.cancelled() => None };
@@ -181,11 +223,16 @@ impl OperationService {
                 return;
             }
             record.lock().model.status = models::OperationStatus::Running;
-            for path in paths {
+            for (path, folder) in targets {
                 if cancel.is_cancelled() {
                     break;
                 }
                 let result = async {
+                    if folder && !recursive {
+                        service.mutation.delete(&library, &path, true).await?;
+                        Self::processed(Some(&record));
+                        return Ok(());
+                    }
                     let source = service.mutation.source(&library, &path, folder, true).await?;
                     service.delete_tree(&library, source, &path, &record).await
                 }
@@ -196,29 +243,81 @@ impl OperationService {
             }
             service.finish(&record).await;
         });
-        Ok(DeleteResult::Started(model))
+        Ok(model)
     }
 
-    async fn prepare(&self, library: &str, request: &models::EntryTransferRequest, folder: bool, moving: bool) -> Result<Transfer> {
+    /// An Operation that follows a timeline scan of `library`. A scan that an Operation already follows answers that Operation.
+    pub fn follow_scan(self: &Arc<Self>, library: &str, scan: ScanHandle) -> models::Operation {
+        self.reap();
+        let followed = self.operations.lock().values().find_map(|record| {
+            let record = record.lock();
+            record
+                .scan
+                .as_ref()
+                .is_some_and(|progress| Arc::ptr_eq(progress, &scan.progress))
+                .then(|| record.model.clone())
+        });
+        if let Some(model) = followed {
+            return model;
+        }
+        let record = self.create(library, models::OperationKind::TimelineScan);
+        let model = {
+            let mut record = record.lock();
+            record.scan = Some(scan.progress.clone());
+            record.model.status = models::OperationStatus::Running;
+            record.model.clone()
+        };
+        tokio::spawn(async move {
+            let ScanHandle { progress, mut finished } = scan;
+            let outcome = loop {
+                record.lock().model.processed_count = progress.load(std::sync::atomic::Ordering::Relaxed);
+                if let Some(outcome) = finished.borrow_and_update().clone() {
+                    break outcome;
+                }
+                tokio::select! {
+                    changed = finished.changed() => if changed.is_err() { break Err("the scan ended without a result".to_string()) },
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+                }
+            };
+            let mut record = record.lock();
+            record.model.processed_count = progress.load(std::sync::atomic::Ordering::Relaxed);
+            record.model.status = match outcome {
+                Ok(()) => models::OperationStatus::Succeeded,
+                Err(message) => {
+                    let mut failure = models::OperationFailure::new("/".to_string(), models::ErrorKind::InternalServerError);
+                    failure.message = Some(message);
+                    record.model.failed_entries.push(failure);
+                    models::OperationStatus::Failed
+                }
+            };
+            record.model.finished_at = Some(Nullable::Present(Utc::now()));
+        });
+        model
+    }
+
+    async fn prepare(&self, request: &models::EntryTransferRequest, moving: bool) -> Result<Transfer> {
+        let library = Self::one_library(&request.sources)?;
         self.mutation.library(library, moving)?;
-        let dst_library = request.dst_library_id.as_deref().unwrap_or(library);
+        let destination = &request.destination;
+        let dst_library = destination.library_id.as_str();
         self.mutation.library(dst_library, true)?;
         let conflict = LibraryMutation::conflict(request.conflict);
-        if request.src_paths.is_empty() || request.dst_path.is_some() == request.dst_folder_path.is_some() || (request.dst_path.is_some() && request.src_paths.len() != 1) {
-            return Err(Error::new(ErrorKind::InvalidInput).with_message("choose dstPath for one source or dstFolderPath"));
+        if destination.path.is_some() == destination.folder_path.is_some() || (destination.path.is_some() && request.sources.len() != 1) {
+            return Err(Error::new(ErrorKind::InvalidInput).with_message("choose path for one source or folderPath"));
         }
         let mut pairs = Vec::new();
-        for src in &request.src_paths {
-            let relative = LibraryRelativePath::parse(&src.0)?;
+        for src in &request.sources {
+            let folder = Self::is_folder(src.view);
+            let relative = LibraryRelativePath::parse(&src.path)?;
             if relative.segments().is_empty() {
                 return Err(Error::new(ErrorKind::InvalidInput).with_message("cannot transfer the library root"));
             }
             let src_path = format!("/{}", relative.segments().join("/"));
-            let dst = match &request.dst_path {
+            let dst = match &destination.path {
                 Some(path) => path.clone(),
                 None => format!(
                     "{}/{}",
-                    request.dst_folder_path.as_deref().unwrap_or_default().trim_end_matches('/'),
+                    destination.folder_path.as_deref().unwrap_or_default().trim_end_matches('/'),
                     relative.segments().last().unwrap()
                 ),
             };
@@ -248,18 +347,21 @@ impl OperationService {
                     return Err(Error::new(ErrorKind::InvalidInput).with_message("destination cannot be the source or a descendant"));
                 }
             }
-            pairs.push((src_path, dst_path));
+            pairs.push(TransferPair {
+                src: src_path,
+                dst: dst_path,
+                folder,
+            });
         }
         let mut changes = ListingInvalidation::default();
-        for (src, dst) in &pairs {
-            changes.include_entry(library, src)?;
-            changes.include_entry(dst_library, dst)?;
+        for pair in &pairs {
+            changes.include_entry(library, &pair.src)?;
+            changes.include_entry(dst_library, &pair.dst)?;
         }
         Ok(Transfer {
             src_library: library.to_string(),
             dst_library: dst_library.to_string(),
             pairs,
-            folder,
             moving,
             conflict,
             swept: Mutex::new(HashSet::new()),
@@ -267,13 +369,8 @@ impl OperationService {
         })
     }
 
-    fn start_transfer(self: &Arc<Self>, transfer: Transfer) -> models::Operation {
-        let kind = match (transfer.folder, transfer.moving) {
-            (false, false) => models::OperationKind::CopyFiles,
-            (false, true) => models::OperationKind::MoveFiles,
-            (true, false) => models::OperationKind::CopyFolders,
-            (true, true) => models::OperationKind::MoveFolders,
-        };
+    fn transfer_record(&self, transfer: &Transfer) -> Arc<Mutex<OperationRecord>> {
+        let kind = if transfer.moving { models::OperationKind::Move } else { models::OperationKind::Copy };
         let record = self.create(&transfer.src_library, kind);
         {
             let mut record = record.lock();
@@ -281,6 +378,11 @@ impl OperationService {
             record.model.destination_library_id = Some(transfer.dst_library.clone());
             record.model.result_entries = Some(Vec::new());
         }
+        record
+    }
+
+    fn start_transfer(self: &Arc<Self>, transfer: Transfer) -> models::Operation {
+        let record = self.transfer_record(&transfer);
         let model = record.lock().model.clone();
         let service = self.clone();
         tokio::spawn(async move {
@@ -291,21 +393,21 @@ impl OperationService {
                 return;
             }
             record.lock().model.status = models::OperationStatus::Running;
-            for (src, dst) in &transfer.pairs {
+            for pair in &transfer.pairs {
                 if cancel.is_cancelled() {
                     break;
                 }
                 let result = async {
-                    let source = service.mutation.source(&transfer.src_library, src, transfer.folder, transfer.moving).await?;
-                    let dst = service.mutation.destination(&transfer.dst_library, dst, false).await?;
+                    let source = service.mutation.source(&transfer.src_library, &pair.src, pair.folder, transfer.moving).await?;
+                    let dst = service.mutation.destination(&transfer.dst_library, &pair.dst, false).await?;
                     service
-                        .transfer_entry(&transfer, source, src.clone(), LibraryMutation::local(&dst)?.to_path_buf(), Some(record.clone()))
+                        .transfer_entry(&transfer, source, pair.src.clone(), LibraryMutation::local(&dst)?.to_path_buf(), Some(record.clone()))
                         .await
                 }
                 .await;
                 match result {
                     Ok(entries) => record.lock().model.result_entries.get_or_insert_with(Vec::new).extend(entries),
-                    Err(error) => Self::failure(&record, src, error),
+                    Err(error) => Self::failure(&record, &pair.src, error),
                 }
             }
             service.finish(&record).await;
@@ -573,6 +675,7 @@ impl OperationService {
             model: models::Operation::new(id.clone(), kind, models::OperationStatus::Pending, library.to_string(), 0, 0, Vec::new(), Utc::now()),
             cancel: CancellationToken::new(),
             changes: Arc::new(Mutex::new(ListingInvalidation::default())),
+            scan: None,
         }));
         self.operations.lock().insert(id, record.clone());
         record
@@ -643,6 +746,18 @@ mod tests {
     use super::*;
     use testresult::TestResult;
 
+    /// A copy or move of one source of the Library `test` to `destination`, which names `folderPath` or `path`.
+    fn request(source: &str, folder: bool, mut destination: serde_json::Value, conflict: &str) -> Result<models::EntryTransferRequest> {
+        destination["libraryId"] = "test".into();
+        let view = if folder { "folder" } else { "file" };
+        serde_json::from_value(serde_json::json!({
+            "sources": [{"libraryId": "test", "path": source, "view": view}],
+            "destination": destination,
+            "conflict": conflict,
+        }))
+        .map_err(|error| Error::from_error(error, ErrorKind::InvalidInput))
+    }
+
     async fn completed(state: &crate::state::DaemonState, id: &str) -> Result<models::Operation> {
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             loop {
@@ -668,8 +783,8 @@ mod tests {
         std::fs::write(root.join("folder/nested.txt"), b"nested")?;
         std::fs::write(root.join("folder (1)/keep.txt"), b"keep")?;
         for (path, folder) in [("/source.txt", false), ("/folder", true)] {
-            let request = serde_json::from_value(serde_json::json!({"srcPaths":[path],"dstFolderPath":"/","conflict":"rename"}))?;
-            let started = state.operations.copy("test", &request, folder).await?;
+            let request = request(path, folder, serde_json::json!({"folderPath":"/"}), "rename")?;
+            let started = state.operations.copy(&request).await?;
             let operation = completed(&state, &started.id).await?;
             assert_eq!(operation.status, models::OperationStatus::Succeeded);
             assert!(operation.failed_entries.is_empty());
@@ -699,15 +814,15 @@ mod tests {
         for folder in [false, true] {
             let source = if folder { "/folder" } else { "/source.txt" };
             for conflict in ["fail", "skip", "overwrite"] {
-                let request = serde_json::from_value(serde_json::json!({"srcPaths":[source],"dstFolderPath":"/","conflict":conflict}))?;
-                assert_eq!(state.operations.copy("test", &request, folder).await.unwrap_err().kind(), &ErrorKind::InvalidInput);
+                let request = request(source, folder, serde_json::json!({"folderPath":"/"}), conflict)?;
+                assert_eq!(state.operations.copy(&request).await.unwrap_err().kind(), &ErrorKind::InvalidInput);
             }
-            let request = serde_json::from_value(serde_json::json!({"srcPaths":[source],"dstFolderPath":"/","conflict":"rename"}))?;
-            assert!(state.operations.move_entries("test", &request, folder).await.is_err());
+            let request = request(source, folder, serde_json::json!({"folderPath":"/"}), "rename")?;
+            assert!(state.operations.move_entries(&request).await.is_err());
         }
         for destination in ["/folder", "/folder/child"] {
-            let request = serde_json::from_value(serde_json::json!({"srcPaths":["/folder"],"dstFolderPath":destination,"conflict":"rename"}))?;
-            assert_eq!(state.operations.copy("test", &request, true).await.unwrap_err().kind(), &ErrorKind::InvalidInput);
+            let request = request("/folder", true, serde_json::json!({"folderPath":destination}), "rename")?;
+            assert_eq!(state.operations.copy(&request).await.unwrap_err().kind(), &ErrorKind::InvalidInput);
         }
         assert_eq!(std::fs::read(root.join("source.txt"))?, b"source");
         Ok(())
@@ -720,8 +835,8 @@ mod tests {
         let root = &state.conf.libraries[0].path;
         std::fs::create_dir(root.join("folder"))?;
         std::os::unix::fs::symlink(root.join("folder"), root.join("folder/alias"))?;
-        let request = serde_json::from_value(serde_json::json!({"srcPaths":["/folder"],"dstPath":"/folder/alias","conflict":"rename"}))?;
-        assert_eq!(state.operations.copy("test", &request, true).await.unwrap_err().kind(), &ErrorKind::InvalidInput);
+        let request = request("/folder", true, serde_json::json!({"path":"/folder/alias"}), "rename")?;
+        assert_eq!(state.operations.copy(&request).await.unwrap_err().kind(), &ErrorKind::InvalidInput);
         assert!(!root.join("folder/alias (1)").exists());
         Ok(())
     }
@@ -733,8 +848,8 @@ mod tests {
         std::fs::create_dir(root.join("source"))?;
         std::fs::write(root.join("source/000-done.txt"), b"done")?;
         std::fs::File::create(root.join("source/999-large.bin"))?.set_len(128 * 1024 * 1024)?;
-        let request: models::EntryTransferRequest = serde_json::from_value(serde_json::json!({"srcPaths":["/source"],"dstPath":"/destination"}))?;
-        let operation = state.operations.copy("test", &request, true).await?;
+        let request = request("/source", true, serde_json::json!({"path":"/destination"}), "fail")?;
+        let operation = state.operations.copy(&request).await?;
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             while state.operations.get(&operation.id)?.processed_count < 2 {
                 tokio::task::yield_now().await;
@@ -786,8 +901,8 @@ mod tests {
         let source = state.conf.libraries[0].path.join("source.txt");
         std::fs::write(&source, b"source")?;
         let permits = state.operations.permits.clone().acquire_many_owned(4).await?;
-        let request: models::EntryTransferRequest = serde_json::from_value(serde_json::json!({"srcPaths":["/source.txt"],"dstPath":"/destination.txt"}))?;
-        let operation = state.operations.copy("test", &request, false).await?;
+        let request = request("/source.txt", false, serde_json::json!({"path":"/destination.txt"}), "fail")?;
+        let operation = state.operations.copy(&request).await?;
         assert_eq!(operation.status, models::OperationStatus::Pending);
         let cancelled = state.operations.cancel(&operation.id)?;
         assert_eq!(cancelled.status, models::OperationStatus::Cancelled);

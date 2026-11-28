@@ -317,7 +317,7 @@ it("shows that a scan is running and starts one on request", async () => {
         await vi.waitFor(() => expect(h.host.textContent).toContain("Aggregating… 42 files processed."));
         expect(h.host.querySelector("[data-grid]")?.getAttribute("data-empty")).toContain("Aggregating");
         await act(async () => h.host.querySelector<HTMLElement>("button[aria-label='Refresh now']")?.click());
-        expect(mock.post).toHaveBeenCalledWith("/timeline/refresh", { body: { libraryIds: ["photos"] } });
+        expect(mock.post).toHaveBeenCalledWith("/timeline/scans", { body: { libraryIds: ["photos"] } });
     } finally {
         await h.dispose();
     }

@@ -208,12 +208,10 @@ export const ja = {
         dismiss: "この項目を消す",
         loadFailed: "操作を読めませんでした。",
         kinds: {
-            copy_files: "ファイルのコピー",
-            move_files: "ファイルの移動",
-            delete_files: "ファイルの削除",
-            copy_folders: "フォルダのコピー",
-            move_folders: "フォルダの移動",
-            delete_folders: "フォルダの削除",
+            copy: "コピー",
+            move: "移動",
+            delete: "削除",
+            timelineScan: "タイムラインの集計",
         },
         statuses: {
             pending: "待機中",

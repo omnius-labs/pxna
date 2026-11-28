@@ -27,9 +27,9 @@ pub enum GetTimelineStatusResponse {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
-pub enum RefreshTimelineResponse {
-    /// The scans are running.
-    Status202_TheScansAreRunning(models::TimelineStatuses),
+pub enum StartTimelineScansResponse {
+    /// One Operation per Library.
+    Status202_OneOperationPerLibrary(models::OperationList),
     /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
     Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
@@ -59,16 +59,16 @@ pub trait Timeline<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Erro
         query_params: &models::GetTimelineStatusQueryParams,
     ) -> Result<GetTimelineStatusResponse, E>;
 
-    /// Start full timeline scans.
+    /// Start timeline scans.
     ///
-    /// RefreshTimeline - POST /api/v1/timeline/refresh
-    async fn refresh_timeline(
+    /// StartTimelineScans - POST /api/v1/timeline/scans
+    async fn start_timeline_scans(
         &self,
 
         method: &Method,
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::TimelineRefreshRequest,
-    ) -> Result<RefreshTimelineResponse, E>;
+        body: &models::TimelineScanRequest,
+    ) -> Result<StartTimelineScansResponse, E>;
 }

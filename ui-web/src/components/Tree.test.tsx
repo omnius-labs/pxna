@@ -122,25 +122,27 @@ async function harness(narrow = false, folderCount = 0, blockLaterPages = false,
     post.mockImplementation(async (route, options) => {
         snapshot++;
         if (route.endsWith("/move")) {
-            const src = options.body.srcPaths[0];
+            const src = options.body.sources[0].path;
             const parent = src.slice(0, src.lastIndexOf("/")) || "/";
             const items = children.get(parent)!;
             const index = items.findIndex((entry) => entry.path === src);
             const changed = {
                 ...items[index]!,
-                path: options.body.dstPath,
-                name: options.body.dstPath.split("/").at(-1)!,
+                path: options.body.destination.path,
+                name: options.body.destination.path.split("/").at(-1)!,
             };
             items[index] = changed;
-            return response({ entries: [changed] });
+            return response({ operation: { status: "succeeded", failedEntries: [], resultEntries: [changed] } }, 202);
         }
         if (route.endsWith("/delete")) {
             for (const [path, entries] of children)
                 children.set(
                     path,
-                    entries.filter((entry) => !options.body.srcPaths.includes(entry.path)),
+                    entries.filter(
+                        (entry) => !options.body.targets.some((target: { path: string }) => target.path === entry.path),
+                    ),
                 );
-            return response(undefined, 204);
+            return response({ operation: { status: "succeeded", failedEntries: [] } }, 202);
         }
         const path = options.body.path;
         const parent = path.slice(0, path.lastIndexOf("/")) || "/";
@@ -243,14 +245,15 @@ it("閉じたフォルダを展開し、その直下で作成・名前の変更�
         await h.dispose();
     }
 });
-it("archive は files/move、ルートは rename/delete 非表示、readonly は無効", async () => {
+it("archive はファイルとして移し、ルートは rename/delete 非表示、readonly は無効", async () => {
     const h = await harness();
     try {
         await h.menu("pack.zip");
         await h.select("Rename");
         await h.type("renamed.zip");
         await wait(() => expect(h.item("renamed.zip")).toBeDefined());
-        expect(post.mock.calls[0]![0]).toBe("/libraries/{libraryId}/files/move");
+        expect(post.mock.calls[0]![0]).toBe("/entries/move");
+        expect(post.mock.calls[0]![1].body.sources[0].view).toBe("file");
         await h.menu("Ops");
         expect([...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual([
             "New folder",

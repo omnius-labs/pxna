@@ -20,7 +20,7 @@ afterEach(() => get.mockReset());
 const operation = (id: string, status: Operation["status"]): Operation => ({
     id,
     libraryId: "ops",
-    kind: "delete_files",
+    kind: "delete",
     status,
     processedCount: 1,
     totalCount: 1,

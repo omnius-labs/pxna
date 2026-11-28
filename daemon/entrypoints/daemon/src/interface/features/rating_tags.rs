@@ -392,12 +392,13 @@ mod tests {
         let renamed = send(
             &router,
             Method::POST,
-            "/api/v1/libraries/photos/files/move",
+            "/api/v1/entries/move",
             headers,
-            Some(json!({"srcPaths": ["/p.png"], "dstPath": "/q.png"})),
+            Some(json!({"sources": [{"libraryId": "photos", "path": "/p.png", "view": "file"}], "destination": {"libraryId": "photos", "path": "/q.png"}})),
         )
         .await?;
-        assert_eq!(renamed.status, StatusCode::OK);
+        assert_eq!(renamed.status, StatusCode::ACCEPTED);
+        assert_eq!(renamed.body["operation"]["status"], "succeeded");
         assert_eq!(rating_of(&router, headers, "/q.png").await?.1, json!({"rating": "good"}));
         let tags = send(&router, Method::GET, &format!("{TAGS}?path=/q.png"), headers, None).await?;
         assert_eq!(tags.body, json!({"tags": ["trip"]}));
@@ -416,12 +417,13 @@ mod tests {
         let moved = send(
             &router,
             Method::POST,
-            "/api/v1/libraries/photos/files/move",
+            "/api/v1/entries/move",
             headers,
-            Some(json!({"srcPaths": ["/q.png"], "dstPath": "/moved/q.png"})),
+            Some(json!({"sources": [{"libraryId": "photos", "path": "/q.png", "view": "file"}], "destination": {"libraryId": "photos", "path": "/moved/q.png"}})),
         )
         .await?;
-        assert_eq!(moved.status, StatusCode::OK);
+        assert_eq!(moved.status, StatusCode::ACCEPTED);
+        assert_eq!(moved.body["operation"]["status"], "succeeded");
         assert_eq!(rating_of(&router, headers, "/moved/q.png").await?.1, json!({"rating": "good"}));
         Ok(())
     }
@@ -438,12 +440,13 @@ mod tests {
         let renamed = send(
             &router,
             Method::POST,
-            "/api/v1/libraries/photos/folders/move",
+            "/api/v1/entries/move",
             headers,
-            Some(json!({"srcPaths": ["/album"], "dstPath": "/trip"})),
+            Some(json!({"sources": [{"libraryId": "photos", "path": "/album", "view": "folder"}], "destination": {"libraryId": "photos", "path": "/trip"}})),
         )
         .await?;
-        assert_eq!(renamed.status, StatusCode::OK);
+        assert_eq!(renamed.status, StatusCode::ACCEPTED);
+        assert_eq!(renamed.body["operation"]["status"], "succeeded");
         assert_eq!(rating_of(&router, headers, "/trip/p.png").await?.1, json!({"rating": "good"}));
         assert_eq!(
             rating_of(&router, headers, "/album2/p.png").await?.1,
@@ -466,9 +469,9 @@ mod tests {
         let copied = send(
             &router,
             Method::POST,
-            "/api/v1/libraries/photos/files/copy",
+            "/api/v1/entries/copy",
             headers,
-            Some(json!({"srcPaths": ["/p.png"], "dstPath": "/copy.png"})),
+            Some(json!({"sources": [{"libraryId": "photos", "path": "/p.png", "view": "file"}], "destination": {"libraryId": "photos", "path": "/copy.png"}})),
         )
         .await?;
         assert_eq!(copied.status, StatusCode::ACCEPTED);
@@ -487,12 +490,13 @@ mod tests {
         let deleted = send(
             &router,
             Method::POST,
-            "/api/v1/libraries/photos/files/delete",
+            "/api/v1/entries/delete",
             headers,
-            Some(json!({"srcPaths": ["/p.png"]})),
+            Some(json!({"targets": [{"libraryId": "photos", "path": "/p.png", "view": "file"}]})),
         )
         .await?;
-        assert_eq!(deleted.status, StatusCode::NO_CONTENT);
+        assert_eq!(deleted.status, StatusCode::ACCEPTED);
+        assert_eq!(deleted.body["operation"]["status"], "succeeded");
         let marks = &fixture.server.state.rating_tags;
         assert!(!marks.all_rated_paths(&user, "photos").await?.contains("/p.png"));
         assert!(marks.tagged_paths(&user, "photos", "trip").await?.iter().all(|path| path != "/p.png"));
@@ -500,9 +504,9 @@ mod tests {
         let folder = send(
             &router,
             Method::POST,
-            "/api/v1/libraries/photos/folders/delete",
+            "/api/v1/entries/delete",
             headers,
-            Some(json!({"srcPaths": ["/dir"], "recursive": true})),
+            Some(json!({"targets": [{"libraryId": "photos", "path": "/dir", "view": "folder"}], "recursive": true})),
         )
         .await?;
         assert!(folder.status.is_success(), "{}", folder.status);

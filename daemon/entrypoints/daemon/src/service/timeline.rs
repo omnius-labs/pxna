@@ -82,6 +82,13 @@ pub struct TimelineStatus {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
+/// A running scan of a Library: the files it has processed, and its end, with the error message when it failed.
+#[derive(Clone)]
+pub struct ScanHandle {
+    pub progress: Arc<AtomicU64>,
+    pub finished: tokio::sync::watch::Receiver<Option<std::result::Result<(), String>>>,
+}
+
 /// Library ごとのタイムラインの索引を集計し、Library を横断したページと月ごとの件数、Library ごとの状態を返す。
 pub struct TimelineService {
     libraries: Vec<LibraryConfig>,
@@ -91,7 +98,7 @@ pub struct TimelineService {
     interval: Option<Duration>,
     clock: Arc<dyn Clock<Utc> + Send + Sync>,
     /// 全体の集計を実行中の Library と、その処理したファイルの数。
-    running: Mutex<HashMap<String, Arc<AtomicU64>>>,
+    running: Mutex<HashMap<String, ScanHandle>>,
 }
 
 impl TimelineService {
@@ -180,26 +187,33 @@ impl TimelineService {
         })
     }
 
-    /// 全体の集計を始める。同じ Library の全体の集計が実行中なら何もしない。
-    fn start_scan(self: &Arc<Self>, library: &LibraryConfig) {
-        let progress = {
+    /// 全体の集計を始める。同じ Library の全体の集計が実行中なら、それを返す。
+    fn start_scan(self: &Arc<Self>, library: &LibraryConfig) -> ScanHandle {
+        let (handle, finished) = {
             let mut running = self.running.lock();
-            if running.contains_key(&library.id) {
-                return;
+            if let Some(handle) = running.get(&library.id) {
+                return handle.clone();
             }
-            let progress = Arc::new(AtomicU64::new(0));
-            running.insert(library.id.clone(), progress.clone());
-            progress
+            let (finished, receiver) = tokio::sync::watch::channel(None);
+            let handle = ScanHandle {
+                progress: Arc::new(AtomicU64::new(0)),
+                finished: receiver,
+            };
+            running.insert(library.id.clone(), handle.clone());
+            (handle, finished)
         };
         let service = self.clone();
         let library = library.clone();
+        let progress = handle.progress.clone();
         tokio::spawn(async move {
             let result = service.full_scan(&library, &progress).await;
-            if let Err(error) = result {
+            if let Err(error) = &result {
                 warn!(library = %library.id, ?error, "timeline: scan failed");
             }
             service.running.lock().remove(&library.id);
+            finished.send_replace(Some(result.map_err(|error| error.to_string())));
         });
+        handle
     }
 
     async fn full_scan(&self, library: &LibraryConfig, progress: &AtomicU64) -> Result<()> {
@@ -220,16 +234,15 @@ impl TimelineService {
         Ok(())
     }
 
-    /// web から全体の集計を始め、今の状態を返す。
-    pub async fn refresh(self: &Arc<Self>, library_id: &str) -> Result<TimelineStatus> {
+    /// 要求を受けて全体の集計を始め、実行中の集計を返す。実行中の集計があれば、それに加わる。
+    pub fn scan(self: &Arc<Self>, library_id: &str) -> Result<ScanHandle> {
         let library = self.library(library_id)?.clone();
-        self.start_scan(&library);
-        self.status(library_id).await
+        Ok(self.start_scan(&library))
     }
 
     pub async fn status(&self, library_id: &str) -> Result<TimelineStatus> {
         let library = self.library(library_id)?;
-        let progress = self.running.lock().get(&library.id).cloned();
+        let progress = self.running.lock().get(&library.id).map(|handle| handle.progress.clone());
         Ok(TimelineStatus {
             library_id: library.id.clone(),
             running: progress.is_some(),
@@ -551,7 +564,7 @@ mod tests {
     const T_2023_07_07: u64 = 1_688_688_000;
 
     async fn wait_scan(service: &Arc<TimelineService>) -> TestResult {
-        service.refresh(LIBRARY).await?;
+        service.scan(LIBRARY)?;
         wait_idle(service).await
     }
 
@@ -956,7 +969,7 @@ mod tests {
         // 変更の反映を模して排他を持つ間に、集計に新しいファイルを読ませ、その後で消す。
         let lock = service.scanner.lock(LIBRARY);
         let guard = lock.lock().await;
-        service.refresh(LIBRARY).await?;
+        service.scan(LIBRARY)?;
         tokio::time::sleep(StdDuration::from_millis(500)).await;
         std::fs::remove_file(fixture.path("new.png"))?;
         drop(guard);
@@ -1046,7 +1059,7 @@ mod tests {
         std::fs::remove_dir_all(fixture.path("sub/inner"))?;
         std::fs::write(fixture.path("later.txt"), b"later")?;
         let finished = service.status(LIBRARY).await?.completed_at;
-        service.refresh(LIBRARY).await?;
+        service.scan(LIBRARY)?;
         wait_until(|| async { Ok(service.status(LIBRARY).await?.completed_at != finished) }).await?;
         assert_eq!(
             names.held(LIBRARY).await,
@@ -1376,7 +1389,7 @@ mod tests {
         fresh.verified().await;
         let service = fixture.service_with_names("UTC", 0, Vec::new(), fresh.clone()).await?;
         service.scanner.take_archive_reads();
-        service.refresh(LIBRARY).await?;
+        service.scan(LIBRARY)?;
         wait_until(|| async { Ok(fresh.is_usable(LIBRARY).await) }).await?;
         wait_idle(&service).await?;
 

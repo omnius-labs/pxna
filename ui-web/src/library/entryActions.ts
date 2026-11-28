@@ -6,8 +6,10 @@ import { describeError } from "../i18n/errors";
 import { entryAddress, groupByLibrary } from "../location";
 import type { Entry } from "./entries";
 import { refreshLibrary } from "./listing";
+import { isRunning } from "./operations";
 
 export type Operation = components["schemas"]["Operation"];
+export type EntryRef = components["schemas"]["EntryRef"];
 
 export function canMutate(
     library: { readonly: boolean },
@@ -33,7 +35,17 @@ export async function createFolder(client: QueryClient, libraryId: string, path:
     await refreshLibrary(client, libraryId);
     return data.entry;
 }
-/// `scope` は Library の id か、タイムラインの範囲である。
+/// Entry を 1 つ指す値。フォルダは `view=folder` で指し、それ以外は archive のファイルも含めてファイルとして指す。
+export function entryRef(libraryId: string, path: string, folder: boolean): EntryRef {
+    return { libraryId, path, view: folder ? "folder" : "file" };
+}
+/// 終わった Operation の最初の失敗を、要求の失敗と同じ形のエラーにする。
+export function operationFailure(operation: Operation): ApiError | undefined {
+    const failure = operation.failedEntries[0];
+    if (!failure) return undefined;
+    return new ApiError(0, failure.kind, failure.message ?? undefined);
+}
+/// `scope` は Library の id か、タイムラインの範囲である。同じ Library の中の 1 件の移動は応答の前に終わり、終わった Operation が返る。
 export async function renameEntry(
     client: QueryClient,
     scope: string,
@@ -42,12 +54,14 @@ export async function renameEntry(
 ): Promise<Entry> {
     const { libraryId, path } = entryAddress(scope, entry.path);
     const dstPath = childPath(path.slice(0, path.lastIndexOf("/")), name);
-    const route = entry.folder ? "/libraries/{libraryId}/folders/move" : "/libraries/{libraryId}/files/move";
-    const data = unwrap(
-        await api.POST(route, { params: { path: { libraryId } }, body: { srcPaths: [path], dstPath } }),
+    const { operation } = unwrap(
+        await api.POST("/entries/move", {
+            body: { sources: [entryRef(libraryId, path, entry.folder)], destination: { libraryId, path: dstPath } },
+        }),
     );
-    if (!("entries" in data)) throw new Error(t("errors.renameNotSync"));
-    const [renamed] = data.entries;
+    const failure = operationFailure(operation);
+    if (failure) throw failure;
+    const renamed = isRunning(operation) ? undefined : operation.resultEntries?.[0];
     if (!renamed) throw new Error(t("errors.renameNotSync"));
     await refreshLibrary(client, libraryId);
     return renamed;
@@ -68,35 +82,24 @@ export class DeleteEntriesError extends ApiError {
     }
 }
 /// `scope` は Library の id か、タイムラインの範囲である。Library ごとに要求を分け、一部の Library だけが失敗しても、ほかの Library の削除は進める。
+/// 応答の前に終わった削除は、その場で一覧を読み直す。失敗を含むときは、その Operation も返して失敗を見せる。
 export async function deleteEntries(
     client: QueryClient,
     scope: string,
     items: ReadonlyMap<string, { folder: boolean }>,
 ): Promise<Operation[]> {
-    const requests = [];
-    for (const [libraryId, group] of groupByLibrary(scope, items)) {
-        const files = [...group].filter(([, item]) => !item.folder).map(([path]) => path);
-        const folders = [...group].filter(([, item]) => item.folder).map(([path]) => path);
-        if (files.length)
-            requests.push({
-                libraryId,
-                request: api.POST("/libraries/{libraryId}/files/delete", {
-                    params: { path: { libraryId } },
-                    body: { srcPaths: files },
-                }),
-            });
-        if (folders.length)
-            requests.push({
-                libraryId,
-                request: api.POST("/libraries/{libraryId}/folders/delete", {
-                    params: { path: { libraryId } },
-                    body: { srcPaths: folders, recursive: true },
-                }),
-            });
-    }
+    const requests = [...groupByLibrary(scope, items)].map(([libraryId, group]) => ({
+        libraryId,
+        request: api.POST("/entries/delete", {
+            body: {
+                targets: [...group].map(([path, item]) => entryRef(libraryId, path, item.folder)),
+                recursive: true,
+            },
+        }),
+    }));
     const operations: Operation[] = [];
     const failures: unknown[] = [];
-    const synchronous = new Set<string>();
+    const finished = new Set<string>();
     const results = await Promise.allSettled(
         requests.map(async ({ libraryId, request }) => ({ libraryId, response: await request })),
     );
@@ -106,14 +109,22 @@ export async function deleteEntries(
             continue;
         }
         try {
-            const data = unwrap(result.value.response);
-            if (data && "operation" in data) operations.push(data.operation);
-            else synchronous.add(result.value.libraryId);
+            const { operation } = unwrap(result.value.response);
+            if (isRunning(operation)) {
+                operations.push(operation);
+                continue;
+            }
+            finished.add(result.value.libraryId);
+            const failure = operationFailure(operation);
+            if (failure) {
+                failures.push(failure);
+                operations.push(operation);
+            }
         } catch (error) {
             failures.push(error);
         }
     }
-    await Promise.all([...synchronous].map((libraryId) => refreshLibrary(client, libraryId)));
+    await Promise.all([...finished].map((libraryId) => refreshLibrary(client, libraryId)));
     if (failures.length) throw new DeleteEntriesError(failures, operations, requests.length - failures.length);
     return operations;
 }
@@ -127,37 +138,34 @@ export interface TransferResult {
     acceptedPaths: string[];
 }
 export type AcceptedTransfer = Omit<TransferResult, "failures">;
-async function transferEntries(
+/// 選んだファイルとフォルダを 1 つの要求で送る。応答の前に終わった Operation は、その結果を返して一覧を読み直し、実行中の Operation は呼び出し側に見せてもらう。
+export async function transferSelection(
     client: QueryClient,
-    mode: "move" | "copy",
-    srcLibraryId: string,
-    srcPaths: string[],
-    dstLibraryId: string,
-    dstFolderPath: string,
+    source: { mode: "cut" | "copy"; libraryId: string; entries: readonly { path: string; folder: boolean }[] },
+    destination: { libraryId: string; path: string },
     conflict: ConflictPolicy,
-    folder: boolean,
     onAccepted?: (result: AcceptedTransfer) => void,
 ): Promise<TransferResult> {
     const result: TransferResult = { entries: [], operations: [], failures: [], skippedCount: 0, acceptedPaths: [] };
-    if (!srcPaths.length) return result;
-    const route = folder
-        ? mode === "move"
-            ? "/libraries/{libraryId}/folders/move"
-            : "/libraries/{libraryId}/folders/copy"
-        : mode === "move"
-          ? "/libraries/{libraryId}/files/move"
-          : "/libraries/{libraryId}/files/copy";
+    if (!source.entries.length) return result;
+    const srcPaths = source.entries.map((entry) => entry.path);
     try {
-        const data = unwrap<{ entries: Entry[] } | { operation: Operation }>(
-            await api.POST(route, {
-                params: { path: { libraryId: srcLibraryId } },
-                body: { srcPaths, dstLibraryId, dstFolderPath, conflict },
+        const { operation } = unwrap(
+            await api.POST(source.mode === "cut" ? "/entries/move" : "/entries/copy", {
+                body: {
+                    sources: source.entries.map((entry) => entryRef(source.libraryId, entry.path, entry.folder)),
+                    destination: { libraryId: destination.libraryId, folderPath: destination.path },
+                    conflict,
+                },
             }),
         );
-        if ("operation" in data) result.operations.push(data.operation);
+        const running = isRunning(operation);
+        if (running) result.operations.push(operation);
         else {
-            result.entries = data.entries;
-            if (conflict === "skip") result.skippedCount = srcPaths.length - data.entries.length;
+            result.entries = operation.resultEntries ?? [];
+            result.skippedCount = operation.skippedCount;
+            const failure = operationFailure(operation);
+            if (failure) result.failures.push(failure);
         }
         result.acceptedPaths = srcPaths;
         onAccepted?.({
@@ -166,9 +174,9 @@ async function transferEntries(
             skippedCount: result.skippedCount,
             acceptedPaths: srcPaths,
         });
-        if ("entries" in data) {
+        if (!running) {
             const refreshed = await Promise.allSettled(
-                [...new Set([srcLibraryId, dstLibraryId])].map((id) => refreshLibrary(client, id)),
+                [...new Set([source.libraryId, destination.libraryId])].map((id) => refreshLibrary(client, id)),
             );
             for (const item of refreshed) if (item.status === "rejected") result.failures.push(item.reason);
         }
@@ -176,78 +184,4 @@ async function transferEntries(
         result.failures.push(error);
     }
     return result;
-}
-export function moveEntries(
-    client: QueryClient,
-    srcLibraryId: string,
-    srcPaths: string[],
-    dstLibraryId: string,
-    dstFolderPath: string,
-    conflict: ConflictPolicy,
-    folder = false,
-    onAccepted?: (result: AcceptedTransfer) => void,
-): Promise<TransferResult> {
-    return transferEntries(
-        client,
-        "move",
-        srcLibraryId,
-        srcPaths,
-        dstLibraryId,
-        dstFolderPath,
-        conflict,
-        folder,
-        onAccepted,
-    );
-}
-export function copyEntries(
-    client: QueryClient,
-    srcLibraryId: string,
-    srcPaths: string[],
-    dstLibraryId: string,
-    dstFolderPath: string,
-    conflict: ConflictPolicy,
-    folder = false,
-    onAccepted?: (result: AcceptedTransfer) => void,
-): Promise<TransferResult> {
-    return transferEntries(
-        client,
-        "copy",
-        srcLibraryId,
-        srcPaths,
-        dstLibraryId,
-        dstFolderPath,
-        conflict,
-        folder,
-        onAccepted,
-    );
-}
-export async function transferSelection(
-    client: QueryClient,
-    source: { mode: "cut" | "copy"; libraryId: string; entries: readonly { path: string; folder: boolean }[] },
-    destination: { libraryId: string; path: string },
-    conflict: ConflictPolicy,
-    onAccepted?: (result: AcceptedTransfer) => void,
-): Promise<TransferResult> {
-    const send = source.mode === "cut" ? moveEntries : copyEntries;
-    const results = await Promise.all(
-        [false, true].map((folder) =>
-            send(
-                client,
-                source.libraryId,
-                source.entries.filter((entry) => entry.folder === folder).map((entry) => entry.path),
-                destination.libraryId,
-                destination.path,
-                conflict,
-                folder,
-                onAccepted,
-            ),
-        ),
-    );
-    return {
-        entries: results.flatMap((result) => result.entries),
-        operations: results.flatMap((result) => result.operations),
-        failures: results.flatMap((result) => result.failures),
-        skippedCount: results.reduce((sum, result) => sum + result.skippedCount, 0),
-        acceptedPaths: results.flatMap((result) => result.acceptedPaths),
-    };
 }

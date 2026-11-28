@@ -17,14 +17,13 @@ A path inside an archive is written by plain concatenation, as in
 and its grammar does not change. The daemon locates the boundary by
 probing the filesystem, which is unambiguous because a file and a
 directory cannot share a name in one directory. An archive's root is
-addressed by the endpoint rather than a trailing slash: the folder
-endpoints treat `/photos/a.zip` as the archive root, the file
-endpoints treat it as the zip file itself.
+addressed by `view=folder` rather than a trailing slash; without it,
+`/photos/a.zip` is the zip file itself.
 
-Mutations follow one rule set. Operations whose duration is
-independent of content size respond synchronously; operations that
-scale with content size return `202` and an operation id that is
-polled through the Operations API. Copy, move, and upload share a
+Mutations follow one rule set. A write to one Entry responds when it
+is done. Copy, move, delete, and timeline scans always answer `202`
+with an Operation, which is polled through the Operations API until
+it is terminal, unless it already is. Copy, move, and upload share a
 `conflict` policy that defaults to `fail`, so nothing is overwritten
 unless a client explicitly asks for it. Mutations are rejected with
 `403` both for paths inside archives and for Libraries marked

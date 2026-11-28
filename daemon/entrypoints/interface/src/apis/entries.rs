@@ -11,6 +11,26 @@ use crate::{models, types::*};
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
+pub enum CopyEntriesResponse {
+    /// The Operation, terminal when the work finished before the response.
+    Status202_TheOperation(models::OperationResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
+    /// Missing or invalid authentication.
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// Resource not found.
+    Status404_ResourceNotFound(models::Problem),
+    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
+    /// Internal server error.
+    Status500_InternalServerError(models::Problem),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum CreateFileResponse {
     /// File created.
     Status201_FileCreated(models::EntryResponse),
@@ -38,6 +58,26 @@ pub enum CreateFileResponse {
 pub enum CreateFolderResponse {
     /// Folder created.
     Status201_FolderCreated(models::EntryResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
+    /// Missing or invalid authentication.
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// Resource not found.
+    Status404_ResourceNotFound(models::Problem),
+    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
+    /// Internal server error.
+    Status500_InternalServerError(models::Problem),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
+pub enum DeleteEntriesResponse {
+    /// The Operation, terminal when the work finished before the response.
+    Status202_TheOperation(models::OperationResponse),
     /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
     Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
@@ -133,6 +173,26 @@ pub enum ListEntryMonthsResponse {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
+pub enum MoveEntriesResponse {
+    /// The Operation, terminal when the work finished before the response.
+    Status202_TheOperation(models::OperationResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
+    /// Missing or invalid authentication.
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// Resource not found.
+    Status404_ResourceNotFound(models::Problem),
+    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
+    /// Internal server error.
+    Status500_InternalServerError(models::Problem),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum ProbeFolderChildrenResponse {
     /// True, confirmed false, or unknown (null).
     Status200_True(models::FolderChildrenProbe),
@@ -217,6 +277,11 @@ pub enum WriteFileContentResponse {
 pub trait Entries<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHandler<E> {
     type Claims;
 
+    /// Copy Entries.
+    ///
+    /// CopyEntries - POST /api/v1/entries/copy
+    async fn copy_entries(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims, body: &models::EntryTransferRequest) -> Result<CopyEntriesResponse, E>;
+
     /// Create a file under a name the daemon may choose.
     ///
     /// CreateFile - POST /api/v1/libraries/{libraryId}/entries/files
@@ -245,6 +310,12 @@ pub trait Entries<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
         path_params: &models::CreateFolderPathParams,
         body: &models::CreateFolderRequest,
     ) -> Result<CreateFolderResponse, E>;
+
+    /// Delete Entries.
+    ///
+    /// DeleteEntries - POST /api/v1/entries/delete
+    async fn delete_entries(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims, body: &models::EntryDeleteRequest)
+    -> Result<DeleteEntriesResponse, E>;
 
     /// Get the metadata of an Entry.
     ///
@@ -290,6 +361,11 @@ pub trait Entries<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
         claims: &Self::Claims,
         body: &models::EntryMonthsRequest,
     ) -> Result<ListEntryMonthsResponse, E>;
+
+    /// Move or rename Entries.
+    ///
+    /// MoveEntries - POST /api/v1/entries/move
+    async fn move_entries(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims, body: &models::EntryTransferRequest) -> Result<MoveEntriesResponse, E>;
 
     /// Probe whether a folder has a folder-like direct child.
     ///

@@ -94,7 +94,7 @@ No term is renamed, and `EntryRef` and View are already in [terms.md](../terms.m
 | [1](#s-1) | Answer every error with Problem Details | - | Done |
 | [2](#s-2) | Move the single-Entry operations into one Entry namespace | - | Done |
 | [3](#s-3) | List through `POST /entries` into the Entry page | 2 | Done |
-| [4](#s-4) | Run copy, move, delete, and timeline scans as Operations | 2 | Not started |
+| [4](#s-4) | Run copy, move, delete, and timeline scans as Operations | 2 | Done |
 | [5](#s-5) | Answer ended video sessions with `410`, rename the session read, and finish the tags | 2, 3, 4 | Not started |
 
 <a id="s-1"></a>

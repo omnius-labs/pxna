@@ -210,12 +210,10 @@ export const en = {
         dismiss: "Dismiss this item",
         loadFailed: "Could not load the operations.",
         kinds: {
-            copy_files: "Copy files",
-            move_files: "Move files",
-            delete_files: "Delete files",
-            copy_folders: "Copy folders",
-            move_folders: "Move folders",
-            delete_folders: "Delete folders",
+            copy: "Copy",
+            move: "Move",
+            delete: "Delete",
+            timelineScan: "Timeline scan",
         },
         statuses: {
             pending: "Waiting",
