@@ -810,7 +810,7 @@ Only the dependencies must be respected.
 | TL2 | Hold the per-month counts per kind and whether inside an archive, and return them over a Scope and a Filter, summed in advance for whole Libraries without conditions (§5, §7) | TL1 | Done |
 | TL3 | Remove the timeline's own page and month APIs, which `listEntries` and the counts over a Scope replace (§9.1), once no client calls them | TL2 | Not started |
 
-TL1 and TL2 correspond to M28, and TL3 to part of M31 of [design.md §12.2](../design.md#122-roadmap).
+TL1 and TL2 correspond to M28, and TL3 to part of M34 of [design.md §12.2](../design.md#122-roadmap).
 The web client's current screen is in [Client Design §6.1](./client.md#61-current-code).
 
 For confirmed defects, see [issues.md](../issues.md).

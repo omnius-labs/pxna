@@ -21,6 +21,8 @@ Design rationale, implementation status, defects, and external behavior are each
 | --- | --- | --- | --- | --- | --- |
 | ConflictPolicy | all | `ConflictPolicy` | `conflict` | How to handle an existing entry at the destination (fail, skip, overwrite, rename) | - |
 | [Entry](#t-entry) | all | `FsEntry` | `FileSystemEntry` | Collective name for a file, folder, or symbolic link in a Library | file |
+| [EntryRef](#t-entry-ref) | all | `EntryRef` | `libraryId`, `path`, `view` | A Library id, a Library-relative path, and the View that chooses between an archive file and its root | entry address |
+| View | all | - | `view` | Which face of a path a request means: `file` or `folder`. For an archive, `file` is the archive file and `folder` is its root | archive mode |
 | Image socket | all | `ImageSocket` | `/api/v1/sockets/image` | The WebSocket, one per browser tab, through which a client wants thumbnails, sprite sheets, and display images and receives them | thumbnail socket, image channel |
 | [Library](#t-library) | all | `LibraryConfig` | `libraryId` | One directory the daemon exposes | root |
 | [Library-relative path](#t-library-relative-path) | all | `LibraryRelativePath` | `RelativePath` | A path with which a client points at a location, treating the Library root as `/` | - |
@@ -278,6 +280,17 @@ A Scope is the part of a listing request that names what is read, and the Scope 
 **What goes wrong if they are confused**
 If the column is read as a listing's Scope, a term marked `listing` looks like something a Scope reads, and the starts of a Scope look like a concern.
 
+<a id="t-view-vs-kind"></a>
+#### View and kind
+
+**Boundary**
+`view` is part of a request and chooses which face of a path it means, while `kind` is the type of the Entry that comes back (`file`, `folder`, or `link`).
+Only an archive has two faces: under `view=file` it is a `file` Entry with the archive hint, and under `view=folder` the same path is read as the folder of its root.
+The web client's URL parameter `view`, which names the Entry the Viewer shows, is neither; it never reaches the API.
+
+**What goes wrong if they are confused**
+If `view` is read as `kind`, an archive file and its root look like the same Entry, and a request that omits `view` seems to need the Entry's kind first.
+
 ## 4. Individual Terms
 
 <a id="t-entry"></a>
@@ -285,6 +298,15 @@ If the column is read as a listing's Scope, a term marked `listing` looks like s
 
 **Names by layer**
 The engine's driver uses `FsEntry`, `StorageService` uses `NestedFsEntry`, which includes the outer path, and the API uses `FileSystemEntry`.
+
+<a id="t-entry-ref"></a>
+#### EntryRef
+
+**Names by layer**
+The API uses the schema `EntryRef` where a path has two faces. Where it has one, a request carries the Library id and the path alone, as `LibraryPath` in a body or as a path parameter and a query in a URL.
+
+**Why this name**
+The name is the address of an Entry, not an Entry's identity. A rename changes it, while ratings and tags are identified by the content hash ([Rating and Tag Design §6.1](./design/rating-tags.md#61-what-is-stored)); see [API Design §3.1](./design/api.md#31-entry-and-entryref).
 
 <a id="t-library"></a>
 #### Library
