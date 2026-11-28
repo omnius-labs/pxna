@@ -245,7 +245,7 @@ A request has this shape:
 
 The listing reads the same snapshots, name index, and timeline index as before ([Listing and Search Design](./listing.md#1-about-this-document)); this structure changes how a listing is requested and returned, not how it is built.
 
-`fields=summary` keeps the rules of the summary listing ([Listing and Search Design §8.1](./listing.md#make-the-summary-listing-of-direct-children-a-separate-response-from-the-existing-detail-listing)): it reads the direct children of one start in name or kind order, and its items are `EntrySummary` values with the path, name, kind, and archive hint, not `FileSystemEntry` values with placeholder sizes and times.
+`fields=summary` keeps the rules of the summary listing ([Listing and Search Design §8.1](./listing.md#make-the-summary-listing-of-direct-children-a-separate-response-from-the-existing-detail-listing)): it reads the direct children of one start in name or kind order, and the page carries `summaries` in place of `items`, each with the path, name, kind, and archive hint, not `FileSystemEntry` values with placeholder sizes and times.
 A summary request with `recursive`, several starts, or another sort is `400`.
 The details of the listed Entries are read with `POST /entries/metadata` (§6.5).
 
@@ -284,7 +284,7 @@ Every listing returns the same envelope:
 }
 ```
 
-- Every item carries its `libraryId`, so a listing of one start has the same type as a listing of several.
+- Every item carries its `libraryId`, so a listing of one start has the same type as a listing of several. A summary carries `summaries`, each a `libraryId` and a `summary`, in place of `items`.
 - `timelineDate` and `timelineDateSource` are present only with `sort=timeline_date`, in the form of [Timeline Design §4](./timeline.md#4-timeline-dates).
 - `page` echoes the effective page. An `offset` page carries `offset`, `totalCount`, and `snapshot`; a `cursor` page carries `previous` and `next`, either absent at an end.
 - `snapshot` identifies the snapshot an `offset` page was cut from, and a client detects a change by comparing it between pages, as it does now. A `cursor` page has none, because it follows the timeline index by cursor rather than a snapshot ([Listing and Search Design §4.6](./listing.md#46-pages-in-timeline-date-order)).
@@ -307,7 +307,7 @@ The name says that it is a probe, not a listing; the children themselves are rea
 `GET /libraries/{libraryId}/entries/metadata?path=&view=` returns one Entry.
 It replaces the separate file and folder reads, and `view` chooses an archive's face (§3.1).
 
-`POST /entries/metadata` takes 1 to 200 places, each a Library id and a Library-relative path, and returns one result per place in request order, each either the Entry as a listing shows it or an error kind.
+`POST /entries/metadata` takes 1 to 200 places, each a Library id and a Library-relative path, and returns one result per place in request order, with its `libraryId` and `path`, and either `detail`, the Entry as a listing shows it, or `error`, an error kind. A Library that does not exist fails only its places, and a place given twice, after its path is normalized, is `400`.
 The request succeeds with `200` even when some places fail, and the rules of the current batch ([Listing and Search Design §8.1](./listing.md#make-the-summary-listing-of-direct-children-a-separate-response-from-the-existing-detail-listing)) apply unchanged.
 
 ## 7. Mutations
@@ -800,14 +800,13 @@ When the control of background work ([design.md §11.2](../design.md#controlling
 
 ### 15.1 Current Code
 
-`daemon/openapi.yaml` answers every error with the Problem of §11.1 (A1), and serves the single-Entry operations of §4 with `view`, ratings, tags, and folder settings beside them (A2); the rest of §3 through §13 is not implemented, and the contract it serves is otherwise the one this document replaces.
+`daemon/openapi.yaml` answers every error with the Problem of §11.1 (A1), serves the single-Entry operations of §4 with `view`, ratings, tags, and folder settings beside them (A2), and lists only through `POST /entries` into the Entry page, with its summary and the metadata batch (A3); the rest of §3 through §13 is not implemented, and the contract it serves is otherwise the one this document replaces.
 Until each area is replaced, the following statements in other documents describe the current contract, and this document the replacement:
 
 - The namespaces of [design.md §8.1](../design.md#81-namespaces) and the sync and async table of [§8.2](../design.md#82-determining-sync-and-async), with the decision "Decide Sync and Async by the Shape of the Request"
-- The folder, summary, search, and timeline listings named in [Listing and Search Design](./listing.md#1-about-this-document) and [Timeline Design](./timeline.md#1-about-this-document)
 - The silent end of a transcode session in [Video Playback Design §5.4](./video.md#54-concurrency), and the error kinds of [design.md §4.4](../design.md#44-error-model-and-http-mapping), which lack `SessionEvicted`
 - The paths of the deletions in [design.md §8.4](../design.md#84-deletion) and the decision "Delete Moves the Entry to a Library-Local Trash, Unified on POST", and the example path in the introduction of [§8](../design.md#8-conventions-for-mutating-apis)
-- The refresh, the status, and the four timeline endpoints in [Timeline Design §6.3](./timeline.md#63-when-aggregation-starts) and [§10.1](./timeline.md#101-current-code)
+- The refresh in [Timeline Design §6.3](./timeline.md#63-when-aggregation-starts) and [§10.1](./timeline.md#101-current-code)
 - The external representation of Aggregation in the term list of [terms.md](../terms.md#2-term-list), and the names of the API in its Timeline entry
 
 Each area's change rewrites the statements it replaces.

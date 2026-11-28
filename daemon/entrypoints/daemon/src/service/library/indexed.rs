@@ -167,7 +167,7 @@ mod tests {
     use crate::{
         config::ListingConfig,
         service::{
-            listing::{EntryKind, EntryKinds, ListOptions},
+            listing::{EntryKind, EntryKinds, ListOptions, SearchPage, SearchQuery},
             mutation::tests::{state, state_with_clock},
         },
         state::DaemonState,
@@ -194,8 +194,8 @@ mod tests {
     }
 
     /// A search of the test Library, as the search route builds it: the rating and tag condition is read for the user first.
-    async fn search(state: &DaemonState, query: Option<&str>, rating: Option<&str>, tags: &[&str], recursive: bool, path: &str) -> TestResult<models::SearchListing> {
-        let params = models::ListSearchEntriesQueryParams {
+    async fn search(state: &DaemonState, query: Option<&str>, rating: Option<&str>, tags: &[&str], recursive: bool, path: &str) -> TestResult<SearchPage> {
+        let params = SearchQuery {
             library_ids: vec![models::LibraryId(LIBRARY.to_string())],
             path: None,
             recursive: Some(recursive),
@@ -216,11 +216,11 @@ mod tests {
         Ok(state.library.search_entries(vec![(LIBRARY.to_string(), options.clone())], path, &options).await?)
     }
 
-    async fn find(state: &DaemonState, query: &str) -> TestResult<models::SearchListing> {
+    async fn find(state: &DaemonState, query: &str) -> TestResult<SearchPage> {
         search(state, Some(query), None, &[], true, "/").await
     }
 
-    fn paths(listing: &models::SearchListing) -> BTreeSet<String> {
+    fn paths(listing: &SearchPage) -> BTreeSet<String> {
         listing.entries.iter().map(|entry| entry.entry.path.clone()).collect()
     }
 
@@ -439,7 +439,7 @@ mod tests {
         write(&root, "a.txt", b"1")?;
         write(&root, "b.txt", b"2")?;
         aggregate(&state).await?;
-        let params = models::ListSearchEntriesQueryParams {
+        let params = SearchQuery {
             library_ids: vec![models::LibraryId(LIBRARY.to_string())],
             path: None,
             recursive: Some(true),
@@ -592,7 +592,7 @@ mod tests {
         kinds: &[EntryKind],
         inside_archives: bool,
     ) -> TestResult<(BTreeSet<String>, bool)> {
-        let params = models::ListSearchEntriesQueryParams {
+        let params = SearchQuery {
             library_ids: vec![models::LibraryId(LIBRARY.to_string())],
             path: None,
             recursive: Some(true),

@@ -149,6 +149,7 @@ pub struct TimelineListedRow {
 }
 
 impl TimelineListedRow {
+    #[cfg(test)]
     pub fn cursor(&self) -> TimelineCursor {
         TimelineCursor {
             date: self.row.date.text(),
@@ -227,6 +228,7 @@ pub enum TimelineAnchor {
     Around { library: String, path: String },
 }
 
+#[cfg(test)]
 /// 新しい順に並べたページと、その前後を読むための cursor。前後に Entry がなければ `None` にする。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelinePage {
@@ -291,6 +293,7 @@ impl TimelineReading {
         }
     }
 
+    #[cfg(test)]
     /// Every row of the Libraries `ids`, of both kinds, the insides of archives included.
     fn of_libraries(ids: &[String]) -> Self {
         Self {
@@ -498,11 +501,13 @@ impl PathRange {
     }
 }
 
+#[cfg(test)]
 /// 読み出しの対象にする Library の組。空の組は作れない。
 struct TimelineLibraries<'a> {
     ids: &'a [String],
 }
 
+#[cfg(test)]
 impl<'a> TimelineLibraries<'a> {
     fn new(ids: &'a [String]) -> Result<Self> {
         if ids.is_empty() {
@@ -1047,11 +1052,13 @@ ON CONFLICT (library_id, path) DO UPDATE SET
 
     // ---- 読み出し ----
 
+    #[cfg(test)]
     /// `libraries` の Entry を 1 本の並びにしたページ。`libraries` は空でない。
     pub async fn page(&self, libraries: &[String], anchor: &TimelineAnchor, limit: usize) -> Result<TimelinePage> {
         self.read(&TimelineReading::of_libraries(libraries), anchor, limit).await
     }
 
+    #[cfg(test)]
     /// The page of the rows of `reading`'s starts as one sequence, newest timeline date first, with the Entries of the same timeline date
     /// ordered by Library id and then by path. Starts that overlap list a row once. `reading` has at least one start.
     ///
@@ -1104,6 +1111,7 @@ ON CONFLICT (library_id, path) DO UPDATE SET
         Ok(TimelinePage { rows, previous, next })
     }
 
+    #[cfg(test)]
     /// `libraries` の月ごとの件数を足し合わせ、新しい月から並べる。`libraries` は空でない。
     pub async fn months(&self, libraries: &[String]) -> Result<Vec<(String, u64)>> {
         let libraries = TimelineLibraries::new(libraries)?;
@@ -1830,7 +1838,7 @@ END
         assert_eq!(
             index.months(&["a".to_string(), "b".to_string()]).await?,
             [("2024-02".to_string(), 4), ("2024-01".to_string(), 4)],
-            "listTimelineMonths returns what it returned before the migration"
+            "the months of whole Libraries are what they were before the migration"
         );
         assert_eq!(index.months(&["a".to_string()]).await?, [("2024-02".to_string(), 3), ("2024-01".to_string(), 4)]);
 
@@ -2005,7 +2013,7 @@ END
             ]),
             "the same timeline date by Library id, then by path"
         );
-        // The page of whole Libraries that `listTimelineEntries` reads is this reading.
+        // The page of whole Libraries, the roots of a Scope, is this reading.
         let page = index.page(&strings(&["b", "a"]), &TimelineAnchor::Newest, 100).await?;
         assert_eq!(listed(&page), all);
 

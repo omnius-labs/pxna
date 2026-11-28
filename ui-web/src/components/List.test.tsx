@@ -12,10 +12,13 @@ import { CROSS_LIBRARY_SCOPE, entryAddress } from "../location";
 import { List } from "./List";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: { GET: get },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: { POST: (route: string, options: never) => answerEntries(get)(route, options), GET: get },
+    };
+});
 vi.mock("@tanstack/react-virtual", () => ({
     useVirtualizer: (options: { count: number; estimateSize: () => number }) => ({
         range: { startIndex: 0, endIndex: 1 },

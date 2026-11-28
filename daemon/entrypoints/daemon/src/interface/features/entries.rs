@@ -16,7 +16,7 @@ use crate::{
     interface::{ApiServer, binary_body::BinaryBody, session::Claims},
     service::{
         library::ReadRange,
-        listing::{ListOptions, MarkSelection, Scope, ScopeEntry, ScopeListing, ScopeStart},
+        listing::{ListOptions, MarkSelection, Scope, ScopeEntry, ScopeListing, ScopeStart, SummaryOptions},
         mutation::LibraryMutation,
         timeline::{ScopeTimeline, ScopeTimelinePage, TimelineAnchor, TimelineCursor, TimelineIndex},
     },
@@ -178,6 +178,9 @@ impl apis::entries::Entries for ApiServer {
         body: &models::EntryListRequest,
     ) -> std::result::Result<apis::entries::ListEntriesResponse, ()> {
         let listing = async {
+            if Self::summary(body)? {
+                return self.list_summary(body).await;
+            }
             let options = ListOptions::from_entries(body)?;
             let scope = Scope::from_request(&body.scope)?;
             let anchor = Self::timeline_anchor(body, &options)?;
@@ -186,19 +189,14 @@ impl apis::entries::Entries for ApiServer {
                 let page = ScopeTimeline::new(&self.state.library, &self.state.timeline)
                     .page(&scope, &selections, &options, &anchor, options.limit())
                     .await?;
-                return Ok::<_, Error>(models::EntryListing::from(page));
+                return Ok::<_, Error>(models::EntryPage::from(page));
             }
-            let located = match &body.locate {
+            let listing = match body.page.as_ref().and_then(|page| page.locate.as_ref()) {
                 Some(locate) => {
-                    if body.offset.is_some() {
+                    if body.page.as_ref().is_some_and(|page| page.offset.is_some()) {
                         return Err(Error::new(ErrorKind::InvalidInput).with_message("locate and offset cannot be given together"));
                     }
-                    Some(ScopeStart::from_request(locate)?)
-                }
-                None => None,
-            };
-            let listing = match located {
-                Some(entry) => {
+                    let entry = ScopeStart::from_request(locate)?;
                     self.state
                         .library
                         .list_entries_located(&scope, &selections, &options, entry.library_id(), &entry.path().absolute())
@@ -211,6 +209,20 @@ impl apis::entries::Entries for ApiServer {
         .await;
         Ok(match listing {
             Ok(listing) => apis::entries::ListEntriesResponse::Status200_TheEntriesOfTheScope(listing),
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+
+    async fn list_entry_metadata(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::EntryMetadataRequest,
+    ) -> std::result::Result<apis::entries::ListEntryMetadataResponse, ()> {
+        Ok(match self.entry_metadata(&body.places).await {
+            Ok(items) => apis::entries::ListEntryMetadataResponse::Status200_ExactlyOneEntryOrErrorKindPerPlace(models::EntryMetadataList::new(items)),
             Err(error) => ApiError::from(error).into(),
         })
     }
@@ -241,10 +253,91 @@ impl apis::entries::Entries for ApiServer {
 }
 
 impl ApiServer {
+    /// Whether the request asks for the summary of direct children rather than the Entries.
+    fn summary(request: &models::EntryListRequest) -> crate::result::Result<bool> {
+        match request.options.as_ref().and_then(|options| options.fields.as_deref()) {
+            None | Some("full") => Ok(false),
+            Some("summary") => Ok(true),
+            Some(other) => Err(Error::new(ErrorKind::InvalidInput).with_message(format!("unknown fields: {other}"))),
+        }
+    }
+
+    /// The summary of the direct children of the one start, as an Entry page of `summaries` cut by `offset` or at `locate`.
+    async fn list_summary(&self, request: &models::EntryListRequest) -> crate::result::Result<models::EntryPage> {
+        let options = SummaryOptions::from_entries(request)?;
+        let start = ScopeStart::from_request(&request.scope.starts[0])?;
+        let library_id = start.library_id();
+        let path = start.path().absolute();
+        let page = match request.page.as_ref().and_then(|page| page.locate.as_ref()) {
+            Some(locate) => {
+                if request.page.as_ref().is_some_and(|page| page.offset.is_some()) {
+                    return Err(Error::new(ErrorKind::InvalidInput).with_message("locate and offset cannot be given together"));
+                }
+                let entry = ScopeStart::from_request(locate)?;
+                if entry.library_id() != library_id {
+                    return Err(Error::new(ErrorKind::NotFound).with_message("the entry is not in the listing"));
+                }
+                self.state
+                    .library
+                    .list_folder_summaries_located(library_id, &path, &options, &entry.path().absolute())
+                    .await?
+            }
+            None => self.state.library.list_folder_summaries(library_id, &path, &options).await?,
+        };
+        let mut info = models::EntryPageInfo::new(models::EntryPageKind::Offset);
+        info.offset = Some(page.offset);
+        info.total_count = Some(page.total_count);
+        info.snapshot = Some(page.snapshot);
+        let mut response = models::EntryPage::new(info, models::EntryWarnings::new(vec![], vec![], vec![]));
+        response.summaries = Some(
+            page.entries
+                .into_iter()
+                .map(|summary| models::ScopedEntrySummary::new(library_id.to_string(), summary))
+                .collect(),
+        );
+        Ok(response)
+    }
+
+    /// One result per place, in the order given. The places of a Library are read together; a Library that does not exist fails only its places.
+    async fn entry_metadata(&self, places: &[models::LibraryPath]) -> crate::result::Result<Vec<models::EntryMetadataResult>> {
+        let mut libraries: Vec<(&str, Vec<usize>)> = Vec::new();
+        for (index, place) in places.iter().enumerate() {
+            match libraries.iter_mut().find(|(id, _)| *id == place.library_id) {
+                Some((_, indices)) => indices.push(index),
+                None => libraries.push((&place.library_id, vec![index])),
+            }
+        }
+        let mut results: Vec<Option<models::EntryMetadataResult>> = vec![None; places.len()];
+        for (library_id, indices) in libraries {
+            let paths = indices.iter().map(|&index| places[index].path.clone()).collect::<Vec<_>>();
+            match self.state.library.entry_details(library_id, &paths).await {
+                Ok(details) => {
+                    for (index, detail) in indices.into_iter().zip(details) {
+                        let mut result = models::EntryMetadataResult::new(library_id.to_string(), detail.path);
+                        result.detail = detail.detail;
+                        result.error = detail.error;
+                        results[index] = Some(result);
+                    }
+                }
+                Err(error) if *error.kind() == ErrorKind::NotFound => {
+                    for index in indices {
+                        let mut result = models::EntryMetadataResult::new(library_id.to_string(), places[index].path.clone());
+                        result.error = Some(ApiError::from_error(&error).body.code);
+                        results[index] = Some(result);
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(results.into_iter().flatten().collect())
+    }
+
     /// Where a page in timeline-date order starts, or none when the listing is cut from snapshots.
     ///
     /// At most one of `after`, `before`, `month`, and `around` is given, only with `sort` of `timeline_date`, and `locate` is not accepted with it.
     fn timeline_anchor(request: &models::EntryListRequest, options: &ListOptions) -> crate::result::Result<Option<TimelineAnchor>> {
+        let empty = models::EntryPageRequest::new(models::EntryPageKind::Cursor);
+        let request = request.page.as_ref().unwrap_or(&empty);
         let given = [request.after.is_some(), request.before.is_some(), request.month.is_some(), request.around.is_some()];
         if given.iter().filter(|given| **given).count() > 1 {
             return Err(Error::new(ErrorKind::InvalidInput).with_message("at most one of after, before, month and around can be given"));
@@ -293,24 +386,26 @@ impl ApiServer {
     }
 }
 
-impl From<ScopeListing> for models::EntryListing {
+impl From<ScopeListing> for models::EntryPage {
     fn from(listing: ScopeListing) -> Self {
-        let mut response = models::EntryListing::new(
-            listing.entries.into_iter().map(models::ScopedEntry::from).collect(),
+        let mut info = models::EntryPageInfo::new(models::EntryPageKind::Offset);
+        info.offset = Some(listing.offset);
+        info.total_count = Some(listing.total_count);
+        info.snapshot = Some(listing.snapshot);
+        let warnings = models::EntryWarnings::new(
             listing.cut_off_starts.iter().map(ScopeStart::to_response).collect(),
             listing.walked_starts.iter().map(ScopeStart::to_response).collect(),
             listing.missing_starts.iter().map(ScopeStart::to_response).collect(),
         );
-        response.total_count = Some(listing.total_count);
-        response.offset = Some(listing.offset);
-        response.snapshot = Some(listing.snapshot);
+        let mut response = models::EntryPage::new(info, warnings);
+        response.items = Some(listing.entries.into_iter().map(models::ScopedEntry::from).collect());
         response
     }
 }
 
-impl From<ScopeTimelinePage> for models::EntryListing {
+impl From<ScopeTimelinePage> for models::EntryPage {
     fn from(page: ScopeTimelinePage) -> Self {
-        let entries = page
+        let items = page
             .entries
             .into_iter()
             .map(|found| {
@@ -320,14 +415,16 @@ impl From<ScopeTimelinePage> for models::EntryListing {
                 scoped
             })
             .collect();
-        let mut response = models::EntryListing::new(
-            entries,
+        let mut info = models::EntryPageInfo::new(models::EntryPageKind::Cursor);
+        info.previous = page.previous.map(|cursor| cursor.encode());
+        info.next = page.next.map(|cursor| cursor.encode());
+        let warnings = models::EntryWarnings::new(
             page.cut_off_starts.iter().map(ScopeStart::to_response).collect(),
             page.walked_starts.iter().map(ScopeStart::to_response).collect(),
             page.missing_starts.iter().map(ScopeStart::to_response).collect(),
         );
-        response.previous = page.previous.map(|cursor| cursor.encode());
-        response.next = page.next.map(|cursor| cursor.encode());
+        let mut response = models::EntryPage::new(info, warnings);
+        response.items = Some(items);
         response
     }
 }
@@ -349,6 +446,17 @@ impl From<ApiError> for apis::entries::ListEntryMonthsResponse {
             ApiStatus::Conflict | ApiStatus::RangeNotSatisfiable | ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => {
                 Self::Status500_InternalServerError(error.body)
             }
+        }
+    }
+}
+
+impl From<ApiError> for apis::entries::ListEntryMetadataResponse {
+    fn from(error: ApiError) -> Self {
+        match error.status {
+            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
+            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
+            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
+            _ => Self::Status500_InternalServerError(error.body),
         }
     }
 }
@@ -472,9 +580,9 @@ mod tests {
 
     /// The Library and the path of every Entry of a page, as `library:path`.
     fn listed(body: &Value) -> TestResult<Vec<String>> {
-        Ok(body["entries"]
+        Ok(body["items"]
             .as_array()
-            .ok_or("entries is missing")?
+            .ok_or("items is missing")?
             .iter()
             .map(|entry| {
                 format!(
@@ -488,7 +596,7 @@ mod tests {
 
     /// The starts that a response names in `field`, each as its Library id and its path as given, the root without its `/`.
     fn strings(body: &Value, field: &str) -> Vec<String> {
-        body[field]
+        body["warnings"][field]
             .as_array()
             .map(|starts| {
                 starts
@@ -513,6 +621,7 @@ mod tests {
     fn body_of(spec: &str) -> Value {
         let mut starts = Vec::new();
         let (mut scope, mut filter, mut body) = (serde_json::Map::new(), serde_json::Map::new(), serde_json::Map::new());
+        let (mut options, mut page) = (serde_json::Map::new(), serde_json::Map::new());
         for (key, value) in spec.split('&').filter(|pair| !pair.is_empty()).map(|pair| pair.split_once('=').unwrap_or((pair, ""))) {
             let number = || value.parse::<u64>().map(Value::from).unwrap_or_else(|_| json!(value));
             match key {
@@ -533,13 +642,22 @@ mod tests {
                         .for_each(|values| values.push(json!(value)));
                 }
                 "locate" | "around" => {
-                    body.insert(key.to_string(), library_path(value));
+                    page.insert(key.to_string(), library_path(value));
                 }
-                "foldersFirst" => {
-                    body.insert(key.to_string(), json!(value == "true"));
+                "after" | "before" | "month" => {
+                    page.insert(key.to_string(), json!(value));
+                }
+                "pageKind" => {
+                    page.insert("kind".to_string(), json!(value));
+                }
+                "foldersFirst" | "includeHidden" => {
+                    options.insert(key.to_string(), json!(value == "true"));
+                }
+                "fields" => {
+                    options.insert(key.to_string(), json!(value));
                 }
                 "offset" | "limit" => {
-                    body.insert(key.to_string(), number());
+                    page.insert(key.to_string(), number());
                 }
                 _ => {
                     body.insert(key.to_string(), json!(value));
@@ -548,6 +666,12 @@ mod tests {
         }
         scope.insert("starts".to_string(), Value::Array(starts));
         body.insert("scope".to_string(), Value::Object(scope));
+        if !options.is_empty() {
+            body.insert("options".to_string(), Value::Object(options));
+        }
+        let cursor = body.get("sort").is_some_and(|sort| sort == "timeline_date");
+        page.entry("kind").or_insert_with(|| json!(if cursor { "cursor" } else { "offset" }));
+        body.insert("page".to_string(), Value::Object(page));
         if !filter.is_empty() {
             body.insert("filter".to_string(), Value::Object(filter));
         }
@@ -604,13 +728,13 @@ mod tests {
             "photos:/x/z.txt",
         ];
         assert_eq!(listed(&all.body)?, expected, "the same path follows the order of the starts");
-        assert_eq!((&all.body["totalCount"], &all.body["offset"]), (&json!(6), &json!(0)));
+        assert_eq!((&all.body["page"]["totalCount"], &all.body["page"]["offset"]), (&json!(6), &json!(0)));
         assert!(
-            all.body["snapshot"].as_str().is_some_and(|snapshot| snapshot.contains(',')),
+            all.body["page"]["snapshot"].as_str().is_some_and(|snapshot| snapshot.contains(',')),
             "the ids of the two starts are joined"
         );
         for field in ["cutOffStarts", "walkedStarts", "missingStarts"] {
-            assert_eq!(all.body[field], json!([]), "{field}");
+            assert_eq!(all.body["warnings"][field], json!([]), "{field}");
         }
 
         let reversed = get(&router, &token, "start=videos/x&start=photos/x&recursive=true&sort=name&limit=100").await?;
@@ -621,13 +745,13 @@ mod tests {
             let mut snapshots = Vec::new();
             for offset in (0..6).step_by(limit) {
                 let page = get(&router, &token, &format!("{query}&limit={limit}&offset={offset}")).await?;
-                assert_eq!(page.body["offset"], offset);
-                assert_eq!(page.body["totalCount"], 6);
+                assert_eq!(page.body["page"]["offset"], offset);
+                assert_eq!(page.body["page"]["totalCount"], 6);
                 joined.extend(listed(&page.body)?);
-                snapshots.push(page.body["snapshot"].clone());
+                snapshots.push(page.body["page"]["snapshot"].clone());
             }
             assert_eq!(joined, expected, "limit {limit}");
-            assert!(snapshots.iter().all(|snapshot| *snapshot == all.body["snapshot"]));
+            assert!(snapshots.iter().all(|snapshot| *snapshot == all.body["page"]["snapshot"]));
         }
 
         let descending = get(&router, &token, &format!("{query}&order=desc&limit=100")).await?;
@@ -767,7 +891,7 @@ mod tests {
         let token = login(&router).await?;
         let state = fixture.server.state.clone();
         let base = get(&router, &token, "start=photos/x&recursive=true&limit=100").await?;
-        assert_eq!(base.body["totalCount"], 3);
+        assert_eq!(base.body["page"]["totalCount"], 3);
 
         for starts in [
             "start=photos/x&start=photos/x",
@@ -782,7 +906,7 @@ mod tests {
                 &format!("{}&recursive=true&limit=100&kind=image&kind=other&kind=video", starts.split('&').next().unwrap_or_default()),
             )
             .await?;
-            assert_eq!(response.body["totalCount"], direct.body["totalCount"], "{starts}");
+            assert_eq!(response.body["page"]["totalCount"], direct.body["page"]["totalCount"], "{starts}");
             assert_eq!(listed(&response.body)?, listed(&direct.body)?, "{starts}");
         }
         // Without recursion only the same start is dropped: the direct children of the root and of `x` are both listed, `x` once.
@@ -791,7 +915,7 @@ mod tests {
             listed(&flat.body)?,
             ["photos:/x/a.png", "photos:/photos", "photos:/x/same.png", "photos:/x", "photos:/x/z.txt"]
         );
-        assert_eq!(flat.body["totalCount"], 5);
+        assert_eq!(flat.body["page"]["totalCount"], 5);
 
         // A start inside an archive is covered by a recursive start above it only with the insides, which the index answers once it is usable.
         aggregate(&state, "photos").await?;
@@ -799,8 +923,8 @@ mod tests {
         let with_archive = get(&router, &token, "start=photos&start=photos/photos/a.7z&recursive=true&limit=1000").await?;
         let inside_only = get(&router, &token, "start=photos/photos/a.7z&recursive=true&limit=1000").await?;
         assert_eq!(
-            with_archive.body["totalCount"].as_u64(),
-            Some(root.body["totalCount"].as_u64().unwrap_or_default() + inside_only.body["totalCount"].as_u64().unwrap_or_default()),
+            with_archive.body["page"]["totalCount"].as_u64(),
+            Some(root.body["page"]["totalCount"].as_u64().unwrap_or_default() + inside_only.body["page"]["totalCount"].as_u64().unwrap_or_default()),
             "without the insides the root lists the archive as one Entry, and the archive start adds its insides"
         );
         let root_inside = get(&router, &token, "start=photos&recursive=true&insideArchives=true&limit=1000").await?;
@@ -811,7 +935,7 @@ mod tests {
         )
         .await?;
         assert_eq!(
-            covered.body["totalCount"], root_inside.body["totalCount"],
+            covered.body["page"]["totalCount"], root_inside.body["page"]["totalCount"],
             "with the insides the root covers the archive and what is inside it"
         );
         assert_eq!(listed(&covered.body)?, listed(&root_inside.body)?);
@@ -838,7 +962,7 @@ mod tests {
             strings(&response.body, "missingStarts"),
             ["photos/gone", "nolibrary/x", "photos/photos/notes.txt", "photos/x/missing"]
         );
-        assert_eq!(response.body["totalCount"], 3);
+        assert_eq!(response.body["page"]["totalCount"], 3);
 
         // The starts that are missing are named on every page.
         let later = get(&router, &token, "start=photos/gone&start=photos/x&recursive=true&limit=1&offset=2").await?;
@@ -848,7 +972,7 @@ mod tests {
         let none = get(&router, &token, "start=photos/gone&start=nolibrary&start=photos/photos/notes.txt&recursive=true").await?;
         assert_eq!(none.status, StatusCode::OK, "{}", none.body);
         assert_eq!(listed(&none.body)?, Vec::<String>::new());
-        assert_eq!((&none.body["totalCount"], &none.body["offset"]), (&json!(0), &json!(0)));
+        assert_eq!((&none.body["page"]["totalCount"], &none.body["page"]["offset"]), (&json!(0), &json!(0)));
         assert_eq!(strings(&none.body, "missingStarts"), ["photos/gone", "nolibrary", "photos/photos/notes.txt"]);
         Ok(())
     }
@@ -869,17 +993,6 @@ mod tests {
         assert_eq!(response.status, StatusCode::OK, "{}", response.body);
         assert_eq!(listed(&response.body)?, ["photos:/x/a.png", "photos:/x/same.png", "photos:/x/z.txt"]);
         assert_eq!(strings(&response.body, "missingStarts"), ["photos/photos/notes.txt/x", "photos/photos/notes.txt/x/y/z"]);
-
-        // The folder listing API keeps its answer for the same path.
-        let folder = send(
-            &router,
-            http::Method::GET,
-            "/api/v1/libraries/photos/folders/entries?path=/photos/notes.txt/x",
-            &[("authorization", token.as_str())],
-            None,
-        )
-        .await?;
-        assert_eq!(folder.status, StatusCode::BAD_REQUEST, "{}", folder.body);
         Ok(())
     }
 
@@ -909,7 +1022,7 @@ mod tests {
 
         // The index of `photos` is not usable, so its start is walked, and the walk is cut off at the limit.
         let before = get(&router, &token, "start=photos/big&start=videos&query=sun&recursive=true&limit=100").await?;
-        assert_eq!(before.body["totalCount"], 4);
+        assert_eq!(before.body["page"]["totalCount"], 4);
         assert_eq!(strings(&before.body, "walkedStarts"), ["photos/big", "videos"]);
         assert_eq!(strings(&before.body, "cutOffStarts"), ["photos/big"]);
 
@@ -942,11 +1055,11 @@ mod tests {
         ] {
             let located = get(&router, &token, &format!("{query}&locate={target}")).await?;
             assert_eq!(located.status, StatusCode::OK, "{target}: {}", located.body);
-            assert_eq!(located.body["offset"], offset, "{target}");
+            assert_eq!(located.body["page"]["offset"], offset, "{target}");
             let page = get(&router, &token, &format!("{query}&offset={offset}")).await?;
-            assert_eq!(located.body["entries"], page.body["entries"], "{target}");
-            assert_eq!(located.body["totalCount"], page.body["totalCount"]);
-            assert_eq!(located.body["snapshot"], page.body["snapshot"]);
+            assert_eq!(located.body["items"], page.body["items"], "{target}");
+            assert_eq!(located.body["page"]["totalCount"], page.body["page"]["totalCount"]);
+            assert_eq!(located.body["page"]["snapshot"], page.body["page"]["snapshot"]);
             assert!(listed(&located.body)?.contains(&target.replacen('/', ":/", 1)), "{target}");
         }
         for target in ["photos/x/missing.png", "videos/x/a.png", "nolibrary/x/a.png", "photos"] {
@@ -1026,16 +1139,14 @@ mod tests {
             ("photos", "/C:/x"),
         ] {
             bodies.push(json!({"scope": {"starts": [start("photos", "/x"), start(library_id, path)]}}));
-            bodies.push(json!({"scope": {"starts": [start("photos", "/x")]}, "locate": start(library_id, path)}));
-            bodies.push(json!({"scope": {"starts": [start("photos", "/x")]}, "sort": "timeline_date", "around": start(library_id, path)}));
+            bodies.push(json!({"scope": {"starts": [start("photos", "/x")]}, "page": {"kind": "offset", "locate": start(library_id, path)}}));
+            bodies.push(json!({"scope": {"starts": [start("photos", "/x")]}, "sort": "timeline_date", "page": {"kind": "cursor", "around": start(library_id, path)}}));
         }
         for body in &bodies {
             for uri in [ENTRIES, &format!("{ENTRIES}/months")] {
                 let response = send(&router, http::Method::POST, uri, headers, Some(body.clone())).await?;
                 // The months request has no `locate` and no `around`, which it ignores, so it answers the starts only.
-                let sorted_out = uri.ends_with("/months")
-                    && (body.get("locate").is_some() || body.get("around").is_some())
-                    && body["scope"]["starts"].as_array().is_some_and(|starts| starts.len() == 1);
+                let sorted_out = uri.ends_with("/months") && body.get("page").is_some() && body["scope"]["starts"].as_array().is_some_and(|starts| starts.len() == 1);
                 if sorted_out {
                     continue;
                 }
@@ -1063,7 +1174,7 @@ mod tests {
         )
         .await?;
         assert_eq!(response.status, StatusCode::OK, "{}", response.body);
-        assert_eq!(response.body["missingStarts"], json!([start("nolibrary", "/x")]));
+        assert_eq!(response.body["warnings"]["missingStarts"], json!([start("nolibrary", "/x")]));
         Ok(())
     }
 
@@ -1083,13 +1194,13 @@ mod tests {
         let response = send(&router, http::Method::POST, ENTRIES, headers, Some(body)).await?;
         assert_eq!(response.status, StatusCode::OK, "{}", response.body);
         assert_eq!(
-            response.body["missingStarts"],
+            response.body["warnings"]["missingStarts"],
             json!([start("photos", "/gone/"), start("nolibrary", "/"), start("photos", "/x/../gone")]),
             "as given, and a start given twice once"
         );
-        assert_eq!(response.body["totalCount"], 3);
+        assert_eq!(response.body["page"]["totalCount"], 3);
         for field in ["cutOffStarts", "walkedStarts"] {
-            assert_eq!(response.body[field], json!([]), "{field}");
+            assert_eq!(response.body["warnings"][field], json!([]), "{field}");
         }
         // The Filter and the choices of the Scope are optional, and `filter` may be empty.
         for body in [
@@ -1099,7 +1210,7 @@ mod tests {
         ] {
             let response = send(&router, http::Method::POST, ENTRIES, headers, Some(body.clone())).await?;
             assert_eq!(response.status, StatusCode::OK, "{body}: {}", response.body);
-            assert_eq!(response.body["totalCount"], 3, "{body}");
+            assert_eq!(response.body["page"]["totalCount"], 3, "{body}");
         }
         // `locate` is an Entry of a Library and a path.
         let located = send(
@@ -1108,12 +1219,162 @@ mod tests {
             ENTRIES,
             headers,
             Some(
-                json!({"scope": {"starts": [start("photos", "/x"), start("videos", "/x")], "recursive": true}, "sort": "name", "limit": 2, "locate": start("videos", "/x/y.txt")}),
+                json!({"scope": {"starts": [start("photos", "/x"), start("videos", "/x")], "recursive": true}, "sort": "name", "page": {"kind": "offset", "limit": 2, "locate": start("videos", "/x/y.txt")}}),
             ),
         )
         .await?;
         assert_eq!(located.status, StatusCode::OK, "{}", located.body);
-        assert_eq!(located.body["offset"], 4);
+        assert_eq!(located.body["page"]["offset"], 4);
+        Ok(())
+    }
+
+    /// A folder written just now is rescanned after the first listing; age it so that two requests share a snapshot.
+    fn age(path: &std::path::Path) -> std::io::Result<()> {
+        let modified = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
+        filetime::set_file_mtime(path, filetime::FileTime::from_system_time(modified))
+    }
+
+    #[tokio::test]
+    async fn a_summary_lists_the_direct_children_of_one_start_and_locates_an_entry_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let shelf = fixture._dir.path().join("library/shelf");
+        std::fs::create_dir_all(&shelf)?;
+        for name in ["a.png", "b.png", "c.png"] {
+            std::fs::write(shelf.join(name), b"png")?;
+        }
+        age(&shelf)?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+
+        let located = get(&router, &token, "start=photos/shelf&fields=summary&limit=1&locate=photos/shelf/b.png").await?;
+        assert_eq!(located.status, StatusCode::OK, "{}", located.body);
+        assert!(located.body.get("items").is_none(), "a summary carries summaries in place of items");
+        assert_eq!(located.body["page"]["offset"], 1);
+        assert_eq!(located.body["summaries"][0]["summary"]["name"], "b.png");
+        assert_eq!(located.body["summaries"][0]["libraryId"], "photos");
+        assert!(located.body["summaries"][0]["summary"].get("metadata").is_none(), "a summary has no metadata");
+        let same = get(&router, &token, "start=photos/shelf&fields=summary&limit=1&offset=1").await?;
+        assert_eq!(located.body["summaries"], same.body["summaries"]);
+        assert_eq!(located.body["page"]["snapshot"], same.body["page"]["snapshot"]);
+
+        for (spec, status) in [
+            ("start=photos/shelf&fields=summary&locate=photos/shelf/a.png&offset=0", StatusCode::BAD_REQUEST),
+            ("start=photos/shelf&fields=summary&locate=photos/shelf/missing.png", StatusCode::NOT_FOUND),
+            ("start=photos/shelf&fields=summary&recursive=true", StatusCode::BAD_REQUEST),
+            ("start=photos/shelf&start=videos&fields=summary", StatusCode::BAD_REQUEST),
+            ("start=photos/shelf&fields=summary&sort=size", StatusCode::BAD_REQUEST),
+            ("start=photos/shelf&fields=summary&kind=image", StatusCode::BAD_REQUEST),
+        ] {
+            assert_eq!(get(&router, &token, spec).await?.status, status, "{spec}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_listing_reads_hidden_entries_only_when_asked_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let photos = fixture._dir.path().join("library/photos");
+        std::fs::create_dir_all(photos.join(".hidden"))?;
+        std::fs::write(photos.join(".hidden/h.png"), b"h")?;
+        std::fs::write(photos.join(".dot.png"), b"d")?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+
+        let plain = get(&router, &token, "start=photos/photos&sort=name").await?;
+        assert!(!listed(&plain.body)?.iter().any(|path| path.contains("/.")), "{:?}", listed(&plain.body)?);
+        let hidden = get(&router, &token, "start=photos/photos&sort=name&includeHidden=true").await?;
+        let paths = listed(&hidden.body)?;
+        assert!(
+            paths.contains(&"photos:/photos/.hidden".to_string()) && paths.contains(&"photos:/photos/.dot.png".to_string()),
+            "{paths:?}"
+        );
+        let deep = get(&router, &token, "start=photos/photos&recursive=true&includeHidden=true&sort=name").await?;
+        assert!(
+            listed(&deep.body)?.contains(&"photos:/photos/.hidden/h.png".to_string()),
+            "a recursive listing walks hidden folders when asked"
+        );
+        let tree = get(&router, &token, "start=photos/photos&kind=folder&kind=archive&includeHidden=true&fields=summary").await?;
+        let names = tree.body["summaries"]
+            .as_array()
+            .ok_or("summaries is missing")?
+            .iter()
+            .map(|item| item["summary"]["name"].as_str().unwrap_or_default().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, [".hidden", "a.7z", "outer.7z"], "the tree's summary keeps folders and archives");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_archive_start_lists_its_root_with_the_content_types_of_images_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let photos = fixture._dir.path().join("library/photos");
+        std::fs::write(photos.join("Pic.PNG"), b"png")?;
+        std::fs::write(photos.join("clip.mp4"), b"mp4")?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+
+        let root = get(&router, &token, "start=photos/photos/a.7z&sort=name").await?;
+        assert_eq!(listed(&root.body)?, ["photos:/photos/a.7z/dir", "photos:/photos/a.7z/y.txt"]);
+        assert_eq!(root.body["items"][0]["entry"]["kind"], "folder");
+
+        let folder = get(&router, &token, "start=photos/photos&sort=name").await?;
+        let content_type = |name: &str| {
+            folder.body["items"]
+                .as_array()
+                .and_then(|items| items.iter().find(|item| item["entry"]["name"] == name))
+                .and_then(|item| item["entry"]["metadata"]["contentType"].as_str().map(str::to_string))
+        };
+        assert_eq!(content_type("Pic.PNG").as_deref(), Some("image/png"));
+        assert_eq!(content_type("clip.mp4").as_deref(), Some("video/mp4"));
+        assert_eq!(content_type("notes.txt"), None);
+        assert_eq!(content_type("a.7z"), None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn metadata_answers_each_place_of_several_libraries_in_order_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        write_pairs(&fixture)?;
+        let router = router(&fixture);
+        let token = login(&router).await?;
+        let headers = &[("authorization", token.as_str())];
+        let places = json!({"places": [
+            library_path("videos/x/b.mp4"),
+            library_path("photos/x/a.png"),
+            library_path("photos/x/missing.png"),
+            library_path("nolibrary/x"),
+            library_path("photos/photos/a.7z/dir"),
+        ]});
+        let response = send(&router, http::Method::POST, &format!("{ENTRIES}/metadata"), headers, Some(places)).await?;
+        assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+        let items = response.body["items"].as_array().ok_or("items is missing")?;
+        let summary = items
+            .iter()
+            .map(|item| {
+                format!(
+                    "{}:{}:{}",
+                    item["libraryId"].as_str().unwrap_or_default(),
+                    item["path"].as_str().unwrap_or_default(),
+                    item["error"].as_str().unwrap_or(if item["detail"].is_object() { "ok" } else { "-" })
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            [
+                "videos:/x/b.mp4:ok",
+                "photos:/x/a.png:ok",
+                "photos:/x/missing.png:NotFound",
+                "nolibrary:/x:NotFound",
+                "photos:/photos/a.7z/dir:ok",
+            ],
+            "one result per place in the order given, and a missing Library fails only its places"
+        );
+        let duplicated = json!({"places": [library_path("photos/x/a.png"), library_path("photos/x/./a.png")]});
+        assert_eq!(
+            send(&router, http::Method::POST, &format!("{ENTRIES}/metadata"), headers, Some(duplicated)).await?.status,
+            StatusCode::BAD_REQUEST
+        );
         Ok(())
     }
 
@@ -1171,7 +1432,7 @@ mod tests {
         let token = bearer(&login)?;
         let bearer = send(&router, http::Method::POST, ENTRIES, &[("authorization", &token)], Some(body.clone())).await?;
         let same = send(&router, http::Method::POST, ENTRIES, &[("cookie", &cookie), ("origin", "http://localhost")], Some(body)).await?;
-        assert_eq!(bearer.body["entries"], same.body["entries"]);
+        assert_eq!(bearer.body["items"], same.body["items"]);
         Ok(())
     }
 
@@ -1199,7 +1460,7 @@ mod tests {
         assert_eq!(listed(&good.body)?, ["photos:/x/a.png", "videos:/x/b.png"]);
         let unrated = get(&router, &token, &format!("{query}&rating=none")).await?;
         assert_eq!(listed(&unrated.body)?, ["videos:/x/b.mp4", "photos:/x/same.png", "videos:/x/same.png"]);
-        let before = good.body["snapshot"].clone();
+        let before = good.body["page"]["snapshot"].clone();
         send(
             &router,
             http::Method::PUT,
@@ -1209,10 +1470,10 @@ mod tests {
         )
         .await?;
         let after = get(&router, &token, &format!("{query}&rating=good")).await?;
-        assert_ne!(after.body["snapshot"], before, "a rating write changes the id");
-        assert_eq!(after.body["totalCount"], 3);
+        assert_ne!(after.body["page"]["snapshot"], before, "a rating write changes the id");
+        assert_eq!(after.body["page"]["totalCount"], 3);
         let none = get(&router, &token, &format!("{query}&rating=good&kind=folder")).await?;
-        assert_eq!(none.body["totalCount"], 0);
+        assert_eq!(none.body["page"]["totalCount"], 0);
         Ok(())
     }
 
@@ -1280,16 +1541,16 @@ mod tests {
         let mut seen = Vec::new();
         let mut page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}")).await?;
         assert_eq!(page.status, StatusCode::OK, "{query}: {}", page.body);
-        assert!(page.body["previous"].is_null());
+        assert!(page.body["page"]["previous"].is_null());
         loop {
             seen.extend(listed(&page.body)?);
-            let Some(next) = page.body["next"].as_str().map(str::to_string) else { break };
+            let Some(next) = page.body["page"]["next"].as_str().map(str::to_string) else { break };
             page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&after={next}")).await?;
             assert_eq!(page.status, StatusCode::OK, "{query}: {}", page.body);
         }
         let all = get(router, token, &format!("{query}&sort=timeline_date&limit=1000")).await?;
         let mut back = Vec::new();
-        if let Some(last) = all.body["entries"].as_array().and_then(|entries| entries.last()) {
+        if let Some(last) = all.body["items"].as_array().and_then(|entries| entries.last()) {
             let cursor = format!(
                 "{}{}{}",
                 last["timelineDate"].as_str().unwrap_or_default(),
@@ -1306,7 +1567,9 @@ mod tests {
                 let mut current = listed(&page.body)?;
                 current.extend(back);
                 back = current;
-                let Some(previous) = page.body["previous"].as_str().map(str::to_string) else { break };
+                let Some(previous) = page.body["page"]["previous"].as_str().map(str::to_string) else {
+                    break;
+                };
                 page = get(router, token, &format!("{query}&sort=timeline_date&limit={limit}&before={previous}")).await?;
             }
         }
@@ -1330,7 +1593,7 @@ mod tests {
         for field in ["totalCount", "offset", "snapshot", "previous", "next"] {
             assert!(all.body.get(field).is_none(), "{field} is absent");
         }
-        let first = &all.body["entries"][0];
+        let first = &all.body["items"][0];
         assert_eq!(
             (first["timelineDate"].as_str().map(|date| &date[..10]), first["timelineDateSource"].as_str()),
             (Some("2024-03-15"), Some("modified"))
@@ -1340,7 +1603,7 @@ mod tests {
             assert!(strings(&all.body, field).is_empty());
         }
         let first_page = get(&router, &token, &format!("{BOTH}&sort=timeline_date&limit=2")).await?;
-        assert!(first_page.body["previous"].is_null() && first_page.body["next"].is_string());
+        assert!(first_page.body["page"]["previous"].is_null() && first_page.body["page"]["next"].is_string());
 
         // The pages join without a repeat or a gap in both directions, whatever their size.
         for limit in 1..=4 {
@@ -1350,7 +1613,7 @@ mod tests {
         // A month starts at its newest Entry, or at the next older month that has one.
         let february = get(&router, &token, &format!("{BOTH}&sort=timeline_date&limit=2&month=2024-02")).await?;
         assert_eq!(listed(&february.body)?, ["photos:/photos/sub/p3.png", "photos:/top.png"]);
-        assert!(february.body["previous"].is_string() && february.body["next"].is_string());
+        assert!(february.body["page"]["previous"].is_string() && february.body["page"]["next"].is_string());
         let gap = get(&router, &token, &format!("{BOTH}&{TIMELINE}&month=2024-01")).await?;
         assert_eq!(listed(&gap.body)?, ["photos:/top.png", "videos:/v2.png"]);
 
@@ -1467,7 +1730,7 @@ mod tests {
         assert!(strings(&after.body, "walkedStarts").is_empty());
         assert_eq!(strings(&after.body, "cutOffStarts"), ["photos/big"]);
         assert_eq!(listed(&after.body)?.len(), 3 + 1, "the matches of each start up to the limit");
-        let dates = after.body["entries"]
+        let dates = after.body["items"]
             .as_array()
             .ok_or("entries")?
             .iter()
@@ -1543,7 +1806,7 @@ mod tests {
                         let seen = walk(&router, &token, &filter, 3).await?;
                         let pages = get(&router, &token, &format!("{filter}&{TIMELINE}")).await?;
                         let mut counted = Vec::<(String, u64)>::new();
-                        for entry in pages.body["entries"].as_array().ok_or("entries")? {
+                        for entry in pages.body["items"].as_array().ok_or("entries")? {
                             let month = entry["timelineDate"].as_str().unwrap_or_default()[..7].to_string();
                             match counted.last_mut() {
                                 Some((last, count)) if *last == month => *count += 1,
@@ -1611,18 +1874,19 @@ mod tests {
         // An order that descends is accepted, and so is a sort that is not a timeline.
         let descending = get(&router, &token, &format!("{BOTH}&{TIMELINE}&order=desc")).await?;
         assert_eq!(listed(&descending.body)?, OUTSIDE_ORDER);
-        // The folder listings keep rejecting the timeline date as a sort.
-        for uri in [
-            "/api/v1/libraries/photos/folders/entries?path=/&sort=timeline_date",
-            "/api/v1/search/entries?libraryIds=photos&query=p&sort=timeline_date",
+        // An offset page in timeline-date order, and a cursor page in another order, are refused.
+        for spec in [
+            format!("{BOTH}&{TIMELINE}&pageKind=offset"),
+            format!("{BOTH}&sort=name&pageKind=cursor"),
+            format!("{BOTH}&{TIMELINE}&includeHidden=true"),
         ] {
-            let response = send(&router, http::Method::GET, uri, &[("authorization", token.as_str())], None).await?;
-            assert_eq!(response.status, StatusCode::BAD_REQUEST, "{uri}");
+            let response = get(&router, &token, &spec).await?;
+            assert_eq!(response.status, StatusCode::BAD_REQUEST, "{spec}: {}", response.body);
         }
         // A listing cut from snapshots answers as before, with `totalCount` and without the cursors.
         let named = get(&router, &token, &format!("{BOTH}&sort=name&limit=100")).await?;
         assert_eq!(named.status, StatusCode::OK);
-        assert!(named.body["totalCount"].is_number() && named.body["previous"].is_null() && named.body["entries"][0]["timelineDate"].is_null());
+        assert!(named.body["page"]["totalCount"].is_number() && named.body["page"]["previous"].is_null() && named.body["items"][0]["timelineDate"].is_null());
         Ok(())
     }
 }

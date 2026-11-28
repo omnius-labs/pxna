@@ -3,7 +3,7 @@ import { t } from "i18next";
 
 import { ApiError, api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
-import { relativePath, scopedKey } from "../location";
+import { joinPath, pathSegments, relativePath, scopedKey } from "../location";
 import type { SearchCriteria } from "./listing";
 import type { SortPreference } from "./preferences";
 
@@ -13,12 +13,54 @@ export type Entry = Omit<DetailedEntry, "metadata"> & {
     metadata?: DetailedEntry["metadata"];
     detailError?: string;
 };
-export type FolderListing = Omit<components["schemas"]["FolderListing"], "entries"> & {
+/// One page of a listing as the screens hold it: Entries cut from one snapshot by `offset`.
+export interface FolderListing {
     entries: Entry[];
+    totalCount: number;
+    offset: number;
+    snapshot: string;
+    /// Whether a recursive walk was cut off at the entry limit.
+    truncated: boolean;
     summary?: boolean;
-    /// Whether the name index answered a search. Only a search tells it.
+    /// Whether the name index answered a search, which is false when a start was walked. Only a search tells it.
     indexed?: boolean;
-};
+}
+
+type EntryListRequest = components["schemas"]["EntryListRequest"];
+type EntryPage = components["schemas"]["EntryPage"];
+type EntryKinds = NonNullable<components["schemas"]["EntryFilter"]["kinds"]>;
+
+/// Every kind, which a recursive listing names so that it returns folders too, as the folder listing and the search always did.
+const EVERY_KIND: EntryKinds = ["folder", "archive", "image", "video", "other"];
+/// The kinds of the tree: folders, and archives that open like folders.
+const FOLDER_KINDS: EntryKinds = ["folder", "archive"];
+
+async function listEntries(body: EntryListRequest, signal?: AbortSignal): Promise<EntryPage> {
+    return unwrap(await api.POST("/entries", { body, signal }));
+}
+
+/// The offset page of a position. A `locate` names its Entry by its path below the start, which the request names from the Library root.
+function offsetPage(libraryId: string, start: string, position: PagePosition): EntryListRequest["page"] {
+    if (typeof position === "number") return { kind: "offset", offset: position, limit: PAGE_SIZE };
+    const path = joinPath([...pathSegments(start), ...pathSegments(position.locate)]);
+    return { kind: "offset", locate: { libraryId: position.locateLibraryId ?? libraryId, path }, limit: PAGE_SIZE };
+}
+
+function offsetListing(page: EntryPage, entries: Entry[]): FolderListing {
+    return {
+        entries,
+        totalCount: page.page.totalCount ?? 0,
+        offset: page.page.offset ?? 0,
+        snapshot: page.page.snapshot ?? "",
+        truncated: page.warnings.cutOffStarts.length > 0,
+    };
+}
+
+/// A folder that is gone, or a path that is not a folder, is a missing start of `listEntries`; the screens keep treating it as a missing folder.
+function requireStarts(page: EntryPage): EntryPage {
+    if (page.warnings.missingStarts.length > 0) throw new ApiError(404, "NotFound", "the folder does not exist");
+    return page;
+}
 export const capabilitiesQuery = queryOptions({
     queryKey: ["capabilities"],
     queryFn: async () => {
@@ -107,15 +149,6 @@ export interface LocatePosition {
 /// A page position: an `offset`, or a `locate` that names an Entry.
 export type PagePosition = number | LocatePosition;
 
-/// Turns a position into query parameters. A `locate` sends no `offset`.
-export function positionQuery(position: PagePosition) {
-    if (typeof position === "number") return { offset: position };
-    return {
-        locate: position.locate,
-        ...(position.locateLibraryId === undefined ? {} : { locateLibraryId: position.locateLibraryId }),
-    };
-}
-
 interface ListOptions {
     includeHidden?: boolean;
     query?: string;
@@ -133,9 +166,24 @@ export async function fetchFolderPage(
     options: ListOptions,
     signal?: AbortSignal,
 ): Promise<FolderListing> {
-    const query = { path, limit: PAGE_SIZE, ...positionQuery(position), ...options };
-    return unwrap(
-        await api.GET("/libraries/{libraryId}/folders/entries", { params: { path: { libraryId }, query }, signal }),
+    const query = options.query?.trim() ?? "";
+    const kinds = options.foldersOnly ? FOLDER_KINDS : options.recursive ? EVERY_KIND : undefined;
+    const page = requireStarts(
+        await listEntries(
+            {
+                scope: { starts: [{ libraryId, path }], recursive: options.recursive ?? false },
+                filter: { ...(query === "" ? {} : { query }), ...(kinds === undefined ? {} : { kinds }) },
+                options: { foldersFirst: options.foldersFirst ?? false, includeHidden: options.includeHidden ?? false },
+                ...(options.sort === undefined ? {} : { sort: options.sort }),
+                ...(options.order === undefined ? {} : { order: options.order }),
+                page: offsetPage(libraryId, path, position),
+            },
+            signal,
+        ),
+    );
+    return offsetListing(
+        page,
+        (page.items ?? []).map(({ entry }) => entry),
     );
 }
 
@@ -147,32 +195,30 @@ export async function fetchSearchPage(
     signal: AbortSignal,
 ): Promise<FolderListing> {
     const query = criteria.query.trim();
-    const page = unwrap(
-        await api.GET("/search/entries", {
-            params: {
-                query: {
-                    libraryIds: [...criteria.libraryIds],
-                    ...(criteria.path === "/" ? {} : { path: criteria.path }),
-                    recursive: criteria.recursive,
-                    ...(query === "" ? {} : { query }),
-                    ...(criteria.rating === undefined ? {} : { rating: criteria.rating }),
-                    ...(criteria.tags.length === 0 ? {} : { tag: [...criteria.tags] }),
-                    ...order,
-                    foldersFirst: true,
-                    ...positionQuery(position),
-                    limit: PAGE_SIZE,
-                },
+    const page = await listEntries(
+        {
+            scope: {
+                starts: criteria.libraryIds.map((libraryId) => ({ libraryId, path: criteria.path })),
+                recursive: criteria.recursive,
             },
-            signal,
-        }),
+            filter: {
+                ...(query === "" ? {} : { query }),
+                ...(criteria.rating === undefined ? {} : { rating: criteria.rating }),
+                ...(criteria.tags.length === 0 ? {} : { tags: [...criteria.tags] }),
+                ...(criteria.recursive ? { kinds: EVERY_KIND } : {}),
+            },
+            options: { foldersFirst: true },
+            ...order,
+            page: offsetPage(criteria.libraryIds[0] ?? "", criteria.path, position),
+        },
+        signal,
     );
     return {
-        entries: page.entries.map(({ libraryId, entry }) => ({ ...entry, path: scopedKey(libraryId, entry.path) })),
-        totalCount: page.totalCount,
-        offset: page.offset,
-        snapshot: page.snapshot,
-        truncated: page.truncatedLibraryIds.length > 0,
-        indexed: page.indexed,
+        ...offsetListing(
+            page,
+            (page.items ?? []).map(({ libraryId, entry }) => ({ ...entry, path: scopedKey(libraryId, entry.path) })),
+        ),
+        indexed: page.warnings.walkedStarts.length === 0,
     };
 }
 
@@ -221,30 +267,36 @@ export async function fetchListingPage(
     signal.throwIfAborted();
     if (!capabilities.summaryListing || !capabilities.entryDetails)
         return fetchFolderPage(libraryId, path, position, options, signal);
-    const summaryOptions = { ...options };
-    delete summaryOptions.recursive;
-    const page = unwrap(
-        await api.GET("/libraries/{libraryId}/folders/summaries", {
-            params: {
-                path: { libraryId },
-                query: {
-                    path,
-                    ...positionQuery(position),
-                    limit: PAGE_SIZE,
-                    ...summaryOptions,
-                    sort: options.sort === "kind" ? "kind" : "name",
+    const query = options.query?.trim() ?? "";
+    const page = requireStarts(
+        await listEntries(
+            {
+                scope: { starts: [{ libraryId, path }] },
+                filter: {
+                    ...(query === "" ? {} : { query }),
+                    ...(options.foldersOnly ? { kinds: FOLDER_KINDS } : {}),
                 },
+                options: {
+                    fields: "summary",
+                    foldersFirst: options.foldersFirst ?? false,
+                    includeHidden: options.includeHidden ?? false,
+                },
+                sort: options.sort === "kind" ? "kind" : "name",
+                ...(options.order === undefined ? {} : { order: options.order }),
+                page: offsetPage(libraryId, path, position),
             },
             signal,
-        }),
+        ),
     );
     return {
-        ...page,
+        ...offsetListing(
+            page,
+            (page.summaries ?? []).map(({ summary: { archive, ...entry } }) => ({
+                ...entry,
+                ...(entry.kind === "file" ? { file: { archive } } : {}),
+            })),
+        ),
         summary: true,
-        entries: page.entries.map(({ archive, ...entry }) => ({
-            ...entry,
-            ...(entry.kind === "file" ? { file: { archive } } : {}),
-        })),
     };
 }
 
@@ -275,10 +327,9 @@ export function startInArchiveQuery(libraryId: string, path: string) {
 
 export async function fetchEntryDetails(libraryId: string, paths: string[], signal: AbortSignal) {
     return unwrap(
-        await api.POST("/libraries/{libraryId}/entries/details", {
-            params: { path: { libraryId } },
-            body: { paths },
+        await api.POST("/entries/metadata", {
+            body: { places: paths.map((path) => ({ libraryId, path })) },
             signal,
         }),
-    ).results;
+    ).items;
 }

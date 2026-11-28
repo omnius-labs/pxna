@@ -53,7 +53,7 @@ tags:
     - name: Libraries
       description: Libraries available to the current user.
     - name: Folders
-      description: Folder listings, the summary listing, the metadata of several entries, and copying, moving, and deleting folders.
+      description: Copying, moving, and deleting folders.
     - name: Files
       description: Copying, moving, and deleting files.
     - name: ImageSocket
@@ -65,13 +65,11 @@ tags:
     - name: Operations
       description: Progress tracking for long-running mutations.
     - name: Timeline
-      description: Images and videos of Libraries ordered by their timeline date.
-    - name: Search
-      description: Name, rating, and tag search across one or more Libraries.
+      description: The state of the timeline's aggregation of Libraries, and starting it.
     - name: Entries
       description: |
-        The Entries of a Scope of starts in one or more Libraries read through a Filter, and one Entry addressed by its
-        Library and path: its metadata, its content, file and folder creation, and the probe for its children.
+        The Entries of a Scope of starts in one or more Libraries read through a Filter, the metadata of several Entries, and one
+        Entry addressed by its Library and path: its metadata, its content, file and folder creation, and the probe for its children.
     - name: Media
       description: Media information of images and videos.
     - name: Ratings & Tags
@@ -446,107 +444,6 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
-    /timeline/entries:
-        get:
-            tags:
-                - Timeline
-            summary: List timeline entries
-            description: |
-                Lists the images and videos of the given Libraries, including
-                those inside archives, from newest to oldest timeline date, as
-                one sequence. Entries with the same timeline date are ordered
-                by Library id and then by path. The result comes from the
-                timeline index that the daemon builds in the background, not
-                from a traversal at request time.
-
-                At most one of `after`, `before`, `month` and `around` selects
-                where the page starts. Without any of them the page starts at
-                the newest entry. `around` needs `aroundLibraryId`, which must
-                be one of `libraryIds`. `previous` and `next` are cursors for
-                the pages before and after the returned entries and are absent
-                when there is nothing further in that direction. A cursor is
-                only meaningful with the same `libraryIds`.
-            operationId: listTimelineEntries
-            parameters:
-                - $ref: "#/components/parameters/TimelineLibraryIdsQuery"
-                - name: after
-                  in: query
-                  required: false
-                  description: Cursor from `next`. Returns the entries older than the cursor.
-                  schema:
-                      type: string
-                - name: before
-                  in: query
-                  required: false
-                  description: Cursor from `previous`. Returns the entries newer than the cursor.
-                  schema:
-                      type: string
-                - name: month
-                  in: query
-                  required: false
-                  description: Starts at the newest entry of this month (`YYYY-MM`), or of the next older month that has entries.
-                  schema:
-                      type: string
-                      pattern: "^[0-9]{4}-[0-9]{2}$"
-                - name: around
-                  in: query
-                  required: false
-                  description: Returns a page that has this entry of `aroundLibraryId` near its middle.
-                  schema:
-                      $ref: "#/components/schemas/RelativePath"
-                - name: aroundLibraryId
-                  in: query
-                  required: false
-                  description: The Library of `around`. Given exactly when `around` is given.
-                  schema:
-                      $ref: "#/components/schemas/LibraryId"
-                - $ref: "#/components/parameters/ListLimitQuery"
-            responses:
-                "200":
-                    description: Timeline entries.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/TimelineListing"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /timeline/months:
-        get:
-            tags:
-                - Timeline
-            summary: List the months that have timeline entries
-            description: |
-                Returns the number of entries of the given Libraries per
-                month, newest month first. The counts are kept up to date
-                together with the timeline index, so they always equal the
-                number of entries `entries` returns for that month with the
-                same `libraryIds`.
-            operationId: listTimelineMonths
-            parameters:
-                - $ref: "#/components/parameters/TimelineLibraryIdsQuery"
-            responses:
-                "200":
-                    description: Entry counts per month.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/TimelineMonths"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
     /timeline/status:
         get:
             tags:
@@ -649,117 +546,6 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
-    /libraries/{libraryId}/folders/entries:
-        get:
-            tags:
-                - Folders
-            summary: List folder entries
-            description: |
-                Lists direct children by default. Set `recursive=true` only for an
-                explicit recursive traversal within the selected Library.
-
-            operationId: listFolderEntries
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-                - $ref: "#/components/parameters/RecursiveQuery"
-                - $ref: "#/components/parameters/ListOffsetQuery"
-                - $ref: "#/components/parameters/LocateQuery"
-                - $ref: "#/components/parameters/NameFilterQuery"
-                - $ref: "#/components/parameters/ListLimitQuery"
-                - $ref: "#/components/parameters/SortQuery"
-                - $ref: "#/components/parameters/OrderQuery"
-                - $ref: "#/components/parameters/IncludeHiddenQuery"
-                - $ref: "#/components/parameters/FoldersFirstQuery"
-                - $ref: "#/components/parameters/FoldersOnlyQuery"
-            responses:
-                "200":
-                    description: Folder entries.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/FolderListing"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-
-    /search/entries:
-        get:
-            tags:
-                - Search
-            summary: Search entries across Libraries
-            description: |
-                Applies the name, rating, and tag conditions to the listing of
-                the start in each of `libraryIds`, and returns the matches as one
-                sequence ordered by `sort`, `order`, and `foldersFirst`. Entries
-                that compare equal, which only happens for the same path in
-                different Libraries, follow the order of `libraryIds`.
-
-                `path` may name a start other than `/` only when `libraryIds`
-                has one Library; with several, every Library is searched from
-                its root. Hidden entries are never returned.
-
-                `rating` and `tag` keep only the images and videos that the
-                current user has rated or tagged that way; several `tag` values
-                must all be present. While one of them is set, `snapshot` also
-                changes whenever the user rates or tags anything, so a client
-                that pages through the result re-reads from the start instead of
-                mixing pages from before and after the change.
-
-                `recursive` traversal is cut off per Library at the configured
-                entry limit, and the Libraries cut off are listed in
-                `truncatedLibraryIds`.
-            operationId: listSearchEntries
-            parameters:
-                - $ref: "#/components/parameters/SearchLibraryIdsQuery"
-                - name: path
-                  in: query
-                  required: false
-                  description: Start relative to the Library. Only with one Library.
-                  schema:
-                      $ref: "#/components/schemas/RelativePath"
-                - $ref: "#/components/parameters/RecursiveQuery"
-                - $ref: "#/components/parameters/NameFilterQuery"
-                - $ref: "#/components/parameters/RatingFilterQuery"
-                - $ref: "#/components/parameters/TagFiltersQuery"
-                - $ref: "#/components/parameters/SortQuery"
-                - $ref: "#/components/parameters/OrderQuery"
-                - $ref: "#/components/parameters/FoldersFirstQuery"
-                - $ref: "#/components/parameters/ListOffsetQuery"
-                - $ref: "#/components/parameters/LocateQuery"
-                - $ref: "#/components/parameters/LocateLibraryIdQuery"
-                - $ref: "#/components/parameters/ListLimitQuery"
-            responses:
-                "200":
-                    description: Matching entries of the Libraries.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/SearchListing"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-
     /entries:
         post:
             tags:
@@ -769,64 +555,80 @@ paths:
                 Lists the Entries of a Scope, the `starts` of `scope` with its
                 `recursive` and `insideArchives`, through a `filter` of `query`,
                 `rating`, `tags`, and `kinds`, as one sequence ordered by
-                `sort`, `order`, and `foldersFirst`. Each Entry comes with its
-                Library id. Entries that compare equal, which only happens for
-                the same path in different Libraries, follow the order of the
-                starts. The request is a POST because it carries a body; it
-                changes nothing.
+                `sort`, `order`, and `options.foldersFirst`, and returns them as
+                one Entry page. Each item comes with its Library id. Entries that
+                compare equal, which only happens for the same path in
+                different Libraries, follow the order of the starts. It is the
+                only listing: a folder, the tree, a search, the timeline, a
+                Shelf, and the summary of a folder's direct children are each a
+                Scope and a Filter. The request is a POST because it carries a
+                body; it changes nothing.
 
                 A start is a `LibraryPath`: a Library id and a path relative to
-                the Library with its leading `/` (`/` for the root). A start
-                whose Library id is not of the form of a configured one, or
-                whose path is not a Library-relative path, is 400. A start that
-                another start covers adds nothing, the same start given twice
-                included. A start inside an archive is covered by a recursive
-                start above it only with `insideArchives`.
+                the Library with its leading `/` (`/` for the root), read as a
+                folder, so an archive is its root. A start whose Library id is
+                not of the form of a configured one, or whose path is not a
+                Library-relative path, is 400. A start that another start covers
+                adds nothing, the same start given twice included. A start
+                inside an archive is covered by a recursive start above it only
+                with `insideArchives`.
 
                 A start whose folder was deleted, whose Library is not
                 configured, or that names a file that is neither a folder nor an
-                archive is skipped and named in `missingStarts`, with the path
-                it was given; the other starts are listed. A start that is an
-                archive, or inside one, is walked inside that archive, and reads
-                the archives nested in it only with `insideArchives`.
+                archive is skipped and named in `warnings.missingStarts`, with
+                the path it was given; the other starts are listed. A start that
+                is an archive, or inside one, is walked inside that archive, and
+                reads the archives nested in it only with `insideArchives`.
 
                 A recursive listing without `kinds` returns no folder, and, with
                 `insideArchives`, none of the archives it reads like folders. A
                 start that is walked because the name index of its Library is not
                 usable returns its archives like other files and is named in
-                `walkedStarts`. With `kinds` it returns exactly the named kinds,
-                symbolic links counted as `other`. A listing of direct children
-                without `kinds` returns every kind. Hidden entries are never
-                returned.
+                `warnings.walkedStarts`. With `kinds` it returns exactly the
+                named kinds, symbolic links counted as `other`. A listing of
+                direct children without `kinds` returns every kind. Hidden
+                entries, whose names start with `.`, and the entries inside them
+                are returned only with `options.includeHidden`; a recursive
+                listing that reads them walks the file system, because the name
+                index holds none.
 
                 `rating` and `tags` keep only the images and videos that the
                 current user has rated or tagged that way. While one of them is
-                set, `snapshot` also changes whenever the user rates or tags
-                anything.
+                set, `page.snapshot` also changes whenever the user rates or
+                tags anything.
 
                 Recursive traversal is cut off per start at the configured entry
-                limit, and the starts cut off are listed in `cutOffStarts`.
+                limit, and the starts cut off are listed in
+                `warnings.cutOffStarts`.
 
-                `locate` names an Entry as a start is named, in place of
-                `offset`. The server returns the page that holds it, with the
-                `offset` it was cut at. `locate` together with `offset` is 400,
-                and an Entry that is not in the sequence is 404.
+                `page.kind` is `offset` for every sort except `timeline_date`,
+                and `cursor` with it; the other kind is 400. An `offset` page is
+                cut from a snapshot at `page.offset`, or, with `page.locate`,
+                which names an Entry as a start is named, at the page that holds
+                it; `locate` together with `offset` is 400, and an Entry that is
+                not in the sequence is 404. The response page carries
+                `offset`, `totalCount`, and `snapshot`.
+
+                `options.fields` of `summary` reads the direct children of one
+                start in `name` or `kind` order and returns `summaries`, each
+                with the path, name, kind, and archive hint, in place of
+                `items`; the details are read with `listEntryMetadata`. A
+                summary with `recursive`, with more than one start, or with
+                another sort is 400. Otherwise the page carries `items`.
 
                 With `sort` of `timeline_date` the Entries are the images and
                 videos of the Scope, newest timeline date first, and those with
                 the same timeline date are ordered by Library id and then by
                 path. `kinds` may name only `image` and `video`, and names both
-                when it is absent; any other kind is 400. The page is not cut
-                by `offset`: at most one of `after`, `before`, `month`, and
-                `around` selects where it starts, and without any of them it
-                starts at the newest Entry. `previous` and `next` are cursors
-                for the pages before and after the returned Entries and are
-                absent when there is nothing further in that direction; a
-                cursor is only meaningful with the same Scope and Filter. The
-                response has no `totalCount`, `offset`, or `snapshot`. `order`
-                may be `desc` only, and `offset`, `locate`, and `foldersFirst`
-                are 400. `after`, `before`, `month`, and `around` are 400 with
-                any other sort, and so is more than one of them.
+                when it is absent; any other kind is 400. At most one of
+                `page.after`, `page.before`, `page.month`, and `page.around`
+                selects where the page starts, and without any of them it starts
+                at the newest Entry. The response page carries `previous` and
+                `next`, cursors for the pages before and after the returned
+                Entries, absent when there is nothing further in that
+                direction; a cursor is only meaningful with the same Scope and
+                Filter. `order` may be `desc` only, and `options.foldersFirst`
+                and `options.includeHidden` are 400.
 
                 Without a name, rating, or tag condition the Entries come from
                 the timeline index that the daemon builds in the background,
@@ -849,7 +651,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: "#/components/schemas/EntryListing"
+                                $ref: "#/components/schemas/EntryPage"
                 "400":
                     $ref: "#/components/responses/InvalidRequest"
                 "401":
@@ -908,6 +710,47 @@ paths:
                 "504":
                     $ref: "#/components/responses/GatewayTimeout"
 
+    /entries/metadata:
+        post:
+            tags:
+                - Entries
+            summary: Read the metadata of up to 200 Entries
+            description: |
+                Read-only metadata request over places in one or more Libraries,
+                each a Library id and a Library-relative path. Validates every
+                place and rejects duplicates after normalization before
+                resolving any of them. Returns one result per place in request
+                order, with its Library id and normalized path, and either
+                `detail`, the Entry as a listing shows it, or `error`, the error
+                kind of that place.
+                The failure of one place does not discard the others. At most
+                four places are resolved at the same time across all requests
+                and Libraries. The leaf is inspected without following a
+                symbolic link, as in a listing. The request is a POST because it
+                carries a body; it changes nothing.
+            operationId: listEntryMetadata
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/EntryMetadataRequest"
+            responses:
+                "200":
+                    description: Exactly one Entry or error kind per place.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/EntryMetadataList"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
     /capabilities:
         get:
             tags: [Libraries]
@@ -955,97 +798,6 @@ paths:
                     $ref: "#/components/responses/InvalidRequest"
                 "401":
                     $ref: "#/components/responses/Unauthorized"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/folders/summaries:
-        get:
-            tags: [Folders]
-            summary: List names and kinds without detailed metadata
-            operationId: listFolderSummaries
-            description: |
-                Lists direct children only. The snapshot identifies the sequence
-                of names and kinds; subsequent detail requests do not change
-                its ordering or total count. Size, timestamps, readonly and
-                symbolic-link targets are not present in this response.
-                Use listFolderEntries for recursive, size or modified_at sorting.
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-                - $ref: "#/components/parameters/PathQuery"
-                - $ref: "#/components/parameters/ListOffsetQuery"
-                - $ref: "#/components/parameters/LocateQuery"
-                - $ref: "#/components/parameters/NameFilterQuery"
-                - $ref: "#/components/parameters/ListLimitQuery"
-                - name: sort
-                  in: query
-                  schema:
-                      type: string
-                      enum: [name, kind]
-                      default: name
-                - $ref: "#/components/parameters/OrderQuery"
-                - $ref: "#/components/parameters/IncludeHiddenQuery"
-                - $ref: "#/components/parameters/FoldersFirstQuery"
-                - $ref: "#/components/parameters/FoldersOnlyQuery"
-            responses:
-                "200":
-                    description: Names and kinds from one summary snapshot.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/FolderSummaryListing"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-                "504":
-                    $ref: "#/components/responses/GatewayTimeout"
-
-    /libraries/{libraryId}/entries/details:
-        post:
-            tags: [Folders]
-            summary: Read current details for up to 200 entries
-            operationId: getEntryDetails
-            description: |
-                Read-only metadata request. Validates all paths and rejects
-                duplicates after normalization before resolving any entry.
-                Returns one result per path in request order, with normalized
-                Library-relative paths. Per-entry failures do not discard the
-                other results. Resolves at most four entries concurrently across
-                all requests and Libraries. The leaf is inspected without
-                following a symbolic link, as in a directory listing.
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/EntryDetailsRequest"
-            responses:
-                "200":
-                    description: Exactly one detail or error kind per requested path.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/EntryDetailsResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "413":
-                    $ref: "#/components/responses/PayloadTooLarge"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
@@ -2291,22 +2043,6 @@ components:
                 items:
                     $ref: "#/components/schemas/LibraryId"
 
-        SearchLibraryIdsQuery:
-            name: libraryIds
-            in: query
-            required: true
-            description: |
-                Libraries to search, repeated as `libraryIds=a&libraryIds=b`.
-                Every id must name a Library; an unknown id is 404.
-            style: form
-            explode: true
-            schema:
-                type: array
-                minItems: 1
-                maxItems: 64
-                items:
-                    $ref: "#/components/schemas/LibraryId"
-
         PathQuery:
             name: path
             in: query
@@ -2316,98 +2052,6 @@ components:
                 $ref: "#/components/schemas/RelativePath"
             example: /photos/2026
 
-        RecursiveQuery:
-            name: recursive
-            in: query
-            required: false
-            description: Whether to include descendants below the requested folder.
-            schema:
-                type: boolean
-                default: false
-
-        ListOffsetQuery:
-            name: offset
-            in: query
-            required: false
-            description: Offset in the sorted and filtered listing.
-            schema:
-                type: integer
-                format: int64
-                minimum: 0
-                default: 0
-
-        LocateQuery:
-            name: locate
-            in: query
-            required: false
-            description: |
-                Path of the Entry relative to the start of the listing, in place
-                of `offset`. The server returns the page that holds the Entry,
-                with the `offset` it was cut at.
-            schema:
-                type: string
-                minLength: 1
-                maxLength: 4096
-
-        LocateLibraryIdQuery:
-            name: locateLibraryId
-            in: query
-            required: false
-            description: |
-                The Library of the Entry named by `locate`. Required with
-                `locate` in a search, because the same path can be in several
-                Libraries.
-            schema:
-                $ref: "#/components/schemas/LibraryId"
-
-        NameFilterQuery:
-            name: query
-            in: query
-            required: false
-            description: |
-                Whitespace-separated terms that must all occur in an entry name.
-                Names and terms are normalized with NFKC and converted to lowercase.
-            schema:
-                type: string
-
-        ListLimitQuery:
-            name: limit
-            in: query
-            required: false
-            description: Maximum number of entries to return.
-            schema:
-                type: integer
-                format: int32
-                minimum: 1
-                maximum: 1000
-                default: 200
-
-        SortQuery:
-            name: sort
-            in: query
-            required: false
-            description: Sort key for folder entries.
-            schema:
-                type: string
-                enum:
-                    - name
-                    - kind
-                    - size
-                    - modified_at
-                default: name
-
-        OrderQuery:
-            name: order
-            in: query
-            required: false
-            description: Sort direction.
-            schema:
-                type: string
-                enum:
-                    - asc
-                    - desc
-                default: asc
-
         IncludeHiddenQuery:
             name: includeHidden
             in: query
@@ -2416,62 +2060,6 @@ components:
             schema:
                 type: boolean
                 default: false
-
-        FoldersFirstQuery:
-            name: foldersFirst
-            in: query
-            required: false
-            description: |
-                Place folders, and files whose `file.archive` hint is true,
-                before the other entries. `sort` and `order` apply within each
-                of the two groups.
-            schema:
-                type: boolean
-                default: false
-
-        FoldersOnlyQuery:
-            name: foldersOnly
-            in: query
-            required: false
-            description: |
-                Return only folders and files whose `file.archive` hint is
-                true. `totalCount` counts the entries after this filter.
-            schema:
-                type: boolean
-                default: false
-
-        RatingFilterQuery:
-            name: rating
-            in: query
-            required: false
-            description: |
-                Return only images and videos with this rating of the current
-                user. `none` selects the images and videos that have not been
-                rated. Folders and other files never match. `totalCount` counts
-                the entries after this filter.
-            schema:
-                type: string
-                enum:
-                    - good
-                    - bad
-                    - none
-
-        TagFiltersQuery:
-            name: tag
-            in: query
-            required: false
-            description: |
-                Return only images and videos that have all of these tags of the
-                current user, repeated as `tag=a&tag=b`. Each word is trimmed
-                like a tag being set; a word the user has never used selects
-                nothing. `totalCount` counts the entries after this filter.
-            style: form
-            explode: true
-            schema:
-                type: array
-                maxItems: 32
-                items:
-                    $ref: "#/components/schemas/TagName"
 
         RangeHeader:
             name: Range
@@ -2531,14 +2119,6 @@ components:
                 archive has both; without it, an archive is its file.
             schema:
                 $ref: "#/components/schemas/EntryView"
-
-        ConflictQuery:
-            name: conflict
-            in: query
-            required: false
-            description: How to resolve an existing entry at the target path.
-            schema:
-                $ref: "#/components/schemas/ConflictPolicy"
 
         UploadIdPath:
             name: uploadId
@@ -3400,49 +2980,6 @@ components:
                 file:
                     $ref: "#/components/schemas/FileSystemEntry"
 
-        TimelineListing:
-            type: object
-            required:
-                - entries
-            properties:
-                entries:
-                    type: array
-                    items:
-                        $ref: "#/components/schemas/TimelineEntry"
-                previous:
-                    type: string
-                    description: Cursor for the page of newer entries. Absent when there are none.
-                next:
-                    type: string
-                    description: Cursor for the page of older entries. Absent when there are none.
-
-        TimelineEntry:
-            type: object
-            required:
-                - libraryId
-                - entry
-                - timelineDate
-                - timelineDateSource
-            properties:
-                libraryId:
-                    $ref: "#/components/schemas/LibraryId"
-                entry:
-                    $ref: "#/components/schemas/FileSystemEntry"
-                timelineDate:
-                    type: string
-                    description: |
-                        Date the entry is ordered by, as `YYYY-MM-DDTHH:MM:SS`
-                        without a time zone, in the daemon's configured time zone.
-                timelineDateSource:
-                    type: string
-                    description: Where `timelineDate` came from.
-                    enum:
-                        - exif
-                        - creationTime
-                        - modified
-                        - archiveModified
-                        - fileName
-
         TimelineMonths:
             type: object
             required:
@@ -3512,90 +3049,6 @@ components:
                     items:
                         $ref: "#/components/schemas/LibraryId"
 
-        FolderListing:
-            type: object
-            required:
-                - entries
-                - totalCount
-                - offset
-                - snapshot
-                - truncated
-            properties:
-                entries:
-                    type: array
-                    items:
-                        $ref: "#/components/schemas/FileSystemEntry"
-                totalCount:
-                    type: integer
-                    format: int64
-                    minimum: 0
-                    description: Total count after filtering the snapshot.
-                offset:
-                    type: integer
-                    format: int64
-                    minimum: 0
-                    description: Offset of this page in the sorted and filtered listing.
-                snapshot:
-                    type: string
-                    description: Opaque identifier of the listing snapshot.
-                truncated:
-                    type: boolean
-                    description: True when recursive traversal reached its entry limit.
-
-        SearchEntry:
-            type: object
-            required:
-                - libraryId
-                - entry
-            properties:
-                libraryId:
-                    $ref: "#/components/schemas/LibraryId"
-                entry:
-                    $ref: "#/components/schemas/FileSystemEntry"
-
-        SearchListing:
-            type: object
-            required:
-                - entries
-                - totalCount
-                - offset
-                - snapshot
-                - truncatedLibraryIds
-                - indexed
-            properties:
-                entries:
-                    type: array
-                    items:
-                        $ref: "#/components/schemas/SearchEntry"
-                totalCount:
-                    type: integer
-                    format: int64
-                    minimum: 0
-                    description: Sum of the per-Library counts after filtering.
-                offset:
-                    type: integer
-                    format: int64
-                    minimum: 0
-                    description: Offset of this page in the merged sequence.
-                snapshot:
-                    type: string
-                    description: |
-                        Opaque identifier of the merged listing. It changes when
-                        the listing of any searched Library is rebuilt.
-                truncatedLibraryIds:
-                    type: array
-                    description: Libraries whose recursive traversal reached the entry limit.
-                    items:
-                        $ref: "#/components/schemas/LibraryId"
-                indexed:
-                    type: boolean
-                    description: |
-                        True when every searched Library answered from its name index.
-                        False when any Library walked the file system, whether because
-                        its index was not usable or because the search is not one the
-                        index answers (it is not recursive, has no condition, or starts
-                        in an archive).
-
         LibraryPath:
             type: object
             description: |
@@ -3626,15 +3079,14 @@ components:
                         $ref: "#/components/schemas/LibraryPath"
                 recursive:
                     type: boolean
-                    default: false
-                    description: Whether to include descendants below each start.
+                    description: Whether to include descendants below each start. Defaults to `false`.
                 insideArchives:
                     type: boolean
-                    default: false
                     description: |
                         Whether the Scope reads the archives found under its
                         starts like folders, down to the nesting limit. It
                         changes nothing without `recursive`.
+                        Defaults to `false`.
 
         EntryFilter:
             type: object
@@ -3688,76 +3140,110 @@ components:
                     $ref: "#/components/schemas/EntryScope"
                 filter:
                     $ref: "#/components/schemas/EntryFilter"
+                options:
+                    $ref: "#/components/schemas/EntryListOptions"
                 sort:
                     type: string
                     description: |
                         Sort key. `timeline_date` orders the images and videos by
                         their timeline dates, newest first only.
+                        Defaults to `name`.
                     enum:
                         - name
                         - kind
                         - size
                         - modified_at
                         - timeline_date
-                    default: name
                 order:
                     type: string
-                    description: Sort direction.
+                    description: Sort direction. Defaults to `asc`.
                     enum:
                         - asc
                         - desc
-                    default: asc
+                page:
+                    $ref: "#/components/schemas/EntryPageRequest"
+
+        EntryListOptions:
+            type: object
+            additionalProperties: false
+            properties:
                 foldersFirst:
                     type: boolean
-                    default: false
                     description: |
                         Place folders, and files whose `file.archive` hint is
                         true, before the other entries. `sort` and `order` apply
                         within each of the two groups.
-                offset:
-                    type: integer
-                    format: int64
-                    minimum: 0
-                    default: 0
-                    description: Offset in the sorted and filtered listing.
+                        Defaults to `false`.
+                includeHidden:
+                    type: boolean
+                    description: |
+                        Read the entries whose names start with `.` and the
+                        entries inside them. A saved Shelf holds no options, so
+                        it never reads them.
+                        Defaults to `false`.
+                fields:
+                    type: string
+                    description: |
+                        `full` returns `items` with their Entries; `summary`
+                        returns `summaries` for the direct children of one start.
+                        Defaults to `full`.
+                    enum:
+                        - full
+                        - summary
+
+        EntryPageRequest:
+            type: object
+            additionalProperties: false
+            required:
+                - kind
+            description: |
+                Where the page starts. `kind` is `offset` for every sort except
+                `timeline_date`, and `cursor` with it. An `offset` page takes
+                `offset` or `locate`; a `cursor` page takes at most one of
+                `after`, `before`, `month`, and `around`.
+            properties:
+                kind:
+                    $ref: "#/components/schemas/EntryPageKind"
                 limit:
                     type: integer
                     format: int32
                     minimum: 1
                     maximum: 1000
-                    default: 200
-                    description: Maximum number of entries to return.
+                    description: Defaults to `200`.
+                offset:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Defaults to `0`.
                 locate:
                     allOf:
                         - $ref: "#/components/schemas/LibraryPath"
-                    description: |
-                        The Entry to find, named as a start is named. Not with
-                        `offset`.
+                    description: The Entry to find, named as a start is named. Not with `offset`.
                 after:
                     type: string
-                    description: |
-                        Only with `sort` of `timeline_date`. A cursor from
-                        `next`; returns the Entries older than it.
+                    description: A cursor from `next`; returns the Entries older than it.
                 before:
                     type: string
-                    description: |
-                        Only with `sort` of `timeline_date`. A cursor from
-                        `previous`; returns the Entries newer than it.
+                    description: A cursor from `previous`; returns the Entries newer than it.
                 month:
                     type: string
                     pattern: "^[0-9]{4}-[0-9]{2}$"
                     description: |
-                        Only with `sort` of `timeline_date`. Starts at the newest
-                        Entry of this month (`YYYY-MM`), or of the next older
-                        month that has Entries.
+                        Starts at the newest Entry of this month (`YYYY-MM`), or
+                        of the next older month that has Entries.
                 around:
                     allOf:
                         - $ref: "#/components/schemas/LibraryPath"
                     description: |
-                        Only with `sort` of `timeline_date`. The Entry to start
-                        around, named as a start is named. The page has it near
-                        its middle, and an Entry that is not in the sequence is
-                        404.
+                        The Entry to start around, named as a start is named. The
+                        page has it near its middle, and an Entry that is not in
+                        the sequence is 404.
+
+        EntryPageKind:
+            type: string
+            enum:
+                - offset
+                - cursor
 
         EntryMonthsRequest:
             type: object
@@ -3795,32 +3281,60 @@ components:
                         - archiveModified
                         - fileName
 
-        EntryListing:
+        EntryPage:
             type: object
+            description: |
+                One page of a listing. It carries `items` with `options.fields`
+                of `full`, and `summaries` with `summary`.
             required:
-                - entries
-                - cutOffStarts
-                - walkedStarts
-                - missingStarts
+                - page
+                - warnings
             properties:
-                entries:
+                items:
                     type: array
                     items:
                         $ref: "#/components/schemas/ScopedEntry"
-                totalCount:
-                    type: integer
-                    format: int64
-                    minimum: 0
-                    description: |
-                        Number of Entries in the merged sequence after the Filter.
-                        Absent with `sort=timeline_date`.
+                summaries:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/ScopedEntrySummary"
+                page:
+                    $ref: "#/components/schemas/EntryPageInfo"
+                warnings:
+                    $ref: "#/components/schemas/EntryWarnings"
+
+        ScopedEntrySummary:
+            type: object
+            required:
+                - libraryId
+                - summary
+            properties:
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                summary:
+                    $ref: "#/components/schemas/FileSystemEntrySummary"
+
+        EntryPageInfo:
+            type: object
+            required:
+                - kind
+            description: |
+                The effective page. An `offset` page carries `offset`,
+                `totalCount`, and `snapshot`; a `cursor` page carries `previous`
+                and `next`, each absent at an end.
+            properties:
+                kind:
+                    $ref: "#/components/schemas/EntryPageKind"
                 offset:
                     type: integer
                     format: int64
                     minimum: 0
-                    description: |
-                        Offset of this page in the merged sequence. Absent with
-                        `sort=timeline_date`.
+                    description: Offset of this page in the merged sequence.
+                totalCount:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    description: Number of Entries in the merged sequence after the Filter.
                 snapshot:
                     type: string
                     description: |
@@ -3828,17 +3342,21 @@ components:
                         the listing of any start is rebuilt.
                 previous:
                     type: string
-                    description: |
-                        Present with `sort=timeline_date`. Cursor for the page of
-                        newer Entries. Absent when there are none.
+                    description: Cursor for the page of newer Entries.
                 next:
                     type: string
-                    description: |
-                        Present with `sort=timeline_date`. Cursor for the page of
-                        older Entries. Absent when there are none.
+                    description: Cursor for the page of older Entries.
+
+        EntryWarnings:
+            type: object
+            required:
+                - cutOffStarts
+                - walkedStarts
+                - missingStarts
+            properties:
                 cutOffStarts:
                     type: array
-                    description: Starts, as they were given, whose recursive traversal reached the entry limit.
+                    description: Starts, as they were given, whose recursive traversal was cut off at the entry limit.
                     items:
                         $ref: "#/components/schemas/LibraryPath"
                 walkedStarts:
@@ -3966,62 +3484,40 @@ components:
                     type: boolean
                     description: Extension-derived archive hint; false unless kind is file.
 
-        FolderSummaryListing:
+        EntryMetadataRequest:
             type: object
-            required: [entries, totalCount, offset, snapshot, truncated]
+            additionalProperties: false
+            required: [places]
             properties:
-                entries:
-                    type: array
-                    items:
-                        $ref: "#/components/schemas/FileSystemEntrySummary"
-                totalCount:
-                    type: integer
-                    format: int64
-                    minimum: 0
-                offset:
-                    type: integer
-                    format: int64
-                    minimum: 0
-                    description: Offset of this page in the sorted and filtered listing.
-                snapshot:
-                    type: string
-                    description: Identifier of the names and kinds, not of later detail metadata.
-                truncated:
-                    type: boolean
-                    description: Always false for a complete direct-child summary listing.
-
-        EntryDetailsRequest:
-            type: object
-            required: [paths]
-            properties:
-                paths:
+                places:
                     type: array
                     minItems: 1
                     maxItems: 200
-                    uniqueItems: true
                     items:
-                        $ref: "#/components/schemas/RelativePath"
+                        $ref: "#/components/schemas/LibraryPath"
 
-        EntryDetailResult:
+        EntryMetadataList:
             type: object
-            description: Exactly one of detail and error is present; no host paths or error messages.
-            required: [path]
+            required: [items]
             properties:
+                items:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/EntryMetadataResult"
+
+        EntryMetadataResult:
+            type: object
+            required: [libraryId, path]
+            description: One place of the request, with either its Entry or its error kind.
+            properties:
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
                 path:
                     $ref: "#/components/schemas/RelativePath"
                 detail:
                     $ref: "#/components/schemas/FileSystemEntry"
                 error:
                     $ref: "#/components/schemas/ErrorKind"
-
-        EntryDetailsResponse:
-            type: object
-            required: [results]
-            properties:
-                results:
-                    type: array
-                    items:
-                        $ref: "#/components/schemas/EntryDetailResult"
 
         FolderChildrenProbe:
             type: object

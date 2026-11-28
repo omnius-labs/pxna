@@ -12,18 +12,22 @@ import { stubResizeObserver } from "../testing/preferences";
 import { Grid } from "./Grid";
 
 const mock = vi.hoisted(() => ({ get: vi.fn(), first: 0, last: 2 }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: {
-        GET: (route: string, options?: unknown) =>
-            route === "/capabilities"
-                ? Promise.resolve({
-                      data: { summaryListing: false, entryDetails: false, childProbes: false },
-                      response: new Response(),
-                  })
-                : mock.get(route, options),
-    },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: {
+            POST: (route: string, options: never) => answerEntries(mock.get)(route, options),
+            GET: (route: string, options?: unknown) =>
+                route === "/capabilities"
+                    ? Promise.resolve({
+                          data: { summaryListing: false, entryDetails: false, childProbes: false },
+                          response: new Response(),
+                      })
+                    : mock.get(route, options),
+        },
+    };
+});
 vi.mock("@tanstack/react-virtual", () => ({
     useVirtualizer: (options: { count: number; estimateSize: () => number }) => ({
         range: { startIndex: mock.first, endIndex: mock.last },

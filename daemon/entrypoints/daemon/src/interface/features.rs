@@ -8,7 +8,6 @@ pub mod operations;
 pub mod performance;
 pub mod preferences;
 pub mod rating_tags;
-pub mod search;
 pub mod setup;
 pub mod shelves;
 pub mod sockets;

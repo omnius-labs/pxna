@@ -8,10 +8,14 @@ import { useTransfer } from "../library/transfer";
 import { UploadContext, UploadStore } from "../library/upload";
 import { TransferProvider } from "./TransferProvider";
 
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: { GET: vi.fn() },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    const GET = vi.fn();
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: { GET, POST: (route: string, options: never) => answerEntries(GET)(route, options) },
+    };
+});
 vi.mock("../library/preferences", () => ({ useNarrowScreen: () => false }));
 it.each(["Keep both", "Skip", "Replace", "Abort"])(
     "アップロードは衝突を確認し %s を一度だけ enqueue へ反映する",

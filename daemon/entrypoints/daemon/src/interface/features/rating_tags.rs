@@ -529,21 +529,41 @@ mod tests {
         Ok(())
     }
 
-    const SEARCH: &str = "/api/v1/search/entries?libraryIds=photos";
-
+    /// A listing of `photos` through `listEntries`, from the compact query `path=/&rating=good&tag=trip&query=clip&recursive=true&sort=name`.
     async fn names(router: &axum::Router, headers: &[(&str, &str)], query: &str) -> TestResult<(Vec<String>, serde_json::Value, String)> {
-        let response = send(router, Method::GET, &format!("{SEARCH}&{query}"), headers, None).await?;
+        let (mut path, mut recursive, mut sort) = ("/".to_string(), false, None);
+        let mut filter = serde_json::Map::new();
+        let mut tags = Vec::new();
+        for (key, value) in query.split('&').filter_map(|pair| pair.split_once('=')) {
+            match key {
+                "path" => path = value.to_string(),
+                "recursive" => recursive = value == "true",
+                "sort" => sort = Some(value.to_string()),
+                "tag" => tags.push(value.to_string()),
+                _ => {
+                    filter.insert(key.to_string(), json!(value));
+                }
+            }
+        }
+        if !tags.is_empty() {
+            filter.insert("tags".to_string(), json!(tags));
+        }
+        let mut body = json!({"scope": {"starts": [{"libraryId": "photos", "path": path}], "recursive": recursive}, "filter": filter, "page": {"kind": "offset"}});
+        if let Some(sort) = sort {
+            body["sort"] = json!(sort);
+        }
+        let response = send(router, Method::POST, "/api/v1/entries", headers, Some(body)).await?;
         assert_eq!(response.status, StatusCode::OK, "{query}: {}", response.body);
-        let names = response.body["entries"]
+        let names = response.body["items"]
             .as_array()
-            .ok_or("entries is missing")?
+            .ok_or("items is missing")?
             .iter()
             .filter_map(|entry| entry["entry"]["path"].as_str().map(str::to_string))
             .collect();
         Ok((
             names,
-            response.body["totalCount"].clone(),
-            response.body["snapshot"].as_str().unwrap_or_default().to_string(),
+            response.body["page"]["totalCount"].clone(),
+            response.body["page"]["snapshot"].as_str().unwrap_or_default().to_string(),
         ))
     }
 
@@ -605,12 +625,19 @@ mod tests {
             "指定がなければ絞らない"
         );
 
-        // フォルダの一覧は評価とタグの条件を受け付けず、名前の条件だけで絞る。
-        let folder = send(&router, Method::GET, "/api/v1/libraries/photos/folders/entries?path=/&rating=good&tag=trip", headers, None).await?;
-        assert_eq!(folder.status, StatusCode::OK);
-        assert!(folder.body["totalCount"].as_u64().unwrap_or_default() > 1, "{}", folder.body);
-        let named = send(&router, Method::GET, "/api/v1/libraries/photos/folders/entries?path=/&query=memo", headers, None).await?;
-        assert_eq!(named.body["totalCount"], json!(1));
+        // The summary of direct children takes no rating or tag condition, only a name condition.
+        let summary = |filter: serde_json::Value| json!({"scope": {"starts": [{"libraryId": "photos", "path": "/"}]}, "filter": filter, "options": {"fields": "summary"}, "page": {"kind": "offset"}});
+        let marked = send(
+            &router,
+            Method::POST,
+            "/api/v1/entries",
+            headers,
+            Some(summary(json!({"rating": "good", "tags": ["trip"]}))),
+        )
+        .await?;
+        assert_eq!(marked.status, StatusCode::BAD_REQUEST, "{}", marked.body);
+        let named = send(&router, Method::POST, "/api/v1/entries", headers, Some(summary(json!({"query": "memo"})))).await?;
+        assert_eq!(named.body["page"]["totalCount"], json!(1), "{}", named.body);
         Ok(())
     }
 
@@ -622,9 +649,10 @@ mod tests {
         let token = login(&router).await?;
         let headers = &[("authorization", token.as_str())];
 
-        for query in ["path=/&rating=great", "path=/&tag=%20", "path=/&tag=a%0Ab"] {
-            let response = send(&router, Method::GET, &format!("{SEARCH}&{query}"), headers, None).await?;
-            assert!(response.status.is_client_error(), "{query}: {}", response.status);
+        for filter in [json!({"rating": "great"}), json!({"tags": [" "]}), json!({"tags": ["a\nb"]})] {
+            let body = json!({"scope": {"starts": [{"libraryId": "photos", "path": "/"}]}, "filter": filter});
+            let response = send(&router, Method::POST, "/api/v1/entries", headers, Some(body)).await?;
+            assert!(response.status.is_client_error(), "{filter}: {}", response.status);
         }
 
         let (_, _, plain) = names(&router, headers, "path=/").await?;

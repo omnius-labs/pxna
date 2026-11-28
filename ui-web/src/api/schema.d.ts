@@ -256,63 +256,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/timeline/entries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List timeline entries
-         * @description Lists the images and videos of the given Libraries, including
-         *     those inside archives, from newest to oldest timeline date, as
-         *     one sequence. Entries with the same timeline date are ordered
-         *     by Library id and then by path. The result comes from the
-         *     timeline index that the daemon builds in the background, not
-         *     from a traversal at request time.
-         *
-         *     At most one of `after`, `before`, `month` and `around` selects
-         *     where the page starts. Without any of them the page starts at
-         *     the newest entry. `around` needs `aroundLibraryId`, which must
-         *     be one of `libraryIds`. `previous` and `next` are cursors for
-         *     the pages before and after the returned entries and are absent
-         *     when there is nothing further in that direction. A cursor is
-         *     only meaningful with the same `libraryIds`.
-         */
-        get: operations["listTimelineEntries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/timeline/months": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the months that have timeline entries
-         * @description Returns the number of entries of the given Libraries per
-         *     month, newest month first. The counts are kept up to date
-         *     together with the timeline index, so they always equal the
-         *     number of entries `entries` returns for that month with the
-         *     same `libraryIds`.
-         */
-        get: operations["listTimelineMonths"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/timeline/status": {
         parameters: {
             query?: never;
@@ -393,66 +336,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/libraries/{libraryId}/folders/entries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List folder entries
-         * @description Lists direct children by default. Set `recursive=true` only for an
-         *     explicit recursive traversal within the selected Library.
-         */
-        get: operations["listFolderEntries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/search/entries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Search entries across Libraries
-         * @description Applies the name, rating, and tag conditions to the listing of
-         *     the start in each of `libraryIds`, and returns the matches as one
-         *     sequence ordered by `sort`, `order`, and `foldersFirst`. Entries
-         *     that compare equal, which only happens for the same path in
-         *     different Libraries, follow the order of `libraryIds`.
-         *
-         *     `path` may name a start other than `/` only when `libraryIds`
-         *     has one Library; with several, every Library is searched from
-         *     its root. Hidden entries are never returned.
-         *
-         *     `rating` and `tag` keep only the images and videos that the
-         *     current user has rated or tagged that way; several `tag` values
-         *     must all be present. While one of them is set, `snapshot` also
-         *     changes whenever the user rates or tags anything, so a client
-         *     that pages through the result re-reads from the start instead of
-         *     mixing pages from before and after the change.
-         *
-         *     `recursive` traversal is cut off per Library at the configured
-         *     entry limit, and the Libraries cut off are listed in
-         *     `truncatedLibraryIds`.
-         */
-        get: operations["listSearchEntries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/entries": {
         parameters: {
             query?: never;
@@ -467,64 +350,80 @@ export interface paths {
          * @description Lists the Entries of a Scope, the `starts` of `scope` with its
          *     `recursive` and `insideArchives`, through a `filter` of `query`,
          *     `rating`, `tags`, and `kinds`, as one sequence ordered by
-         *     `sort`, `order`, and `foldersFirst`. Each Entry comes with its
-         *     Library id. Entries that compare equal, which only happens for
-         *     the same path in different Libraries, follow the order of the
-         *     starts. The request is a POST because it carries a body; it
-         *     changes nothing.
+         *     `sort`, `order`, and `options.foldersFirst`, and returns them as
+         *     one Entry page. Each item comes with its Library id. Entries that
+         *     compare equal, which only happens for the same path in
+         *     different Libraries, follow the order of the starts. It is the
+         *     only listing: a folder, the tree, a search, the timeline, a
+         *     Shelf, and the summary of a folder's direct children are each a
+         *     Scope and a Filter. The request is a POST because it carries a
+         *     body; it changes nothing.
          *
          *     A start is a `LibraryPath`: a Library id and a path relative to
-         *     the Library with its leading `/` (`/` for the root). A start
-         *     whose Library id is not of the form of a configured one, or
-         *     whose path is not a Library-relative path, is 400. A start that
-         *     another start covers adds nothing, the same start given twice
-         *     included. A start inside an archive is covered by a recursive
-         *     start above it only with `insideArchives`.
+         *     the Library with its leading `/` (`/` for the root), read as a
+         *     folder, so an archive is its root. A start whose Library id is
+         *     not of the form of a configured one, or whose path is not a
+         *     Library-relative path, is 400. A start that another start covers
+         *     adds nothing, the same start given twice included. A start
+         *     inside an archive is covered by a recursive start above it only
+         *     with `insideArchives`.
          *
          *     A start whose folder was deleted, whose Library is not
          *     configured, or that names a file that is neither a folder nor an
-         *     archive is skipped and named in `missingStarts`, with the path
-         *     it was given; the other starts are listed. A start that is an
-         *     archive, or inside one, is walked inside that archive, and reads
-         *     the archives nested in it only with `insideArchives`.
+         *     archive is skipped and named in `warnings.missingStarts`, with
+         *     the path it was given; the other starts are listed. A start that
+         *     is an archive, or inside one, is walked inside that archive, and
+         *     reads the archives nested in it only with `insideArchives`.
          *
          *     A recursive listing without `kinds` returns no folder, and, with
          *     `insideArchives`, none of the archives it reads like folders. A
          *     start that is walked because the name index of its Library is not
          *     usable returns its archives like other files and is named in
-         *     `walkedStarts`. With `kinds` it returns exactly the named kinds,
-         *     symbolic links counted as `other`. A listing of direct children
-         *     without `kinds` returns every kind. Hidden entries are never
-         *     returned.
+         *     `warnings.walkedStarts`. With `kinds` it returns exactly the
+         *     named kinds, symbolic links counted as `other`. A listing of
+         *     direct children without `kinds` returns every kind. Hidden
+         *     entries, whose names start with `.`, and the entries inside them
+         *     are returned only with `options.includeHidden`; a recursive
+         *     listing that reads them walks the file system, because the name
+         *     index holds none.
          *
          *     `rating` and `tags` keep only the images and videos that the
          *     current user has rated or tagged that way. While one of them is
-         *     set, `snapshot` also changes whenever the user rates or tags
-         *     anything.
+         *     set, `page.snapshot` also changes whenever the user rates or
+         *     tags anything.
          *
          *     Recursive traversal is cut off per start at the configured entry
-         *     limit, and the starts cut off are listed in `cutOffStarts`.
+         *     limit, and the starts cut off are listed in
+         *     `warnings.cutOffStarts`.
          *
-         *     `locate` names an Entry as a start is named, in place of
-         *     `offset`. The server returns the page that holds it, with the
-         *     `offset` it was cut at. `locate` together with `offset` is 400,
-         *     and an Entry that is not in the sequence is 404.
+         *     `page.kind` is `offset` for every sort except `timeline_date`,
+         *     and `cursor` with it; the other kind is 400. An `offset` page is
+         *     cut from a snapshot at `page.offset`, or, with `page.locate`,
+         *     which names an Entry as a start is named, at the page that holds
+         *     it; `locate` together with `offset` is 400, and an Entry that is
+         *     not in the sequence is 404. The response page carries
+         *     `offset`, `totalCount`, and `snapshot`.
+         *
+         *     `options.fields` of `summary` reads the direct children of one
+         *     start in `name` or `kind` order and returns `summaries`, each
+         *     with the path, name, kind, and archive hint, in place of
+         *     `items`; the details are read with `listEntryMetadata`. A
+         *     summary with `recursive`, with more than one start, or with
+         *     another sort is 400. Otherwise the page carries `items`.
          *
          *     With `sort` of `timeline_date` the Entries are the images and
          *     videos of the Scope, newest timeline date first, and those with
          *     the same timeline date are ordered by Library id and then by
          *     path. `kinds` may name only `image` and `video`, and names both
-         *     when it is absent; any other kind is 400. The page is not cut
-         *     by `offset`: at most one of `after`, `before`, `month`, and
-         *     `around` selects where it starts, and without any of them it
-         *     starts at the newest Entry. `previous` and `next` are cursors
-         *     for the pages before and after the returned Entries and are
-         *     absent when there is nothing further in that direction; a
-         *     cursor is only meaningful with the same Scope and Filter. The
-         *     response has no `totalCount`, `offset`, or `snapshot`. `order`
-         *     may be `desc` only, and `offset`, `locate`, and `foldersFirst`
-         *     are 400. `after`, `before`, `month`, and `around` are 400 with
-         *     any other sort, and so is more than one of them.
+         *     when it is absent; any other kind is 400. At most one of
+         *     `page.after`, `page.before`, `page.month`, and `page.around`
+         *     selects where the page starts, and without any of them it starts
+         *     at the newest Entry. The response page carries `previous` and
+         *     `next`, cursors for the pages before and after the returned
+         *     Entries, absent when there is nothing further in that
+         *     direction; a cursor is only meaningful with the same Scope and
+         *     Filter. `order` may be `desc` only, and `options.foldersFirst`
+         *     and `options.includeHidden` are 400.
          *
          *     Without a name, rating, or tag condition the Entries come from
          *     the timeline index that the daemon builds in the background,
@@ -573,6 +472,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/entries/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read the metadata of up to 200 Entries
+         * @description Read-only metadata request over places in one or more Libraries,
+         *     each a Library id and a Library-relative path. Validates every
+         *     place and rejects duplicates after normalization before
+         *     resolving any of them. Returns one result per place in request
+         *     order, with its Library id and normalized path, and either
+         *     `detail`, the Entry as a listing shows it, or `error`, the error
+         *     kind of that place.
+         *     The failure of one place does not discard the others. At most
+         *     four places are resolved at the same time across all requests
+         *     and Libraries. The leaf is inspected without following a
+         *     symbolic link, as in a listing. The request is a POST because it
+         *     carries a body; it changes nothing.
+         */
+        post: operations["listEntryMetadata"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capabilities": {
         parameters: {
             query?: never;
@@ -614,56 +544,6 @@ export interface paths {
          *     accepts and discards them.
          */
         post: operations["reportClientTimings"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/folders/summaries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List names and kinds without detailed metadata
-         * @description Lists direct children only. The snapshot identifies the sequence
-         *     of names and kinds; subsequent detail requests do not change
-         *     its ordering or total count. Size, timestamps, readonly and
-         *     symbolic-link targets are not present in this response.
-         *     Use listFolderEntries for recursive, size or modified_at sorting.
-         */
-        get: operations["listFolderSummaries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/entries/details": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Read current details for up to 200 entries
-         * @description Read-only metadata request. Validates all paths and rejects
-         *     duplicates after normalization before resolving any entry.
-         *     Returns one result per path in request order, with normalized
-         *     Library-relative paths. Per-entry failures do not discard the
-         *     other results. Resolves at most four entries concurrently across
-         *     all requests and Libraries. The leaf is inspected without
-         *     following a symbolic link, as in a directory listing.
-         */
-        post: operations["getEntryDetails"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1677,27 +1557,6 @@ export interface components {
         FileResponse: {
             file: components["schemas"]["FileSystemEntry"];
         };
-        TimelineListing: {
-            entries: components["schemas"]["TimelineEntry"][];
-            /** @description Cursor for the page of newer entries. Absent when there are none. */
-            previous?: string;
-            /** @description Cursor for the page of older entries. Absent when there are none. */
-            next?: string;
-        };
-        TimelineEntry: {
-            libraryId: components["schemas"]["LibraryId"];
-            entry: components["schemas"]["FileSystemEntry"];
-            /**
-             * @description Date the entry is ordered by, as `YYYY-MM-DDTHH:MM:SS`
-             *     without a time zone, in the daemon's configured time zone.
-             */
-            timelineDate: string;
-            /**
-             * @description Where `timelineDate` came from.
-             * @enum {string}
-             */
-            timelineDateSource: "exif" | "creationTime" | "modified" | "archiveModified" | "fileName";
-        };
         TimelineMonths: {
             months: components["schemas"]["TimelineMonth"][];
         };
@@ -1728,55 +1587,6 @@ export interface components {
         TimelineRefreshRequest: {
             libraryIds: components["schemas"]["LibraryId"][];
         };
-        FolderListing: {
-            entries: components["schemas"]["FileSystemEntry"][];
-            /**
-             * Format: int64
-             * @description Total count after filtering the snapshot.
-             */
-            totalCount: number;
-            /**
-             * Format: int64
-             * @description Offset of this page in the sorted and filtered listing.
-             */
-            offset: number;
-            /** @description Opaque identifier of the listing snapshot. */
-            snapshot: string;
-            /** @description True when recursive traversal reached its entry limit. */
-            truncated: boolean;
-        };
-        SearchEntry: {
-            libraryId: components["schemas"]["LibraryId"];
-            entry: components["schemas"]["FileSystemEntry"];
-        };
-        SearchListing: {
-            entries: components["schemas"]["SearchEntry"][];
-            /**
-             * Format: int64
-             * @description Sum of the per-Library counts after filtering.
-             */
-            totalCount: number;
-            /**
-             * Format: int64
-             * @description Offset of this page in the merged sequence.
-             */
-            offset: number;
-            /**
-             * @description Opaque identifier of the merged listing. It changes when
-             *     the listing of any searched Library is rebuilt.
-             */
-            snapshot: string;
-            /** @description Libraries whose recursive traversal reached the entry limit. */
-            truncatedLibraryIds: components["schemas"]["LibraryId"][];
-            /**
-             * @description True when every searched Library answered from its name index.
-             *     False when any Library walked the file system, whether because
-             *     its index was not usable or because the search is not one the
-             *     index answers (it is not recursive, has no condition, or starts
-             *     in an archive).
-             */
-            indexed: boolean;
-        };
         /**
          * @description A place in a Library: a start of a Scope, an Entry, or a folder.
          *     A listing keeps the path of a start as it was given, so its
@@ -1790,18 +1600,15 @@ export interface components {
         /** @description The starts of a listing and how far it reads from them. */
         EntryScope: {
             starts: components["schemas"]["LibraryPath"][];
-            /**
-             * @description Whether to include descendants below each start.
-             * @default false
-             */
-            recursive: boolean;
+            /** @description Whether to include descendants below each start. Defaults to `false`. */
+            recursive?: boolean;
             /**
              * @description Whether the Scope reads the archives found under its
              *     starts like folders, down to the nesting limit. It
              *     changes nothing without `recursive`.
-             * @default false
+             *     Defaults to `false`.
              */
-            insideArchives: boolean;
+            insideArchives?: boolean;
         };
         /** @description The conditions the Entries of a listing meet. */
         EntryFilter: {
@@ -1831,67 +1638,82 @@ export interface components {
         EntryListRequest: {
             scope: components["schemas"]["EntryScope"];
             filter?: components["schemas"]["EntryFilter"];
+            options?: components["schemas"]["EntryListOptions"];
             /**
              * @description Sort key. `timeline_date` orders the images and videos by
              *     their timeline dates, newest first only.
-             * @default name
+             *     Defaults to `name`.
              * @enum {string}
              */
-            sort: "name" | "kind" | "size" | "modified_at" | "timeline_date";
+            sort?: "name" | "kind" | "size" | "modified_at" | "timeline_date";
             /**
-             * @description Sort direction.
-             * @default asc
+             * @description Sort direction. Defaults to `asc`.
              * @enum {string}
              */
-            order: "asc" | "desc";
+            order?: "asc" | "desc";
+            page?: components["schemas"]["EntryPageRequest"];
+        };
+        EntryListOptions: {
             /**
              * @description Place folders, and files whose `file.archive` hint is
              *     true, before the other entries. `sort` and `order` apply
              *     within each of the two groups.
-             * @default false
+             *     Defaults to `false`.
              */
-            foldersFirst: boolean;
+            foldersFirst?: boolean;
             /**
-             * Format: int64
-             * @description Offset in the sorted and filtered listing.
-             * @default 0
+             * @description Read the entries whose names start with `.` and the
+             *     entries inside them. A saved Shelf holds no options, so
+             *     it never reads them.
+             *     Defaults to `false`.
              */
-            offset: number;
+            includeHidden?: boolean;
+            /**
+             * @description `full` returns `items` with their Entries; `summary`
+             *     returns `summaries` for the direct children of one start.
+             *     Defaults to `full`.
+             * @enum {string}
+             */
+            fields?: "full" | "summary";
+        };
+        /**
+         * @description Where the page starts. `kind` is `offset` for every sort except
+         *     `timeline_date`, and `cursor` with it. An `offset` page takes
+         *     `offset` or `locate`; a `cursor` page takes at most one of
+         *     `after`, `before`, `month`, and `around`.
+         */
+        EntryPageRequest: {
+            kind: components["schemas"]["EntryPageKind"];
             /**
              * Format: int32
-             * @description Maximum number of entries to return.
-             * @default 200
+             * @description Defaults to `200`.
              */
-            limit: number;
+            limit?: number;
             /**
-             * @description The Entry to find, named as a start is named. Not with
-             *     `offset`.
+             * Format: int64
+             * @description Defaults to `0`.
              */
+            offset?: number;
+            /** @description The Entry to find, named as a start is named. Not with `offset`. */
             locate?: components["schemas"]["LibraryPath"];
-            /**
-             * @description Only with `sort` of `timeline_date`. A cursor from
-             *     `next`; returns the Entries older than it.
-             */
+            /** @description A cursor from `next`; returns the Entries older than it. */
             after?: string;
-            /**
-             * @description Only with `sort` of `timeline_date`. A cursor from
-             *     `previous`; returns the Entries newer than it.
-             */
+            /** @description A cursor from `previous`; returns the Entries newer than it. */
             before?: string;
             /**
-             * @description Only with `sort` of `timeline_date`. Starts at the newest
-             *     Entry of this month (`YYYY-MM`), or of the next older
-             *     month that has Entries.
+             * @description Starts at the newest Entry of this month (`YYYY-MM`), or
+             *     of the next older month that has Entries.
              */
             month?: string;
             /**
-             * @description Only with `sort` of `timeline_date`. The Entry to start
-             *     around, named as a start is named. The page has it near
-             *     its middle, and an Entry that is not in the sequence is
-             *     404.
+             * @description The Entry to start around, named as a start is named. The
+             *     page has it near its middle, and an Entry that is not in
+             *     the sequence is 404.
              */
             around?: components["schemas"]["LibraryPath"];
         };
+        /** @enum {string} */
+        EntryPageKind: "offset" | "cursor";
         EntryMonthsRequest: {
             scope: components["schemas"]["EntryScope"];
             filter?: components["schemas"]["EntryFilter"];
@@ -1911,36 +1733,49 @@ export interface components {
              */
             timelineDateSource?: "exif" | "creationTime" | "modified" | "archiveModified" | "fileName";
         };
-        EntryListing: {
-            entries: components["schemas"]["ScopedEntry"][];
+        /**
+         * @description One page of a listing. It carries `items` with `options.fields`
+         *     of `full`, and `summaries` with `summary`.
+         */
+        EntryPage: {
+            items?: components["schemas"]["ScopedEntry"][];
+            summaries?: components["schemas"]["ScopedEntrySummary"][];
+            page: components["schemas"]["EntryPageInfo"];
+            warnings: components["schemas"]["EntryWarnings"];
+        };
+        ScopedEntrySummary: {
+            libraryId: components["schemas"]["LibraryId"];
+            summary: components["schemas"]["FileSystemEntrySummary"];
+        };
+        /**
+         * @description The effective page. An `offset` page carries `offset`,
+         *     `totalCount`, and `snapshot`; a `cursor` page carries `previous`
+         *     and `next`, each absent at an end.
+         */
+        EntryPageInfo: {
+            kind: components["schemas"]["EntryPageKind"];
+            /**
+             * Format: int64
+             * @description Offset of this page in the merged sequence.
+             */
+            offset?: number;
             /**
              * Format: int64
              * @description Number of Entries in the merged sequence after the Filter.
-             *     Absent with `sort=timeline_date`.
              */
             totalCount?: number;
-            /**
-             * Format: int64
-             * @description Offset of this page in the merged sequence. Absent with
-             *     `sort=timeline_date`.
-             */
-            offset?: number;
             /**
              * @description Opaque identifier of the merged listing. It changes when
              *     the listing of any start is rebuilt.
              */
             snapshot?: string;
-            /**
-             * @description Present with `sort=timeline_date`. Cursor for the page of
-             *     newer Entries. Absent when there are none.
-             */
+            /** @description Cursor for the page of newer Entries. */
             previous?: string;
-            /**
-             * @description Present with `sort=timeline_date`. Cursor for the page of
-             *     older Entries. Absent when there are none.
-             */
+            /** @description Cursor for the page of older Entries. */
             next?: string;
-            /** @description Starts, as they were given, whose recursive traversal reached the entry limit. */
+        };
+        EntryWarnings: {
+            /** @description Starts, as they were given, whose recursive traversal was cut off at the entry limit. */
             cutOffStarts: components["schemas"]["LibraryPath"][];
             /**
              * @description Starts, as they were given, that the name index would
@@ -2015,31 +1850,18 @@ export interface components {
             /** @description Extension-derived archive hint; false unless kind is file. */
             archive: boolean;
         };
-        FolderSummaryListing: {
-            entries: components["schemas"]["FileSystemEntrySummary"][];
-            /** Format: int64 */
-            totalCount: number;
-            /**
-             * Format: int64
-             * @description Offset of this page in the sorted and filtered listing.
-             */
-            offset: number;
-            /** @description Identifier of the names and kinds, not of later detail metadata. */
-            snapshot: string;
-            /** @description Always false for a complete direct-child summary listing. */
-            truncated: boolean;
+        EntryMetadataRequest: {
+            places: components["schemas"]["LibraryPath"][];
         };
-        EntryDetailsRequest: {
-            paths: components["schemas"]["RelativePath"][];
+        EntryMetadataList: {
+            items: components["schemas"]["EntryMetadataResult"][];
         };
-        /** @description Exactly one of detail and error is present; no host paths or error messages. */
-        EntryDetailResult: {
+        /** @description One place of the request, with either its Entry or its error kind. */
+        EntryMetadataResult: {
+            libraryId: components["schemas"]["LibraryId"];
             path: components["schemas"]["RelativePath"];
             detail?: components["schemas"]["FileSystemEntry"];
             error?: components["schemas"]["ErrorKind"];
-        };
-        EntryDetailsResponse: {
-            results: components["schemas"]["EntryDetailResult"][];
         };
         FolderChildrenProbe: {
             /**
@@ -2562,69 +2384,12 @@ export interface components {
          */
         TimelineLibraryIdsQuery: components["schemas"]["LibraryId"][];
         /**
-         * @description Libraries to search, repeated as `libraryIds=a&libraryIds=b`.
-         *     Every id must name a Library; an unknown id is 404.
-         */
-        SearchLibraryIdsQuery: components["schemas"]["LibraryId"][];
-        /**
          * @description Path relative to the selected Library.
          * @example /photos/2026
          */
         PathQuery: components["schemas"]["RelativePath"];
-        /** @description Whether to include descendants below the requested folder. */
-        RecursiveQuery: boolean;
-        /** @description Offset in the sorted and filtered listing. */
-        ListOffsetQuery: number;
-        /**
-         * @description Path of the Entry relative to the start of the listing, in place
-         *     of `offset`. The server returns the page that holds the Entry,
-         *     with the `offset` it was cut at.
-         */
-        LocateQuery: string;
-        /**
-         * @description The Library of the Entry named by `locate`. Required with
-         *     `locate` in a search, because the same path can be in several
-         *     Libraries.
-         */
-        LocateLibraryIdQuery: components["schemas"]["LibraryId"];
-        /**
-         * @description Whitespace-separated terms that must all occur in an entry name.
-         *     Names and terms are normalized with NFKC and converted to lowercase.
-         */
-        NameFilterQuery: string;
-        /** @description Maximum number of entries to return. */
-        ListLimitQuery: number;
-        /** @description Sort key for folder entries. */
-        SortQuery: "name" | "kind" | "size" | "modified_at";
-        /** @description Sort direction. */
-        OrderQuery: "asc" | "desc";
         /** @description Whether hidden entries should be returned. */
         IncludeHiddenQuery: boolean;
-        /**
-         * @description Place folders, and files whose `file.archive` hint is true,
-         *     before the other entries. `sort` and `order` apply within each
-         *     of the two groups.
-         */
-        FoldersFirstQuery: boolean;
-        /**
-         * @description Return only folders and files whose `file.archive` hint is
-         *     true. `totalCount` counts the entries after this filter.
-         */
-        FoldersOnlyQuery: boolean;
-        /**
-         * @description Return only images and videos with this rating of the current
-         *     user. `none` selects the images and videos that have not been
-         *     rated. Folders and other files never match. `totalCount` counts
-         *     the entries after this filter.
-         */
-        RatingFilterQuery: "good" | "bad" | "none";
-        /**
-         * @description Return only images and videos that have all of these tags of the
-         *     current user, repeated as `tag=a&tag=b`. Each word is trimmed
-         *     like a tag being set; a word the user has never used selects
-         *     nothing. `totalCount` counts the entries after this filter.
-         */
-        TagFiltersQuery: components["schemas"]["TagName"][];
         /**
          * @description Single HTTP byte range as defined by RFC 7233, including suffix
          *     ranges such as `bytes=-500`. The daemon parses this header itself,
@@ -2651,8 +2416,6 @@ export interface components {
          *     archive has both; without it, an archive is its file.
          */
         ViewQuery: components["schemas"]["EntryView"];
-        /** @description How to resolve an existing entry at the target path. */
-        ConflictQuery: components["schemas"]["ConflictPolicy"];
         /** @description Opaque identifier of an upload session. */
         UploadIdPath: components["schemas"]["UploadId"];
         /**
@@ -3040,78 +2803,6 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    listTimelineEntries: {
-        parameters: {
-            query: {
-                /**
-                 * @description Libraries to list, repeated as `libraryIds=a&libraryIds=b`.
-                 *     Every id must name a Library; an unknown id is 404.
-                 */
-                libraryIds: components["parameters"]["TimelineLibraryIdsQuery"];
-                /** @description Cursor from `next`. Returns the entries older than the cursor. */
-                after?: string;
-                /** @description Cursor from `previous`. Returns the entries newer than the cursor. */
-                before?: string;
-                /** @description Starts at the newest entry of this month (`YYYY-MM`), or of the next older month that has entries. */
-                month?: string;
-                /** @description Returns a page that has this entry of `aroundLibraryId` near its middle. */
-                around?: components["schemas"]["RelativePath"];
-                /** @description The Library of `around`. Given exactly when `around` is given. */
-                aroundLibraryId?: components["schemas"]["LibraryId"];
-                /** @description Maximum number of entries to return. */
-                limit?: components["parameters"]["ListLimitQuery"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Timeline entries. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TimelineListing"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    listTimelineMonths: {
-        parameters: {
-            query: {
-                /**
-                 * @description Libraries to list, repeated as `libraryIds=a&libraryIds=b`.
-                 *     Every id must name a Library; an unknown id is 404.
-                 */
-                libraryIds: components["parameters"]["TimelineLibraryIdsQuery"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Entry counts per month. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TimelineMonths"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
     getTimelineStatus: {
         parameters: {
             query: {
@@ -3219,157 +2910,6 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    listFolderEntries: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-                /** @description Whether to include descendants below the requested folder. */
-                recursive?: components["parameters"]["RecursiveQuery"];
-                /** @description Offset in the sorted and filtered listing. */
-                offset?: components["parameters"]["ListOffsetQuery"];
-                /**
-                 * @description Path of the Entry relative to the start of the listing, in place
-                 *     of `offset`. The server returns the page that holds the Entry,
-                 *     with the `offset` it was cut at.
-                 */
-                locate?: components["parameters"]["LocateQuery"];
-                /**
-                 * @description Whitespace-separated terms that must all occur in an entry name.
-                 *     Names and terms are normalized with NFKC and converted to lowercase.
-                 */
-                query?: components["parameters"]["NameFilterQuery"];
-                /** @description Maximum number of entries to return. */
-                limit?: components["parameters"]["ListLimitQuery"];
-                /** @description Sort key for folder entries. */
-                sort?: components["parameters"]["SortQuery"];
-                /** @description Sort direction. */
-                order?: components["parameters"]["OrderQuery"];
-                /** @description Whether hidden entries should be returned. */
-                includeHidden?: components["parameters"]["IncludeHiddenQuery"];
-                /**
-                 * @description Place folders, and files whose `file.archive` hint is true,
-                 *     before the other entries. `sort` and `order` apply within each
-                 *     of the two groups.
-                 */
-                foldersFirst?: components["parameters"]["FoldersFirstQuery"];
-                /**
-                 * @description Return only folders and files whose `file.archive` hint is
-                 *     true. `totalCount` counts the entries after this filter.
-                 */
-                foldersOnly?: components["parameters"]["FoldersOnlyQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Folder entries. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderListing"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    listSearchEntries: {
-        parameters: {
-            query: {
-                /**
-                 * @description Libraries to search, repeated as `libraryIds=a&libraryIds=b`.
-                 *     Every id must name a Library; an unknown id is 404.
-                 */
-                libraryIds: components["parameters"]["SearchLibraryIdsQuery"];
-                /** @description Start relative to the Library. Only with one Library. */
-                path?: components["schemas"]["RelativePath"];
-                /** @description Whether to include descendants below the requested folder. */
-                recursive?: components["parameters"]["RecursiveQuery"];
-                /**
-                 * @description Whitespace-separated terms that must all occur in an entry name.
-                 *     Names and terms are normalized with NFKC and converted to lowercase.
-                 */
-                query?: components["parameters"]["NameFilterQuery"];
-                /**
-                 * @description Return only images and videos with this rating of the current
-                 *     user. `none` selects the images and videos that have not been
-                 *     rated. Folders and other files never match. `totalCount` counts
-                 *     the entries after this filter.
-                 */
-                rating?: components["parameters"]["RatingFilterQuery"];
-                /**
-                 * @description Return only images and videos that have all of these tags of the
-                 *     current user, repeated as `tag=a&tag=b`. Each word is trimmed
-                 *     like a tag being set; a word the user has never used selects
-                 *     nothing. `totalCount` counts the entries after this filter.
-                 */
-                tag?: components["parameters"]["TagFiltersQuery"];
-                /** @description Sort key for folder entries. */
-                sort?: components["parameters"]["SortQuery"];
-                /** @description Sort direction. */
-                order?: components["parameters"]["OrderQuery"];
-                /**
-                 * @description Place folders, and files whose `file.archive` hint is true,
-                 *     before the other entries. `sort` and `order` apply within each
-                 *     of the two groups.
-                 */
-                foldersFirst?: components["parameters"]["FoldersFirstQuery"];
-                /** @description Offset in the sorted and filtered listing. */
-                offset?: components["parameters"]["ListOffsetQuery"];
-                /**
-                 * @description Path of the Entry relative to the start of the listing, in place
-                 *     of `offset`. The server returns the page that holds the Entry,
-                 *     with the `offset` it was cut at.
-                 */
-                locate?: components["parameters"]["LocateQuery"];
-                /**
-                 * @description The Library of the Entry named by `locate`. Required with
-                 *     `locate` in a search, because the same path can be in several
-                 *     Libraries.
-                 */
-                locateLibraryId?: components["parameters"]["LocateLibraryIdQuery"];
-                /** @description Maximum number of entries to return. */
-                limit?: components["parameters"]["ListLimitQuery"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Matching entries of the Libraries. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SearchListing"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
     listEntries: {
         parameters: {
             query?: never;
@@ -3389,7 +2929,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EntryListing"];
+                    "application/json": components["schemas"]["EntryPage"];
                 };
             };
             400: components["responses"]["InvalidRequest"];
@@ -3428,6 +2968,34 @@ export interface operations {
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
             504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listEntryMetadata: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EntryMetadataRequest"];
+            };
+        };
+        responses: {
+            /** @description Exactly one Entry or error kind per place. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryMetadataList"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     getCapabilities: {
@@ -3474,106 +3042,6 @@ export interface operations {
             };
             400: components["responses"]["InvalidRequest"];
             401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    listFolderSummaries: {
-        parameters: {
-            query: {
-                /**
-                 * @description Path relative to the selected Library.
-                 * @example /photos/2026
-                 */
-                path: components["parameters"]["PathQuery"];
-                /** @description Offset in the sorted and filtered listing. */
-                offset?: components["parameters"]["ListOffsetQuery"];
-                /**
-                 * @description Path of the Entry relative to the start of the listing, in place
-                 *     of `offset`. The server returns the page that holds the Entry,
-                 *     with the `offset` it was cut at.
-                 */
-                locate?: components["parameters"]["LocateQuery"];
-                /**
-                 * @description Whitespace-separated terms that must all occur in an entry name.
-                 *     Names and terms are normalized with NFKC and converted to lowercase.
-                 */
-                query?: components["parameters"]["NameFilterQuery"];
-                /** @description Maximum number of entries to return. */
-                limit?: components["parameters"]["ListLimitQuery"];
-                sort?: "name" | "kind";
-                /** @description Sort direction. */
-                order?: components["parameters"]["OrderQuery"];
-                /** @description Whether hidden entries should be returned. */
-                includeHidden?: components["parameters"]["IncludeHiddenQuery"];
-                /**
-                 * @description Place folders, and files whose `file.archive` hint is true,
-                 *     before the other entries. `sort` and `order` apply within each
-                 *     of the two groups.
-                 */
-                foldersFirst?: components["parameters"]["FoldersFirstQuery"];
-                /**
-                 * @description Return only folders and files whose `file.archive` hint is
-                 *     true. `totalCount` counts the entries after this filter.
-                 */
-                foldersOnly?: components["parameters"]["FoldersOnlyQuery"];
-            };
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Names and kinds from one summary snapshot. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderSummaryListing"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            500: components["responses"]["InternalServerError"];
-            504: components["responses"]["GatewayTimeout"];
-        };
-    };
-    getEntryDetails: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EntryDetailsRequest"];
-            };
-        };
-        responses: {
-            /** @description Exactly one detail or error kind per requested path. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EntryDetailsResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            413: components["responses"]["PayloadTooLarge"];
             500: components["responses"]["InternalServerError"];
         };
     };

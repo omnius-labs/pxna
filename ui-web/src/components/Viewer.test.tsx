@@ -43,18 +43,22 @@ vi.mock("@tanstack/react-virtual", () => ({
             })),
     }),
 }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: {
-        GET: (route: string, options?: unknown) =>
-            route === "/capabilities"
-                ? Promise.resolve({
-                      data: { summaryListing: false, entryDetails: false, childProbes: false },
-                      response: new Response(),
-                  })
-                : get(route, options),
-    },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: {
+            POST: (route: string, options: never) => answerEntries(get)(route, options),
+            GET: (route: string, options?: unknown) =>
+                route === "/capabilities"
+                    ? Promise.resolve({
+                          data: { summaryListing: false, entryDetails: false, childProbes: false },
+                          response: new Response(),
+                      })
+                    : get(route, options),
+        },
+    };
+});
 // 動画の再生は VideoPlayer のテストが受け持つ。ここでは、終わったと知らせる onDone だけを確かめる。
 vi.mock("./VideoPlayer", () => ({
     VideoPlayer: ({ onDone }: { onDone?: () => void }) => (

@@ -18,10 +18,20 @@ const mock = vi.hoisted(() => ({
     put: vi.fn(),
     status: { running: false, processedFiles: 0 } as Record<string, unknown>,
 }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: { GET: mock.get, POST: mock.post, PUT: mock.put },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: {
+            GET: mock.get,
+            POST: (route: string, options: never) =>
+                route.startsWith("/entries")
+                    ? answerEntries(mock.get, mock.post)(route, options)
+                    : mock.post(route, options),
+            PUT: mock.put,
+        },
+    };
+});
 vi.mock("../components/AppShell", () => ({
     AppShell: ({
         children,

@@ -11,10 +11,13 @@ import { stubResizeObserver } from "../testing/preferences";
 import { TimelineGrid } from "./TimelineGrid";
 
 const mock = vi.hoisted(() => ({ get: vi.fn(), entries: vi.fn(), first: 0, last: 3 }));
-vi.mock("../api/client", async (original) => ({
-    ...(await original<typeof import("../api/client")>()),
-    api: { GET: mock.get },
-}));
+vi.mock("../api/client", async (original) => {
+    const { answerEntries } = await import("../testing/listingApi");
+    return {
+        ...(await original<typeof import("../api/client")>()),
+        api: { POST: (route: string, options: never) => answerEntries(mock.get)(route, options), GET: mock.get },
+    };
+});
 vi.mock("@tanstack/react-virtual", () => ({
     useVirtualizer: (options: { count: number; estimateSize: (index: number) => number }) => ({
         range: { startIndex: mock.first, endIndex: Math.min(mock.last, options.count - 1) },

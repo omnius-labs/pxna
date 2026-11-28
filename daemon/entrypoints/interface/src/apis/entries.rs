@@ -79,7 +79,7 @@ pub enum GetEntryMetadataResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum ListEntriesResponse {
     /// The Entries of the Scope.
-    Status200_TheEntriesOfTheScope(models::EntryListing),
+    Status200_TheEntriesOfTheScope(models::EntryPage),
     /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
     Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
@@ -92,6 +92,22 @@ pub enum ListEntriesResponse {
     Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
     Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
+pub enum ListEntryMetadataResponse {
+    /// Exactly one Entry or error kind per place.
+    Status200_ExactlyOneEntryOrErrorKindPerPlace(models::EntryMetadataList),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
+    /// Missing or invalid authentication.
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// Internal server error.
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -248,6 +264,19 @@ pub trait Entries<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
     ///
     /// ListEntries - POST /api/v1/entries
     async fn list_entries(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims, body: &models::EntryListRequest) -> Result<ListEntriesResponse, E>;
+
+    /// Read the metadata of up to 200 Entries.
+    ///
+    /// ListEntryMetadata - POST /api/v1/entries/metadata
+    async fn list_entry_metadata(
+        &self,
+
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::EntryMetadataRequest,
+    ) -> Result<ListEntryMetadataResponse, E>;
 
     /// List the months that have Entries of a Scope.
     ///

@@ -16,6 +16,7 @@ pub struct ListingSource {
 }
 
 impl ListingSource {
+    #[cfg(test)]
     /// A Library's listing for the search API.
     pub fn new(library_id: &str, snapshot: Arc<ListingSnapshot>, options: ListOptions) -> Self {
         Self {
