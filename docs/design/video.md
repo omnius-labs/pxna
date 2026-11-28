@@ -175,7 +175,7 @@ However, if two devices transcode-play different videos at the same time, with t
 The ended session does not disappear silently.
 The daemon remembers its id for `session_idle_timeout_secs`, the time after which the session would have expired by idleness anyway, and its playlist, its segments, and its deletion answer `410` with `SessionEvicted` meanwhile ([API Design §9.3](./api.md#93-video)).
 A session that was deleted, expired, or never existed answers `404`.
-The web client's player shows that playback ended because another video started when hls.js reports `410`; the browser's own HLS player does not expose the status, so it shows the general playback failure.
+The web client's player shows that playback ended because another video started when hls.js reports `410`. The browser's own HLS player, which Chromium also has ([knowledge](../knowledge/chromium-native-hls.md)), does not expose the status, so it shows the general playback failure ([issues.md](../issues.md)).
 
 ## 6. Configuration
 

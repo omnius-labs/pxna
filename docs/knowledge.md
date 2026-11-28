@@ -44,6 +44,9 @@ For items whose source is `Literature only`, reread the primary sources every 3 
 | [Chromium limits an element's width to 33,554,428 CSS pixels](./knowledge/chromium-scrollable-width.md) | Chromium 156.0.0.0 | Verified | 2026-11-04 |
 | [An upsert that fires a trigger turns `INSERT OR IGNORE` in the trigger body into a failure](./knowledge/sqlite-upsert-trigger-conflict.md) | sqlite3 3.51.0, libsqlite3-sys 0.30.1 (SQLite 3.46.0) | Verified | 2026-11-24 |
 | [axum's `Json` extractor rejects a body that is not JSON with 400 and one that does not fit the type with 422](./knowledge/axum-json-rejection.md) | axum 0.8.9 | Verified | 2026-11-26 |
+| [validator 0.20 cannot derive `Validate` for a nested optional field named `entry`](./knowledge/validator-option-named-entry.md) | validator 0.20.0, validator_derive 0.20.1, openapi-generator 7.23.0 | Verified | 2026-11-28 |
+| [openapi-typescript makes a property with a `default` required in the generated types](./knowledge/openapi-typescript-default-required.md) | openapi-typescript 7.13.0 | Verified | 2026-11-28 |
+| [Chromium 158 plays HLS in a `<video>` element without Media Source Extensions](./knowledge/chromium-native-hls.md) | Chromium 158.0.0.0 | Verified | 2026-11-28 |
 
 The first 2 items, the WebP size item, and the webp crate item are the premises of the decision to output thumbnails as lossy WebP.
 The first 2 items hold as a pair, and if image gains a lossy WebP encoder, there is no longer a reason to depend on libwebp-sys.
@@ -61,3 +64,5 @@ The Chromium modal item and the Radix item are the premises of the viewer's full
 The ffprobe stream level item is the premise of treating a negative `level` as absent in media info. It is about the same ffprobe 9.0 as the rotation and tile grid items, but it does not depend on them.
 The Chromium scrollable-width item is the premise of laying out only a window of positions in the viewer's gallery. It is about the same Chromium as the directory-reading, beforeunload, and modal items, but it does not depend on them.
 The axum `Json` item is the premise of the statuses with which the generated router rejects a body. It does not depend on the other items.
+The validator item and the openapi-typescript item are the premises of how `daemon/openapi.yaml` names optional object properties and writes the defaults of request schemas, the former for the daemon's generated crate and the latter for the web client's types. They do not depend on each other.
+The Chromium HLS item is the premise of the defect in which the player cannot report an ended video session. It is about a later Chromium than the other Chromium items, and does not depend on them.
