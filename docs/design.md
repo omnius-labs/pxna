@@ -288,6 +288,10 @@ The procedure for changing the API is as follows.
 2. Run `daemon/entrypoints/gen-interface.sh`
 3. Fix the compile errors in `src/interface/features/`
 
+Two behaviors of the generators shape how `openapi.yaml` is written.
+An optional property whose type is an object is not named `entry`, because the validation the generated crate derives for it does not compile ([knowledge](./knowledge/validator-option-named-entry.md)).
+The schemas of a listing request (`EntryScope`, `EntryListRequest`, `EntryListOptions`, and `EntryPageRequest`) state their defaults in the description instead of `default:`, because openapi-typescript makes a property with a `default` required in the web client's types ([knowledge](./knowledge/openapi-typescript-default-required.md)); a request schema that keeps `default:`, such as `createParents` of `CreateFolderRequest`, is required there, and the web client always sends it.
+
 `daemon/watch-openapi.sh` is an auxiliary script that previews the specification in a browser with Scalar, and is not involved in generation.
 
 The exception is the paths that return file content and HLS playlists and segments, and the image socket.
