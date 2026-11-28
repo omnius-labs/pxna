@@ -578,7 +578,7 @@ Carrying `view` on every request was rejected because an operation with one face
 **Decision**
 An operation on one Entry, including the daemon's own data about it (the rating, the tags, and the folder settings), is under `/libraries/{libraryId}/entries/` with the path in the query.
 A read or a command whose body names its Libraries is global.
-This replaces the decision of [design.md §11.1](../design.md#name-a-folder-of-the-folder-settings-in-the-body-of-requests-under-settingsfolder) that named a folder of the folder settings in the body of requests under `/settings/folder`.
+This replaced the earlier decision that named a folder of the folder settings in the body of requests under `/settings/folder`.
 
 **Reason**
 The current contract put the same concept in different places: the path of a rating was in the query to read and in the body to write, and the folder settings named a folder in a body while the rating named an Entry in the query.
@@ -800,16 +800,15 @@ When the control of background work ([design.md §11.2](../design.md#controlling
 
 ### 15.1 Current Code
 
-`daemon/openapi.yaml` answers every error with the Problem of §11.1 (A1); the rest of §3 through §13 is not implemented, and the contract it serves is otherwise the one this document replaces.
+`daemon/openapi.yaml` answers every error with the Problem of §11.1 (A1), and serves the single-Entry operations of §4 with `view`, ratings, tags, and folder settings beside them (A2); the rest of §3 through §13 is not implemented, and the contract it serves is otherwise the one this document replaces.
 Until each area is replaced, the following statements in other documents describe the current contract, and this document the replacement:
 
 - The namespaces of [design.md §8.1](../design.md#81-namespaces) and the sync and async table of [§8.2](../design.md#82-determining-sync-and-async), with the decision "Decide Sync and Async by the Shape of the Request"
-- The folder settings under `/settings/folder` in [design.md §6.5](../design.md#65-shelves-and-folder-settings), with the decision "Name a Folder of the Folder Settings in the Body of Requests under /settings/folder"
 - The folder, summary, search, and timeline listings named in [Listing and Search Design](./listing.md#1-about-this-document) and [Timeline Design](./timeline.md#1-about-this-document)
 - The silent end of a transcode session in [Video Playback Design §5.4](./video.md#54-concurrency), and the error kinds of [design.md §4.4](../design.md#44-error-model-and-http-mapping), which lack `SessionEvicted`
-- The paths of the one-shot write in [design.md §8.7](../design.md#87-uploads), of the deletions in [§8.4](../design.md#84-deletion) and the decision "Delete Moves the Entry to a Library-Local Trash, Unified on POST", and the example path in the introduction of [§8](../design.md#8-conventions-for-mutating-apis)
+- The paths of the deletions in [design.md §8.4](../design.md#84-deletion) and the decision "Delete Moves the Entry to a Library-Local Trash, Unified on POST", and the example path in the introduction of [§8](../design.md#8-conventions-for-mutating-apis)
 - The refresh, the status, and the four timeline endpoints in [Timeline Design §6.3](./timeline.md#63-when-aggregation-starts) and [§10.1](./timeline.md#101-current-code)
-- The external representations of Folder settings, Media info, Aggregation, and Vocabulary in the term list of [terms.md](../terms.md#2-term-list), and the names of the API in its Timeline entry
+- The external representation of Aggregation in the term list of [terms.md](../terms.md#2-term-list), and the names of the API in its Timeline entry
 
 Each area's change rewrites the statements it replaces.
 

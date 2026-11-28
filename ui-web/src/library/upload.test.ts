@@ -43,7 +43,8 @@ it("32 MiB ちょうどまでワンショット、33 MiB は16 MiBずつとcommi
     binary.mockResolvedValue(new Response(null, { status: 201 }));
     await uploadFile(file(ONE_SHOT_LIMIT), destination, "rename", new AbortController().signal, () => {});
     expect(binary).toHaveBeenCalledOnce();
-    expect(binary.mock.calls[0]![0]).toContain("conflict=rename");
+    expect(binary.mock.calls[0]![0]).toContain("/entries/files?path=");
+    expect(binary.mock.calls[0]![1]?.method).toBe("POST");
     expect(post).not.toHaveBeenCalled();
     binary.mockClear();
     binary.mockImplementation(async () => new Response(null, { status: 204 }));
@@ -128,7 +129,7 @@ it("フォルダを先に作り、renameした親へファイルを送り、空�
     setup();
     post.mockRejectedValueOnce(
         new (await import("../api/client")).ApiError(409, "Conflict", "exists"),
-    ).mockResolvedValue(response({ folder: {} }, 201));
+    ).mockResolvedValue(response({ entry: {} }, 201));
     binary.mockImplementation(async () => {
         expect(post.mock.calls.some((args) => args[1].body.path === "/batch (1)")).toBe(true);
         return new Response(null, { status: 201 });
@@ -237,9 +238,7 @@ it("ファイルのskipは送らず、フォルダoverwriteの種別衝突はフ
     await vi.waitFor(() => expect(store.getSnapshot()[0]?.status).toBe("skipped"));
     expect(binary).not.toHaveBeenCalled();
     const { ApiError } = await import("../api/client");
-    post.mockRejectedValueOnce(new ApiError(409, "Conflict", "exists")).mockResolvedValue(
-        response({ folder: {} }, 201),
-    );
+    post.mockRejectedValueOnce(new ApiError(409, "Conflict", "exists")).mockResolvedValue(response({ entry: {} }, 201));
     listing.mockResolvedValue({
         entries: [{ name: "batch", kind: "file", metadata: { readonly: false } }],
         totalCount: 1,
@@ -247,8 +246,8 @@ it("ファイルのskipは送らず、フォルダoverwriteの種別衝突はフ
     store.enqueue([{ path: "batch" }], { libraryId: "normal", path: "/" }, "overwrite");
     await vi.waitFor(() => expect(store.getSnapshot()[1]?.status).toBe("succeeded"));
     expect(post.mock.calls.map((args) => args[0])).toEqual([
-        "/libraries/{libraryId}/folders",
+        "/libraries/{libraryId}/entries/folders",
         "/libraries/{libraryId}/files/delete",
-        "/libraries/{libraryId}/folders",
+        "/libraries/{libraryId}/entries/folders",
     ]);
 });

@@ -70,7 +70,7 @@ async function harness() {
             { id: "dest", readonly: false },
         ],
     );
-    get.mockResolvedValue(response({ folder: { metadata: { readonly: false } } }));
+    get.mockResolvedValue(response({ entry: { metadata: { readonly: false } } }));
     fetchPage.mockResolvedValue({ entries: [], totalCount: 0, snapshot: "one" });
     post.mockResolvedValue(response({ operation }, 202));
     const store = new EntryClipboard();
@@ -221,7 +221,7 @@ it("読み取り専用の宛先、照合失敗、狭い画面への切り替え�
     const h = await harness();
     try {
         await h.capture("cut");
-        get.mockResolvedValueOnce(response({ folder: { metadata: { readonly: true } } }));
+        get.mockResolvedValueOnce(response({ entry: { metadata: { readonly: true } } }));
         await act(async () => (await h.begin()).promise);
         expect(post).not.toHaveBeenCalled();
         fetchPage.mockRejectedValueOnce(new Error("offline"));

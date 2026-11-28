@@ -37,21 +37,6 @@ impl apis::folders::Folders for ApiServer {
         })
     }
 
-    async fn create_folder(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::CreateFolderPathParams,
-        body: &models::CreateFolderRequest,
-    ) -> std::result::Result<apis::folders::CreateFolderResponse, ()> {
-        Ok(match self.state.mutation.create_folder(&path_params.library_id, body).await {
-            Ok(file) => apis::folders::CreateFolderResponse::Status201_FolderCreated(models::FolderResponse::new(file)),
-            Err(error) => ApiError::from(error).into(),
-        })
-    }
-
     async fn delete_folders(
         &self,
         method: &Method,
@@ -73,21 +58,6 @@ impl apis::folders::Folders for ApiServer {
                 Err(error) => ApiError::from(error).into(),
             },
         )
-    }
-
-    async fn get_folder(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::GetFolderPathParams,
-        query_params: &models::GetFolderQueryParams,
-    ) -> std::result::Result<apis::folders::GetFolderResponse, ()> {
-        Ok(match self.state.library.get_folder(&path_params.library_id, &query_params.path).await {
-            Ok(folder) => apis::folders::GetFolderResponse::Status200_FolderMetadata(models::FolderResponse::new(folder)),
-            Err(error) => ApiError::from(error).into(),
-        })
     }
 
     async fn list_folder_entries(
@@ -167,28 +137,6 @@ impl apis::folders::Folders for ApiServer {
         })
     }
 
-    async fn probe_folder_children(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        _claims: &Self::Claims,
-        path: &models::ProbeFolderChildrenPathParams,
-        query: &models::ProbeFolderChildrenQueryParams,
-    ) -> std::result::Result<apis::folders::ProbeFolderChildrenResponse, ()> {
-        Ok(
-            match self
-                .state
-                .library
-                .probe_folder_children(&path.library_id, &query.path, query.include_hidden.unwrap_or(false))
-                .await
-            {
-                Ok(result) => apis::folders::ProbeFolderChildrenResponse::Status200_True(result),
-                Err(error) => ApiError::from(error).into(),
-            },
-        )
-    }
-
     async fn move_folders(
         &self,
         method: &Method,
@@ -203,22 +151,6 @@ impl apis::folders::Folders for ApiServer {
             Ok(MoveResult::Started(operation)) => apis::folders::MoveFoldersResponse::Status202_MoveOperationStarted(models::OperationResponse::new(operation)),
             Err(error) => ApiError::from(error).into(),
         })
-    }
-}
-
-impl From<ApiError> for apis::folders::GetFolderResponse {
-    fn from(error: ApiError) -> Self {
-        match error.status {
-            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
-            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
-            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
-            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
-            ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
-            ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
-            ApiStatus::RangeNotSatisfiable | ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => {
-                Self::Status500_InternalServerError(error.body)
-            }
-        }
     }
 }
 
@@ -245,19 +177,6 @@ impl From<ApiError> for apis::folders::CopyFoldersResponse {
             ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
             ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
             ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
-            _ => Self::Status500_InternalServerError(error.body),
-        }
-    }
-}
-
-impl From<ApiError> for apis::folders::CreateFolderResponse {
-    fn from(error: ApiError) -> Self {
-        match error.status {
-            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
-            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
-            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
-            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
-            ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
             _ => Self::Status500_InternalServerError(error.body),
         }
     }
@@ -531,22 +450,25 @@ mod tests {
         assert_eq!(paths, ["/photos/a.7z/dir", "/photos/a.7z/y.txt"]);
         assert_eq!(listing.entries[0].kind, models::FileSystemEntryKind::Folder);
 
-        let folder = apis::folders::Folders::get_folder(
+        let folder = apis::entries::Entries::get_entry_metadata(
             &fixture.server,
             &Method::GET,
             &host(),
             &CookieJar::default(),
             &claims(),
-            &models::GetFolderPathParams { library_id: "photos".to_string() },
-            &models::GetFolderQueryParams { path: "/photos/a.7z".to_string() },
+            &models::GetEntryMetadataPathParams { library_id: "photos".to_string() },
+            &models::GetEntryMetadataQueryParams {
+                path: "/photos/a.7z".to_string(),
+                view: Some(models::EntryView::Folder),
+            },
         )
         .await
         .unwrap();
-        let apis::folders::GetFolderResponse::Status200_FolderMetadata(folder) = folder else {
+        let apis::entries::GetEntryMetadataResponse::Status200_TheEntry(folder) = folder else {
             panic!("archive root must be a folder");
         };
-        assert_eq!(folder.folder.path, "/photos/a.7z");
-        assert_eq!(folder.folder.kind, models::FileSystemEntryKind::Folder);
+        assert_eq!(folder.entry.path, "/photos/a.7z");
+        assert_eq!(folder.entry.kind, models::FileSystemEntryKind::Folder);
         Ok(())
     }
 }
@@ -575,18 +497,6 @@ impl From<ApiError> for apis::folders::GetEntryDetailsResponse {
             ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
             ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
             ApiStatus::PayloadTooLarge => Self::Status413_TheRequestBodyExceedsTheOne(error.body),
-            _ => Self::Status500_InternalServerError(error.body),
-        }
-    }
-}
-
-impl From<ApiError> for apis::folders::ProbeFolderChildrenResponse {
-    fn from(error: ApiError) -> Self {
-        match error.status {
-            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
-            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
-            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
-            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
             _ => Self::Status500_InternalServerError(error.body),
         }
     }

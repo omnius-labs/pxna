@@ -29,26 +29,6 @@ pub enum CopyFoldersResponse {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
-pub enum CreateFolderResponse {
-    /// Folder created.
-    Status201_FolderCreated(models::FolderResponse),
-    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::Problem),
-    /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::Problem),
-    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
-    /// Resource not found.
-    Status404_ResourceNotFound(models::Problem),
-    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
-    /// Internal server error.
-    Status500_InternalServerError(models::Problem),
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[must_use]
-#[allow(clippy::large_enum_variant)]
 pub enum DeleteFoldersResponse {
     /// Delete operation started.
     Status202_DeleteOperationStarted(models::OperationResponse),
@@ -86,28 +66,6 @@ pub enum GetEntryDetailsResponse {
     Status413_TheRequestBodyExceedsTheOne(models::Problem),
     /// Internal server error.
     Status500_InternalServerError(models::Problem),
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[must_use]
-#[allow(clippy::large_enum_variant)]
-pub enum GetFolderResponse {
-    /// Folder metadata.
-    Status200_FolderMetadata(models::FolderResponse),
-    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::Problem),
-    /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::Problem),
-    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
-    /// Resource not found.
-    Status404_ResourceNotFound(models::Problem),
-    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
-    /// Internal server error.
-    Status500_InternalServerError(models::Problem),
-    /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -176,26 +134,6 @@ pub enum MoveFoldersResponse {
     Status500_InternalServerError(models::Problem),
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[must_use]
-#[allow(clippy::large_enum_variant)]
-pub enum ProbeFolderChildrenResponse {
-    /// True, confirmed false, or unknown (null).
-    Status200_True(models::FolderChildrenProbe),
-    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::Problem),
-    /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::Problem),
-    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
-    /// Resource not found.
-    Status404_ResourceNotFound(models::Problem),
-    /// Internal server error.
-    Status500_InternalServerError(models::Problem),
-    /// Child probes are not provided; childProbes is false. No response body.
-    Status501_ChildProbesAreNotProvided,
-}
-
 /// Folders
 #[async_trait]
 #[allow(clippy::ptr_arg)]
@@ -215,20 +153,6 @@ pub trait Folders<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
         path_params: &models::CopyFoldersPathParams,
         body: &models::EntryTransferRequest,
     ) -> Result<CopyFoldersResponse, E>;
-
-    /// Create a folder.
-    ///
-    /// CreateFolder - POST /api/v1/libraries/{libraryId}/folders
-    async fn create_folder(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::CreateFolderPathParams,
-        body: &models::CreateFolderRequest,
-    ) -> Result<CreateFolderResponse, E>;
 
     /// Delete folders.
     ///
@@ -257,20 +181,6 @@ pub trait Folders<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
         path_params: &models::GetEntryDetailsPathParams,
         body: &models::EntryDetailsRequest,
     ) -> Result<GetEntryDetailsResponse, E>;
-
-    /// Get folder metadata.
-    ///
-    /// GetFolder - GET /api/v1/libraries/{libraryId}/folders
-    async fn get_folder(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::GetFolderPathParams,
-        query_params: &models::GetFolderQueryParams,
-    ) -> Result<GetFolderResponse, E>;
 
     /// List folder entries.
     ///
@@ -313,18 +223,4 @@ pub trait Folders<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::Error
         path_params: &models::MoveFoldersPathParams,
         body: &models::EntryTransferRequest,
     ) -> Result<MoveFoldersResponse, E>;
-
-    /// Probe for a folder-like direct child within a small budget.
-    ///
-    /// ProbeFolderChildren - GET /api/v1/libraries/{libraryId}/folders/children
-    async fn probe_folder_children(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::ProbeFolderChildrenPathParams,
-        query_params: &models::ProbeFolderChildrenQueryParams,
-    ) -> Result<ProbeFolderChildrenResponse, E>;
 }

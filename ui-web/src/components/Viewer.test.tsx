@@ -350,7 +350,7 @@ describe("Switch to the original image", () => {
             await wait(() => expect(findDisplayImage(h)).not.toBeNull());
             expect(originalImage(h)).toBeNull();
             await loadDisplay(h);
-            expect(originalImage(h)?.getAttribute("src")).toContain("files/content");
+            expect(originalImage(h)?.getAttribute("src")).toContain("entries/content");
             expect(originalImage(h)?.getAttribute("src")).toContain("a.png");
         } finally {
             await h.dispose();
@@ -987,7 +987,7 @@ describe("ダウンロードと削除", () => {
             try {
                 const link = control(h, "Download");
                 expect(link?.tagName).toBe("A");
-                expect(link?.getAttribute("href")).toContain("/files/content?path=%2F1.png");
+                expect(link?.getAttribute("href")).toContain("/entries/content?path=%2F1.png");
                 expect(link?.getAttribute("download")).toBe("1.png");
             } finally {
                 await h.dispose();
@@ -1237,7 +1237,7 @@ describe("Rate mode", () => {
     /// 一覧と、保存済みの評価を返す daemon の代わり。
     const answering = (entries: Entry[], ratings: Record<string, string> = {}) =>
         get.mockImplementation(async (route: string, options?: { params?: { query?: { path?: string } } }) =>
-            route === "/libraries/{libraryId}/rating"
+            route === "/libraries/{libraryId}/entries/rating"
                 ? { data: { rating: ratings[options?.params?.query?.path ?? ""] ?? "none" }, response: new Response() }
                 : {
                       data: { entries, totalCount: entries.length, snapshot: "one", truncated: false },

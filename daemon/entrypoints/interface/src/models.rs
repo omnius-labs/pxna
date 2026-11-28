@@ -64,52 +64,22 @@ pub fn check_xss_map<T>(v: &std::collections::HashMap<String, T>) -> std::result
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct CopyFilesPathParams {
+pub struct CreateFilePathParams {
     /// Opaque identifier of a Library owned by the owner.
     #[validate(
                         length(min = 1, max = 64),
-                          regex(path = *RE_COPYFILESPATHPARAMS_LIBRARY_ID),
+                          regex(path = *RE_CREATEFILEPATHPARAMS_LIBRARY_ID),
             )]
     pub library_id: String,
 }
 
 lazy_static::lazy_static! {
-    static ref RE_COPYFILESPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+    static ref RE_CREATEFILEPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct DeleteFilesPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_DELETEFILESPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_DELETEFILESPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetFilePathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_GETFILEPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_GETFILEPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetFileQueryParams {
+pub struct CreateFileQueryParams {
     /// Path relative to the selected Library.
     #[serde(rename = "path")]
     #[validate(length(min = 1, max = 4096))]
@@ -118,17 +88,73 @@ pub struct GetFileQueryParams {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct MoveFilesPathParams {
+pub struct CreateFolderPathParams {
     /// Opaque identifier of a Library owned by the owner.
     #[validate(
                         length(min = 1, max = 64),
-                          regex(path = *RE_MOVEFILESPATHPARAMS_LIBRARY_ID),
+                          regex(path = *RE_CREATEFOLDERPATHPARAMS_LIBRARY_ID),
             )]
     pub library_id: String,
 }
 
 lazy_static::lazy_static! {
-    static ref RE_MOVEFILESPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+    static ref RE_CREATEFOLDERPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct GetEntryMetadataPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_GETENTRYMETADATAPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_GETENTRYMETADATAPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct GetEntryMetadataQueryParams {
+    /// Path relative to the selected Library.
+    #[serde(rename = "path")]
+    #[validate(length(min = 1, max = 4096))]
+    pub path: String,
+    /// Which face of the path is meant: `file` or `folder`. Only an archive has both; without it, an archive is its file.
+    #[serde(rename = "view")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<models::EntryView>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct ProbeFolderChildrenPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_PROBEFOLDERCHILDRENPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_PROBEFOLDERCHILDRENPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct ProbeFolderChildrenQueryParams {
+    /// Path relative to the selected Library.
+    #[serde(rename = "path")]
+    #[validate(length(min = 1, max = 4096))]
+    pub path: String,
+    /// Whether hidden entries should be returned.
+    #[serde(rename = "includeHidden")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_hidden: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -193,10 +219,55 @@ pub struct WriteFileContentQueryParams {
     #[serde(rename = "path")]
     #[validate(length(min = 1, max = 4096))]
     pub path: String,
-    /// How to resolve an existing entry at the target path.
+    /// How to resolve an existing entry at the exact path. `rename` is not accepted; use `POST .../entries/files`.
     #[serde(rename = "conflict")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub conflict: Option<models::ConflictPolicy>,
+    pub conflict: Option<models::WriteConflictPolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct CopyFilesPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_COPYFILESPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_COPYFILESPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct DeleteFilesPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_DELETEFILESPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_DELETEFILESPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct MoveFilesPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_MOVEFILESPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_MOVEFILESPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -212,21 +283,6 @@ pub struct CopyFoldersPathParams {
 
 lazy_static::lazy_static! {
     static ref RE_COPYFOLDERSPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct CreateFolderPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_CREATEFOLDERPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_CREATEFOLDERPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -257,30 +313,6 @@ pub struct GetEntryDetailsPathParams {
 
 lazy_static::lazy_static! {
     static ref RE_GETENTRYDETAILSPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetFolderPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_GETFOLDERPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_GETFOLDERPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetFolderQueryParams {
-    /// Path relative to the selected Library.
-    #[serde(rename = "path")]
-    #[validate(length(min = 1, max = 4096))]
-    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -433,34 +465,6 @@ lazy_static::lazy_static! {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct ProbeFolderChildrenPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_PROBEFOLDERCHILDRENPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_PROBEFOLDERCHILDRENPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct ProbeFolderChildrenQueryParams {
-    /// Path relative to the selected Library.
-    #[serde(rename = "path")]
-    #[validate(length(min = 1, max = 4096))]
-    pub path: String,
-    /// Whether hidden entries should be returned.
-    #[serde(rename = "includeHidden")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub include_hidden: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct GetLibraryPathParams {
     /// Opaque identifier of a Library owned by the owner.
     #[validate(
@@ -472,6 +476,30 @@ pub struct GetLibraryPathParams {
 
 lazy_static::lazy_static! {
     static ref RE_GETLIBRARYPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct GetMediaInfoPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_GETMEDIAINFOPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_GETMEDIAINFOPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct GetMediaInfoQueryParams {
+    /// Path relative to the selected Library.
+    #[serde(rename = "path")]
+    #[validate(length(min = 1, max = 4096))]
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -488,6 +516,30 @@ pub struct GetOperationPathParams {
     /// Opaque identifier of a long-running operation.
     #[validate(length(min = 1))]
     pub operation_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct GetEntryTagsPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_GETENTRYTAGSPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_GETENTRYTAGSPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct GetEntryTagsQueryParams {
+    /// Path relative to the selected Library.
+    #[serde(rename = "path")]
+    #[validate(length(min = 1, max = 4096))]
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -516,6 +568,30 @@ pub struct GetRatingQueryParams {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct PutEntryTagsPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_PUTENTRYTAGSPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_PUTENTRYTAGSPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct PutEntryTagsQueryParams {
+    /// Path relative to the selected Library.
+    #[serde(rename = "path")]
+    #[validate(length(min = 1, max = 4096))]
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct PutRatingPathParams {
     /// Opaque identifier of a Library owned by the owner.
     #[validate(
@@ -527,6 +603,15 @@ pub struct PutRatingPathParams {
 
 lazy_static::lazy_static! {
     static ref RE_PUTRATINGPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct PutRatingQueryParams {
+    /// Path relative to the selected Library.
+    #[serde(rename = "path")]
+    #[validate(length(min = 1, max = 4096))]
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -604,38 +689,22 @@ lazy_static::lazy_static! {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct DeleteShelfPathParams {
-    /// Identifier the daemon gave the Shelf.
-    #[validate(length(min = 1))]
-    pub shelf_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct ReplaceShelfPathParams {
-    /// Identifier the daemon gave the Shelf.
-    #[validate(length(min = 1))]
-    pub shelf_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetEntryTagsPathParams {
+pub struct DeleteFolderSettingPathParams {
     /// Opaque identifier of a Library owned by the owner.
     #[validate(
                         length(min = 1, max = 64),
-                          regex(path = *RE_GETENTRYTAGSPATHPARAMS_LIBRARY_ID),
+                          regex(path = *RE_DELETEFOLDERSETTINGPATHPARAMS_LIBRARY_ID),
             )]
     pub library_id: String,
 }
 
 lazy_static::lazy_static! {
-    static ref RE_GETENTRYTAGSPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+    static ref RE_DELETEFOLDERSETTINGPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetEntryTagsQueryParams {
+pub struct DeleteFolderSettingQueryParams {
     /// Path relative to the selected Library.
     #[serde(rename = "path")]
     #[validate(length(min = 1, max = 4096))]
@@ -644,17 +713,42 @@ pub struct GetEntryTagsQueryParams {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct PutEntryTagsPathParams {
+pub struct DeleteShelfPathParams {
+    /// Identifier the daemon gave the Shelf.
+    #[validate(length(min = 1))]
+    pub shelf_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct PutFolderSettingPathParams {
     /// Opaque identifier of a Library owned by the owner.
     #[validate(
                         length(min = 1, max = 64),
-                          regex(path = *RE_PUTENTRYTAGSPATHPARAMS_LIBRARY_ID),
+                          regex(path = *RE_PUTFOLDERSETTINGPATHPARAMS_LIBRARY_ID),
             )]
     pub library_id: String,
 }
 
 lazy_static::lazy_static! {
-    static ref RE_PUTENTRYTAGSPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+    static ref RE_PUTFOLDERSETTINGPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct PutFolderSettingQueryParams {
+    /// Path relative to the selected Library.
+    #[serde(rename = "path")]
+    #[validate(length(min = 1, max = 4096))]
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct ReplaceShelfPathParams {
+    /// Identifier the daemon gave the Shelf.
+    #[validate(length(min = 1))]
+    pub shelf_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -850,30 +944,6 @@ pub struct DeleteVideoSessionPathParams {
 
 lazy_static::lazy_static! {
     static ref RE_DELETEVIDEOSESSIONPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetMediaInfoPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_GETMEDIAINFOPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_GETMEDIAINFOPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetMediaInfoQueryParams {
-    /// Path relative to the selected Library.
-    #[serde(rename = "path")]
-    #[validate(length(min = 1, max = 4096))]
-    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -4115,6 +4185,113 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<EntryMonthsR
     }
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct EntryResponse {
+    #[serde(rename = "entry")]
+    #[validate(nested)]
+    pub entry: models::FileSystemEntry,
+}
+
+impl EntryResponse {
+    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
+    pub fn new(entry: models::FileSystemEntry) -> EntryResponse {
+        EntryResponse { entry }
+    }
+}
+
+/// Converts the EntryResponse value to the Query Parameters representation (style=form, explode=false)
+/// specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde serializer
+impl std::fmt::Display for EntryResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<Option<String>> = vec![
+            // Skipping entry in query parameter serialization
+
+        ];
+
+        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
+    }
+}
+
+/// Converts Query Parameters representation (style=form, explode=false) to a EntryResponse value
+/// as specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde deserializer
+impl std::str::FromStr for EntryResponse {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        /// An intermediate representation of the struct to use for parsing.
+        #[derive(Default)]
+        #[allow(dead_code)]
+        struct IntermediateRep {
+            pub entry: Vec<models::FileSystemEntry>,
+        }
+
+        let mut intermediate_rep = IntermediateRep::default();
+
+        // Parse into intermediate representation
+        let mut string_iter = s.split(',');
+        let mut key_result = string_iter.next();
+
+        while key_result.is_some() {
+            let val = match string_iter.next() {
+                Some(x) => x,
+                None => return std::result::Result::Err("Missing value while parsing EntryResponse".to_string()),
+            };
+
+            if let Some(key) = key_result {
+                #[allow(clippy::match_single_binding)]
+                match key {
+                    #[allow(clippy::redundant_clone)]
+                    "entry" => intermediate_rep
+                        .entry
+                        .push(<models::FileSystemEntry as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    _ => return std::result::Result::Err("Unexpected key while parsing EntryResponse".to_string()),
+                }
+            }
+
+            // Get the next key
+            key_result = string_iter.next();
+        }
+
+        // Use the intermediate representation to return the struct
+        std::result::Result::Ok(EntryResponse {
+            entry: intermediate_rep.entry.into_iter().next().ok_or_else(|| "entry missing in EntryResponse".to_string())?,
+        })
+    }
+}
+
+// Methods for converting between header::IntoHeaderValue<EntryResponse> and HeaderValue
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<header::IntoHeaderValue<EntryResponse>> for HeaderValue {
+    type Error = String;
+
+    fn try_from(hdr_value: header::IntoHeaderValue<EntryResponse>) -> std::result::Result<Self, Self::Error> {
+        let hdr_value = hdr_value.to_string();
+        match HeaderValue::from_str(&hdr_value) {
+            std::result::Result::Ok(value) => std::result::Result::Ok(value),
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for EntryResponse - value: {hdr_value} is invalid {e}"#)),
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<EntryResponse> {
+    type Error = String;
+
+    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
+        match hdr_value.to_str() {
+            std::result::Result::Ok(value) => match <EntryResponse as std::str::FromStr>::from_str(value) {
+                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
+                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into EntryResponse - {err}"#)),
+            },
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
 /// The starts of a listing and how far it reads from them.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
@@ -4520,6 +4697,48 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<EntryTransfe
                 std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into EntryTransferRequest - {err}"#)),
             },
             std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
+/// The face of a path. `file` is the file, an archive file included; `folder` is a folder or an archive's root.
+/// Enumeration of values.
+/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
+/// which helps with FFI.
+#[allow(non_camel_case_types, clippy::large_enum_variant)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
+pub enum EntryView {
+    #[serde(rename = "file")]
+    File,
+    #[serde(rename = "folder")]
+    Folder,
+}
+
+impl validator::Validate for EntryView {
+    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
+        std::result::Result::Ok(())
+    }
+}
+
+impl std::fmt::Display for EntryView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            EntryView::File => write!(f, "file"),
+            EntryView::Folder => write!(f, "folder"),
+        }
+    }
+}
+
+impl std::str::FromStr for EntryView {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "file" => std::result::Result::Ok(EntryView::File),
+            "folder" => std::result::Result::Ok(EntryView::Folder),
+            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
         }
     }
 }
@@ -5919,113 +6138,6 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<FolderListin
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct FolderResponse {
-    #[serde(rename = "folder")]
-    #[validate(nested)]
-    pub folder: models::FileSystemEntry,
-}
-
-impl FolderResponse {
-    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(folder: models::FileSystemEntry) -> FolderResponse {
-        FolderResponse { folder }
-    }
-}
-
-/// Converts the FolderResponse value to the Query Parameters representation (style=form, explode=false)
-/// specified in https://swagger.io/docs/specification/serialization/
-/// Should be implemented in a serde serializer
-impl std::fmt::Display for FolderResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let params: Vec<Option<String>> = vec![
-            // Skipping folder in query parameter serialization
-
-        ];
-
-        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
-    }
-}
-
-/// Converts Query Parameters representation (style=form, explode=false) to a FolderResponse value
-/// as specified in https://swagger.io/docs/specification/serialization/
-/// Should be implemented in a serde deserializer
-impl std::str::FromStr for FolderResponse {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        /// An intermediate representation of the struct to use for parsing.
-        #[derive(Default)]
-        #[allow(dead_code)]
-        struct IntermediateRep {
-            pub folder: Vec<models::FileSystemEntry>,
-        }
-
-        let mut intermediate_rep = IntermediateRep::default();
-
-        // Parse into intermediate representation
-        let mut string_iter = s.split(',');
-        let mut key_result = string_iter.next();
-
-        while key_result.is_some() {
-            let val = match string_iter.next() {
-                Some(x) => x,
-                None => return std::result::Result::Err("Missing value while parsing FolderResponse".to_string()),
-            };
-
-            if let Some(key) = key_result {
-                #[allow(clippy::match_single_binding)]
-                match key {
-                    #[allow(clippy::redundant_clone)]
-                    "folder" => intermediate_rep
-                        .folder
-                        .push(<models::FileSystemEntry as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    _ => return std::result::Result::Err("Unexpected key while parsing FolderResponse".to_string()),
-                }
-            }
-
-            // Get the next key
-            key_result = string_iter.next();
-        }
-
-        // Use the intermediate representation to return the struct
-        std::result::Result::Ok(FolderResponse {
-            folder: intermediate_rep.folder.into_iter().next().ok_or_else(|| "folder missing in FolderResponse".to_string())?,
-        })
-    }
-}
-
-// Methods for converting between header::IntoHeaderValue<FolderResponse> and HeaderValue
-
-#[cfg(feature = "server")]
-impl std::convert::TryFrom<header::IntoHeaderValue<FolderResponse>> for HeaderValue {
-    type Error = String;
-
-    fn try_from(hdr_value: header::IntoHeaderValue<FolderResponse>) -> std::result::Result<Self, Self::Error> {
-        let hdr_value = hdr_value.to_string();
-        match HeaderValue::from_str(&hdr_value) {
-            std::result::Result::Ok(value) => std::result::Result::Ok(value),
-            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for FolderResponse - value: {hdr_value} is invalid {e}"#)),
-        }
-    }
-}
-
-#[cfg(feature = "server")]
-impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<FolderResponse> {
-    type Error = String;
-
-    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
-        match hdr_value.to_str() {
-            std::result::Result::Ok(value) => match <FolderResponse as std::str::FromStr>::from_str(value) {
-                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
-                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into FolderResponse - {err}"#)),
-            },
-            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
-        }
-    }
-}
-
 /// The display values saved for one folder. The path is returned in normal form, with `.` and `..` resolved.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
@@ -6269,6 +6381,118 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<FolderSettin
             std::result::Result::Ok(value) => match <FolderSettingList as std::str::FromStr>::from_str(value) {
                 std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
                 std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into FolderSettingList - {err}"#)),
+            },
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
+/// The display values to save for the folder named in the query.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct FolderSettingRequest {
+    #[serde(rename = "display")]
+    #[validate(nested)]
+    pub display: models::DisplayValues,
+}
+
+impl FolderSettingRequest {
+    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
+    pub fn new(display: models::DisplayValues) -> FolderSettingRequest {
+        FolderSettingRequest { display }
+    }
+}
+
+/// Converts the FolderSettingRequest value to the Query Parameters representation (style=form, explode=false)
+/// specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde serializer
+impl std::fmt::Display for FolderSettingRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<Option<String>> = vec![
+            // Skipping display in query parameter serialization
+
+        ];
+
+        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
+    }
+}
+
+/// Converts Query Parameters representation (style=form, explode=false) to a FolderSettingRequest value
+/// as specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde deserializer
+impl std::str::FromStr for FolderSettingRequest {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        /// An intermediate representation of the struct to use for parsing.
+        #[derive(Default)]
+        #[allow(dead_code)]
+        struct IntermediateRep {
+            pub display: Vec<models::DisplayValues>,
+        }
+
+        let mut intermediate_rep = IntermediateRep::default();
+
+        // Parse into intermediate representation
+        let mut string_iter = s.split(',');
+        let mut key_result = string_iter.next();
+
+        while key_result.is_some() {
+            let val = match string_iter.next() {
+                Some(x) => x,
+                None => return std::result::Result::Err("Missing value while parsing FolderSettingRequest".to_string()),
+            };
+
+            if let Some(key) = key_result {
+                #[allow(clippy::match_single_binding)]
+                match key {
+                    #[allow(clippy::redundant_clone)]
+                    "display" => intermediate_rep
+                        .display
+                        .push(<models::DisplayValues as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    _ => return std::result::Result::Err("Unexpected key while parsing FolderSettingRequest".to_string()),
+                }
+            }
+
+            // Get the next key
+            key_result = string_iter.next();
+        }
+
+        // Use the intermediate representation to return the struct
+        std::result::Result::Ok(FolderSettingRequest {
+            display: intermediate_rep
+                .display
+                .into_iter()
+                .next()
+                .ok_or_else(|| "display missing in FolderSettingRequest".to_string())?,
+        })
+    }
+}
+
+// Methods for converting between header::IntoHeaderValue<FolderSettingRequest> and HeaderValue
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<header::IntoHeaderValue<FolderSettingRequest>> for HeaderValue {
+    type Error = String;
+
+    fn try_from(hdr_value: header::IntoHeaderValue<FolderSettingRequest>) -> std::result::Result<Self, Self::Error> {
+        let hdr_value = hdr_value.to_string();
+        match HeaderValue::from_str(&hdr_value) {
+            std::result::Result::Ok(value) => std::result::Result::Ok(value),
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for FolderSettingRequest - value: {hdr_value} is invalid {e}"#)),
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<FolderSettingRequest> {
+    type Error = String;
+
+    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
+        match hdr_value.to_str() {
+            std::result::Result::Ok(value) => match <FolderSettingRequest as std::str::FromStr>::from_str(value) {
+                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
+                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into FolderSettingRequest - {err}"#)),
             },
             std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
         }
@@ -9072,11 +9296,6 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<Problem> {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct PutEntryTagsRequest {
-    /// Absolute-looking path within the selected Library. The resolved path must never escape that library.
-    #[serde(rename = "path")]
-    #[validate(length(min = 1, max = 4096), custom(function = "check_xss_string"))]
-    pub path: String,
-
     #[serde(rename = "tags")]
     #[validate(length(max = 32), nested)]
     pub tags: Vec<models::TagName>,
@@ -9084,8 +9303,8 @@ pub struct PutEntryTagsRequest {
 
 impl PutEntryTagsRequest {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(path: String, tags: Vec<models::TagName>) -> PutEntryTagsRequest {
-        PutEntryTagsRequest { path, tags }
+    pub fn new(tags: Vec<models::TagName>) -> PutEntryTagsRequest {
+        PutEntryTagsRequest { tags }
     }
 }
 
@@ -9094,12 +9313,7 @@ impl PutEntryTagsRequest {
 /// Should be implemented in a serde serializer
 impl std::fmt::Display for PutEntryTagsRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let params: Vec<Option<String>> = vec![
-            Some("path".to_string()),
-            Some(self.path.to_string()),
-            Some("tags".to_string()),
-            Some(self.tags.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
-        ];
+        let params: Vec<Option<String>> = vec![Some("tags".to_string()), Some(self.tags.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))];
 
         write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
     }
@@ -9116,7 +9330,6 @@ impl std::str::FromStr for PutEntryTagsRequest {
         #[derive(Default)]
         #[allow(dead_code)]
         struct IntermediateRep {
-            pub path: Vec<String>,
             pub tags: Vec<Vec<models::TagName>>,
         }
 
@@ -9135,8 +9348,6 @@ impl std::str::FromStr for PutEntryTagsRequest {
             if let Some(key) = key_result {
                 #[allow(clippy::match_single_binding)]
                 match key {
-                    #[allow(clippy::redundant_clone)]
-                    "path" => intermediate_rep.path.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     "tags" => return std::result::Result::Err("Parsing a container in this style is not supported in PutEntryTagsRequest".to_string()),
                     _ => return std::result::Result::Err("Unexpected key while parsing PutEntryTagsRequest".to_string()),
                 }
@@ -9148,7 +9359,6 @@ impl std::str::FromStr for PutEntryTagsRequest {
 
         // Use the intermediate representation to return the struct
         std::result::Result::Ok(PutEntryTagsRequest {
-            path: intermediate_rep.path.into_iter().next().ok_or_else(|| "path missing in PutEntryTagsRequest".to_string())?,
             tags: intermediate_rep.tags.into_iter().next().ok_or_else(|| "tags missing in PutEntryTagsRequest".to_string())?,
         })
     }
@@ -9187,11 +9397,6 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<PutEntryTags
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct PutRatingRequest {
-    /// Absolute-looking path within the selected Library. The resolved path must never escape that library.
-    #[serde(rename = "path")]
-    #[validate(length(min = 1, max = 4096), custom(function = "check_xss_string"))]
-    pub path: String,
-
     #[serde(rename = "rating")]
     #[validate(nested)]
     pub rating: models::RatingValue,
@@ -9199,8 +9404,8 @@ pub struct PutRatingRequest {
 
 impl PutRatingRequest {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(path: String, rating: models::RatingValue) -> PutRatingRequest {
-        PutRatingRequest { path, rating }
+    pub fn new(rating: models::RatingValue) -> PutRatingRequest {
+        PutRatingRequest { rating }
     }
 }
 
@@ -9210,9 +9415,8 @@ impl PutRatingRequest {
 impl std::fmt::Display for PutRatingRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
-            Some("path".to_string()),
-            Some(self.path.to_string()),
             // Skipping rating in query parameter serialization
+
         ];
 
         write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
@@ -9230,7 +9434,6 @@ impl std::str::FromStr for PutRatingRequest {
         #[derive(Default)]
         #[allow(dead_code)]
         struct IntermediateRep {
-            pub path: Vec<String>,
             pub rating: Vec<models::RatingValue>,
         }
 
@@ -9250,8 +9453,6 @@ impl std::str::FromStr for PutRatingRequest {
                 #[allow(clippy::match_single_binding)]
                 match key {
                     #[allow(clippy::redundant_clone)]
-                    "path" => intermediate_rep.path.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    #[allow(clippy::redundant_clone)]
                     "rating" => intermediate_rep
                         .rating
                         .push(<models::RatingValue as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
@@ -9265,7 +9466,6 @@ impl std::str::FromStr for PutRatingRequest {
 
         // Use the intermediate representation to return the struct
         std::result::Result::Ok(PutRatingRequest {
-            path: intermediate_rep.path.into_iter().next().ok_or_else(|| "path missing in PutRatingRequest".to_string())?,
             rating: intermediate_rep.rating.into_iter().next().ok_or_else(|| "rating missing in PutRatingRequest".to_string())?,
         })
     }
@@ -13610,6 +13810,52 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<VideoSession
                 std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into VideoSessionResponse - {err}"#)),
             },
             std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
+/// How a write to an exact path resolves an existing entry there: `fail` rejects with `409`, `skip` leaves it in place, and `overwrite` replaces it.
+/// Enumeration of values.
+/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
+/// which helps with FFI.
+#[allow(non_camel_case_types, clippy::large_enum_variant)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "conversion", derive(frunk_enum_derive::LabelledGenericEnum))]
+pub enum WriteConflictPolicy {
+    #[serde(rename = "fail")]
+    Fail,
+    #[serde(rename = "skip")]
+    Skip,
+    #[serde(rename = "overwrite")]
+    Overwrite,
+}
+
+impl validator::Validate for WriteConflictPolicy {
+    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
+        std::result::Result::Ok(())
+    }
+}
+
+impl std::fmt::Display for WriteConflictPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            WriteConflictPolicy::Fail => write!(f, "fail"),
+            WriteConflictPolicy::Skip => write!(f, "skip"),
+            WriteConflictPolicy::Overwrite => write!(f, "overwrite"),
+        }
+    }
+}
+
+impl std::str::FromStr for WriteConflictPolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "fail" => std::result::Result::Ok(WriteConflictPolicy::Fail),
+            "skip" => std::result::Result::Ok(WriteConflictPolicy::Skip),
+            "overwrite" => std::result::Result::Ok(WriteConflictPolicy::Overwrite),
+            _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
         }
     }
 }

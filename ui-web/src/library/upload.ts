@@ -26,9 +26,9 @@ export interface UploadItem {
 export function isUploadRunning(item: UploadItem) {
     return item.status === "pending" || item.status === "running";
 }
-async function writeBytes(url: string, body: Blob, signal: AbortSignal): Promise<Response> {
+async function writeBytes(url: string, body: Blob, signal: AbortSignal, method = "PUT"): Promise<Response> {
     const response = await fetch(url, {
-        method: "PUT",
+        method,
         body,
         signal,
         headers: { "Content-Type": "application/octet-stream" },
@@ -48,11 +48,21 @@ export async function uploadFile(
     signal.throwIfAborted();
     const base = `/api/v1/libraries/${encodeURIComponent(destination.libraryId)}`;
     if (file.size <= ONE_SHOT_LIMIT) {
-        await writeBytes(
-            `${base}/files/content?${new URLSearchParams({ path: destination.path, conflict })}`,
-            file,
-            signal,
-        );
+        // 別の名前で公開しうる書き込みは作成の `POST`、正確な path への書き込みは `PUT` である。
+        if (conflict === "rename") {
+            await writeBytes(
+                `${base}/entries/files?${new URLSearchParams({ path: destination.path })}`,
+                file,
+                signal,
+                "POST",
+            );
+        } else {
+            await writeBytes(
+                `${base}/entries/content?${new URLSearchParams({ path: destination.path, conflict })}`,
+                file,
+                signal,
+            );
+        }
         progress(file.size);
         return;
     }
@@ -113,7 +123,7 @@ async function makeUploadFolder(
         const path = childPath(parent, suffix ? `${name} (${suffix})` : name);
         try {
             unwrap(
-                await api.POST("/libraries/{libraryId}/folders", {
+                await api.POST("/libraries/{libraryId}/entries/folders", {
                     params: { path: { libraryId } },
                     body: { path, createParents: false },
                 }),
@@ -136,7 +146,7 @@ async function makeUploadFolder(
             );
             signal.throwIfAborted();
             unwrap(
-                await api.POST("/libraries/{libraryId}/folders", {
+                await api.POST("/libraries/{libraryId}/entries/folders", {
                     params: { path: { libraryId } },
                     body: { path, createParents: false },
                 }),

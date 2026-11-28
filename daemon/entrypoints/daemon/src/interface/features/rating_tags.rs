@@ -14,7 +14,7 @@ use crate::{
 
 #[allow(unused_variables)]
 #[async_trait]
-impl apis::rating::Rating for ApiServer {
+impl apis::ratings_tags::RatingsTags for ApiServer {
     type Claims = Claims;
 
     async fn get_rating(
@@ -25,14 +25,14 @@ impl apis::rating::Rating for ApiServer {
         claims: &Self::Claims,
         path_params: &models::GetRatingPathParams,
         query_params: &models::GetRatingQueryParams,
-    ) -> std::result::Result<apis::rating::GetRatingResponse, ()> {
+    ) -> std::result::Result<apis::ratings_tags::GetRatingResponse, ()> {
         let rating = async {
             let path = self.rating_target(&path_params.library_id, &query_params.path).await?;
             Ok::<_, Error>(self.state.rating_tags.rating(&claims.user.id, &path_params.library_id, &path).await?)
         }
         .await;
         Ok(match rating {
-            Ok(rating) => apis::rating::GetRatingResponse::Status200_TheRating(models::RatingResponse::new(Self::rating_to_model(rating))),
+            Ok(rating) => apis::ratings_tags::GetRatingResponse::Status200_TheRating(models::RatingResponse::new(Self::rating_to_model(rating))),
             Err(error) => ApiError::from(error).into(),
         })
     }
@@ -44,26 +44,21 @@ impl apis::rating::Rating for ApiServer {
         cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::PutRatingPathParams,
+        query_params: &models::PutRatingQueryParams,
         body: &models::PutRatingRequest,
-    ) -> std::result::Result<apis::rating::PutRatingResponse, ()> {
+    ) -> std::result::Result<apis::ratings_tags::PutRatingResponse, ()> {
         let saved = async {
-            let path = self.rating_target(&path_params.library_id, &body.path).await?;
+            let path = self.rating_target(&path_params.library_id, &query_params.path).await?;
             let rating = Self::rating_from_model(&body.rating);
             self.state.rating_tags.set_rating(&claims.user.id, &path_params.library_id, &path, rating).await?;
             Ok::<_, Error>(rating)
         }
         .await;
         Ok(match saved {
-            Ok(rating) => apis::rating::PutRatingResponse::Status200_TheSavedRating(models::RatingResponse::new(Self::rating_to_model(rating))),
+            Ok(rating) => apis::ratings_tags::PutRatingResponse::Status200_TheSavedRating(models::RatingResponse::new(Self::rating_to_model(rating))),
             Err(error) => ApiError::from(error).into(),
         })
     }
-}
-
-#[allow(unused_variables)]
-#[async_trait]
-impl apis::tags::Tags for ApiServer {
-    type Claims = Claims;
 
     async fn get_entry_tags(
         &self,
@@ -73,14 +68,14 @@ impl apis::tags::Tags for ApiServer {
         claims: &Self::Claims,
         path_params: &models::GetEntryTagsPathParams,
         query_params: &models::GetEntryTagsQueryParams,
-    ) -> std::result::Result<apis::tags::GetEntryTagsResponse, ()> {
+    ) -> std::result::Result<apis::ratings_tags::GetEntryTagsResponse, ()> {
         let tags = async {
             let path = self.rating_target(&path_params.library_id, &query_params.path).await?;
             Ok::<_, Error>(self.state.rating_tags.entry_tags(&claims.user.id, &path_params.library_id, &path).await?)
         }
         .await;
         Ok(match tags {
-            Ok(tags) => apis::tags::GetEntryTagsResponse::Status200_TheTags(models::EntryTagsResponse::new(Self::tags_to_model(tags))),
+            Ok(tags) => apis::ratings_tags::GetEntryTagsResponse::Status200_TheTags(models::EntryTagsResponse::new(Self::tags_to_model(tags))),
             Err(error) => ApiError::from(error).into(),
         })
     }
@@ -92,23 +87,24 @@ impl apis::tags::Tags for ApiServer {
         cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::PutEntryTagsPathParams,
+        query_params: &models::PutEntryTagsQueryParams,
         body: &models::PutEntryTagsRequest,
-    ) -> std::result::Result<apis::tags::PutEntryTagsResponse, ()> {
+    ) -> std::result::Result<apis::ratings_tags::PutEntryTagsResponse, ()> {
         let saved = async {
-            let path = self.rating_target(&path_params.library_id, &body.path).await?;
+            let path = self.rating_target(&path_params.library_id, &query_params.path).await?;
             let names = body.tags.iter().map(|tag| tag.0.clone()).collect::<Vec<_>>();
             Ok::<_, Error>(self.state.rating_tags.set_entry_tags(&claims.user.id, &path_params.library_id, &path, &names).await?)
         }
         .await;
         Ok(match saved {
-            Ok(tags) => apis::tags::PutEntryTagsResponse::Status200_TheSavedTags(models::EntryTagsResponse::new(Self::tags_to_model(tags))),
+            Ok(tags) => apis::ratings_tags::PutEntryTagsResponse::Status200_TheSavedTags(models::EntryTagsResponse::new(Self::tags_to_model(tags))),
             Err(error) => ApiError::from(error).into(),
         })
     }
 
-    async fn list_tags(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> std::result::Result<apis::tags::ListTagsResponse, ()> {
+    async fn list_tag_words(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> std::result::Result<apis::ratings_tags::ListTagWordsResponse, ()> {
         Ok(match self.state.rating_tags.tags(&claims.user.id).await {
-            Ok(tags) => apis::tags::ListTagsResponse::Status200_TheWords(models::TagsResponse::new(Self::tags_to_model(tags))),
+            Ok(tags) => apis::ratings_tags::ListTagWordsResponse::Status200_TheWords(models::TagsResponse::new(Self::tags_to_model(tags))),
             Err(error) => ApiError::from(Error::from(error)).into(),
         })
     }
@@ -147,7 +143,7 @@ impl ApiServer {
     }
 }
 
-impl From<ApiError> for apis::rating::GetRatingResponse {
+impl From<ApiError> for apis::ratings_tags::GetRatingResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -159,7 +155,7 @@ impl From<ApiError> for apis::rating::GetRatingResponse {
     }
 }
 
-impl From<ApiError> for apis::rating::PutRatingResponse {
+impl From<ApiError> for apis::ratings_tags::PutRatingResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -171,7 +167,7 @@ impl From<ApiError> for apis::rating::PutRatingResponse {
     }
 }
 
-impl From<ApiError> for apis::tags::GetEntryTagsResponse {
+impl From<ApiError> for apis::ratings_tags::GetEntryTagsResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -183,7 +179,7 @@ impl From<ApiError> for apis::tags::GetEntryTagsResponse {
     }
 }
 
-impl From<ApiError> for apis::tags::PutEntryTagsResponse {
+impl From<ApiError> for apis::ratings_tags::PutEntryTagsResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -195,7 +191,7 @@ impl From<ApiError> for apis::tags::PutEntryTagsResponse {
     }
 }
 
-impl From<ApiError> for apis::tags::ListTagsResponse {
+impl From<ApiError> for apis::ratings_tags::ListTagWordsResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
@@ -214,8 +210,8 @@ mod tests {
     use super::*;
     use crate::interface::server::tests::*;
 
-    const RATING: &str = "/api/v1/libraries/photos/rating";
-    const TAGS: &str = "/api/v1/libraries/photos/tags";
+    const RATING: &str = "/api/v1/libraries/photos/entries/rating";
+    const TAGS: &str = "/api/v1/libraries/photos/entries/tags";
 
     async fn login(router: &axum::Router) -> TestResult<String> {
         let setup = send(router, Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "bearer")).await?;
@@ -237,13 +233,13 @@ mod tests {
         let first = send(&router, Method::GET, &format!("{RATING}?path=/p.png"), headers, None).await?;
         assert_eq!((first.status, first.body), (StatusCode::OK, json!({"rating": "none"})));
         for value in ["good", "bad", "none"] {
-            let saved = send(&router, Method::PUT, RATING, headers, Some(json!({"path": "/p.png", "rating": value}))).await?;
+            let saved = send(&router, Method::PUT, &format!("{RATING}?path=/p.png"), headers, Some(json!({"rating": value}))).await?;
             assert_eq!((saved.status, saved.body), (StatusCode::OK, json!({"rating": value})));
             let read = send(&router, Method::GET, &format!("{RATING}?path=/p.png"), headers, None).await?;
             assert_eq!(read.body, json!({"rating": value}));
         }
 
-        let unknown = send(&router, Method::PUT, RATING, headers, Some(json!({"path": "/p.png", "rating": "great"}))).await?;
+        let unknown = send(&router, Method::PUT, &format!("{RATING}?path=/p.png"), headers, Some(json!({"rating": "great"}))).await?;
         assert!(unknown.status.is_client_error(), "{}", unknown.status);
         Ok(())
     }
@@ -255,11 +251,11 @@ mod tests {
         let token = login(&router).await?;
         let headers = &[("authorization", token.as_str())];
 
-        let text = send(&router, Method::PUT, RATING, headers, Some(json!({"path": "/photos/notes.txt", "rating": "good"}))).await?;
+        let text = send(&router, Method::PUT, &format!("{RATING}?path=/photos/notes.txt"), headers, Some(json!({"rating": "good"}))).await?;
         assert_eq!(text.status, StatusCode::BAD_REQUEST);
-        let missing = send(&router, Method::PUT, RATING, headers, Some(json!({"path": "/missing.png", "rating": "good"}))).await?;
+        let missing = send(&router, Method::PUT, &format!("{RATING}?path=/missing.png"), headers, Some(json!({"rating": "good"}))).await?;
         assert_eq!(missing.status, StatusCode::NOT_FOUND);
-        let folder = send(&router, Method::PUT, RATING, headers, Some(json!({"path": "/", "rating": "good"}))).await?;
+        let folder = send(&router, Method::PUT, &format!("{RATING}?path=/"), headers, Some(json!({"rating": "good"}))).await?;
         assert_eq!(folder.status, StatusCode::BAD_REQUEST);
         Ok(())
     }
@@ -277,18 +273,18 @@ mod tests {
         let rated = send(
             &router,
             Method::PUT,
-            "/api/v1/libraries/videos/rating",
+            "/api/v1/libraries/videos/entries/rating?path=/v.mp4",
             headers,
-            Some(json!({"path": "/v.mp4", "rating": "bad"})),
+            Some(json!({"rating": "bad"})),
         )
         .await?;
         assert_eq!((rated.status, rated.body), (StatusCode::OK, json!({"rating": "bad"})));
         let tagged = send(
             &router,
             Method::PUT,
-            "/api/v1/libraries/videos/tags",
+            "/api/v1/libraries/videos/entries/tags?path=/v.mp4",
             headers,
-            Some(json!({"path": "/v.mp4", "tags": ["clip"]})),
+            Some(json!({"tags": ["clip"]})),
         )
         .await?;
         assert_eq!((tagged.status, tagged.body), (StatusCode::OK, json!({"tags": ["clip"]})));
@@ -298,10 +294,17 @@ mod tests {
             "Entry は変わらない"
         );
         // 変更系の API は readonly の Library を拒否したままである。
-        let upload = send(&router, Method::POST, "/api/v1/libraries/videos/folders", headers, Some(json!({"path": "/new"}))).await?;
+        let upload = send(&router, Method::POST, "/api/v1/libraries/videos/entries/folders", headers, Some(json!({"path": "/new"}))).await?;
         assert_eq!(upload.status, StatusCode::FORBIDDEN);
 
-        let inner = send(&router, Method::PUT, RATING, headers, Some(json!({"path": "/photos/a.7z/dir/x.png", "rating": "good"}))).await?;
+        let inner = send(
+            &router,
+            Method::PUT,
+            &format!("{RATING}?path=/photos/a.7z/dir/x.png"),
+            headers,
+            Some(json!({"rating": "good"})),
+        )
+        .await?;
         assert_eq!((inner.status, inner.body), (StatusCode::OK, json!({"rating": "good"})));
         let read = send(&router, Method::GET, &format!("{RATING}?path=/photos/a.7z/dir/x.png"), headers, None).await?;
         assert_eq!(read.body, json!({"rating": "good"}));
@@ -317,12 +320,19 @@ mod tests {
         let token = login(&router).await?;
         let headers = &[("authorization", token.as_str())];
 
-        let saved = send(&router, Method::PUT, TAGS, headers, Some(json!({"path": "/p.png", "tags": [" trip ", "cat", "trip"]}))).await?;
+        let saved = send(
+            &router,
+            Method::PUT,
+            &format!("{TAGS}?path=/p.png"),
+            headers,
+            Some(json!({"tags": [" trip ", "cat", "trip"]})),
+        )
+        .await?;
         assert_eq!((saved.status, saved.body), (StatusCode::OK, json!({"tags": ["cat", "trip"]})));
-        send(&router, Method::PUT, TAGS, headers, Some(json!({"path": "/q.png", "tags": ["trip", "dog"]}))).await?;
-        send(&router, Method::PUT, TAGS, headers, Some(json!({"path": "/p.png", "tags": ["cat"]}))).await?;
+        send(&router, Method::PUT, &format!("{TAGS}?path=/q.png"), headers, Some(json!({"tags": ["trip", "dog"]}))).await?;
+        send(&router, Method::PUT, &format!("{TAGS}?path=/p.png"), headers, Some(json!({"tags": ["cat"]}))).await?;
 
-        let words = send(&router, Method::GET, "/api/v1/tags", headers, None).await?;
+        let words = send(&router, Method::GET, "/api/v1/tags/words", headers, None).await?;
         assert_eq!(words.body, json!({"tags": ["cat", "dog", "trip"]}));
         let tags = send(&router, Method::GET, &format!("{TAGS}?path=/p.png"), headers, None).await?;
         assert_eq!(tags.body, json!({"tags": ["cat"]}));
@@ -342,16 +352,16 @@ mod tests {
         let router = router(&fixture);
         let token = login(&router).await?;
         let headers = &[("authorization", token.as_str())];
-        send(&router, Method::PUT, TAGS, headers, Some(json!({"path": "/p.png", "tags": ["keep"]}))).await?;
+        send(&router, Method::PUT, &format!("{TAGS}?path=/p.png"), headers, Some(json!({"tags": ["keep"]}))).await?;
 
         let too_many = (0..33).map(|index| format!("t{index}")).collect::<Vec<_>>();
         for tags in [json!(["  "]), json!(["a\nb"]), json!(["あ".repeat(65)]), json!(too_many)] {
-            let rejected = send(&router, Method::PUT, TAGS, headers, Some(json!({"path": "/p.png", "tags": tags}))).await?;
+            let rejected = send(&router, Method::PUT, &format!("{TAGS}?path=/p.png"), headers, Some(json!({"tags": tags}))).await?;
             assert_eq!(rejected.status, StatusCode::BAD_REQUEST, "{tags}");
         }
         let read = send(&router, Method::GET, &format!("{TAGS}?path=/p.png"), headers, None).await?;
         assert_eq!(read.body, json!({"tags": ["keep"]}));
-        let words = send(&router, Method::GET, "/api/v1/tags", headers, None).await?;
+        let words = send(&router, Method::GET, "/api/v1/tags/words", headers, None).await?;
         assert_eq!(words.body, json!({"tags": ["keep"]}));
         Ok(())
     }
@@ -361,8 +371,8 @@ mod tests {
         let local = fixture._dir.path().join("library").join(path.trim_start_matches('/'));
         std::fs::create_dir_all(local.parent().ok_or("no parent")?)?;
         std::fs::write(local, b"pixel")?;
-        send(router, Method::PUT, RATING, headers, Some(json!({"path": path, "rating": "good"}))).await?;
-        send(router, Method::PUT, TAGS, headers, Some(json!({"path": path, "tags": ["trip"]}))).await?;
+        send(router, Method::PUT, &format!("{RATING}?path={path}"), headers, Some(json!({"rating": "good"}))).await?;
+        send(router, Method::PUT, &format!("{TAGS}?path={path}"), headers, Some(json!({"tags": ["trip"]}))).await?;
         Ok(())
     }
 
@@ -402,7 +412,7 @@ mod tests {
                 .contains("/q.png")
         );
 
-        send(&router, Method::POST, "/api/v1/libraries/photos/folders", headers, Some(json!({"path": "/moved"}))).await?;
+        send(&router, Method::POST, "/api/v1/libraries/photos/entries/folders", headers, Some(json!({"path": "/moved"}))).await?;
         let moved = send(
             &router,
             Method::POST,
@@ -554,11 +564,11 @@ mod tests {
         let router = router(&fixture);
         let token = login(&router).await?;
         let headers = &[("authorization", token.as_str())];
-        put(&router, headers, RATING, json!({"path": "/good.png", "rating": "good"})).await?;
-        put(&router, headers, RATING, json!({"path": "/sub/deep.png", "rating": "good"})).await?;
-        put(&router, headers, RATING, json!({"path": "/bad.png", "rating": "bad"})).await?;
-        put(&router, headers, TAGS, json!({"path": "/good.png", "tags": ["trip", "cat"]})).await?;
-        put(&router, headers, TAGS, json!({"path": "/clip.mp4", "tags": ["trip"]})).await?;
+        put(&router, headers, &format!("{RATING}?path=/good.png"), json!({"rating": "good"})).await?;
+        put(&router, headers, &format!("{RATING}?path=/sub/deep.png"), json!({"rating": "good"})).await?;
+        put(&router, headers, &format!("{RATING}?path=/bad.png"), json!({"rating": "bad"})).await?;
+        put(&router, headers, &format!("{TAGS}?path=/good.png"), json!({"tags": ["trip", "cat"]})).await?;
+        put(&router, headers, &format!("{TAGS}?path=/clip.mp4"), json!({"tags": ["trip"]})).await?;
 
         let (good, total, _) = names(&router, headers, "path=/&rating=good").await?;
         assert_eq!((good, total), (vec!["/good.png".to_string()], json!(1)), "直下だけを見る");
@@ -625,7 +635,7 @@ mod tests {
         let (_, _, again) = names(&router, headers, "path=/&rating=good").await?;
         assert!(version(&first).is_some(), "絞り込み中の識別子には評価の版を足す: {first}");
         assert_eq!(version(&first), version(&again), "書き込みがなければ、評価の版は変わらない");
-        put(&router, headers, RATING, json!({"path": "/p.png", "rating": "good"})).await?;
+        put(&router, headers, &format!("{RATING}?path=/p.png"), json!({"rating": "good"})).await?;
         let (listed, _, after) = names(&router, headers, "path=/&rating=good").await?;
         assert_ne!(version(&first), version(&after), "絞り込み中の識別子は、書き込みで変わる");
         assert_eq!(listed, vec!["/p.png".to_string()]);

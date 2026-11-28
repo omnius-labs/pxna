@@ -20,6 +20,35 @@ pub use route::*;
 
 #[allow(unused_variables)]
 #[async_trait]
+impl apis::media::Media for ApiServer {
+    type Claims = Claims;
+
+    async fn get_media_info(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::GetMediaInfoPathParams,
+        query_params: &models::GetMediaInfoQueryParams,
+    ) -> std::result::Result<apis::media::GetMediaInfoResponse, ()> {
+        // 再生と情報パネルが開いた 1 件の情報なので、ユーザーが待っているものとして数える。
+        // occupy は枠を使わずに下位の段を保留するだけで、probe 自体は従来どおり Foreground の枠で走る。
+        let _waiting = media_info_pool(&self.state.pools, &query_params.path).occupy(WorkClass::Interactive);
+        let result = async {
+            let source = self.state.mutation.source(&path_params.library_id, &query_params.path, false, false).await?;
+            Ok::<_, Error>(MediaInfoModel::from(self.state.media_info.probe(&source, WorkClass::Foreground).await?))
+        }
+        .await;
+        Ok(match result {
+            Ok(info) => apis::media::GetMediaInfoResponse::Status200_MediaInformationOfAnImageOrAVideo(models::MediaInfoResponse::new(info.0)),
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+}
+
+#[allow(unused_variables)]
+#[async_trait]
 impl apis::video::Video for ApiServer {
     type Claims = Claims;
     async fn create_video_session(
@@ -52,28 +81,6 @@ impl apis::video::Video for ApiServer {
     ) -> std::result::Result<apis::video::DeleteVideoSessionResponse, ()> {
         Ok(match self.state.videos.close(&path_params.library_id, &path_params.session_id).await {
             Ok(()) => apis::video::DeleteVideoSessionResponse::Status204_VideoSessionEnded,
-            Err(error) => ApiError::from(error).into(),
-        })
-    }
-    async fn get_media_info(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::GetMediaInfoPathParams,
-        query_params: &models::GetMediaInfoQueryParams,
-    ) -> std::result::Result<apis::video::GetMediaInfoResponse, ()> {
-        // 再生と情報パネルが開いた 1 件の情報なので、ユーザーが待っているものとして数える。
-        // occupy は枠を使わずに下位の段を保留するだけで、probe 自体は従来どおり Foreground の枠で走る。
-        let _waiting = media_info_pool(&self.state.pools, &query_params.path).occupy(WorkClass::Interactive);
-        let result = async {
-            let source = self.state.mutation.source(&path_params.library_id, &query_params.path, false, false).await?;
-            Ok::<_, Error>(MediaInfoModel::from(self.state.media_info.probe(&source, WorkClass::Foreground).await?))
-        }
-        .await;
-        Ok(match result {
-            Ok(info) => apis::video::GetMediaInfoResponse::Status200_MediaInformationOfAnImageOrAVideo(models::MediaInfoResponse::new(info.0)),
             Err(error) => ApiError::from(error).into(),
         })
     }
@@ -141,7 +148,7 @@ impl From<ApiError> for apis::video::DeleteVideoSessionResponse {
     }
 }
 
-impl From<ApiError> for apis::video::GetMediaInfoResponse {
+impl From<ApiError> for apis::media::GetMediaInfoResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -251,7 +258,7 @@ mod tests {
         let root = &fixture.server.state.conf.libraries[0].path;
         image::RgbaImage::new(40, 20).save(root.join("pic.png"))?;
         let router = router(&fixture);
-        let uri = "/api/v1/libraries/photos/media-info?path=/pic.png";
+        let uri = "/api/v1/libraries/photos/entries/media?path=/pic.png";
         assert_eq!(send(&router, Method::GET, uri, &[], None).await?.status, StatusCode::UNAUTHORIZED);
         let setup = send(&router, Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "bearer")).await?;
         let bearer = bearer(&setup)?;
@@ -269,7 +276,7 @@ mod tests {
         let broken = send(
             &router,
             Method::GET,
-            "/api/v1/libraries/photos/media-info?path=/broken.png",
+            "/api/v1/libraries/photos/entries/media?path=/broken.png",
             &[("authorization", bearer.as_str())],
             None,
         )
@@ -307,12 +314,12 @@ mod tests {
             .status()?;
         assert!(status.success());
         let router = router(&fixture);
-        let no_auth = send(&router, Method::GET, "/api/v1/libraries/photos/media-info?path=/clip.mp4", &[], None).await?;
+        let no_auth = send(&router, Method::GET, "/api/v1/libraries/photos/entries/media?path=/clip.mp4", &[], None).await?;
         assert_eq!(no_auth.status, StatusCode::UNAUTHORIZED);
         let setup = send(&router, Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "bearer")).await?;
         let bearer = bearer(&setup)?;
         let headers = &[("authorization", bearer.as_str())];
-        let info = send(&router, Method::GET, "/api/v1/libraries/photos/media-info?path=/clip.mp4", headers, None).await?;
+        let info = send(&router, Method::GET, "/api/v1/libraries/photos/entries/media?path=/clip.mp4", headers, None).await?;
         assert_eq!(info.status, StatusCode::OK);
         assert_eq!(info.body["mediaInfo"]["kind"], "video");
         assert_eq!(info.body["mediaInfo"]["video"]["videoCodec"], "mpeg4");
@@ -364,7 +371,7 @@ mod tests {
             }
             let name = format!("{codec}.webm");
             write_webm(&root.join(&name), encoder)?;
-            let info = send(&router, Method::GET, &format!("/api/v1/libraries/photos/media-info?path=/{name}"), headers, None).await?;
+            let info = send(&router, Method::GET, &format!("/api/v1/libraries/photos/entries/media?path=/{name}"), headers, None).await?;
             assert_eq!(info.status, StatusCode::OK, "{codec}");
             assert_eq!(info.body["mediaInfo"]["video"]["videoCodec"], codec);
             assert_eq!(info.body["mediaInfo"]["video"]["durationSecs"].as_f64(), Some(2.0), "{codec}");

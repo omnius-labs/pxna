@@ -18,7 +18,7 @@ it("メディア情報の問い合わせは、Library の id と path で要求�
     expect(result).toBe(mediaInfo);
     expect(mocks.get).toHaveBeenCalledOnce();
     const [path, options] = mocks.get.mock.calls[0] ?? [];
-    expect(path).toBe("/libraries/{libraryId}/media-info");
+    expect(path).toBe("/libraries/{libraryId}/entries/media");
     expect(options.params).toEqual({ path: { libraryId: "photos" }, query: { path: "/trip/clip.mp4" } });
     expect(options.signal).toBeInstanceOf(AbortSignal);
 });

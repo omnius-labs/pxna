@@ -1,27 +1,173 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use axum::body::Bytes;
 use axum_extra::extract::CookieJar;
 use headers::Host;
 use http::Method;
 
-use omnius_pxna_interface::{apis, models};
+use omnius_pxna_engine::service::ConflictPolicy;
+use omnius_pxna_interface::{apis, models, types::ByteArray};
 
 use omnius_core_base::error::OmniError as _;
 
 use crate::{
     error::{ApiError, ApiStatus, Error, ErrorKind},
-    interface::{ApiServer, session::Claims},
+    interface::{ApiServer, binary_body::BinaryBody, session::Claims},
     service::{
+        library::ReadRange,
         listing::{ListOptions, MarkSelection, Scope, ScopeEntry, ScopeListing, ScopeStart},
+        mutation::LibraryMutation,
         timeline::{ScopeTimeline, ScopeTimelinePage, TimelineAnchor, TimelineCursor, TimelineIndex},
     },
 };
+
+mod content;
+
+pub use content::*;
 
 #[allow(unused_variables)]
 #[async_trait]
 impl apis::entries::Entries for ApiServer {
     type Claims = Claims;
+
+    async fn get_entry_metadata(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::GetEntryMetadataPathParams,
+        query_params: &models::GetEntryMetadataQueryParams,
+    ) -> std::result::Result<apis::entries::GetEntryMetadataResponse, ()> {
+        Ok(match self.state.library.get_entry(&path_params.library_id, &query_params.path, query_params.view).await {
+            Ok(entry) => apis::entries::GetEntryMetadataResponse::Status200_TheEntry(models::EntryResponse::new(entry)),
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+
+    async fn read_file_content(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        header_params: &models::ReadFileContentHeaderParams,
+        path_params: &models::ReadFileContentPathParams,
+        query_params: &models::ReadFileContentQueryParams,
+    ) -> std::result::Result<apis::entries::ReadFileContentResponse, ()> {
+        let content = async {
+            let range = ReadRange::parse(header_params.range.as_deref(), query_params.offset, query_params.limit)?;
+            self.state.library.read_file_content(&path_params.library_id, &query_params.path, &range).await
+        }
+        .await;
+        Ok(match content {
+            Ok(content) => {
+                let content_length = Some(content.bytes.len() as u64);
+                let accept_ranges = Some("bytes".to_string());
+                match content.content_range() {
+                    Some(content_range) => apis::entries::ReadFileContentResponse::Status206_PartialFileBytes {
+                        body: ByteArray(content.bytes),
+                        accept_ranges,
+                        content_range: Some(content_range),
+                        content_length,
+                        e_tag: None,
+                    },
+                    None => apis::entries::ReadFileContentResponse::Status200_FullOrRequestedFileBytes {
+                        body: ByteArray(content.bytes),
+                        accept_ranges,
+                        content_length,
+                        e_tag: None,
+                    },
+                }
+            }
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+
+    async fn write_file_content(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::WriteFileContentPathParams,
+        query_params: &models::WriteFileContentQueryParams,
+        body: &Bytes,
+    ) -> std::result::Result<apis::entries::WriteFileContentResponse, ()> {
+        if body.len() > BinaryBody::MAX_BYTES {
+            return Ok(ApiError::from(Error::new(ErrorKind::PayloadTooLarge)).into());
+        }
+        Ok(
+            match self
+                .state
+                .mutation
+                .write(&path_params.library_id, &query_params.path, body, LibraryMutation::write_conflict(query_params.conflict))
+                .await
+            {
+                Ok(file) => apis::entries::WriteFileContentResponse::Status201_FileWritten(models::EntryResponse::new(file)),
+                Err(error) => ApiError::from(error).into(),
+            },
+        )
+    }
+
+    async fn create_file(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::CreateFilePathParams,
+        query_params: &models::CreateFileQueryParams,
+        body: &Bytes,
+    ) -> std::result::Result<apis::entries::CreateFileResponse, ()> {
+        if body.len() > BinaryBody::MAX_BYTES {
+            return Ok(ApiError::from(Error::new(ErrorKind::PayloadTooLarge)).into());
+        }
+        Ok(
+            match self.state.mutation.write(&path_params.library_id, &query_params.path, body, ConflictPolicy::Rename).await {
+                Ok(entry) => apis::entries::CreateFileResponse::Status201_FileCreated(models::EntryResponse::new(entry)),
+                Err(error) => ApiError::from(error).into(),
+            },
+        )
+    }
+
+    async fn create_folder(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::CreateFolderPathParams,
+        body: &models::CreateFolderRequest,
+    ) -> std::result::Result<apis::entries::CreateFolderResponse, ()> {
+        Ok(match self.state.mutation.create_folder(&path_params.library_id, body).await {
+            Ok(file) => apis::entries::CreateFolderResponse::Status201_FolderCreated(models::EntryResponse::new(file)),
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+
+    async fn probe_folder_children(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        _claims: &Self::Claims,
+        path: &models::ProbeFolderChildrenPathParams,
+        query: &models::ProbeFolderChildrenQueryParams,
+    ) -> std::result::Result<apis::entries::ProbeFolderChildrenResponse, ()> {
+        Ok(
+            match self
+                .state
+                .library
+                .probe_folder_children(&path.library_id, &query.path, query.include_hidden.unwrap_or(false))
+                .await
+            {
+                Ok(result) => apis::entries::ProbeFolderChildrenResponse::Status200_True(result),
+                Err(error) => ApiError::from(error).into(),
+            },
+        )
+    }
 
     async fn list_entries(
         &self,
@@ -218,6 +364,92 @@ impl From<ApiError> for apis::entries::ListEntriesResponse {
             ApiStatus::Conflict | ApiStatus::RangeNotSatisfiable | ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => {
                 Self::Status500_InternalServerError(error.body)
             }
+        }
+    }
+}
+
+impl From<ApiError> for apis::entries::GetEntryMetadataResponse {
+    fn from(error: ApiError) -> Self {
+        match error.status {
+            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
+            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
+            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
+            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
+            ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
+            ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
+            ApiStatus::RangeNotSatisfiable | ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => {
+                Self::Status500_InternalServerError(error.body)
+            }
+        }
+    }
+}
+
+impl From<ApiError> for apis::entries::ReadFileContentResponse {
+    fn from(error: ApiError) -> Self {
+        match error.status {
+            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
+            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
+            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
+            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
+            ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
+            ApiStatus::RangeNotSatisfiable => Self::Status416_RequestedByteRangeCannotBeSatisfied(error.body),
+            ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
+            ApiStatus::PayloadTooLarge | ApiStatus::InsufficientStorage | ApiStatus::InternalServerError => Self::Status500_InternalServerError(error.body),
+        }
+    }
+}
+
+impl From<ApiError> for apis::entries::WriteFileContentResponse {
+    fn from(error: ApiError) -> Self {
+        match error.status {
+            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
+            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
+            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
+            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
+            ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
+            ApiStatus::PayloadTooLarge => Self::Status413_TheRequestBodyExceedsTheOne(error.body),
+            ApiStatus::InsufficientStorage => Self::Status507_TheDaemonDoesNotHaveEnoughDiskSpace(error.body),
+            _ => Self::Status500_InternalServerError(error.body),
+        }
+    }
+}
+
+impl From<ApiError> for apis::entries::CreateFileResponse {
+    fn from(error: ApiError) -> Self {
+        match error.status {
+            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
+            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
+            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
+            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
+            ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
+            ApiStatus::PayloadTooLarge => Self::Status413_TheRequestBodyExceedsTheOne(error.body),
+            ApiStatus::InsufficientStorage => Self::Status507_TheDaemonDoesNotHaveEnoughDiskSpace(error.body),
+            _ => Self::Status500_InternalServerError(error.body),
+        }
+    }
+}
+
+impl From<ApiError> for apis::entries::CreateFolderResponse {
+    fn from(error: ApiError) -> Self {
+        match error.status {
+            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
+            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
+            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
+            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
+            ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
+            _ => Self::Status500_InternalServerError(error.body),
+        }
+    }
+}
+
+impl From<ApiError> for apis::entries::ProbeFolderChildrenResponse {
+    fn from(error: ApiError) -> Self {
+        match error.status {
+            ApiStatus::Unauthorized => Self::Status401_MissingOrInvalidAuthentication(error.body),
+            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
+            ApiStatus::Forbidden => Self::Status403_TheRequestedResourceCannotBeAccessedOrWritten(error.body),
+            ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
+            _ => Self::Status500_InternalServerError(error.body),
         }
     }
 }
@@ -955,9 +1187,9 @@ mod tests {
             let saved = send(
                 &router,
                 http::Method::PUT,
-                &format!("/api/v1/libraries/{library}/rating"),
+                &format!("/api/v1/libraries/{library}/entries/rating?path={path}"),
                 headers,
-                Some(json!({"path": path, "rating": "good"})),
+                Some(json!({"rating": "good"})),
             )
             .await?;
             assert_eq!(saved.status, StatusCode::OK, "{}", saved.body);
@@ -971,9 +1203,9 @@ mod tests {
         send(
             &router,
             http::Method::PUT,
-            "/api/v1/libraries/photos/rating",
+            "/api/v1/libraries/photos/entries/rating?path=/x/same.png",
             headers,
-            Some(json!({"path": "/x/same.png", "rating": "good"})),
+            Some(json!({"rating": "good"})),
         )
         .await?;
         let after = get(&router, &token, &format!("{query}&rating=good")).await?;
@@ -1264,9 +1496,9 @@ mod tests {
             let saved = send(
                 &router,
                 http::Method::PUT,
-                &format!("/api/v1/libraries/{library}/rating"),
+                &format!("/api/v1/libraries/{library}/entries/rating?path={path}"),
                 headers,
-                Some(json!({"path": path, "rating": "good"})),
+                Some(json!({"rating": "good"})),
             )
             .await?;
             assert_eq!(saved.status, StatusCode::OK, "{}", saved.body);
@@ -1280,9 +1512,9 @@ mod tests {
         send(
             &router,
             http::Method::PUT,
-            "/api/v1/libraries/photos/rating",
+            "/api/v1/libraries/photos/entries/rating?path=/top.png",
             headers,
-            Some(json!({"path": "/top.png", "rating": "good"})),
+            Some(json!({"rating": "good"})),
         )
         .await?;
         let more = get(&router, &token, &format!("{BOTH}&rating=good&{TIMELINE}")).await?;
