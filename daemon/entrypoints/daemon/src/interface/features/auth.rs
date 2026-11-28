@@ -36,8 +36,31 @@ impl apis::auth::Auth for ApiServer {
         })
     }
 
-    async fn get_current_user(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> std::result::Result<apis::auth::GetCurrentUserResponse, ()> {
-        Ok(apis::auth::GetCurrentUserResponse::Status200_CurrentAuthenticatedUserAndSession(AuthConverter::current(
+    async fn create_initial_setup(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        body: &models::InitialSetupRequest,
+    ) -> std::result::Result<apis::auth::CreateInitialSetupResponse, ()> {
+        let transport = AuthConverter::transport(body.session_transport);
+        Ok(match self.state.auth.create_owner(&body.username, &body.password, transport).await.map_err(Error::from) {
+            Ok(issued) => {
+                let (body, set_cookie) = AuthConverter::issued(&issued, SessionCookie::from_config(&self.state.conf.web));
+                apis::auth::CreateInitialSetupResponse::Status201_OwnerAndAuthenticatedSessionCreated { body, set_cookie }
+            }
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+
+    async fn get_current_session(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+    ) -> std::result::Result<apis::auth::GetCurrentSessionResponse, ()> {
+        Ok(apis::auth::GetCurrentSessionResponse::Status200_CurrentAuthenticatedUserAndSession(AuthConverter::current(
             claims,
         )))
     }
@@ -51,6 +74,20 @@ impl apis::auth::Auth for ApiServer {
             }
             Err(error) => ApiError::from(error).into(),
         })
+    }
+}
+
+impl From<ApiError> for apis::auth::CreateInitialSetupResponse {
+    fn from(mut error: ApiError) -> Self {
+        match error.status {
+            ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
+            // オーナーがすでにいるときの engine の `AlreadyExists` を、契約の `AlreadyInitialized` として返す。
+            ApiStatus::Conflict => {
+                error.body.code = models::ErrorKind::AlreadyInitialized;
+                Self::Status409_TheInitialOwnerHasAlreadyBeenRegistered(error.body)
+            }
+            _ => Self::Status500_InternalServerError(error.body),
+        }
     }
 }
 
@@ -170,7 +207,7 @@ mod tests {
         let setup = send(&router, Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "cookie")).await?;
         let cookie = cookie(&setup)?;
 
-        let me = send(&router, Method::GET, "/api/v1/auth/me", &[("cookie", &cookie)], None).await?;
+        let me = send(&router, Method::GET, "/api/v1/auth/session", &[("cookie", &cookie)], None).await?;
         assert_eq!(me.status, StatusCode::OK);
         assert_eq!(me.body["user"]["username"], "owner");
         assert_eq!(me.body["user"]["role"], "owner");
@@ -188,7 +225,7 @@ mod tests {
         assert_eq!(logout.status, StatusCode::NO_CONTENT);
         assert!(logout.set_cookie().is_some_and(|value| value.ends_with("Max-Age=0")), "ブラウザに cookie を消させる");
         assert_eq!(
-            send(&router, Method::GET, "/api/v1/auth/me", &[("cookie", &cookie)], None).await?.status,
+            send(&router, Method::GET, "/api/v1/auth/session", &[("cookie", &cookie)], None).await?.status,
             StatusCode::UNAUTHORIZED
         );
 
@@ -198,7 +235,7 @@ mod tests {
         assert_eq!(logout.status, StatusCode::NO_CONTENT);
         assert!(logout.set_cookie().is_none(), "bearer のセッションには cookie を返さない");
         assert_eq!(
-            send(&router, Method::GET, "/api/v1/auth/me", &[("authorization", &bearer)], None).await?.status,
+            send(&router, Method::GET, "/api/v1/auth/session", &[("authorization", &bearer)], None).await?.status,
             StatusCode::UNAUTHORIZED
         );
         Ok(())

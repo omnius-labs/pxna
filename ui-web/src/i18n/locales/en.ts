@@ -56,6 +56,7 @@ export const en = {
         InsufficientStorage: "Not enough disk space.",
         Timeout: "The operation timed out.",
         MethodNotAllowed: "The server does not accept this request.",
+        SessionEvicted: "Playback ended because another video started.",
     },
     sort: {
         name: "Name",
@@ -129,6 +130,7 @@ export const en = {
         infoFailed: "Could not get the video information.",
         unsupported: "This browser does not support video playback.",
         playFailed: "Could not play the video. Close it and open it again.",
+        sessionEvicted: "Playback ended because another video started. Close it and open it again.",
         loadFailed: "Could not load the video.",
         infoLoadFailed: "Could not load the video information.",
         player: "Video player",

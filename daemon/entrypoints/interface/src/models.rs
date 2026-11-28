@@ -242,6 +242,38 @@ lazy_static::lazy_static! {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct CreateVideoSessionPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_CREATEVIDEOSESSIONPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_CREATEVIDEOSESSIONPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct DeleteVideoSessionPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_DELETEVIDEOSESSIONPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+    #[validate(length(min = 1))]
+    pub session_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_DELETEVIDEOSESSIONPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct GetMediaInfoPathParams {
     /// Opaque identifier of a Library owned by the owner.
     #[validate(
@@ -262,6 +294,47 @@ pub struct GetMediaInfoQueryParams {
     #[serde(rename = "path")]
     #[validate(length(min = 1, max = 4096))]
     pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct GetVideoPlaylistPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_GETVIDEOPLAYLISTPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+    #[validate(length(min = 1))]
+    pub session_id: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_GETVIDEOPLAYLISTPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct GetVideoSegmentPathParams {
+    /// Opaque identifier of a Library owned by the owner.
+    #[validate(
+                        length(min = 1, max = 64),
+                          regex(path = *RE_GETVIDEOSEGMENTPATHPARAMS_LIBRARY_ID),
+            )]
+    pub library_id: String,
+    #[validate(length(min = 1))]
+    pub session_id: String,
+    #[validate(
+                          regex(path = *RE_GETVIDEOSEGMENTPATHPARAMS_SEGMENT_NAME),
+            )]
+    pub segment_name: String,
+}
+
+lazy_static::lazy_static! {
+    static ref RE_GETVIDEOSEGMENTPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
+}
+lazy_static::lazy_static! {
+    static ref RE_GETVIDEOSEGMENTPATHPARAMS_SEGMENT_NAME: regex::Regex = regex::Regex::new("^[0-9]+\\.ts$").unwrap();
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
@@ -543,79 +616,6 @@ pub struct WriteUploadContentQueryParams {
     #[serde(rename = "offset")]
     #[validate(range(min = 0u64))]
     pub offset: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct CreateVideoSessionPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_CREATEVIDEOSESSIONPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_CREATEVIDEOSESSIONPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct DeleteVideoSessionPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_DELETEVIDEOSESSIONPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-    #[validate(length(min = 1))]
-    pub session_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_DELETEVIDEOSESSIONPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetVideoPlaylistPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_GETVIDEOPLAYLISTPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-    #[validate(length(min = 1))]
-    pub session_id: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_GETVIDEOPLAYLISTPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct GetVideoSegmentPathParams {
-    /// Opaque identifier of a Library owned by the owner.
-    #[validate(
-                        length(min = 1, max = 64),
-                          regex(path = *RE_GETVIDEOSEGMENTPATHPARAMS_LIBRARY_ID),
-            )]
-    pub library_id: String,
-    #[validate(length(min = 1))]
-    pub session_id: String,
-    #[validate(
-                          regex(path = *RE_GETVIDEOSEGMENTPATHPARAMS_SEGMENT_NAME),
-            )]
-    pub segment_name: String,
-}
-
-lazy_static::lazy_static! {
-    static ref RE_GETVIDEOSEGMENTPATHPARAMS_LIBRARY_ID: regex::Regex = regex::Regex::new("^[A-Za-z0-9._-]+$").unwrap();
-}
-lazy_static::lazy_static! {
-    static ref RE_GETVIDEOSEGMENTPATHPARAMS_SEGMENT_NAME: regex::Regex = regex::Regex::new("^[0-9]+\\.ts$").unwrap();
 }
 
 /// How an archive opens: `folder` browses its contents like a folder, and `viewer` opens them in the viewer. An archive opens as a folder when the value is absent.
@@ -4974,7 +4974,7 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<EntryWarning
     }
 }
 
-/// `UnsupportedType`, `LimitExceeded`, and `PasswordRequired` describe the target file rather than the request, so a client can tell \"cannot open this format\", \"too large to handle\", and \"password protected\" apart without parsing `detail`. `MethodNotAllowed` means that the path exists but does not accept the method. `Timeout` means that extracting an archive or generating a thumbnail did not finish within the daemon's time limit. The result is not cached, so repeating the same request can hit the same limit again; no `Retry-After` is returned.
+/// `UnsupportedType`, `LimitExceeded`, and `PasswordRequired` describe the target file rather than the request, so a client can tell \"cannot open this format\", \"too large to handle\", and \"password protected\" apart without parsing `detail`. `MethodNotAllowed` means that the path exists but does not accept the method. `Timeout` means that extracting an archive or generating a thumbnail did not finish within the daemon's time limit. The result is not cached, so repeating the same request can hit the same limit again; no `Retry-After` is returned. `SessionEvicted` means that the daemon ended a video session to make way for a newer one.
 /// Enumeration of values.
 /// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
 /// which helps with FFI.
@@ -5013,6 +5013,8 @@ pub enum ErrorKind {
     Timeout,
     #[serde(rename = "MethodNotAllowed")]
     MethodNotAllowed,
+    #[serde(rename = "SessionEvicted")]
+    SessionEvicted,
 }
 
 impl validator::Validate for ErrorKind {
@@ -5039,6 +5041,7 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::InsufficientStorage => write!(f, "InsufficientStorage"),
             ErrorKind::Timeout => write!(f, "Timeout"),
             ErrorKind::MethodNotAllowed => write!(f, "MethodNotAllowed"),
+            ErrorKind::SessionEvicted => write!(f, "SessionEvicted"),
         }
     }
 }
@@ -5063,6 +5066,7 @@ impl std::str::FromStr for ErrorKind {
             "InsufficientStorage" => std::result::Result::Ok(ErrorKind::InsufficientStorage),
             "Timeout" => std::result::Result::Ok(ErrorKind::Timeout),
             "MethodNotAllowed" => std::result::Result::Ok(ErrorKind::MethodNotAllowed),
+            "SessionEvicted" => std::result::Result::Ok(ErrorKind::SessionEvicted),
             _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
         }
     }

@@ -56,6 +56,7 @@ export const ja = {
         InsufficientStorage: "ディスクの空きが足りません。",
         Timeout: "操作がタイムアウトしました。",
         MethodNotAllowed: "サーバーがこの要求を受け付けません。",
+        SessionEvicted: "ほかの動画の再生が始まったため、再生を終了しました。",
     },
     sort: {
         name: "名前",
@@ -129,6 +130,7 @@ export const ja = {
         infoFailed: "動画の情報を取得できませんでした。",
         unsupported: "このブラウザは動画再生に対応していません。",
         playFailed: "動画を再生できませんでした。閉じて、もう一度開いてください。",
+        sessionEvicted: "ほかの動画の再生が始まったため、再生を終了しました。閉じて、もう一度開いてください。",
         loadFailed: "動画を読み込めませんでした。",
         infoLoadFailed: "動画情報を読み込めませんでした。",
         player: "動画プレイヤー",

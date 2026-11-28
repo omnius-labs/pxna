@@ -15,18 +15,6 @@ use crate::{
 impl apis::libraries::Libraries for ApiServer {
     type Claims = Claims;
 
-    async fn get_capabilities(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        _claims: &Self::Claims,
-    ) -> std::result::Result<apis::libraries::GetCapabilitiesResponse, ()> {
-        Ok(apis::libraries::GetCapabilitiesResponse::Status200_OptionalBrowsingFeaturesImplementedByThisDaemon(
-            models::Capabilities::new(true, true, true, self.state.conf.logging.performance),
-        ))
-    }
-
     async fn get_library(
         &self,
         method: &Method,
@@ -60,6 +48,7 @@ impl From<ApiError> for apis::libraries::GetLibraryResponse {
             | ApiStatus::GatewayTimeout
             | ApiStatus::PayloadTooLarge
             | ApiStatus::InsufficientStorage
+            | ApiStatus::Gone
             | ApiStatus::InternalServerError => Self::Status500_InternalServerError(error.body),
         }
     }

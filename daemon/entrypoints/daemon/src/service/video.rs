@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
     pin::Pin,
     process::Stdio,
@@ -199,6 +199,8 @@ pub struct VideoService {
     ffmpeg: PathBuf,
     root: PathBuf,
     sessions: TokioMutex<VecDeque<Arc<VideoSession>>>,
+    /// The sessions ended to make way for a newer one, by Library and id, and when. They answer `Gone` until the idle timeout would have ended them anyway.
+    evicted: Mutex<HashMap<(String, String), Instant>>,
     /// セグメントを待たせている間、Interactive が動いているものとして数える外部プロセスの資源。
     videos: WorkPriorityPool,
 }
@@ -231,6 +233,7 @@ impl VideoService {
             ffmpeg: tools.ffmpeg_path.clone(),
             root: root.to_path_buf(),
             sessions: TokioMutex::new(VecDeque::new()),
+            evicted: Mutex::new(HashMap::new()),
             videos,
         });
         let weak = Arc::downgrade(&service);
@@ -289,6 +292,7 @@ impl VideoService {
         let mut sessions = self.sessions.lock().await;
         while sessions.len() >= self.options.max_concurrent_transcodes {
             if let Some(oldest) = sessions.pop_front() {
+                self.evicted.lock().insert((oldest.info.library_id.clone(), oldest.info.id.clone()), Instant::now());
                 oldest.close().await;
             }
         }
@@ -326,6 +330,7 @@ impl VideoService {
                     ErrorKind::Timeout => "timeout",
                     ErrorKind::AlreadyExists => "superseded",
                     ErrorKind::NotFound => "ended",
+                    ErrorKind::Gone => "evicted",
                     _ => "failed",
                 },
             },
@@ -345,7 +350,7 @@ impl VideoService {
         let mut interactive_wait = None;
         loop {
             if session.cancel.is_cancelled() {
-                return Err(Error::new(ErrorKind::NotFound).with_message("video session ended"));
+                return Err(self.missing(library, id));
             }
             session.touch();
             match tokio::fs::File::open(session.segment(index)).await {
@@ -360,7 +365,7 @@ impl VideoService {
             {
                 let mut process = session.process.lock().await;
                 if session.cancel.is_cancelled() {
-                    return Err(Error::new(ErrorKind::NotFound));
+                    return Err(self.missing(library, id));
                 }
                 if generation.is_some_and(|generation| generation != process.generation) {
                     return Err(Error::new(ErrorKind::AlreadyExists).with_message("segment request was superseded by a seek"));
@@ -384,7 +389,7 @@ impl VideoService {
             if tokio::time::Instant::now() >= deadline {
                 return Err(Error::new(ErrorKind::Timeout).with_message("video segment generation timed out"));
             }
-            tokio::select! { _ = tokio::time::sleep(Duration::from_millis(50)) => {}, _ = session.cancel.cancelled() => return Err(Error::new(ErrorKind::NotFound)) }
+            tokio::select! { _ = tokio::time::sleep(Duration::from_millis(50)) => {}, _ = session.cancel.cancelled() => return Err(self.missing(library, id)) }
         }
     }
 
@@ -393,8 +398,8 @@ impl VideoService {
         let index = sessions
             .iter()
             .position(|session| session.info.id == id && session.info.library_id == library)
-            .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message("video session not found"))?;
-        let session = sessions.remove(index).ok_or_else(|| Error::new(ErrorKind::NotFound))?;
+            .ok_or_else(|| self.missing(library, id))?;
+        let session = sessions.remove(index).ok_or_else(|| self.missing(library, id))?;
         session.close().await;
         Ok(())
     }
@@ -406,7 +411,22 @@ impl VideoService {
             .iter()
             .find(|session| session.info.id == id && session.info.library_id == library)
             .cloned()
-            .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message("video session not found"))
+            .ok_or_else(|| self.missing(library, id))
+    }
+
+    /// The error for a session that is not running: `Gone` while it is remembered as ended to make way for a newer one, otherwise `NotFound`.
+    fn missing(&self, library: &str, id: &str) -> Error {
+        let timeout = Duration::from_secs(self.options.session_idle_timeout_secs);
+        let evicted = self
+            .evicted
+            .lock()
+            .get(&(library.to_string(), id.to_string()))
+            .is_some_and(|ended| ended.elapsed() < timeout);
+        if evicted {
+            Error::new(ErrorKind::Gone).with_message("the video session was ended to make way for a newer one")
+        } else {
+            Error::new(ErrorKind::NotFound).with_message("video session not found")
+        }
     }
 
     async fn restart(&self, session: &VideoSession, process: &mut Transcode, index: u32) -> Result<()> {
@@ -455,6 +475,7 @@ impl VideoService {
     async fn reap(&self) {
         let mut sessions = self.sessions.lock().await;
         let timeout = Duration::from_secs(self.options.session_idle_timeout_secs);
+        self.evicted.lock().retain(|_, ended| ended.elapsed() < timeout);
         let mut index = 0;
         while index < sessions.len() {
             if sessions[index].touched.lock().elapsed() >= timeout {
@@ -636,7 +657,13 @@ mod tests {
         drop(reader);
         drop(session);
         let next = state.videos.create("test", "/clip.mp4").await?;
-        assert_eq!(*state.videos.playlist("test", &info.id).await.unwrap_err().kind(), ErrorKind::NotFound);
+        assert_eq!(
+            *state.videos.playlist("test", &info.id).await.unwrap_err().kind(),
+            ErrorKind::Gone,
+            "an evicted session is gone, not unknown"
+        );
+        assert_eq!(*state.videos.segment("test", &info.id, 0).await.err().ok_or("expected failure")?.kind(), ErrorKind::Gone);
+        assert_eq!(*state.videos.playlist("other", &info.id).await.unwrap_err().kind(), ErrorKind::NotFound);
         wait_for_cleanup(&output_dir).await?;
         let reader = state.videos.segment("test", &next.id, 0).await?;
         let path = state.videos.session("test", &next.id).await?.directory().to_path_buf();
@@ -645,6 +672,16 @@ mod tests {
         drop(reader);
         wait_for_cleanup(&path).await?;
         assert_eq!(std::fs::read_dir(dir.path().join("state/video"))?.count(), 0);
+        assert_eq!(
+            *state.videos.close("test", &next.id).await.unwrap_err().kind(),
+            ErrorKind::NotFound,
+            "a closed session is not evicted"
+        );
+        // The record of an evicted session lasts as long as the idle timeout would have let the session live.
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        state.videos.reap().await;
+        assert_eq!(*state.videos.playlist("test", &info.id).await.unwrap_err().kind(), ErrorKind::NotFound);
+        assert!(state.videos.evicted.lock().is_empty());
         Ok(())
     }
 

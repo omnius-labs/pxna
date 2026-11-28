@@ -517,7 +517,7 @@ mod tests {
 
     /// ログイン中のユーザの識別子。保存した行を `RatingTagService` から直接確かめるのに使う。
     async fn user_id(router: &axum::Router, headers: &[(&str, &str)]) -> TestResult<String> {
-        let me = send(router, Method::GET, "/api/v1/auth/me", headers, None).await?;
+        let me = send(router, Method::GET, "/api/v1/auth/session", headers, None).await?;
         Ok(me.body["user"]["id"].as_str().ok_or("user id is missing")?.to_string())
     }
 

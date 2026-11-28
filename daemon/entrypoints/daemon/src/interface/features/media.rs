@@ -45,12 +45,17 @@ impl apis::media::Media for ApiServer {
             Err(error) => ApiError::from(error).into(),
         })
     }
-}
 
-#[allow(unused_variables)]
-#[async_trait]
-impl apis::video::Video for ApiServer {
-    type Claims = Claims;
+    async fn get_image_socket(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> std::result::Result<apis::media::GetImageSocketResponse, ()> {
+        // 外側のルータの手書きの route が先に処理するため、この実装は呼ばれない。
+        let error = ApiError::new(
+            ApiStatus::InternalServerError,
+            models::ErrorKind::InternalServerError,
+            Some("served by a hand-written route".to_string()),
+        );
+        Ok(apis::media::GetImageSocketResponse::Status500_InternalServerError(error.body))
+    }
+
     async fn create_video_session(
         &self,
         method: &Method,
@@ -59,9 +64,9 @@ impl apis::video::Video for ApiServer {
         claims: &Self::Claims,
         path_params: &models::CreateVideoSessionPathParams,
         body: &models::VideoSessionCreateRequest,
-    ) -> std::result::Result<apis::video::CreateVideoSessionResponse, ()> {
+    ) -> std::result::Result<apis::media::CreateVideoSessionResponse, ()> {
         Ok(match self.state.videos.create(&path_params.library_id, &body.path).await {
-            Ok(info) => apis::video::CreateVideoSessionResponse::Status201_VideoSessionCreated(models::VideoSessionResponse::new(models::VideoSession::new(
+            Ok(info) => apis::media::CreateVideoSessionResponse::Status201_VideoSessionCreated(models::VideoSessionResponse::new(models::VideoSession::new(
                 info.id,
                 info.library_id,
                 info.path,
@@ -78,9 +83,9 @@ impl apis::video::Video for ApiServer {
         cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::DeleteVideoSessionPathParams,
-    ) -> std::result::Result<apis::video::DeleteVideoSessionResponse, ()> {
+    ) -> std::result::Result<apis::media::DeleteVideoSessionResponse, ()> {
         Ok(match self.state.videos.close(&path_params.library_id, &path_params.session_id).await {
-            Ok(()) => apis::video::DeleteVideoSessionResponse::Status204_VideoSessionEnded,
+            Ok(()) => apis::media::DeleteVideoSessionResponse::Status204_VideoSessionEnded,
             Err(error) => ApiError::from(error).into(),
         })
     }
@@ -91,9 +96,9 @@ impl apis::video::Video for ApiServer {
         cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::GetVideoPlaylistPathParams,
-    ) -> std::result::Result<apis::video::GetVideoPlaylistResponse, ()> {
+    ) -> std::result::Result<apis::media::GetVideoPlaylistResponse, ()> {
         Ok(match self.state.videos.playlist(&path_params.library_id, &path_params.session_id).await {
-            Ok(playlist) => apis::video::GetVideoPlaylistResponse::Status200_VODPlaylist(playlist),
+            Ok(playlist) => apis::media::GetVideoPlaylistResponse::Status200_VODPlaylist(playlist),
             Err(error) => ApiError::from(error).into(),
         })
     }
@@ -104,7 +109,7 @@ impl apis::video::Video for ApiServer {
         cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::GetVideoSegmentPathParams,
-    ) -> std::result::Result<apis::video::GetVideoSegmentResponse, ()> {
+    ) -> std::result::Result<apis::media::GetVideoSegmentResponse, ()> {
         let result = async {
             let index = VideoSessionRoute::index(&path_params.segment_name)?;
             let mut reader = self.state.videos.segment(&path_params.library_id, &path_params.session_id, index).await?;
@@ -114,13 +119,13 @@ impl apis::video::Video for ApiServer {
         }
         .await;
         Ok(match result {
-            Ok(bytes) => apis::video::GetVideoSegmentResponse::Status200_MPEGTransportStreamSegment(ByteArray(bytes)),
+            Ok(bytes) => apis::media::GetVideoSegmentResponse::Status200_MPEGTransportStreamSegment(ByteArray(bytes)),
             Err(error) => ApiError::from(error).into(),
         })
     }
 }
 
-impl From<ApiError> for apis::video::CreateVideoSessionResponse {
+impl From<ApiError> for apis::media::CreateVideoSessionResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -134,7 +139,7 @@ impl From<ApiError> for apis::video::CreateVideoSessionResponse {
     }
 }
 
-impl From<ApiError> for apis::video::DeleteVideoSessionResponse {
+impl From<ApiError> for apis::media::DeleteVideoSessionResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -143,6 +148,7 @@ impl From<ApiError> for apis::video::DeleteVideoSessionResponse {
             ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
             ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
             ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
+            ApiStatus::Gone => Self::Status410_TheVideoSessionWasEndedToMakeWayForANewerOne(error.body),
             _ => Self::Status500_InternalServerError(error.body),
         }
     }
@@ -162,7 +168,7 @@ impl From<ApiError> for apis::media::GetMediaInfoResponse {
     }
 }
 
-impl From<ApiError> for apis::video::GetVideoPlaylistResponse {
+impl From<ApiError> for apis::media::GetVideoPlaylistResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -171,12 +177,13 @@ impl From<ApiError> for apis::video::GetVideoPlaylistResponse {
             ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
             ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
             ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
+            ApiStatus::Gone => Self::Status410_TheVideoSessionWasEndedToMakeWayForANewerOne(error.body),
             _ => Self::Status500_InternalServerError(error.body),
         }
     }
 }
 
-impl From<ApiError> for apis::video::GetVideoSegmentResponse {
+impl From<ApiError> for apis::media::GetVideoSegmentResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -185,6 +192,7 @@ impl From<ApiError> for apis::video::GetVideoSegmentResponse {
             ApiStatus::NotFound => Self::Status404_ResourceNotFound(error.body),
             ApiStatus::Conflict => Self::Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(error.body),
             ApiStatus::GatewayTimeout => Self::Status504_ExtractionOrThumbnailGenerationTimedOut(error.body),
+            ApiStatus::Gone => Self::Status410_TheVideoSessionWasEndedToMakeWayForANewerOne(error.body),
             _ => Self::Status500_InternalServerError(error.body),
         }
     }
@@ -343,9 +351,27 @@ mod tests {
         assert_eq!(send(&router, Method::GET, &wrong_scope, headers, None).await?.status, StatusCode::NOT_FOUND);
         let invalid = segment_url.replace("/0.ts", "/0.png");
         assert_eq!(send(&router, Method::GET, &invalid, headers, None).await?.status, StatusCode::BAD_REQUEST);
+        // A new session ends the oldest at the limit of one; the ended session is gone, and an unknown one is not found.
+        let newer = send(&router, Method::POST, "/api/v1/libraries/photos/video/sessions", headers, Some(json!({"path":"/clip.mp4"}))).await?;
+        assert_eq!(newer.status, StatusCode::CREATED);
         let close_url = format!("/api/v1/libraries/photos/video/sessions/{id}");
-        assert_eq!(send(&router, Method::DELETE, &close_url, headers, None).await?.status, StatusCode::NO_CONTENT);
-        assert_eq!(send(&router, Method::GET, url, headers, None).await?.status, StatusCode::NOT_FOUND);
+        for (method, ended) in [(Method::GET, url.to_string()), (Method::GET, segment_url.clone()), (Method::DELETE, close_url.clone())] {
+            let response = send(&router, method, &ended, headers, None).await?;
+            assert_eq!(response.status, StatusCode::GONE, "{ended}");
+            assert_eq!(response.body["code"], "SessionEvicted", "{ended}");
+        }
+        let unknown = url.replace(id, "vid_unknown");
+        let response = send(&router, Method::GET, &unknown, headers, None).await?;
+        assert_eq!((response.status, response.body["code"].as_str()), (StatusCode::NOT_FOUND, Some("NotFound")));
+        let newer_id = newer.body["session"]["id"].as_str().ok_or("no id")?;
+        let newer_close = format!("/api/v1/libraries/photos/video/sessions/{newer_id}");
+        let newer_url = newer.body["session"]["playlistUrl"].as_str().ok_or("no playlist")?;
+        assert_eq!(send(&router, Method::DELETE, &newer_close, headers, None).await?.status, StatusCode::NO_CONTENT);
+        assert_eq!(
+            send(&router, Method::GET, newer_url, headers, None).await?.status,
+            StatusCode::NOT_FOUND,
+            "a closed session is not evicted"
+        );
         Ok(())
     }
 

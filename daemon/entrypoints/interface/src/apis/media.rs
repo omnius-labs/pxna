@@ -11,6 +11,70 @@ use crate::{models, types::*};
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
+pub enum CreateVideoSessionResponse {
+    /// Video session created.
+    Status201_VideoSessionCreated(models::VideoSessionResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
+    /// Missing or invalid authentication.
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// Resource not found.
+    Status404_ResourceNotFound(models::Problem),
+    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
+    /// Internal server error.
+    Status500_InternalServerError(models::Problem),
+    /// Extraction or thumbnail generation timed out.
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
+pub enum DeleteVideoSessionResponse {
+    /// Video session ended.
+    Status204_VideoSessionEnded,
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
+    /// Missing or invalid authentication.
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// Resource not found.
+    Status404_ResourceNotFound(models::Problem),
+    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
+    /// The video session was ended to make way for a newer one. `code` is `SessionEvicted`; an unknown or expired session is `404`.
+    Status410_TheVideoSessionWasEndedToMakeWayForANewerOne(models::Problem),
+    /// Internal server error.
+    Status500_InternalServerError(models::Problem),
+    /// Extraction or thumbnail generation timed out.
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
+pub enum GetImageSocketResponse {
+    /// The connection is upgraded to a WebSocket.
+    Status101_TheConnectionIsUpgradedToAWebSocket,
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
+    /// Missing or invalid authentication.
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// The session already has the most image sockets it may keep open. `code` is `LimitExceeded`.
+    Status429_TheSessionAlreadyHasTheMostImageSocketsItMayKeepOpen(models::Problem),
+    /// Internal server error.
+    Status500_InternalServerError(models::Problem),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum GetMediaInfoResponse {
     /// Media information of an image or a video.
     Status200_MediaInformationOfAnImageOrAVideo(models::MediaInfoResponse),
@@ -30,11 +94,91 @@ pub enum GetMediaInfoResponse {
     Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
+pub enum GetVideoPlaylistResponse {
+    /// VOD playlist.
+    Status200_VODPlaylist(String),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
+    /// Missing or invalid authentication.
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// Resource not found.
+    Status404_ResourceNotFound(models::Problem),
+    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
+    /// The video session was ended to make way for a newer one. `code` is `SessionEvicted`; an unknown or expired session is `404`.
+    Status410_TheVideoSessionWasEndedToMakeWayForANewerOne(models::Problem),
+    /// Internal server error.
+    Status500_InternalServerError(models::Problem),
+    /// Extraction or thumbnail generation timed out.
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
+pub enum GetVideoSegmentResponse {
+    /// MPEG transport stream segment.
+    Status200_MPEGTransportStreamSegment(ByteArray),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
+    /// Missing or invalid authentication.
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// Resource not found.
+    Status404_ResourceNotFound(models::Problem),
+    /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
+    /// The video session was ended to make way for a newer one. `code` is `SessionEvicted`; an unknown or expired session is `404`.
+    Status410_TheVideoSessionWasEndedToMakeWayForANewerOne(models::Problem),
+    /// Internal server error.
+    Status500_InternalServerError(models::Problem),
+    /// Extraction or thumbnail generation timed out.
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
+}
+
 /// Media
 #[async_trait]
 #[allow(clippy::ptr_arg)]
 pub trait Media<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHandler<E> {
     type Claims;
+
+    /// Start an HLS conversion session.
+    ///
+    /// CreateVideoSession - POST /api/v1/libraries/{libraryId}/video/sessions
+    async fn create_video_session(
+        &self,
+
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::CreateVideoSessionPathParams,
+        body: &models::VideoSessionCreateRequest,
+    ) -> Result<CreateVideoSessionResponse, E>;
+
+    /// End an HLS conversion session.
+    ///
+    /// DeleteVideoSession - DELETE /api/v1/libraries/{libraryId}/video/sessions/{sessionId}
+    async fn delete_video_session(
+        &self,
+
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::DeleteVideoSessionPathParams,
+    ) -> Result<DeleteVideoSessionResponse, E>;
+
+    /// Open the image socket.
+    ///
+    /// GetImageSocket - GET /api/v1/sockets/image
+    async fn get_image_socket(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims) -> Result<GetImageSocketResponse, E>;
 
     /// Inspect media information.
     ///
@@ -49,4 +193,30 @@ pub trait Media<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHa
         path_params: &models::GetMediaInfoPathParams,
         query_params: &models::GetMediaInfoQueryParams,
     ) -> Result<GetMediaInfoResponse, E>;
+
+    /// Read the full VOD playlist.
+    ///
+    /// GetVideoPlaylist - GET /api/v1/libraries/{libraryId}/video/sessions/{sessionId}/playlist.m3u8
+    async fn get_video_playlist(
+        &self,
+
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::GetVideoPlaylistPathParams,
+    ) -> Result<GetVideoPlaylistResponse, E>;
+
+    /// Read a completed transport stream segment.
+    ///
+    /// GetVideoSegment - GET /api/v1/libraries/{libraryId}/video/sessions/{sessionId}/segments/{segmentName}
+    async fn get_video_segment(
+        &self,
+
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::GetVideoSegmentPathParams,
+    ) -> Result<GetVideoSegmentResponse, E>;
 }

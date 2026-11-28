@@ -172,6 +172,11 @@ We end the old one rather than rejecting the new session because the user is a s
 Opening a new video can be taken to mean the previous video was finished or abandoned.
 However, if two devices transcode-play different videos at the same time, with the limit at 1 they would end each other's sessions.
 
+The ended session does not disappear silently.
+The daemon remembers its id for `session_idle_timeout_secs`, the time after which the session would have expired by idleness anyway, and its playlist, its segments, and its deletion answer `410` with `SessionEvicted` meanwhile ([API Design §9.3](./api.md#93-video)).
+A session that was deleted, expired, or never existed answers `404`.
+The web client's player shows that playback ended because another video started when hls.js reports `410`; the browser's own HLS player does not expose the status, so it shows the general playback failure.
+
 ## 6. Configuration
 
 The transcoding configuration goes in the top-level `[video]`.
@@ -342,6 +347,7 @@ When a usage in which two or more devices transcode-play at the same time actual
 The content API's HTTP response is returned as a stream by `FileContentRoute`, which holds the file and lease, and carries the ETag and the requested range.
 Media info is returned from the cache shared with thumbnail generation, and transcode sessions and HLS delivery are also connected to the API.
 Seeking far ahead and backward, the concurrency limit, expiry, the body's lease, and resource reclamation are confirmed with real ffmpeg and HTTP tests.
+`VideoService` keeps the ids of the sessions it ended for the concurrency limit, answers them with `Gone` until `session_idle_timeout_secs` passes, and prunes them with the idle sessions (§5.4).
 The media info response is split into images and videos by `kind`.
 For images, it returns the MIME type decided from the extension, the dimensions with the EXIF orientation applied, and the shooting info read by kamadak-exif, and does not return location information.
 For formats read with ffmpeg such as HEIC, the dimensions are obtained from ffprobe as the width and height as encoded, preferring the Tile Grid of a tiled image, and the rotation is returned separately as `rotation` (§7.1).

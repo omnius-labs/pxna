@@ -95,7 +95,7 @@ No term is renamed, and `EntryRef` and View are already in [terms.md](../terms.m
 | [2](#s-2) | Move the single-Entry operations into one Entry namespace | - | Done |
 | [3](#s-3) | List through `POST /entries` into the Entry page | 2 | Done |
 | [4](#s-4) | Run copy, move, delete, and timeline scans as Operations | 2 | Done |
-| [5](#s-5) | Answer ended video sessions with `410`, rename the session read, and finish the tags | 2, 3, 4 | Not started |
+| [5](#s-5) | Answer ended video sessions with `410`, rename the session read, and finish the tags | 2, 3, 4 | Done |
 
 <a id="s-1"></a>
 ### Step 1. Answer Every Error with Problem Details
@@ -152,7 +152,7 @@ HTTP tests copy, move, and delete a file and a folder in one request each with `
 [video.rs#L290](../../daemon/entrypoints/daemon/src/service/video.rs#L290), [openapi.yaml#L204](../../daemon/openapi.yaml#L204), [openapi.yaml#L42](../../daemon/openapi.yaml#L42), [session.ts#L8](../../ui-web/src/auth/session.ts#L8), [video.ts#L37](../../ui-web/src/viewer/video.ts#L37), [design.md §4.4](../design.md#44-error-model-and-http-mapping), and [Video Playback Design §5.4](../design/video.md#54-concurrency).
 
 **What to do**
-Keep the ids of sessions ended to make way for `session_idle_timeout_secs`, as API Design §9.3 decides, and answer their read, playlist, and segments with `410` and `SessionEvicted`. Rename `GET /auth/me` to `GET /auth/session`. Move the remaining operations to the tags of API Design §12 and remove the tags left empty. Have the web client's viewer report an ended session. Add `SessionEvicted` with `410` to the table of design.md §4.4, rewrite Video Playback Design §5.4, and remove the last entries of API Design §15.1 and the not-implemented sentence there.
+Keep the ids of sessions ended to make way for `session_idle_timeout_secs`, as API Design §9.3 decides, and answer their playlist, segments, and deletion with `410` and `SessionEvicted`. Rename `GET /auth/me` to `GET /auth/session`. Move the remaining operations to the tags of API Design §12 and remove the tags left empty. Have the web client's viewer report an ended session. Add `SessionEvicted` with `410` to the table of design.md §4.4, rewrite Video Playback Design §5.4, and remove the last entries of API Design §15.1 and the not-implemented sentence there.
 
 **Completion condition**
 An HTTP test sees `410` with `SessionEvicted` for an ended session and `404` for an unknown one, `daemon/openapi.yaml` has the twelve tags in order, API Design §15.1 lists no statement, and the daemon and web client checks pass.
