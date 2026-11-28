@@ -14,18 +14,18 @@ use crate::{models, types::*};
 pub enum CommitUploadResponse {
     /// File created at the target path.
     Status201_FileCreatedAtTheTargetPath(models::FileResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -34,20 +34,20 @@ pub enum CommitUploadResponse {
 pub enum CreateUploadResponse {
     /// Upload session created.
     Status201_UploadSessionCreated(models::UploadResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// The daemon does not have enough disk space.
-    Status507_TheDaemonDoesNotHaveEnoughDiskSpace(models::ErrorResponse),
+    Status507_TheDaemonDoesNotHaveEnoughDiskSpace(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -57,13 +57,13 @@ pub enum DeleteUploadResponse {
     /// Upload session discarded.
     Status204_UploadSessionDiscarded,
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -73,13 +73,13 @@ pub enum GetUploadResponse {
     /// Upload session state.
     Status200_UploadSessionState(models::UploadResponse),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -88,20 +88,20 @@ pub enum GetUploadResponse {
 pub enum WriteUploadContentResponse {
     /// Chunk accepted.
     Status204_ChunkAccepted,
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// The daemon does not have enough disk space.
-    Status507_TheDaemonDoesNotHaveEnoughDiskSpace(models::ErrorResponse),
+    Status507_TheDaemonDoesNotHaveEnoughDiskSpace(models::Problem),
 }
 
 /// Uploads

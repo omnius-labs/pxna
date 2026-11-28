@@ -150,8 +150,7 @@ export interface paths {
          *     server validates the ranges and keeps the saved values when
          *     any value is out of range. The ranges are part of this
          *     contract, so a value out of range is rejected with 400 before
-         *     the handler runs, and that 400 body is plain text rather than
-         *     an `ErrorResponse`.
+         *     the handler runs.
          */
         put: operations["putPreferences"];
         post?: never;
@@ -2235,28 +2234,50 @@ export interface components {
             kind: components["schemas"]["ErrorKind"];
             message?: string;
         };
-        ErrorResponse: {
-            kind: components["schemas"]["ErrorKind"];
-            message?: string;
-            /** @description Optional request identifier for server logs. */
-            requestId?: string;
+        /**
+         * @description An RFC 9457 problem document. Every error response is one,
+         *     served as `application/problem+json`, including a missing
+         *     route, a method the route does not allow, a body that does not
+         *     fit the contract, and a missing session. A body that does not
+         *     fit the types of the contract is answered with status 422.
+         */
+        Problem: {
+            /** @description Always `about:blank`; a client branches on `code`. */
+            type: string;
+            /** @description The reason phrase of `status`. */
+            title: string;
+            /** Format: int32 */
+            status: number;
+            code: components["schemas"]["ErrorKind"];
+            /**
+             * @description A message for a person. It never contains a host path,
+             *     and it is absent for an internal error.
+             */
+            detail?: string;
+            /**
+             * @description Identifies this error. An internal error is logged
+             *     under it.
+             */
+            requestId: string;
         };
         /**
          * @description `UnsupportedType`, `LimitExceeded`, and `PasswordRequired`
          *     describe the target file rather than the request, so a client
          *     can tell "cannot open this format", "too large to handle", and
-         *     "password protected" apart without parsing `message`.
+         *     "password protected" apart without parsing `detail`.
+         *     `MethodNotAllowed` means that the path exists but does not
+         *     accept the method.
          *     `Timeout` means that extracting an archive or generating a
          *     thumbnail did not finish within the daemon's time limit. The
          *     result is not cached, so repeating the same request can hit the
          *     same limit again; no `Retry-After` is returned.
          * @enum {string}
          */
-        ErrorKind: "InternalServerError" | "InvalidRequest" | "UnsupportedType" | "LimitExceeded" | "NotFound" | "Unauthorized" | "Forbidden" | "PasswordRequired" | "AlreadyInitialized" | "RangeNotSatisfiable" | "Conflict" | "PayloadTooLarge" | "InsufficientStorage" | "Timeout";
+        ErrorKind: "InternalServerError" | "InvalidRequest" | "UnsupportedType" | "LimitExceeded" | "NotFound" | "Unauthorized" | "Forbidden" | "PasswordRequired" | "AlreadyInitialized" | "RangeNotSatisfiable" | "Conflict" | "PayloadTooLarge" | "InsufficientStorage" | "Timeout" | "MethodNotAllowed";
     };
     responses: {
         /**
-         * @description Invalid request. `kind` is `InvalidRequest`, or
+         * @description Invalid request. `code` is `InvalidRequest`, or
          *     `UnsupportedType` when the target cannot be opened as an
          *     archive, or `LimitExceeded` when an archive exceeds an entry,
          *     size, or nesting limit.
@@ -2268,11 +2289,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "InvalidRequest",
-                 *       "message": "Invalid request."
+                 *       "type": "about:blank",
+                 *       "title": "Bad Request",
+                 *       "status": 400,
+                 *       "code": "InvalidRequest",
+                 *       "detail": "Invalid request.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /** @description Missing or invalid authentication. */
@@ -2283,15 +2308,19 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "Unauthorized",
-                 *       "message": "Authentication is required."
+                 *       "type": "about:blank",
+                 *       "title": "Unauthorized",
+                 *       "status": 401,
+                 *       "code": "Unauthorized",
+                 *       "detail": "Authentication is required.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /**
-         * @description The requested resource cannot be accessed or written. `kind` is
+         * @description The requested resource cannot be accessed or written. `code` is
          *     `Forbidden` for a `readonly` Library and for a mutation inside
          *     an archive, or `PasswordRequired` for a password-protected
          *     archive.
@@ -2303,11 +2332,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "Forbidden",
-                 *       "message": "Library access is not allowed."
+                 *       "type": "about:blank",
+                 *       "title": "Forbidden",
+                 *       "status": 403,
+                 *       "code": "Forbidden",
+                 *       "detail": "Library access is not allowed.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /** @description Resource not found. */
@@ -2318,11 +2351,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "NotFound",
-                 *       "message": "Entry not found."
+                 *       "type": "about:blank",
+                 *       "title": "Not Found",
+                 *       "status": 404,
+                 *       "code": "NotFound",
+                 *       "detail": "Entry not found.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /** @description The initial owner has already been registered. */
@@ -2333,11 +2370,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "AlreadyInitialized",
-                 *       "message": "Initial setup is already complete."
+                 *       "type": "about:blank",
+                 *       "title": "Conflict",
+                 *       "status": 409,
+                 *       "code": "AlreadyInitialized",
+                 *       "detail": "Initial setup is already complete.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /** @description Requested byte range cannot be satisfied. */
@@ -2348,11 +2389,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "RangeNotSatisfiable",
-                 *       "message": "Requested range is outside the file size."
+                 *       "type": "about:blank",
+                 *       "title": "Range Not Satisfiable",
+                 *       "status": 416,
+                 *       "code": "RangeNotSatisfiable",
+                 *       "detail": "Requested range is outside the file size.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /**
@@ -2367,11 +2412,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "Conflict",
-                 *       "message": "Entry already exists."
+                 *       "type": "about:blank",
+                 *       "title": "Conflict",
+                 *       "status": 409,
+                 *       "code": "Conflict",
+                 *       "detail": "Entry already exists.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /** @description The request body exceeds the one-shot write limit. */
@@ -2382,11 +2431,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "PayloadTooLarge",
-                 *       "message": "Body exceeds the 32 MiB one-shot limit."
+                 *       "type": "about:blank",
+                 *       "title": "Payload Too Large",
+                 *       "status": 413,
+                 *       "code": "PayloadTooLarge",
+                 *       "detail": "Body exceeds the 32 MiB one-shot limit.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /** @description The daemon does not have enough disk space. */
@@ -2397,11 +2450,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "InsufficientStorage",
-                 *       "message": "Not enough disk space."
+                 *       "type": "about:blank",
+                 *       "title": "Insufficient Storage",
+                 *       "status": 507,
+                 *       "code": "InsufficientStorage",
+                 *       "detail": "Not enough disk space.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /** @description Extraction or thumbnail generation timed out. */
@@ -2412,11 +2469,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "Timeout",
-                 *       "message": "Archive extraction timed out."
+                 *       "type": "about:blank",
+                 *       "title": "Gateway Timeout",
+                 *       "status": 504,
+                 *       "code": "Timeout",
+                 *       "detail": "Archive extraction timed out.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
         /** @description Internal server error. */
@@ -2427,11 +2488,15 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "kind": "InternalServerError",
-                 *       "message": "Unexpected server error."
+                 *       "type": "about:blank",
+                 *       "title": "Internal Server Error",
+                 *       "status": 500,
+                 *       "code": "InternalServerError",
+                 *       "detail": "Unexpected server error.",
+                 *       "requestId": "0f8e2c4a9b6d4e1f8a3c5b7d9e1f2a4c"
                  *     }
                  */
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/problem+json": components["schemas"]["Problem"];
             };
         };
     };
@@ -4013,13 +4078,13 @@ export interface operations {
             400: components["responses"]["InvalidRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description The session already has the most image sockets it may keep open. `kind` is `LimitExceeded`. */
+            /** @description The session already has the most image sockets it may keep open. `code` is `LimitExceeded`. */
             429: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             500: components["responses"]["InternalServerError"];

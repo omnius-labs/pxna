@@ -51,7 +51,7 @@ impl From<ApiError> for apis::setup::CreateInitialSetupResponse {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
             // オーナーがすでにいるときの engine の `AlreadyExists` を、契約の `AlreadyInitialized` として返す。
             ApiStatus::Conflict => {
-                error.body.kind = models::ErrorKind::AlreadyInitialized;
+                error.body.code = models::ErrorKind::AlreadyInitialized;
                 Self::Status409_TheInitialOwnerHasAlreadyBeenRegistered(error.body)
             }
             _ => Self::Status500_InternalServerError(error.body),
@@ -104,7 +104,7 @@ mod tests {
         let [created, conflict] = &responses;
         assert!(created.set_cookie().is_some_and(|value| value.starts_with("__Host-pxna_session=")));
         assert!(created.body.get("accessToken").is_none(), "cookie のセッションは token を本文に載せない");
-        assert_eq!(conflict.body["kind"], "AlreadyInitialized");
+        assert_eq!(conflict.body["code"], "AlreadyInitialized");
 
         let status = send(&router, Method::GET, "/api/v1/setup/status", &[], None).await?;
         assert_eq!(status.body["initialized"].as_bool(), Some(true));

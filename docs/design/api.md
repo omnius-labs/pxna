@@ -462,16 +462,15 @@ Every error is `application/problem+json`:
   "status": 409,
   "code": "Conflict",
   "detail": "The destination already exists.",
-  "requestId": "...",
-  "errors": [{ "pointer": "/destination/folderPath", "code": "InvalidRequest" }]
+  "requestId": "..."
 }
 ```
 
 - `code` is the API error kind of [design.md §4.4](../design.md#44-error-model-and-http-mapping), and a client branches on it.
-- `detail` never contains a host path; the daemon logs the host path under `requestId`.
-- `errors` names each failing field by JSON Pointer when the daemon's own checks know the field; a body that the generated router rejects carries the router's message in `detail`, because the router reports no field.
+- `detail` never contains a host path; the daemon logs an internal error, with its details, under its `requestId`.
+- A body that the generated router rejects carries the router's reason in `detail`; the router reports no field, so the Problem names none.
 - A missing route, a method not allowed, a body the generated router rejects, an authentication failure, and a size limit use the same shape; no error is plain text or an empty body.
-- `requestId` is present on every error.
+- `requestId` is present on every error and distinct per error.
 
 A per-item failure inside a successful response, such as one place of `POST /entries/metadata`, is the error kind alone, not a Problem.
 
@@ -685,7 +684,7 @@ Removing the status projection was rejected because a client that shows aggregat
 #### Use Problem Details for Every Error
 
 **Decision**
-Every error is `application/problem+json` with `code`, `detail`, `requestId`, and the failing fields (§11.1).
+Every error is `application/problem+json` with `code`, `detail`, and `requestId` (§11.1).
 
 **Reason**
 The current contract documents `ErrorResponse`, but the generated router answers a rejected body in plain text, a missing route and a disallowed method with an empty body, and a 401 only gets a body from an outer middleware, while `requestId` is never set.
@@ -801,12 +800,11 @@ When the control of background work ([design.md §11.2](../design.md#controlling
 
 ### 15.1 Current Code
 
-`daemon/openapi.yaml` serves the contract this document replaces, and none of §3 through §13 is implemented.
+`daemon/openapi.yaml` answers every error with the Problem of §11.1 (A1); the rest of §3 through §13 is not implemented, and the contract it serves is otherwise the one this document replaces.
 Until each area is replaced, the following statements in other documents describe the current contract, and this document the replacement:
 
 - The namespaces of [design.md §8.1](../design.md#81-namespaces) and the sync and async table of [§8.2](../design.md#82-determining-sync-and-async), with the decision "Decide Sync and Async by the Shape of the Request"
 - The folder settings under `/settings/folder` in [design.md §6.5](../design.md#65-shelves-and-folder-settings), with the decision "Name a Folder of the Folder Settings in the Body of Requests under /settings/folder"
-- The plain-text and empty error bodies in [design.md §4.4](../design.md#44-error-model-and-http-mapping)
 - The folder, summary, search, and timeline listings named in [Listing and Search Design](./listing.md#1-about-this-document) and [Timeline Design](./timeline.md#1-about-this-document)
 - The silent end of a transcode session in [Video Playback Design §5.4](./video.md#54-concurrency), and the error kinds of [design.md §4.4](../design.md#44-error-model-and-http-mapping), which lack `SessionEvicted`
 - The paths of the one-shot write in [design.md §8.7](../design.md#87-uploads), of the deletions in [§8.4](../design.md#84-deletion) and the decision "Delete Moves the Entry to a Library-Local Trash, Unified on POST", and the example path in the introduction of [§8](../design.md#8-conventions-for-mutating-apis)

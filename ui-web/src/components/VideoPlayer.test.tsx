@@ -52,7 +52,7 @@ it("最後まで再生したら onDone を呼ぶ", async () => {
 });
 
 it("動画の情報を読めなかったときも onDone を呼ぶ", async () => {
-    get.mockResolvedValue({ error: { kind: "NotFound" }, response: new Response(null, { status: 404 }) });
+    get.mockResolvedValue({ error: { code: "NotFound" }, response: new Response(null, { status: 404 }) });
     const onDone = vi.fn();
     const h = await render(onDone);
     try {

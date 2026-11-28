@@ -526,8 +526,8 @@ impl Run {
                 let body = ApiError::from_error(&error).body;
                 self.control_message(&ServerMessage::Failed {
                     id,
-                    kind: body.kind,
-                    message: body.message,
+                    kind: body.code,
+                    message: body.detail,
                 });
             }
             Outcome::Image(thumbnail) => {

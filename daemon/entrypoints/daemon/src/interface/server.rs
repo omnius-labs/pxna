@@ -10,7 +10,7 @@ use omnius_pxna_interface::{apis, apis::BasicAuthKind};
 use crate::{
     interface::{
         features::{files::FileContentRoute, sockets::image::ImageSocketRoute, uploads::UploadContentRoute, video::VideoSessionRoute},
-        middleware::{OriginCheck, UnauthorizedBody},
+        middleware::{OriginCheck, ProblemBody},
         session::{BearerToken, Claims, SessionAuth, SessionCookie},
         web::WebAssets,
     },
@@ -69,7 +69,7 @@ impl ApiServer {
             Some(dir) => WebAssets::new(dir).router(api),
             None => api,
         };
-        app.layer(axum::middleware::from_fn(UnauthorizedBody::middleware))
+        app.layer(axum::middleware::from_fn(ProblemBody::middleware))
             .layer(axum::middleware::from_fn(OriginCheck::middleware))
     }
 
@@ -387,7 +387,7 @@ pub(crate) mod tests {
         )
         .await?;
         assert_eq!(too_large.status, StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(too_large.body["kind"], "PayloadTooLarge");
+        assert_eq!(too_large.body["code"], "PayloadTooLarge");
         assert!(!fixture.server.state.conf.libraries[0].path.join("new/too-large.bin").exists());
         let moved = send(
             &router,
@@ -607,8 +607,8 @@ pub(crate) mod tests {
         for headers in [&[][..], &[("authorization", "Bearer invalid")][..]] {
             let response = status(headers).await?;
             assert_eq!(response.status, StatusCode::UNAUTHORIZED);
-            assert_eq!(response.body["kind"], "Unauthorized");
-            assert!(response.header("content-type").is_some_and(|value| value.starts_with("application/json")));
+            assert_eq!(response.body["code"], "Unauthorized");
+            assert!(response.header("content-type").is_some_and(|value| value.starts_with("application/problem+json")));
             assert!(response.header("content-length").is_none(), "本文を差し替えた際に空応答の長さを残さない");
         }
         assert_eq!(send(&router, Method::GET, "/api/v1/libraries", &[("cookie", &cookie)], None).await?.status, StatusCode::OK);
@@ -966,7 +966,7 @@ pub(crate) mod tests {
 
         let missing = send(&router, Method::DELETE, "/api/v1/auth/session", &[("cookie", &cookie)], None).await?;
         assert_eq!(missing.status, StatusCode::FORBIDDEN);
-        assert_eq!(missing.body["kind"], "Forbidden");
+        assert_eq!(missing.body["code"], "Forbidden");
         let foreign = send(
             &router,
             Method::DELETE,
@@ -982,6 +982,75 @@ pub(crate) mod tests {
             StatusCode::OK,
             "失効していない"
         );
+        Ok(())
+    }
+
+    /// 本文が契約の `Problem` であり、`status` と `code` が応答と一致し、`requestId` を持つことを確かめる。
+    fn assert_problem(response: &HttpResponse, status: StatusCode, code: &str) {
+        assert_eq!(response.status, status, "{code}");
+        assert!(
+            response.header("content-type").is_some_and(|value| value.starts_with("application/problem+json")),
+            "{code}: {:?}",
+            response.header("content-type")
+        );
+        assert_eq!(response.body["type"], "about:blank", "{code}");
+        assert_eq!(response.body["status"], status.as_u16(), "{code}");
+        assert_eq!(response.body["code"], code, "{code}");
+        assert!(response.body["title"].as_str().is_some_and(|title| !title.is_empty()), "{code}");
+        assert!(response.body["requestId"].as_str().is_some_and(|id| !id.is_empty()), "{code}");
+    }
+
+    async fn send_raw(router: &axum::Router, method: Method, uri: &str, headers: &[(&str, &str)], body: &'static str) -> TestResult<HttpResponse> {
+        let mut request = http::Request::builder().method(method).uri(uri).header(http::header::HOST, "localhost");
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let response = router.clone().oneshot(request.body(Body::from(body))?).await?;
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+        Ok(HttpResponse {
+            status,
+            headers,
+            body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            bytes: bytes.to_vec(),
+        })
+    }
+
+    #[tokio::test]
+    async fn router_answers_every_error_with_a_problem_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let router = router(&fixture);
+        let setup = send(&router, Method::POST, "/api/v1/setup", &[], credentials("owner", "password1", "cookie")).await?;
+        let cookie = cookie(&setup)?;
+        let json = ("content-type", "application/json");
+
+        let unknown = send(&router, Method::GET, "/api/v1/nowhere", &[("cookie", &cookie)], None).await?;
+        assert_problem(&unknown, StatusCode::NOT_FOUND, "NotFound");
+
+        let method = send(&router, Method::PATCH, "/api/v1/libraries", &[("cookie", &cookie), ("origin", "http://localhost")], None).await?;
+        assert_problem(&method, StatusCode::METHOD_NOT_ALLOWED, "MethodNotAllowed");
+
+        let malformed = send_raw(&router, Method::POST, "/api/v1/auth/login", &[json], "{").await?;
+        assert_problem(&malformed, StatusCode::BAD_REQUEST, "InvalidRequest");
+        assert!(malformed.body["detail"].as_str().is_some_and(|detail| !detail.is_empty()), "the router's reason is kept");
+
+        let mistyped = send_raw(&router, Method::POST, "/api/v1/auth/login", &[json], r#"{"username": 1}"#).await?;
+        assert_problem(&mistyped, StatusCode::UNPROCESSABLE_ENTITY, "InvalidRequest");
+
+        let anonymous = send(&router, Method::GET, "/api/v1/libraries", &[], None).await?;
+        assert_problem(&anonymous, StatusCode::UNAUTHORIZED, "Unauthorized");
+
+        let without_origin = send(&router, Method::POST, "/api/v1/entries", &[("cookie", &cookie)], Some(json!({}))).await?;
+        assert_problem(&without_origin, StatusCode::FORBIDDEN, "Forbidden");
+
+        let handler = send(&router, Method::GET, "/api/v1/libraries/missing", &[("cookie", &cookie)], None).await?;
+        assert_problem(&handler, StatusCode::NOT_FOUND, "NotFound");
+        assert_ne!(unknown.body["requestId"], handler.body["requestId"], "each error has its own id");
+
+        let head = send(&router, Method::HEAD, "/api/v1/nowhere", &[("cookie", &cookie)], None).await?;
+        assert_eq!(head.status, StatusCode::NOT_FOUND);
+        assert!(head.bytes.is_empty(), "a HEAD response keeps no body");
         Ok(())
     }
 

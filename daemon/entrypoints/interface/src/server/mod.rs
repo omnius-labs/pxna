@@ -188,7 +188,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -205,7 +205,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -298,7 +298,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -315,7 +315,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -426,7 +426,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -443,7 +443,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -460,7 +460,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -564,7 +564,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -581,7 +581,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -598,7 +598,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -615,7 +615,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -632,7 +632,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -649,7 +649,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -753,7 +753,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -770,7 +770,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -787,7 +787,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -804,7 +804,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -821,7 +821,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -838,7 +838,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -947,7 +947,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -964,7 +964,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -981,7 +981,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -998,7 +998,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1015,7 +1015,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1128,7 +1128,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1145,7 +1145,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1162,7 +1162,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1179,7 +1179,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1196,7 +1196,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1297,7 +1297,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1314,7 +1314,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1331,7 +1331,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1348,7 +1348,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1365,7 +1365,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1382,7 +1382,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1399,7 +1399,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1525,7 +1525,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1542,7 +1542,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1559,7 +1559,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1576,7 +1576,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1593,7 +1593,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1610,7 +1610,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1888,7 +1888,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1905,7 +1905,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1922,7 +1922,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1939,7 +1939,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1956,7 +1956,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1973,7 +1973,7 @@ where
                 let mut response = response.status(416);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -1990,7 +1990,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2007,7 +2007,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2121,7 +2121,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2138,7 +2138,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2155,7 +2155,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2172,7 +2172,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2189,7 +2189,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2206,7 +2206,7 @@ where
                 let mut response = response.status(413);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2223,7 +2223,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2240,7 +2240,7 @@ where
                 let mut response = response.status(507);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2349,7 +2349,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2366,7 +2366,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2383,7 +2383,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2400,7 +2400,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2417,7 +2417,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2526,7 +2526,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2543,7 +2543,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2560,7 +2560,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2577,7 +2577,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2594,7 +2594,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2611,7 +2611,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2724,7 +2724,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2741,7 +2741,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2758,7 +2758,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2775,7 +2775,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2792,7 +2792,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2809,7 +2809,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2918,7 +2918,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2935,7 +2935,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2952,7 +2952,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2969,7 +2969,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -2986,7 +2986,7 @@ where
                 let mut response = response.status(413);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3003,7 +3003,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3104,7 +3104,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3121,7 +3121,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3138,7 +3138,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3155,7 +3155,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3172,7 +3172,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3189,7 +3189,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3206,7 +3206,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3309,7 +3309,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3326,7 +3326,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3343,7 +3343,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3360,7 +3360,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3377,7 +3377,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3394,7 +3394,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3411,7 +3411,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3517,7 +3517,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3534,7 +3534,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3551,7 +3551,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3568,7 +3568,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3585,7 +3585,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3602,7 +3602,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3619,7 +3619,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3745,7 +3745,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3762,7 +3762,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3779,7 +3779,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3796,7 +3796,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3813,7 +3813,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3830,7 +3830,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3936,7 +3936,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3953,7 +3953,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3970,7 +3970,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -3987,7 +3987,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4004,7 +4004,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4084,7 +4084,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4164,7 +4164,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4181,7 +4181,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4198,7 +4198,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4215,7 +4215,7 @@ where
                 let mut response = response.status(429);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4232,7 +4232,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4325,7 +4325,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4342,7 +4342,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4438,7 +4438,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4455,7 +4455,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4472,7 +4472,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4489,7 +4489,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4582,7 +4582,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4599,7 +4599,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4695,7 +4695,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4712,7 +4712,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4729,7 +4729,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4825,7 +4825,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4842,7 +4842,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4859,7 +4859,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4952,7 +4952,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -4969,7 +4969,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5060,7 +5060,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5077,7 +5077,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5094,7 +5094,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5187,7 +5187,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5204,7 +5204,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5308,7 +5308,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5325,7 +5325,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5342,7 +5342,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5443,7 +5443,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5460,7 +5460,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5477,7 +5477,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5494,7 +5494,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5511,7 +5511,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5620,7 +5620,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5637,7 +5637,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5654,7 +5654,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5671,7 +5671,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5688,7 +5688,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5784,7 +5784,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5801,7 +5801,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5818,7 +5818,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5835,7 +5835,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5852,7 +5852,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5869,7 +5869,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5980,7 +5980,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -5997,7 +5997,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6014,7 +6014,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6090,7 +6090,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6194,7 +6194,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6211,7 +6211,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6228,7 +6228,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6319,7 +6319,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6336,7 +6336,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6353,7 +6353,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6370,7 +6370,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6453,7 +6453,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6470,7 +6470,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6487,7 +6487,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6580,7 +6580,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6597,7 +6597,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6690,7 +6690,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6707,7 +6707,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6811,7 +6811,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6828,7 +6828,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6845,7 +6845,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6949,7 +6949,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6966,7 +6966,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -6983,7 +6983,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7092,7 +7092,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7109,7 +7109,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7126,7 +7126,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7143,7 +7143,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7244,7 +7244,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7261,7 +7261,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7278,7 +7278,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7295,7 +7295,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7312,7 +7312,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7405,7 +7405,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7422,7 +7422,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7531,7 +7531,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7548,7 +7548,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7565,7 +7565,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7582,7 +7582,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7599,7 +7599,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7695,7 +7695,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7712,7 +7712,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7729,7 +7729,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7746,7 +7746,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7842,7 +7842,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7859,7 +7859,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7876,7 +7876,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7893,7 +7893,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -7989,7 +7989,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8006,7 +8006,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8023,7 +8023,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8040,7 +8040,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8144,7 +8144,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8161,7 +8161,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8178,7 +8178,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8195,7 +8195,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8291,7 +8291,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8308,7 +8308,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8325,7 +8325,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8342,7 +8342,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8359,7 +8359,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8376,7 +8376,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8485,7 +8485,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8502,7 +8502,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8519,7 +8519,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8536,7 +8536,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8553,7 +8553,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8570,7 +8570,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8587,7 +8587,7 @@ where
                 let mut response = response.status(507);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8670,7 +8670,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8687,7 +8687,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8704,7 +8704,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8721,7 +8721,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8817,7 +8817,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8834,7 +8834,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8851,7 +8851,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8868,7 +8868,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8969,7 +8969,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -8986,7 +8986,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9003,7 +9003,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9020,7 +9020,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9037,7 +9037,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9054,7 +9054,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9071,7 +9071,7 @@ where
                 let mut response = response.status(507);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9180,7 +9180,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9197,7 +9197,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9214,7 +9214,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9231,7 +9231,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9248,7 +9248,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9265,7 +9265,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9282,7 +9282,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9365,7 +9365,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9382,7 +9382,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9399,7 +9399,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9416,7 +9416,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9433,7 +9433,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9450,7 +9450,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9467,7 +9467,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9568,7 +9568,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9585,7 +9585,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9602,7 +9602,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9619,7 +9619,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9636,7 +9636,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9653,7 +9653,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9670,7 +9670,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9759,7 +9759,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9776,7 +9776,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9793,7 +9793,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9810,7 +9810,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9827,7 +9827,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9844,7 +9844,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9861,7 +9861,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9950,7 +9950,7 @@ where
                 let mut response = response.status(400);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9967,7 +9967,7 @@ where
                 let mut response = response.status(401);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -9984,7 +9984,7 @@ where
                 let mut response = response.status(403);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -10001,7 +10001,7 @@ where
                 let mut response = response.status(404);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -10018,7 +10018,7 @@ where
                 let mut response = response.status(409);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -10035,7 +10035,7 @@ where
                 let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {
@@ -10052,7 +10052,7 @@ where
                 let mut response = response.status(504);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
-                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 }
 
                 let body_content = tokio::task::spawn_blocking(move || {

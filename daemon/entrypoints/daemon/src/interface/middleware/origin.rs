@@ -1,17 +1,15 @@
-use axum::{
-    Json,
-    extract::Request,
-    middleware::Next,
-    response::{IntoResponse as _, Response},
-};
+use axum::{extract::Request, middleware::Next, response::Response};
 use http::{
-    HeaderMap, Method, StatusCode,
+    HeaderMap, Method,
     header::{COOKIE, HOST, ORIGIN},
 };
 
 use omnius_pxna_interface::models;
 
-use crate::interface::session::{INSECURE_SESSION_COOKIE_NAME, SESSION_COOKIE_NAME};
+use crate::{
+    error::{ApiError, ApiStatus},
+    interface::session::{INSECURE_SESSION_COOKIE_NAME, SESSION_COOKIE_NAME},
+};
 
 /// セッションの cookie を持つ変更系の要求で、`Origin` が `Host` と一致するかを検証する（design.md §8.5）。
 pub struct OriginCheck;
@@ -22,9 +20,7 @@ impl OriginCheck {
         if Self::is_allowed(request.method(), request.headers()) {
             next.run(request).await
         } else {
-            let mut body = models::ErrorResponse::new(models::ErrorKind::Forbidden);
-            body.message = Some("origin does not match host".to_string());
-            (StatusCode::FORBIDDEN, Json(body)).into_response()
+            ApiError::new(ApiStatus::Forbidden, models::ErrorKind::Forbidden, Some("origin does not match host".to_string())).into_response()
         }
     }
 
@@ -73,6 +69,7 @@ impl OriginCheck {
 #[cfg(test)]
 mod tests {
     use axum::{Router, body::Body, routing::any};
+    use http::StatusCode;
     use testresult::TestResult;
     use tower::ServiceExt as _;
 

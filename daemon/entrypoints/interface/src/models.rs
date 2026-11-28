@@ -4524,7 +4524,7 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<EntryTransfe
     }
 }
 
-/// `UnsupportedType`, `LimitExceeded`, and `PasswordRequired` describe the target file rather than the request, so a client can tell \"cannot open this format\", \"too large to handle\", and \"password protected\" apart without parsing `message`. `Timeout` means that extracting an archive or generating a thumbnail did not finish within the daemon's time limit. The result is not cached, so repeating the same request can hit the same limit again; no `Retry-After` is returned.
+/// `UnsupportedType`, `LimitExceeded`, and `PasswordRequired` describe the target file rather than the request, so a client can tell \"cannot open this format\", \"too large to handle\", and \"password protected\" apart without parsing `detail`. `MethodNotAllowed` means that the path exists but does not accept the method. `Timeout` means that extracting an archive or generating a thumbnail did not finish within the daemon's time limit. The result is not cached, so repeating the same request can hit the same limit again; no `Retry-After` is returned.
 /// Enumeration of values.
 /// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
 /// which helps with FFI.
@@ -4561,6 +4561,8 @@ pub enum ErrorKind {
     InsufficientStorage,
     #[serde(rename = "Timeout")]
     Timeout,
+    #[serde(rename = "MethodNotAllowed")]
+    MethodNotAllowed,
 }
 
 impl validator::Validate for ErrorKind {
@@ -4586,6 +4588,7 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::PayloadTooLarge => write!(f, "PayloadTooLarge"),
             ErrorKind::InsufficientStorage => write!(f, "InsufficientStorage"),
             ErrorKind::Timeout => write!(f, "Timeout"),
+            ErrorKind::MethodNotAllowed => write!(f, "MethodNotAllowed"),
         }
     }
 }
@@ -4609,138 +4612,8 @@ impl std::str::FromStr for ErrorKind {
             "PayloadTooLarge" => std::result::Result::Ok(ErrorKind::PayloadTooLarge),
             "InsufficientStorage" => std::result::Result::Ok(ErrorKind::InsufficientStorage),
             "Timeout" => std::result::Result::Ok(ErrorKind::Timeout),
+            "MethodNotAllowed" => std::result::Result::Ok(ErrorKind::MethodNotAllowed),
             _ => std::result::Result::Err(format!(r#"Value not valid: {s}"#)),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
-#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct ErrorResponse {
-    #[serde(rename = "kind")]
-    #[validate(nested)]
-    pub kind: models::ErrorKind,
-
-    #[serde(rename = "message")]
-    #[validate(custom(function = "check_xss_string"))]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-
-    /// Optional request identifier for server logs.
-    #[serde(rename = "requestId")]
-    #[validate(custom(function = "check_xss_string"))]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
-}
-
-impl ErrorResponse {
-    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(kind: models::ErrorKind) -> ErrorResponse {
-        ErrorResponse {
-            kind,
-            message: None,
-            request_id: None,
-        }
-    }
-}
-
-/// Converts the ErrorResponse value to the Query Parameters representation (style=form, explode=false)
-/// specified in https://swagger.io/docs/specification/serialization/
-/// Should be implemented in a serde serializer
-impl std::fmt::Display for ErrorResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let params: Vec<Option<String>> = vec![
-            // Skipping kind in query parameter serialization
-            self.message.as_ref().map(|message| ["message".to_string(), message.to_string()].join(",")),
-            self.request_id.as_ref().map(|request_id| ["requestId".to_string(), request_id.to_string()].join(",")),
-        ];
-
-        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
-    }
-}
-
-/// Converts Query Parameters representation (style=form, explode=false) to a ErrorResponse value
-/// as specified in https://swagger.io/docs/specification/serialization/
-/// Should be implemented in a serde deserializer
-impl std::str::FromStr for ErrorResponse {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        /// An intermediate representation of the struct to use for parsing.
-        #[derive(Default)]
-        #[allow(dead_code)]
-        struct IntermediateRep {
-            pub kind: Vec<models::ErrorKind>,
-            pub message: Vec<String>,
-            pub request_id: Vec<String>,
-        }
-
-        let mut intermediate_rep = IntermediateRep::default();
-
-        // Parse into intermediate representation
-        let mut string_iter = s.split(',');
-        let mut key_result = string_iter.next();
-
-        while key_result.is_some() {
-            let val = match string_iter.next() {
-                Some(x) => x,
-                None => return std::result::Result::Err("Missing value while parsing ErrorResponse".to_string()),
-            };
-
-            if let Some(key) = key_result {
-                #[allow(clippy::match_single_binding)]
-                match key {
-                    #[allow(clippy::redundant_clone)]
-                    "kind" => intermediate_rep
-                        .kind
-                        .push(<models::ErrorKind as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    #[allow(clippy::redundant_clone)]
-                    "message" => intermediate_rep.message.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    #[allow(clippy::redundant_clone)]
-                    "requestId" => intermediate_rep.request_id.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    _ => return std::result::Result::Err("Unexpected key while parsing ErrorResponse".to_string()),
-                }
-            }
-
-            // Get the next key
-            key_result = string_iter.next();
-        }
-
-        // Use the intermediate representation to return the struct
-        std::result::Result::Ok(ErrorResponse {
-            kind: intermediate_rep.kind.into_iter().next().ok_or_else(|| "kind missing in ErrorResponse".to_string())?,
-            message: intermediate_rep.message.into_iter().next(),
-            request_id: intermediate_rep.request_id.into_iter().next(),
-        })
-    }
-}
-
-// Methods for converting between header::IntoHeaderValue<ErrorResponse> and HeaderValue
-
-#[cfg(feature = "server")]
-impl std::convert::TryFrom<header::IntoHeaderValue<ErrorResponse>> for HeaderValue {
-    type Error = String;
-
-    fn try_from(hdr_value: header::IntoHeaderValue<ErrorResponse>) -> std::result::Result<Self, Self::Error> {
-        let hdr_value = hdr_value.to_string();
-        match HeaderValue::from_str(&hdr_value) {
-            std::result::Result::Ok(value) => std::result::Result::Ok(value),
-            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for ErrorResponse - value: {hdr_value} is invalid {e}"#)),
-        }
-    }
-}
-
-#[cfg(feature = "server")]
-impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<ErrorResponse> {
-    type Error = String;
-
-    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
-        match hdr_value.to_str() {
-            std::result::Result::Ok(value) => match <ErrorResponse as std::str::FromStr>::from_str(value) {
-                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
-                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into ErrorResponse - {err}"#)),
-            },
-            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
         }
     }
 }
@@ -9023,6 +8896,173 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<Preferences>
             std::result::Result::Ok(value) => match <Preferences as std::str::FromStr>::from_str(value) {
                 std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
                 std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into Preferences - {err}"#)),
+            },
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
+        }
+    }
+}
+
+/// An RFC 9457 problem document. Every error response is one, served as `application/problem+json`, including a missing route, a method the route does not allow, a body that does not fit the contract, and a missing session. A body that does not fit the types of the contract is answered with status 422.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
+#[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
+pub struct Problem {
+    /// Always `about:blank`; a client branches on `code`.
+    #[serde(rename = "type")]
+    #[validate(custom(function = "check_xss_string"))]
+    pub r_type: String,
+
+    /// The reason phrase of `status`.
+    #[serde(rename = "title")]
+    #[validate(custom(function = "check_xss_string"))]
+    pub title: String,
+
+    #[serde(rename = "status")]
+    pub status: i32,
+
+    #[serde(rename = "code")]
+    #[validate(nested)]
+    pub code: models::ErrorKind,
+
+    /// A message for a person. It never contains a host path, and it is absent for an internal error.
+    #[serde(rename = "detail")]
+    #[validate(custom(function = "check_xss_string"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+
+    /// Identifies this error. An internal error is logged under it.
+    #[serde(rename = "requestId")]
+    #[validate(custom(function = "check_xss_string"))]
+    pub request_id: String,
+}
+
+impl Problem {
+    #[allow(clippy::new_without_default, clippy::too_many_arguments)]
+    pub fn new(r_type: String, title: String, status: i32, code: models::ErrorKind, request_id: String) -> Problem {
+        Problem {
+            r_type,
+            title,
+            status,
+            code,
+            detail: None,
+            request_id,
+        }
+    }
+}
+
+/// Converts the Problem value to the Query Parameters representation (style=form, explode=false)
+/// specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde serializer
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<Option<String>> = vec![
+            Some("type".to_string()),
+            Some(self.r_type.to_string()),
+            Some("title".to_string()),
+            Some(self.title.to_string()),
+            Some("status".to_string()),
+            Some(self.status.to_string()),
+            // Skipping code in query parameter serialization
+            self.detail.as_ref().map(|detail| ["detail".to_string(), detail.to_string()].join(",")),
+            Some("requestId".to_string()),
+            Some(self.request_id.to_string()),
+        ];
+
+        write!(f, "{}", params.into_iter().flatten().collect::<Vec<_>>().join(","))
+    }
+}
+
+/// Converts Query Parameters representation (style=form, explode=false) to a Problem value
+/// as specified in https://swagger.io/docs/specification/serialization/
+/// Should be implemented in a serde deserializer
+impl std::str::FromStr for Problem {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        /// An intermediate representation of the struct to use for parsing.
+        #[derive(Default)]
+        #[allow(dead_code)]
+        struct IntermediateRep {
+            pub r_type: Vec<String>,
+            pub title: Vec<String>,
+            pub status: Vec<i32>,
+            pub code: Vec<models::ErrorKind>,
+            pub detail: Vec<String>,
+            pub request_id: Vec<String>,
+        }
+
+        let mut intermediate_rep = IntermediateRep::default();
+
+        // Parse into intermediate representation
+        let mut string_iter = s.split(',');
+        let mut key_result = string_iter.next();
+
+        while key_result.is_some() {
+            let val = match string_iter.next() {
+                Some(x) => x,
+                None => return std::result::Result::Err("Missing value while parsing Problem".to_string()),
+            };
+
+            if let Some(key) = key_result {
+                #[allow(clippy::match_single_binding)]
+                match key {
+                    #[allow(clippy::redundant_clone)]
+                    "type" => intermediate_rep.r_type.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "title" => intermediate_rep.title.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "status" => intermediate_rep.status.push(<i32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "code" => intermediate_rep
+                        .code
+                        .push(<models::ErrorKind as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "detail" => intermediate_rep.detail.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    #[allow(clippy::redundant_clone)]
+                    "requestId" => intermediate_rep.request_id.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
+                    _ => return std::result::Result::Err("Unexpected key while parsing Problem".to_string()),
+                }
+            }
+
+            // Get the next key
+            key_result = string_iter.next();
+        }
+
+        // Use the intermediate representation to return the struct
+        std::result::Result::Ok(Problem {
+            r_type: intermediate_rep.r_type.into_iter().next().ok_or_else(|| "type missing in Problem".to_string())?,
+            title: intermediate_rep.title.into_iter().next().ok_or_else(|| "title missing in Problem".to_string())?,
+            status: intermediate_rep.status.into_iter().next().ok_or_else(|| "status missing in Problem".to_string())?,
+            code: intermediate_rep.code.into_iter().next().ok_or_else(|| "code missing in Problem".to_string())?,
+            detail: intermediate_rep.detail.into_iter().next(),
+            request_id: intermediate_rep.request_id.into_iter().next().ok_or_else(|| "requestId missing in Problem".to_string())?,
+        })
+    }
+}
+
+// Methods for converting between header::IntoHeaderValue<Problem> and HeaderValue
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<header::IntoHeaderValue<Problem>> for HeaderValue {
+    type Error = String;
+
+    fn try_from(hdr_value: header::IntoHeaderValue<Problem>) -> std::result::Result<Self, Self::Error> {
+        let hdr_value = hdr_value.to_string();
+        match HeaderValue::from_str(&hdr_value) {
+            std::result::Result::Ok(value) => std::result::Result::Ok(value),
+            std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Invalid header value for Problem - value: {hdr_value} is invalid {e}"#)),
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<Problem> {
+    type Error = String;
+
+    fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
+        match hdr_value.to_str() {
+            std::result::Result::Ok(value) => match <Problem as std::str::FromStr>::from_str(value) {
+                std::result::Result::Ok(value) => std::result::Result::Ok(header::IntoHeaderValue(value)),
+                std::result::Result::Err(err) => std::result::Result::Err(format!(r#"Unable to convert header value '{value}' into Problem - {err}"#)),
             },
             std::result::Result::Err(e) => std::result::Result::Err(format!(r#"Unable to convert header: {hdr_value:?} to string: {e}"#)),
         }

@@ -4,7 +4,7 @@ import type { components, paths } from "./schema";
 
 export type ErrorKind = components["schemas"]["ErrorKind"];
 
-/// API が 2xx 以外を返したときの失敗。`kind` は本文の `ErrorResponse` から取り、本文がなければ持たない。
+/// API が 2xx 以外を返したときの失敗。`kind` は本文の `Problem` の `code` から取り、本文がなければ持たない。
 export class ApiError extends Error {
     readonly status: number;
     readonly kind: ErrorKind | undefined;
@@ -39,6 +39,11 @@ export function unwrap<T>(result: FetchResult<T>): T {
     if (result.response.ok) {
         return result.data as T;
     }
-    const body = result.error as { kind?: ErrorKind; message?: string | null } | undefined;
-    throw new ApiError(result.response.status, body?.kind, body?.message ?? undefined);
+    throw problemError(result.response.status, result.error);
+}
+
+/// 失敗した応答の本文（契約の `Problem`）から `ApiError` を作る。本文が読めなければ status だけを持つ。
+export function problemError(status: number, body: unknown): ApiError {
+    const problem = body as Partial<components["schemas"]["Problem"]> | null | undefined;
+    return new ApiError(status, problem?.code, problem?.detail ?? undefined);
 }

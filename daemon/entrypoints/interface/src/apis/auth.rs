@@ -15,9 +15,9 @@ pub enum DeleteCurrentSessionResponse {
     /// Session revoked.
     Status204_SessionRevoked { set_cookie: Option<String> },
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -27,9 +27,9 @@ pub enum GetCurrentUserResponse {
     /// Current authenticated user and session.
     Status200_CurrentAuthenticatedUserAndSession(models::CurrentAuth),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -38,12 +38,12 @@ pub enum GetCurrentUserResponse {
 pub enum LoginResponse {
     /// Login succeeded.
     Status200_LoginSucceeded { body: models::AuthResult, set_cookie: Option<String> },
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 /// Auth

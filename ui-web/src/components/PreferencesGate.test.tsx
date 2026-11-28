@@ -72,7 +72,7 @@ it("shows only the skeleton while the preferences are loading, then the children
 });
 
 it("falls back to the defaults and notifies when the preferences cannot be read", async () => {
-    mocks.get.mockResolvedValue({ error: { kind: "InternalServerError" }, response: { ok: false, status: 500 } });
+    mocks.get.mockResolvedValue({ error: { code: "InternalServerError" }, response: { ok: false, status: 500 } });
     const root = await render();
     await until(() => host.querySelector("[data-child]") !== null);
     expect(host.querySelector("[data-child]")).not.toBeNull();
@@ -82,7 +82,7 @@ it("falls back to the defaults and notifies when the preferences cannot be read"
 });
 
 it("leaves an unauthorized response to the common handler", async () => {
-    mocks.get.mockResolvedValue({ error: { kind: "Unauthorized" }, response: { ok: false, status: 401 } });
+    mocks.get.mockResolvedValue({ error: { code: "Unauthorized" }, response: { ok: false, status: 401 } });
     const root = await render();
     await until(() => client.getQueryState(preferencesQuery.queryKey)?.status === "error");
     expect(host.querySelector("[data-child]")).toBeNull();

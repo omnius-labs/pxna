@@ -609,8 +609,8 @@ impl OperationService {
             return;
         }
         let api = ApiError::from(error);
-        let mut failure = models::OperationFailure::new(path.to_string(), api.body.kind);
-        failure.message = api.body.message;
+        let mut failure = models::OperationFailure::new(path.to_string(), api.body.code);
+        failure.message = api.body.detail;
         record.lock().model.failed_entries.push(failure);
     }
 

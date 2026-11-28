@@ -143,7 +143,7 @@ it("混在した移動は先に受理した項目だけ除き、拒否された�
             ]),
         );
         expect(show).toHaveBeenCalledWith([operation]);
-        finish({ error: { kind: "Forbidden" }, response: new Response(null, { status: 403 }) });
+        finish({ error: { code: "Forbidden" }, response: new Response(null, { status: 403 }) });
         await act(async () => promise);
         expect(h.state.value!.sources.flatMap((source) => source.entries).map((entry) => entry.path)).toEqual(["/dir"]);
         expect(notify).toHaveBeenCalled();

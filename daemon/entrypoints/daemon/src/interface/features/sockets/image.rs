@@ -7,7 +7,10 @@ use http::Method;
 
 use omnius_pxna_interface::{apis, models};
 
-use crate::interface::{ApiServer, session::Claims};
+use crate::{
+    error::{ApiError, ApiStatus},
+    interface::{ApiServer, session::Claims},
+};
 
 mod connection;
 mod message;
@@ -30,8 +33,11 @@ impl apis::image_socket::ImageSocket for ApiServer {
         claims: &Self::Claims,
     ) -> std::result::Result<apis::image_socket::GetImageSocketResponse, ()> {
         // 外側のルータの手書きの route が先に処理するため、この実装は呼ばれない。
-        let mut error = models::ErrorResponse::new(models::ErrorKind::InternalServerError);
-        error.message = Some("served by a hand-written route".to_string());
-        Ok(apis::image_socket::GetImageSocketResponse::Status500_InternalServerError(error))
+        let error = ApiError::new(
+            ApiStatus::InternalServerError,
+            models::ErrorKind::InternalServerError,
+            Some("served by a hand-written route".to_string()),
+        );
+        Ok(apis::image_socket::GetImageSocketResponse::Status500_InternalServerError(error.body))
     }
 }

@@ -10,7 +10,7 @@ vi.mock("../api/client", async (importOriginal) => ({
 }));
 afterEach(() => mocks.put.mockReset());
 
-const failure = { error: { kind: "NotFound", message: "x" }, response: new Response(null, { status: 404 }) };
+const failure = { error: { code: "NotFound", detail: "x" }, response: new Response(null, { status: 404 }) };
 
 it("評価は保存の前にキャッシュへ入れ、失敗したら元の値へ戻して例外を投げる", async () => {
     const client = new QueryClient();

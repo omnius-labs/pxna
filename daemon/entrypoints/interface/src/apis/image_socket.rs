@@ -14,16 +14,16 @@ use crate::{models, types::*};
 pub enum GetImageSocketResponse {
     /// The connection is upgraded to a WebSocket.
     Status101_TheConnectionIsUpgradedToAWebSocket,
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
-    /// The session already has the most image sockets it may keep open. `kind` is `LimitExceeded`.
-    Status429_TheSessionAlreadyHasTheMostImageSocketsItMayKeepOpen(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
+    /// The session already has the most image sockets it may keep open. `code` is `LimitExceeded`.
+    Status429_TheSessionAlreadyHasTheMostImageSocketsItMayKeepOpen(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 /// ImageSocket

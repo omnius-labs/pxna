@@ -15,9 +15,9 @@ pub enum GetCapabilitiesResponse {
     /// Optional browsing features implemented by this daemon.
     Status200_OptionalBrowsingFeaturesImplementedByThisDaemon(models::Capabilities),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -27,13 +27,13 @@ pub enum GetLibraryResponse {
     /// Library metadata.
     Status200_LibraryMetadata(models::LibraryResponse),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -43,9 +43,9 @@ pub enum ListLibrariesResponse {
     /// Available Libraries.
     Status200_AvailableLibraries(models::LibraryList),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 /// Libraries

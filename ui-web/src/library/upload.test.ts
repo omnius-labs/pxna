@@ -220,7 +220,7 @@ it("403の失敗理由と送信中の取り消しを保存し、次の待機項�
     );
     await vi.waitFor(() => expect(binary).toHaveBeenCalledTimes(2));
     binary.mockResolvedValueOnce(
-        new Response(JSON.stringify({ kind: "Forbidden", message: "readonly target" }), { status: 403 }),
+        new Response(JSON.stringify({ code: "Forbidden", detail: "readonly target" }), { status: 403 }),
     );
     store.cancel(store.getSnapshot()[0]!.id);
     await vi.waitFor(() => expect(store.getSnapshot()[2]?.status).toBe("failed"));

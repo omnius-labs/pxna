@@ -55,6 +55,7 @@ export const ja = {
         PayloadTooLarge: "ファイルが大きすぎて、一度には送れません。",
         InsufficientStorage: "ディスクの空きが足りません。",
         Timeout: "操作がタイムアウトしました。",
+        MethodNotAllowed: "サーバーがこの要求を受け付けません。",
     },
     sort: {
         name: "名前",

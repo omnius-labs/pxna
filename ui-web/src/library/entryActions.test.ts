@@ -73,7 +73,7 @@ it("混在削除を分け、2 つの Operation を保持し、完了前は更新
 });
 it("片方の失敗でも成功 Operation を失わない", async () => {
     post.mockResolvedValueOnce(result({ operation: op("files") }, 202)).mockResolvedValueOnce({
-        error: { kind: "Forbidden" },
+        error: { code: "Forbidden" },
         response: new Response(null, { status: 403 }),
     });
     const error = await deleteEntries(
@@ -93,7 +93,7 @@ it("同期削除は一覧を更新し、409 は ApiError を保つ", async () =>
     post.mockResolvedValue(result(undefined, 204));
     expect(await deleteEntries(new QueryClient(), "ops", new Map([["/a", { folder: false }]]))).toEqual([]);
     expect(refresh).toHaveBeenCalledOnce();
-    post.mockResolvedValue({ error: { kind: "Conflict" }, response: new Response(null, { status: 409 }) });
+    post.mockResolvedValue({ error: { code: "Conflict" }, response: new Response(null, { status: 409 }) });
     await expect(createFolder(new QueryClient(), "ops", "/a")).rejects.toMatchObject({ status: 409, kind: "Conflict" });
 });
 
@@ -117,7 +117,7 @@ it("単一 move の同期結果で両 Library を更新し、copy の Operation 
 it("混在転送は種別ごとに分け、片方の失敗でも Operation を保持する", async () => {
     const { transferSelection } = await import("./entryActions");
     post.mockResolvedValueOnce(result({ operation: op("accepted") }, 202)).mockResolvedValueOnce({
-        error: { kind: "Forbidden" },
+        error: { code: "Forbidden" },
         response: new Response(null, { status: 403 }),
     });
     const transferred = await transferSelection(
@@ -144,7 +144,7 @@ it("同期 skip の空 entries を成功かつスキップとし、409 は結果
     const { moveEntries } = await import("./entryActions");
     post.mockResolvedValueOnce(result({ entries: [] }));
     expect((await moveEntries(new QueryClient(), "a", ["/file"], "a", "/dest", "skip")).skippedCount).toBe(1);
-    post.mockResolvedValueOnce({ error: { kind: "Conflict" }, response: new Response(null, { status: 409 }) });
+    post.mockResolvedValueOnce({ error: { code: "Conflict" }, response: new Response(null, { status: 409 }) });
     expect((await moveEntries(new QueryClient(), "a", ["/file"], "a", "/dest", "fail")).failures[0]).toMatchObject({
         status: 409,
     });
@@ -177,7 +177,7 @@ it("混在した転送は他方の完了を待たず受理pathを通知する", 
     await vi.waitFor(() =>
         expect(accepted).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ acceptedPaths: ["/a"] })),
     );
-    rejectFolder({ error: { kind: "Forbidden" }, response: new Response(null, { status: 403 }) });
+    rejectFolder({ error: { code: "Forbidden" }, response: new Response(null, { status: 403 }) });
     const transferred = await pending;
     expect(transferred.acceptedPaths).toEqual(["/a"]);
     expect(transferred.operations.map((operation) => operation.id)).toEqual(["accepted"]);
@@ -195,7 +195,7 @@ it("同期転送の一覧更新が失敗しても受理の記録を失わない"
 });
 it("タイムラインの選択は Library ごとに削除し、一部の Library の失敗でもほかの Library の削除を進める", async () => {
     post.mockResolvedValueOnce(result({ entries: [] })).mockResolvedValueOnce({
-        error: { kind: "Forbidden" },
+        error: { code: "Forbidden" },
         response: new Response(null, { status: 403 }),
     });
     const error = await deleteEntries(

@@ -14,20 +14,20 @@ use crate::{models, types::*};
 pub enum CreateVideoSessionResponse {
     /// Video session created.
     Status201_VideoSessionCreated(models::VideoSessionResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::ErrorResponse),
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -36,20 +36,20 @@ pub enum CreateVideoSessionResponse {
 pub enum DeleteVideoSessionResponse {
     /// Video session ended.
     Status204_VideoSessionEnded,
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::ErrorResponse),
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -58,20 +58,20 @@ pub enum DeleteVideoSessionResponse {
 pub enum GetMediaInfoResponse {
     /// Media information of an image or a video.
     Status200_MediaInformationOfAnImageOrAVideo(models::MediaInfoResponse),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::ErrorResponse),
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -80,20 +80,20 @@ pub enum GetMediaInfoResponse {
 pub enum GetVideoPlaylistResponse {
     /// VOD playlist.
     Status200_VODPlaylist(String),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::ErrorResponse),
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -102,20 +102,20 @@ pub enum GetVideoPlaylistResponse {
 pub enum GetVideoSegmentResponse {
     /// MPEG transport stream segment.
     Status200_MPEGTransportStreamSegment(ByteArray),
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// Missing or invalid authentication.
-    Status401_MissingOrInvalidAuthentication(models::ErrorResponse),
-    /// The requested resource cannot be accessed or written. `kind` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
-    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::ErrorResponse),
+    Status401_MissingOrInvalidAuthentication(models::Problem),
+    /// The requested resource cannot be accessed or written. `code` is `Forbidden` for a `readonly` Library and for a mutation inside an archive, or `PasswordRequired` for a password-protected archive.
+    Status403_TheRequestedResourceCannotBeAccessedOrWritten(models::Problem),
     /// Resource not found.
-    Status404_ResourceNotFound(models::ErrorResponse),
+    Status404_ResourceNotFound(models::Problem),
     /// The request conflicts with the current state of the target. This also covers a source archive that changed while the daemon was reading it.
-    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::ErrorResponse),
+    Status409_TheRequestConflictsWithTheCurrentStateOfTheTarget(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
     /// Extraction or thumbnail generation timed out.
-    Status504_ExtractionOrThumbnailGenerationTimedOut(models::ErrorResponse),
+    Status504_ExtractionOrThumbnailGenerationTimedOut(models::Problem),
 }
 
 /// Video

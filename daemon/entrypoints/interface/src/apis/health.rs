@@ -15,7 +15,7 @@ pub enum GetHealthResponse {
     /// The daemon is running.
     Status200_TheDaemonIsRunning(models::HealthResponse),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 /// Health

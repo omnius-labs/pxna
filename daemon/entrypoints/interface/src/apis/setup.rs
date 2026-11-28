@@ -14,12 +14,12 @@ use crate::{models, types::*};
 pub enum CreateInitialSetupResponse {
     /// Owner and authenticated session created.
     Status201_OwnerAndAuthenticatedSessionCreated { body: models::AuthResult, set_cookie: Option<String> },
-    /// Invalid request. `kind` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
-    Status400_InvalidRequest(models::ErrorResponse),
+    /// Invalid request. `code` is `InvalidRequest`, or `UnsupportedType` when the target cannot be opened as an archive, or `LimitExceeded` when an archive exceeds an entry, size, or nesting limit.
+    Status400_InvalidRequest(models::Problem),
     /// The initial owner has already been registered.
-    Status409_TheInitialOwnerHasAlreadyBeenRegistered(models::ErrorResponse),
+    Status409_TheInitialOwnerHasAlreadyBeenRegistered(models::Problem),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -29,7 +29,7 @@ pub enum GetSetupStatusResponse {
     /// Current setup status.
     Status200_CurrentSetupStatus(models::SetupStatus),
     /// Internal server error.
-    Status500_InternalServerError(models::ErrorResponse),
+    Status500_InternalServerError(models::Problem),
 }
 
 /// Setup
