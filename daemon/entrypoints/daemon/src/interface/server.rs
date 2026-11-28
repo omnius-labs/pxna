@@ -116,11 +116,30 @@ pub(crate) mod tests {
         db::DatabaseBootstrap,
         error::ApiError,
         interface::binary_body::BinaryBody,
-        service::{
-            listing::ListOptions,
-            mutation::{DeleteResult, LibraryMutation, MoveResult},
-        },
+        service::{listing::ListOptions, mutation::LibraryMutation},
     };
+
+    /// The `EntryRef` values of `items` in `library`, each a path and whether it is named as a folder.
+    pub(crate) fn entry_refs(library: &str, items: &[(&str, bool)]) -> Value {
+        items
+            .iter()
+            .map(|(path, folder)| json!({"libraryId": library, "path": path, "view": if *folder { "folder" } else { "file" }}))
+            .collect()
+    }
+
+    /// A copy or move of `sources` in `library` to `destination`, which names its Library and `path` or `folderPath`.
+    pub(crate) fn transfer(library: &str, sources: &[(&str, bool)], destination: Value, conflict: Option<&str>) -> TestResult<models::EntryTransferRequest> {
+        let mut body = json!({"sources": entry_refs(library, sources), "destination": destination});
+        if let Some(conflict) = conflict {
+            body["conflict"] = conflict.into();
+        }
+        Ok(serde_json::from_value(body)?)
+    }
+
+    /// A deletion of `targets` in `library`.
+    pub(crate) fn deletion(library: &str, targets: &[(&str, bool)], recursive: bool) -> TestResult<models::EntryDeleteRequest> {
+        Ok(serde_json::from_value(json!({"targets": entry_refs(library, targets), "recursive": recursive}))?)
+    }
 
     /// ハンドラを直接呼ぶテストが渡す、照合済みとみなしたユーザとセッション。
     pub(crate) fn claims() -> Claims {
@@ -403,12 +422,14 @@ pub(crate) mod tests {
         let moved = send(
             &router,
             Method::POST,
-            "/api/v1/libraries/photos/files/move",
+            "/api/v1/entries/move",
             headers,
-            Some(json!({"srcPaths":["/new/deep/file.bin"],"dstPath":"/new/moved.bin"})),
+            Some(json!({"sources": [{"libraryId": "photos", "path": "/new/deep/file.bin", "view": "file"}], "destination": {"libraryId": "photos", "path": "/new/moved.bin"}})),
         )
         .await?;
-        assert_eq!(moved.status, StatusCode::OK);
+        assert_eq!(moved.status, StatusCode::ACCEPTED);
+        assert_eq!(moved.body["operation"]["status"], "succeeded", "one move within a Library finishes before the response");
+        assert_eq!(moved.body["operation"]["resultEntries"][0]["path"], "/new/moved.bin");
         assert_eq!(
             send(&router, Method::GET, "/api/v1/libraries/photos/entries/content?path=/new/moved.bin&limit=2", headers, None)
                 .await?
@@ -419,21 +440,21 @@ pub(crate) mod tests {
             send(
                 &router,
                 Method::POST,
-                "/api/v1/libraries/photos/files/delete",
+                "/api/v1/entries/delete",
                 headers,
-                Some(json!({"srcPaths":["/new/moved.bin"]}))
+                Some(json!({"targets": [{"libraryId": "photos", "path": "/new/moved.bin", "view": "file"}]}))
             )
             .await?
             .status,
-            StatusCode::NO_CONTENT
+            StatusCode::ACCEPTED
         );
         assert_eq!(
             send(
                 &router,
                 Method::POST,
-                "/api/v1/libraries/photos/folders/delete",
+                "/api/v1/entries/delete",
                 headers,
-                Some(json!({"srcPaths":["/photos"]}))
+                Some(json!({"targets": [{"libraryId": "photos", "path": "/photos", "view": "folder"}]}))
             )
             .await?
             .status,
@@ -443,13 +464,13 @@ pub(crate) mod tests {
             send(
                 &router,
                 Method::POST,
-                "/api/v1/libraries/photos/folders/delete",
+                "/api/v1/entries/delete",
                 headers,
-                Some(json!({"srcPaths":["/new/deep"]}))
+                Some(json!({"targets": [{"libraryId": "photos", "path": "/new/deep", "view": "folder"}]}))
             )
             .await?
             .status,
-            StatusCode::NO_CONTENT
+            StatusCode::ACCEPTED
         );
         Ok(())
     }
@@ -555,28 +576,36 @@ pub(crate) mod tests {
         assert!(!after.last().unwrap().entries.iter().any(|entry| entry.name == "upload.txt"));
 
         let before = prime_listings(state, &clock).await?;
-        let moved: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/changes/nested/written.txt"],"dstPath":"/changes/nested/moved.txt"}))?;
-        assert!(matches!(state.operations.move_entries("photos", &moved, false).await?, MoveResult::Completed(_)));
+        let moved = transfer(
+            "photos",
+            &[("/changes/nested/written.txt", false)],
+            json!({"libraryId": "photos", "path": "/changes/nested/moved.txt"}),
+            None,
+        )?;
+        assert_eq!(state.operations.move_entries(&moved).await?.status, models::OperationStatus::Succeeded);
         let after = changed_listings(state, before).await?;
         let entries = &after.last().unwrap().entries;
         assert!(entries.iter().any(|entry| entry.name == "moved.txt"));
         assert!(!entries.iter().any(|entry| entry.name == "written.txt"));
 
         let before = prime_listings(state, &clock).await?;
-        let copy: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/changes/nested/moved.txt"],"dstPath":"/changes/nested/copied.txt"}))?;
-        let operation = state.operations.copy("photos", &copy, false).await?;
+        let copy = transfer(
+            "photos",
+            &[("/changes/nested/moved.txt", false)],
+            json!({"libraryId": "photos", "path": "/changes/nested/copied.txt"}),
+            None,
+        )?;
+        let operation = state.operations.copy(&copy).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
         let after = changed_listings(state, before).await?;
         assert!(after.last().unwrap().entries.iter().any(|entry| entry.name == "copied.txt"));
 
         let before = prime_listings(state, &clock).await?;
-        assert!(matches!(
-            state
-                .operations
-                .delete_entries("photos", &[models::RelativePath("/changes/nested/copied.txt".to_string())], false, false)
-                .await?,
-            DeleteResult::Completed
-        ));
+        let operation = state
+            .operations
+            .delete_entries(&deletion("photos", &[("/changes/nested/copied.txt", false)], false)?)
+            .await?;
+        assert_eq!(operation.status, models::OperationStatus::Succeeded, "one file is deleted before the response");
         let after = changed_listings(state, before).await?;
         assert!(!after.last().unwrap().entries.iter().any(|entry| entry.name == "copied.txt"));
 
@@ -589,8 +618,13 @@ pub(crate) mod tests {
         let child_before = cached_listing(state, child_path, true).await?;
         let child_dir = root.join(child_path.trim_start_matches('/'));
         let child_modified = std::fs::metadata(&child_dir)?.modified()?;
-        let merge: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/source"],"dstPath":"/changes/nested/merge","conflict":"overwrite"}))?;
-        let operation = state.operations.copy("photos", &merge, true).await?;
+        let merge = transfer(
+            "photos",
+            &[("/source", true)],
+            json!({"libraryId": "photos", "path": "/changes/nested/merge"}),
+            Some("overwrite"),
+        )?;
+        let operation = state.operations.copy(&merge).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
         changed_listings(state, before).await?;
         filetime::set_file_mtime(&child_dir, filetime::FileTime::from_system_time(child_modified))?;
@@ -599,13 +633,7 @@ pub(crate) mod tests {
         assert_eq!(child_after.entries.iter().find(|entry| entry.name == "replaced.txt").unwrap().metadata.size, 11);
 
         let before = prime_listings(state, &clock).await?;
-        let operation = state
-            .operations
-            .delete_entries("photos", &[models::RelativePath("/changes/nested/merge".to_string())], true, true)
-            .await?;
-        let DeleteResult::Started(operation) = operation else {
-            panic!("recursive deletion must start an Operation");
-        };
+        let operation = state.operations.delete_entries(&deletion("photos", &[("/changes/nested/merge", true)], true)?).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
         let after = changed_listings(state, before).await?;
         assert!(!after.last().unwrap().entries.iter().any(|entry| entry.path.starts_with("/changes/nested/merge")));
@@ -657,7 +685,7 @@ pub(crate) mod tests {
         std::fs::write(root.join("src/x.png"), b"x")?;
         std::fs::write(root.join("src/sub/y.png"), b"y")?;
         std::fs::write(root.join("dst/z.png"), b"z")?;
-        state.timeline.refresh("photos").await?;
+        state.timeline.scan("photos")?;
         for _ in 0..200 {
             let status = state.timeline.status("photos").await?;
             if !status.running && status.completed_at.is_some() {
@@ -671,8 +699,8 @@ pub(crate) mod tests {
         };
         assert!(paths().await?.contains(&"/src/sub/y.png".to_string()));
 
-        let request: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/src"],"dstPath":"/dst","conflict":"overwrite"}))?;
-        assert!(matches!(state.operations.move_entries("photos", &request, true).await?, MoveResult::Completed(_)));
+        let request = transfer("photos", &[("/src", true)], json!({"libraryId": "photos", "path": "/dst"}), Some("overwrite"))?;
+        assert_eq!(state.operations.move_entries(&request).await?.status, models::OperationStatus::Succeeded);
         let after = paths().await?;
         for expected in ["/dst/x.png", "/dst/sub/y.png", "/dst/z.png"] {
             assert!(after.contains(&expected.to_string()), "{expected} を応答の前に付け替える: {after:?}");
@@ -698,16 +726,11 @@ pub(crate) mod tests {
         assert!(state.names.is_usable("photos").await);
         assert!(names_held(state).await.contains(&"/gone/deeper/a.txt:1".to_string()));
 
-        state
-            .operations
-            .delete_entries("photos", &[models::RelativePath("/single.txt".to_string())], false, false)
-            .await?;
+        state.operations.delete_entries(&deletion("photos", &[("/single.txt", false)], false)?).await?;
         let held = names_held(state).await;
         assert!(!held.contains(&"/single.txt:1".to_string()) && held.contains(&"/stay.txt:1".to_string()), "{held:?}");
 
-        let DeleteResult::Started(operation) = state.operations.delete_entries("photos", &[models::RelativePath("/gone".to_string())], true, true).await? else {
-            panic!("recursive deletion must start an Operation");
-        };
+        let operation = state.operations.delete_entries(&deletion("photos", &[("/gone", true)], true)?).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
         let held = names_held(state).await;
         assert!(!held.iter().any(|entry| entry.starts_with("/gone")), "{held:?}");
@@ -729,8 +752,8 @@ pub(crate) mod tests {
         std::fs::write(root.join("src2/keep.txt"), b"k")?;
         timeline_scanned(state).await?;
 
-        let request: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/src"],"dstPath":"/dst","conflict":"overwrite"}))?;
-        assert!(matches!(state.operations.move_entries("photos", &request, true).await?, MoveResult::Completed(_)));
+        let request = transfer("photos", &[("/src", true)], json!({"libraryId": "photos", "path": "/dst"}), Some("overwrite"))?;
+        assert_eq!(state.operations.move_entries(&request).await?.status, models::OperationStatus::Succeeded);
         let held = names_held(state).await;
         for expected in ["/dst/x.png:3", "/dst/sub:0", "/dst/sub/y.txt:1", "/dst/z.png:3"] {
             assert!(held.contains(&expected.to_string()), "{expected} moves before the response: {held:?}");
@@ -793,7 +816,7 @@ pub(crate) mod tests {
 
     async fn timeline_scanned(state: &DaemonState) -> TestResult {
         state.names.verified().await;
-        state.timeline.refresh("photos").await?;
+        state.timeline.scan("photos")?;
         for _ in 0..400 {
             let status = state.timeline.status("photos").await?;
             if !status.running && status.completed_at.is_some() {
@@ -816,8 +839,8 @@ pub(crate) mod tests {
         timeline_scanned(state).await?;
         assert!(timeline_paths(state).await?.contains(&"/dst/c.7z/old.png".to_string()));
 
-        let request: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/src"],"dstPath":"/dst","conflict":"overwrite"}))?;
-        let operation = state.operations.copy("photos", &request, true).await?;
+        let request = transfer("photos", &[("/src", true)], json!({"libraryId": "photos", "path": "/dst"}), Some("overwrite"))?;
+        let operation = state.operations.copy(&request).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
         let after = timeline_paths(state).await?;
         assert!(!after.contains(&"/dst/c.7z/old.png".to_string()), "操作の完了までに旧い archive の Entry を消す: {after:?}");
@@ -860,8 +883,8 @@ pub(crate) mod tests {
         assert!(timeline_paths(state).await?.contains(&"/photo.png".to_string()));
 
         // 既存の target.txt と衝突するので、`target (1).txt` として公開される。対象外の拡張子なので、タイムラインから消える。
-        let request: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/photo.png"],"dstPath":"/target.txt","conflict":"rename"}))?;
-        assert!(matches!(state.operations.move_entries("photos", &request, false).await?, MoveResult::Completed(_)));
+        let request = transfer("photos", &[("/photo.png", false)], json!({"libraryId": "photos", "path": "/target.txt"}), Some("rename"))?;
+        assert_eq!(state.operations.move_entries(&request).await?.status, models::OperationStatus::Succeeded);
         assert!(root.join("target (1).txt").exists());
         let mut gone = false;
         for _ in 0..200 {
@@ -892,8 +915,8 @@ pub(crate) mod tests {
             StatusCode::UNAUTHORIZED
         );
 
-        let refresh = send(&router, Method::POST, "/api/v1/timeline/refresh", &auth, Some(json!({"libraryIds": ["photos"]}))).await?;
-        assert_eq!(refresh.status, StatusCode::ACCEPTED);
+        let scans = send(&router, Method::POST, "/api/v1/timeline/scans", &auth, Some(json!({"libraryIds": ["photos"]}))).await?;
+        assert_eq!(scans.status, StatusCode::ACCEPTED);
         for _ in 0..200 {
             let status = send(&router, Method::GET, "/api/v1/timeline/status?libraryIds=photos", &auth, None).await?;
             assert_eq!(status.status, StatusCode::OK);

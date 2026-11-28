@@ -5,6 +5,7 @@ import { api, unwrap } from "../api/client";
 import type { components } from "../api/schema";
 import { CROSS_LIBRARY_SCOPE, entryAddress, scopedKey } from "../location";
 import type { Entry } from "./entries";
+import type { Operation } from "./entryActions";
 import { type Listing, ListingSnapshotChanged, type PageStatus } from "./listing";
 
 export type TimelineMonth = components["schemas"]["TimelineMonth"];
@@ -533,7 +534,7 @@ export function timelineStatusQuery(libraryIds: readonly string[]) {
     });
 }
 
-/// 並べている Library の全体の集計を始め、今の状態を返す。
-export async function startTimelineScan(libraryIds: readonly string[]): Promise<TimelineStatus[]> {
-    return unwrap(await api.POST("/timeline/refresh", { body: { libraryIds: [...libraryIds] } })).libraries;
+/// 並べている Library の全体の集計を始め、Library ごとにその集計を追う Operation を返す。
+export async function startTimelineScan(libraryIds: readonly string[]): Promise<Operation[]> {
+    return unwrap(await api.POST("/timeline/scans", { body: { libraryIds: [...libraryIds] } })).operations;
 }

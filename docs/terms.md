@@ -110,7 +110,7 @@ Design rationale, implementation status, defects, and external behavior are each
 | Timeline date | timeline | `TimelineDate` | `timelineDate` | The date and time, without a time zone, by which the timeline orders Entries, decided from the shooting date and time or `creation_time` (or else the modification time) | - |
 | Timeline date source | timeline | `TimelineDateSource` | `timelineDateSource` | Which of the shooting date and time, `creation_time`, the Entry's modification time, or the archive's modification time the timeline date came from | - |
 | Timeline index | timeline | `TimelineIndex` | `state_dir/timeline/index.db` | A SQLite index, built by aggregation, that holds per Library the Entries to list in the timeline and their timeline dates | timeline cache |
-| Aggregation | timeline | `TimelineScanner` | `/timeline/refresh`, `/timeline/status` | The process that scans a Library, reads the timeline dates of images and videos, and reflects them in the timeline index, passing the names it enumerates to the name index | indexing, scan |
+| Aggregation | timeline | `TimelineScanner` | `/timeline/scans`, `/timeline/status`, `timelineScan` | The process that scans a Library, reads the timeline dates of images and videos, and reflects them in the timeline index, passing the names it enumerates to the name index | indexing, scan |
 | [Rating](./terms/rating-tags.md#t-rating) | rating-tags | `Rating` | `rating`, `RatingValue` | The good or bad value a user gives to an image or video. The unrated state is represented as none | star, score |
 | Vocabulary | rating-tags | `RatingTagService::tags` | `GET /tags/words` | The list of tag words the user has created so far. Words removed from Entries remain and serve as completion candidates while typing | tag list |
 | Tag | rating-tags | `TagName` | `tags` | A word the user freely attaches to an image or video. Up to 32 per Entry, each word up to 64 characters, case-sensitive | label |
@@ -325,7 +325,7 @@ The API uses `RelativePath`, and the daemon uses `LibraryRelativePath`, which is
 #### Timeline
 
 **Names by layer**
-The daemon uses `TimelineService`, the API reads it as `listEntries` sorted by timeline date and keeps `/timeline/status` and `/timeline/refresh` for aggregation, and the web client uses the Layout `timeline` and the default Shelf "Timeline", to which the old URL `/timeline` leads.
+The daemon uses `TimelineService`, the API reads it as `listEntries` sorted by timeline date and keeps `/timeline/status` and `/timeline/scans` for aggregation, and the web client uses the Layout `timeline` and the default Shelf "Timeline", to which the old URL `/timeline` leads.
 
 **Why this name**
 "Flat view" was rejected because it expresses only that folder hierarchy was removed, and the name does not show that Entries are ordered by timeline date.

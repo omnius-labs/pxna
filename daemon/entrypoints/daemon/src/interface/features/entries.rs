@@ -22,6 +22,7 @@ use crate::{
     },
 };
 
+mod commands;
 mod content;
 
 pub use content::*;
@@ -247,6 +248,48 @@ impl apis::entries::Entries for ApiServer {
                 let months = months.into_iter().map(|(month, count)| models::TimelineMonth::new(month, count)).collect();
                 apis::entries::ListEntryMonthsResponse::Status200_EntryCountsPerMonth(models::TimelineMonths::new(months))
             }
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+
+    async fn copy_entries(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::EntryTransferRequest,
+    ) -> std::result::Result<apis::entries::CopyEntriesResponse, ()> {
+        Ok(match self.state.operations.copy(body).await {
+            Ok(operation) => apis::entries::CopyEntriesResponse::Status202_TheOperation(models::OperationResponse::new(operation)),
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+
+    async fn move_entries(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::EntryTransferRequest,
+    ) -> std::result::Result<apis::entries::MoveEntriesResponse, ()> {
+        Ok(match self.state.operations.move_entries(body).await {
+            Ok(operation) => apis::entries::MoveEntriesResponse::Status202_TheOperation(models::OperationResponse::new(operation)),
+            Err(error) => ApiError::from(error).into(),
+        })
+    }
+
+    async fn delete_entries(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::EntryDeleteRequest,
+    ) -> std::result::Result<apis::entries::DeleteEntriesResponse, ()> {
+        Ok(match self.state.operations.delete_entries(body).await {
+            Ok(operation) => apis::entries::DeleteEntriesResponse::Status202_TheOperation(models::OperationResponse::new(operation)),
             Err(error) => ApiError::from(error).into(),
         })
     }
@@ -685,7 +728,7 @@ mod tests {
     /// Runs a full aggregation of `library` and waits for it, which makes its name index usable.
     async fn aggregate(state: &DaemonState, library: &str) -> TestResult {
         state.names.verified().await;
-        state.timeline.refresh(library).await?;
+        state.timeline.scan(library)?;
         for _ in 0..400 {
             let status = state.timeline.status(library).await?;
             if !status.running && status.completed_at.is_some() {

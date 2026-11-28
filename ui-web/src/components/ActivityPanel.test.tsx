@@ -21,7 +21,7 @@ it("進捗、スキップ、失敗理由、取り消し、畳んだボタンを�
     const op: Operation = {
         id: "op",
         libraryId: "ops",
-        kind: "delete_folders",
+        kind: "delete",
         status: "running",
         processedCount: 40,
         totalCount: 400,
@@ -91,7 +91,7 @@ it("Operationとアップロードの状態・バイト進捗・失敗理由・�
     }));
     const operation: Operation = {
         id: "operation",
-        kind: "copy_files",
+        kind: "copy",
         libraryId: "a",
         status: "succeeded",
         processedCount: 1,
@@ -121,7 +121,7 @@ it("Operationとアップロードの状態・バイト進捗・失敗理由・�
                 </ActivityContext.Provider>,
             ),
         );
-        expect(host.textContent).toContain("Copy files");
+        expect(host.textContent).toContain("Copy");
         expect(host.textContent).toContain("16,777,216 / 34,603,008 bytes");
         expect(host.textContent).toContain("/f3: denied");
         for (const label of ["Waiting", "Sending", "Done", "Failed", "Cancelled", "Skip"])

@@ -79,6 +79,21 @@ async function wait(assertion: () => void) {
     });
 }
 /// 名前のダイアログの入力欄。
+/// 応答の前に終わった Operation。
+function finished(kind: string, extra: Record<string, unknown> = {}) {
+    return {
+        id: `done-${kind}`,
+        kind,
+        status: "succeeded",
+        libraryId: "ops",
+        processedCount: 1,
+        skippedCount: 0,
+        failedEntries: [],
+        createdAt: "2026-10-07",
+        finishedAt: "2026-10-07",
+        ...extra,
+    };
+}
 function nameInput(): HTMLInputElement | null {
     return document.querySelector<HTMLInputElement>('[role="dialog"] input[aria-label="Name"]');
 }
@@ -123,21 +138,21 @@ async function harness(view: "grid" | "list" = "grid", initial: Entry[] = []) {
     );
     post.mockImplementation(async (route, options) => {
         if (route.endsWith("/delete")) {
-            const paths = options.body.srcPaths as string[];
+            const paths = (options.body.targets as { path: string }[]).map((target) => target.path);
             for (let i = entries.length - 1; i >= 0; i--) if (paths.includes(entries[i]!.path)) entries.splice(i, 1);
             snapshot++;
-            return response(undefined, 204);
+            return response({ operation: finished("delete") }, 202);
         }
         if (route.endsWith("/move")) {
-            const index = entries.findIndex((entry) => entry.path === options.body.srcPaths[0]);
+            const index = entries.findIndex((entry) => entry.path === options.body.sources[0].path);
             const changed = {
                 ...entries[index]!,
-                path: options.body.dstPath,
-                name: options.body.dstPath.split("/").at(-1)!,
+                path: options.body.destination.path,
+                name: options.body.destination.path.split("/").at(-1)!,
             };
             entries[index] = changed;
             snapshot++;
-            return response({ entries: [changed] });
+            return response({ operation: finished("move", { resultEntries: [changed] }) }, 202);
         }
         const path = options.body.path;
         const entry: Entry = {
@@ -328,8 +343,11 @@ it.each(["grid", "list"] as const)(
             await h.type("changed.txt");
             await h.submit();
             await wait(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
-            expect(post.mock.calls[0]![0]).toBe("/libraries/{libraryId}/files/move");
-            expect(post.mock.calls[0]![1].body).toEqual({ srcPaths: ["/empty/a.txt"], dstPath: "/empty/changed.txt" });
+            expect(post.mock.calls[0]![0]).toBe("/entries/move");
+            expect(post.mock.calls[0]![1].body).toEqual({
+                sources: [{ libraryId: "ops", path: "/empty/a.txt", view: "file" }],
+                destination: { libraryId: "ops", path: "/empty/changed.txt" },
+            });
             expect(h.host.querySelector('[role="option"][aria-selected="true"]')).toBeNull();
             expect(h.host.textContent).toContain("changed.txt");
         } finally {
@@ -391,11 +409,14 @@ it("Delete は確認後に混在削除を送り、ダイアログ内のキーと
                 .click(),
         );
         await wait(() => expect(h.host.textContent).toContain("This folder is empty."));
-        expect(post.mock.calls.map(([route]) => route)).toEqual([
-            "/libraries/{libraryId}/files/delete",
-            "/libraries/{libraryId}/folders/delete",
-        ]);
-        expect(post.mock.calls[1]![1].body).toEqual({ srcPaths: ["/empty/dir"], recursive: true });
+        expect(post.mock.calls.map(([route]) => route)).toEqual(["/entries/delete"]);
+        expect(post.mock.calls[0]![1].body).toEqual({
+            targets: [
+                { libraryId: "ops", path: "/empty/a.txt", view: "file" },
+                { libraryId: "ops", path: "/empty/dir", view: "folder" },
+            ],
+            recursive: true,
+        });
         expect(h.host.querySelector('[role="option"][aria-selected="true"]')).toBeNull();
     } finally {
         await h.dispose();
@@ -445,8 +466,8 @@ it.each(["grid", "list"] as const)(
             await h.submit();
             await wait(() => expect(post).toHaveBeenCalledOnce());
             expect(post.mock.calls[0]![1].body).toEqual({
-                srcPaths: ["/empty/f0.txt"],
-                dstPath: "/empty/renamed-offscreen.txt",
+                sources: [{ libraryId: "ops", path: "/empty/f0.txt", view: "file" }],
+                destination: { libraryId: "ops", path: "/empty/renamed-offscreen.txt" },
             });
         } finally {
             await h.dispose();
@@ -524,7 +545,7 @@ it.each(["cut", "copy"] as const)(
             expect(post).not.toHaveBeenCalled();
             const operation = {
                 id: "transfer",
-                kind: "copy_files",
+                kind: "copy",
                 status: "pending",
                 libraryId: "ops",
                 destinationLibraryId: "ops",
@@ -536,7 +557,10 @@ it.each(["cut", "copy"] as const)(
             };
             post.mockResolvedValueOnce(
                 mode === "cut"
-                    ? { data: { entries: [] }, response: new Response(null, { status: 200 }) }
+                    ? {
+                          data: { operation: finished("move", { skippedCount: 1 }) },
+                          response: new Response(null, { status: 202 }),
+                      }
                     : { data: { operation }, response: new Response(null, { status: 202 }) },
             );
             await act(async () =>
@@ -545,11 +569,10 @@ it.each(["cut", "copy"] as const)(
                     .click(),
             );
             await wait(() => expect(post).toHaveBeenCalledOnce());
-            expect(post.mock.calls[0]![0]).toBe(`/libraries/{libraryId}/files/${mode === "cut" ? "move" : "copy"}`);
+            expect(post.mock.calls[0]![0]).toBe(`/entries/${mode === "cut" ? "move" : "copy"}`);
             expect(post.mock.calls[0]![1].body).toEqual({
-                srcPaths: [fileEntry.path],
-                dstLibraryId: "ops",
-                dstFolderPath: mode === "cut" ? "/dest" : "/empty",
+                sources: [{ libraryId: "ops", path: fileEntry.path, view: "file" }],
+                destination: { libraryId: "ops", folderPath: mode === "cut" ? "/dest" : "/empty" },
                 conflict: mode === "cut" ? "skip" : "rename",
             });
             await h.navigate("/empty");
@@ -561,7 +584,7 @@ it.each(["cut", "copy"] as const)(
         }
     },
 );
-it("混在切り取りの一方が失敗したら拒否された項目と受理済み Operation を残す", async () => {
+it("混在切り取りが拒否されたら、すべての項目を切り取りのまま残す", async () => {
     const directory: Entry = {
         path: "/empty/dir",
         name: "dir",
@@ -579,37 +602,26 @@ it("混在切り取りの一方が失敗したら拒否された項目と受理�
         await h.navigate("/dest");
         await h.key("v", document.body, { ctrlKey: true });
         await wait(() => expect(document.querySelector('[role="alertdialog"]')).not.toBeNull());
-        post.mockResolvedValueOnce({
-            data: {
-                operation: {
-                    id: "accepted",
-                    kind: "move_files",
-                    status: "pending",
-                    libraryId: "ops",
-                    processedCount: 0,
-                    skippedCount: 0,
-                    failedEntries: [],
-                    createdAt: "2026-10-07",
-                },
-            },
-            response: new Response(null, { status: 202 }),
-        }).mockResolvedValueOnce({ error: { code: "Forbidden" }, response: new Response(null, { status: 403 }) });
+        post.mockResolvedValueOnce({ error: { code: "Forbidden" }, response: new Response(null, { status: 403 }) });
         await act(async () =>
             [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
                 .find((button) => button.textContent === "Keep both")!
                 .click(),
         );
-        await wait(() => expect(post).toHaveBeenCalledTimes(2));
+        await wait(() => expect(post).toHaveBeenCalledOnce());
+        expect(post.mock.calls[0]![1].body.sources.map((source: { view: string }) => source.view)).toEqual([
+            "file",
+            "folder",
+        ]);
         await h.navigate("/empty");
         const remaining = h.host.querySelectorAll<HTMLElement>('[role="option"]');
-        expect(remaining[0]!.style.opacity).toBe("");
+        expect(remaining[0]!.style.opacity).toBe("0.4");
         expect(remaining[1]!.style.opacity).toBe("0.4");
-        expect(h.host.querySelector('[aria-label="Activity"]')?.textContent).toContain("Move");
     } finally {
         await h.dispose();
     }
 });
-it("混在moveの同期結果はトースト、非同期結果はパネルで知らせる", async () => {
+it("混在 move を 1 つの要求で送り、応答の前に終わった結果はトーストで知らせる", async () => {
     const { toast } = await import("sonner");
     const success = vi.spyOn(toast, "success");
     const dir: Entry = { path: "/empty/dir", name: "dir", kind: "folder", metadata: { size: 0, readonly: false } };
@@ -621,27 +633,17 @@ it("混在moveの同期結果はトースト、非同期結果はパネルで知
         await h.key("v", document.body, { ctrlKey: true });
         await wait(() => expect(document.querySelector('[role="alertdialog"]')).not.toBeNull());
         post.mockResolvedValueOnce({
-            data: {
-                operation: {
-                    id: "multi-files",
-                    kind: "move_files",
-                    status: "pending",
-                    libraryId: "ops",
-                    processedCount: 0,
-                    skippedCount: 0,
-                    failedEntries: [],
-                    createdAt: "2026-10-07",
-                },
-            },
+            data: { operation: finished("move", { resultEntries: [dir] }) },
             response: new Response(null, { status: 202 }),
-        }).mockResolvedValueOnce({ data: { entries: [dir] }, response: new Response(null, { status: 200 }) });
+        });
         await act(async () =>
             [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
                 .find((button) => button.textContent === "Replace")!
                 .click(),
         );
         await wait(() => expect(success).toHaveBeenCalledWith("Moved."));
-        expect(h.host.querySelector('[aria-label="Activity"]')?.textContent).toContain("Move files");
+        expect(post).toHaveBeenCalledOnce();
+        expect(post.mock.calls[0]![1].body.sources).toHaveLength(3);
     } finally {
         success.mockRestore();
         await h.dispose();

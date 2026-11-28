@@ -238,7 +238,9 @@ it("ファイルのskipは送らず、フォルダoverwriteの種別衝突はフ
     await vi.waitFor(() => expect(store.getSnapshot()[0]?.status).toBe("skipped"));
     expect(binary).not.toHaveBeenCalled();
     const { ApiError } = await import("../api/client");
-    post.mockRejectedValueOnce(new ApiError(409, "Conflict", "exists")).mockResolvedValue(response({ entry: {} }, 201));
+    post.mockRejectedValueOnce(new ApiError(409, "Conflict", "exists"))
+        .mockResolvedValueOnce(response({ operation: { status: "succeeded", failedEntries: [] } }, 202))
+        .mockResolvedValue(response({ entry: {} }, 201));
     listing.mockResolvedValue({
         entries: [{ name: "batch", kind: "file", metadata: { readonly: false } }],
         totalCount: 1,
@@ -247,7 +249,8 @@ it("ファイルのskipは送らず、フォルダoverwriteの種別衝突はフ
     await vi.waitFor(() => expect(store.getSnapshot()[1]?.status).toBe("succeeded"));
     expect(post.mock.calls.map((args) => args[0])).toEqual([
         "/libraries/{libraryId}/entries/folders",
-        "/libraries/{libraryId}/files/delete",
+        "/entries/delete",
         "/libraries/{libraryId}/entries/folders",
     ]);
+    expect(post.mock.calls[1]![1].body).toEqual({ targets: [{ libraryId: "normal", path: "/batch", view: "file" }] });
 });

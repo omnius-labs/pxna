@@ -86,11 +86,7 @@ mod tests {
     use testresult::TestResult;
 
     use super::*;
-    use crate::{
-        interface::server::tests::*,
-        prelude::*,
-        service::mutation::{DeleteResult, LibraryMutation, MoveResult},
-    };
+    use crate::{interface::server::tests::*, prelude::*, service::mutation::LibraryMutation};
 
     #[tokio::test]
     async fn operation_overwrite_merge_skip_and_recursive_delete_test() -> TestResult {
@@ -105,31 +101,35 @@ mod tests {
         std::fs::write(root.join("source/type.txt"), b"file")?;
         std::fs::create_dir_all(root.join("target/type.txt"))?;
         std::fs::write(root.join("target/type.txt/old"), b"old")?;
-        let request: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/source"],"dstPath":"/target","conflict":"overwrite"}))?;
-        let operation = state.operations.copy("photos", &request, true).await?;
+        let request = transfer("photos", &[("/source", true)], json!({"libraryId": "photos", "path": "/target"}), Some("overwrite"))?;
+        let operation = state.operations.copy(&request).await?;
         let operation = wait_operation(state, &operation.id).await?;
         assert_eq!(operation.status, models::OperationStatus::Succeeded);
         assert_eq!(operation.processed_count, 4);
         assert_eq!(std::fs::read(root.join("target/sub/replaced.txt"))?, b"new");
         assert_eq!(std::fs::read(root.join("target/retained.txt"))?, b"retain");
         assert_eq!(std::fs::read(root.join("target/type.txt"))?, b"file");
-        let skip: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/source/type.txt","/photos/notes.txt"],"dstFolderPath":"/target","conflict":"skip"}))?;
-        let started = state.operations.copy("photos", &skip, false).await?;
+        let skip = transfer(
+            "photos",
+            &[("/source/type.txt", false), ("/photos/notes.txt", false)],
+            json!({"libraryId": "photos", "folderPath": "/target"}),
+            Some("skip"),
+        )?;
+        let started = state.operations.copy(&skip).await?;
         let operation = wait_operation(state, &started.id).await?;
         assert_eq!(operation.status, models::OperationStatus::Succeeded);
         assert_eq!((operation.processed_count, operation.skipped_count), (1, 1));
-        let fail: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/source/type.txt","/photos/notes.txt"],"dstFolderPath":"/target"}))?;
-        let operation = state.operations.copy("photos", &fail, false).await?;
+        let fail = transfer(
+            "photos",
+            &[("/source/type.txt", false), ("/photos/notes.txt", false)],
+            json!({"libraryId": "photos", "folderPath": "/target"}),
+            None,
+        )?;
+        let operation = state.operations.copy(&fail).await?;
         let operation = wait_operation(state, &operation.id).await?;
         assert_eq!(operation.status, models::OperationStatus::Failed);
         assert_eq!(operation.failed_entries.len(), 2);
-        let result = state
-            .operations
-            .delete_entries("photos", &[models::RelativePath("/source".to_string())], true, true)
-            .await?;
-        let DeleteResult::Started(operation) = result else {
-            panic!("recursive delete must be asynchronous")
-        };
+        let operation = state.operations.delete_entries(&deletion("photos", &[("/source", true)], true)?).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
         assert!(!root.join("source").exists());
         Ok(())
@@ -140,19 +140,22 @@ mod tests {
         let fixture = fixture(ArchiveOptions::default()).await?;
         let state = &fixture.server.state;
         std::fs::write(state.conf.libraries[1].path.join("readonly.txt"), b"readable")?;
-        let request: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/readonly.txt"],"dstLibraryId":"photos","dstPath":"/copied.txt"}))?;
-        let operation = state.operations.copy("videos", &request, false).await?;
+        let request = transfer("videos", &[("/readonly.txt", false)], json!({"libraryId": "photos", "path": "/copied.txt"}), None)?;
+        let operation = state.operations.copy(&request).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
-        assert!(state.operations.move_entries("videos", &request, false).await.is_err());
-        let archive: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/photos/a.7z"],"dstPath":"/expanded"}))?;
-        let operation = state.operations.copy("photos", &archive, true).await?;
+        assert!(state.operations.move_entries(&request).await.is_err());
+        let archive = transfer("photos", &[("/photos/a.7z", true)], json!({"libraryId": "photos", "path": "/expanded"}), None)?;
+        let operation = state.operations.copy(&archive).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
         assert_eq!(std::fs::read(state.conf.libraries[0].path.join("expanded/dir/x.png"))?, b"pixel");
-        let moved: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/expanded"],"dstPath":"/renamed"}))?;
-        let MoveResult::Completed(entries) = state.operations.move_entries("photos", &moved, true).await? else {
-            panic!("single move must be synchronous")
-        };
-        assert_eq!(entries[0].path, "/renamed");
+        let moved = transfer("photos", &[("/expanded", true)], json!({"libraryId": "photos", "path": "/renamed"}), None)?;
+        let operation = state.operations.move_entries(&moved).await?;
+        assert_eq!(
+            operation.status,
+            models::OperationStatus::Succeeded,
+            "one move within a Library is renamed before the response"
+        );
+        assert_eq!(operation.result_entries.ok_or("missing result entries")?[0].path, "/renamed");
         assert!(!state.conf.libraries[0].path.join("expanded").exists());
         Ok(())
     }
@@ -175,17 +178,27 @@ mod tests {
             .write("photos", "/outside/changed.txt", b"owner link", LibraryMutation::conflict(None))
             .await?;
         assert_eq!(std::fs::read(state.conf.libraries[1].path.join("changed.txt"))?, b"owner link");
-        let direct: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/outside/changed.txt"],"dstPath":"/direct-link-copy.txt"}))?;
-        let operation = state.operations.copy("photos", &direct, false).await?;
+        let direct = transfer(
+            "photos",
+            &[("/outside/changed.txt", false)],
+            json!({"libraryId": "photos", "path": "/direct-link-copy.txt"}),
+            None,
+        )?;
+        let operation = state.operations.copy(&direct).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
         std::os::unix::fs::symlink("good.txt", root.join("links/link.txt"))?;
-        let direct: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/links/link.txt"],"dstPath":"/direct-leaf-link.txt"}))?;
-        let operation = state.operations.copy("photos", &direct, false).await?;
+        let direct = transfer(
+            "photos",
+            &[("/links/link.txt", false)],
+            json!({"libraryId": "photos", "path": "/direct-leaf-link.txt"}),
+            None,
+        )?;
+        let operation = state.operations.copy(&direct).await?;
         assert_eq!(wait_operation(state, &operation.id).await?.status, models::OperationStatus::Succeeded);
         assert_eq!(std::fs::read(root.join("direct-leaf-link.txt"))?, b"good");
 
-        let request: models::EntryTransferRequest = serde_json::from_value(json!({"srcPaths":["/links"],"dstPath":"/copied-links"}))?;
-        let operation = state.operations.copy("photos", &request, true).await?;
+        let request = transfer("photos", &[("/links", true)], json!({"libraryId": "photos", "path": "/copied-links"}), None)?;
+        let operation = state.operations.copy(&request).await?;
         let operation = wait_operation(state, &operation.id).await?;
         assert_eq!(operation.status, models::OperationStatus::Failed);
         assert_eq!(operation.failed_entries[0].path, "/links/link.txt");

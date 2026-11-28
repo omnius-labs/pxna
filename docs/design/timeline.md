@@ -195,13 +195,13 @@ A Library that has never finished a full aggregation is treated as the interval 
 If `scan_interval_secs` is 0, only this periodic aggregation is absent.
 The name index then reflects external changes only through manual aggregation.
 
-From the web client, full aggregations of the given Libraries can be started with `POST /timeline/refresh`.
-Only one full aggregation of the same Library runs at a time, and a request received while one is running returns the current state.
+From the web client, full aggregations of the given Libraries can be started with `POST /timeline/scans`, which returns one Operation of kind `timelineScan` per Library ([API Design §9.1](./api.md#91-timeline)).
+Only one full aggregation of the same Library runs at a time, and a request received while one is running joins it: its Operation follows the running aggregation, and a request while a requested aggregation runs returns the same Operation.
 Including range aggregations (§6.4), only one aggregation runs on the same Library, and aggregation yields its turn to the next aggregation each time it finishes reading one folder.
 Aggregations of different Libraries run at the same time and write to the same index, so each write transaction takes the write lock from its start and waits for the others instead of failing.
 
-The progress of aggregation is returned per Library by `GET /timeline/status`.
-It is not made an Operation (§9.1).
+The progress of aggregation is returned per Library by `GET /timeline/status`, whoever started it.
+Only a requested aggregation is followed by an Operation (§9.1).
 
 ### 6.4 The Daemon's Own Changes
 
@@ -484,18 +484,24 @@ A method that builds a new index separately and swaps it in when aggregation fin
 The order does not change while viewing, but for the first aggregation nothing would show until it ends, and capacity for two indexes would be needed.
 It also cannot coexist with the decision to immediately reflect the daemon's own changes by range aggregation, so we rejected it.
 
-#### Do Not Make the Progress of Aggregation an Operation
+#### Make Only a Requested Aggregation an Operation
 
 **Decision**
-The progress of aggregation is returned by the timeline's status API and is not handled as an Operation (§6.3).
+An aggregation that a client requests is followed by an Operation of kind `timelineScan`, and an aggregation the daemon starts by itself creates none (§6.3).
+The timeline's status API returns the progress of every aggregation, whoever started it.
+The Operation cannot cancel the aggregation it follows.
 
 **Reason**
-Operations exist to list the progress of mutating operations the user started in the activity panel.
-Aggregation also runs periodically, so if it were an Operation, the daily aggregation would line up in the activity panel.
+Operations exist to list the progress of work the user started in the activity panel, and a requested aggregation is such work; following it with an Operation removes a lifecycle of its own ([API Design §14.1](./api.md#make-a-timeline-scan-an-operation)).
+Aggregation also runs periodically, so if every aggregation were an Operation, the daily aggregation would line up in the activity panel.
 
-**Rejected alternative**
-A method that adds aggregation as a kind of Operation and shows progress and cancellation in the activity panel.
-Existing screens could be used, but for the reason above the activity panel would be filled with aggregation, so we rejected it.
+**Rejected alternative 1**
+A method that makes every aggregation an Operation.
+For the reason above the activity panel would be filled with aggregation, so we rejected it.
+
+**Rejected alternative 2**
+A method that keeps aggregation out of Operations and returns only the status, the earlier decision.
+A client that requested an aggregation then polls a status of its own instead of the Operation it reads for every other long-running request, so we rejected it.
 
 #### Do Not Make Thumbnails in Aggregation
 
@@ -792,7 +798,7 @@ For archives, `FileStorageArchive::block_groups` and `extract_group` extract eac
 `TimelineIndex` holds the SQLite index and the triggers that increase and decrease the per-month counts, and `TimelineService` handles periodic aggregation, manual aggregation, state, and the reflection of the daemon's own changes.
 `LibraryMutation`, at the same point as discarding listing snapshots, tells `TimelineService` the changed Entry's path via `apply_changes`.
 For renames and moves within the same Library, `renamed` reassigns the rows' paths.
-The timeline of a set of Libraries is read through `listEntries` over their roots in timeline-date order and its months through `listEntryMonths`; `GET /timeline/status` and `POST /timeline/refresh` each take a set of Libraries.
+The timeline of a set of Libraries is read through `listEntries` over their roots in timeline-date order and its months through `listEntryMonths`; `GET /timeline/status` and `POST /timeline/scans` each take a set of Libraries, and `OperationService::follow_scan` follows a requested aggregation with a `timelineScan` Operation, joining the aggregation already running for the Library.
 `TimelineIndex` holds the per-month counts per Library, month, kind, and whether the Entry is inside an archive; a migration recounts them from the rows, and triggers keep them in step with the rows, raising a count by an upsert, so an upsert that changes a row's kind or local file moves it too.
 A `TimelineReading` of starts reads the rows of a Scope in timeline-date order (§7): the roots of Libraries together by the date order, every other start by the range of its path, with the kinds, the descendants, and the insides of archives, and `count_months` sums the held counts for whole Libraries and otherwise counts the rows. The timeline of whole Libraries is the same reading over their roots.
 `ListingSnapshot::timeline` keeps the order of a start's matches of a name, rating, or tag condition by the dates of their rows (`TimelineIndex::rows_of`), and `ScopeTimeline` merges these sequences for `listEntries` with `sort=timeline_date` and `listEntryMonths` ([Listing and Search Design §9.1](./listing.md#91-current-code)).

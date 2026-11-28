@@ -37,7 +37,7 @@ afterEach(() => {
 const response = (data: unknown, status = 200) => ({ data, response: new Response(null, { status }) });
 const operation = {
     id: "accepted",
-    kind: "move_files",
+    kind: "move",
     status: "pending",
     libraryId: "src",
     destinationLibraryId: "dest",
@@ -125,27 +125,37 @@ async function harness() {
         },
     };
 }
-it("混在した移動は先に受理した項目だけ除き、拒否された項目を残す", async () => {
+it("混在した移動は 1 つの要求で送り、受理したら Operation を見せて切り取りを空にする", async () => {
     const h = await harness();
     try {
-        let finish!: (data: unknown) => void;
-        post.mockResolvedValueOnce(response({ operation }, 202)).mockImplementationOnce(
-            () =>
-                new Promise((resolve) => {
-                    finish = resolve;
-                }),
-        );
+        post.mockResolvedValueOnce(response({ operation }, 202));
         await h.capture("cut");
         const { promise } = await h.begin();
-        await flush(() =>
-            expect(h.state.value!.sources.flatMap((source) => source.entries).map((entry) => entry.path)).toEqual([
-                "/dir",
-            ]),
-        );
-        expect(show).toHaveBeenCalledWith([operation]);
-        finish({ error: { code: "Forbidden" }, response: new Response(null, { status: 403 }) });
         await act(async () => promise);
-        expect(h.state.value!.sources.flatMap((source) => source.entries).map((entry) => entry.path)).toEqual(["/dir"]);
+        expect(post).toHaveBeenCalledOnce();
+        expect(post.mock.calls[0]![0]).toBe("/entries/move");
+        expect(post.mock.calls[0]![1].body.sources.map((source: { view: string }) => source.view)).toEqual([
+            "file",
+            "folder",
+        ]);
+        expect(show).toHaveBeenCalledWith([operation]);
+        expect(h.state.value?.sources.flatMap((source) => source.entries) ?? []).toEqual([]);
+    } finally {
+        await h.dispose();
+    }
+});
+it("混在した移動が拒否されたら、切り取りをすべて残す", async () => {
+    const h = await harness();
+    try {
+        post.mockResolvedValueOnce({ error: { code: "Forbidden" }, response: new Response(null, { status: 403 }) });
+        await h.capture("cut");
+        const { promise } = await h.begin();
+        await act(async () => promise);
+        expect(h.state.value!.sources.flatMap((source) => source.entries).map((entry) => entry.path)).toEqual([
+            "/a.txt",
+            "/dir",
+        ]);
+        expect(show).not.toHaveBeenCalled();
         expect(notify).toHaveBeenCalled();
     } finally {
         await h.dispose();

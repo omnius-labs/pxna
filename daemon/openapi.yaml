@@ -20,14 +20,13 @@ info:
         and its grammar does not change. The daemon locates the boundary by
         probing the filesystem, which is unambiguous because a file and a
         directory cannot share a name in one directory. An archive's root is
-        addressed by the endpoint rather than a trailing slash: the folder
-        endpoints treat `/photos/a.zip` as the archive root, the file
-        endpoints treat it as the zip file itself.
+        addressed by `view=folder` rather than a trailing slash; without it,
+        `/photos/a.zip` is the zip file itself.
 
-        Mutations follow one rule set. Operations whose duration is
-        independent of content size respond synchronously; operations that
-        scale with content size return `202` and an operation id that is
-        polled through the Operations API. Copy, move, and upload share a
+        Mutations follow one rule set. A write to one Entry responds when it
+        is done. Copy, move, delete, and timeline scans always answer `202`
+        with an Operation, which is polled through the Operations API until
+        it is terminal, unless it already is. Copy, move, and upload share a
         `conflict` policy that defaults to `fail`, so nothing is overwritten
         unless a client explicitly asks for it. Mutations are rejected with
         `403` both for paths inside archives and for Libraries marked
@@ -52,10 +51,6 @@ tags:
       description: The current user's Shelves and folder settings, which every client reads and edits.
     - name: Libraries
       description: Libraries available to the current user.
-    - name: Folders
-      description: Copying, moving, and deleting folders.
-    - name: Files
-      description: Copying, moving, and deleting files.
     - name: ImageSocket
       description: The WebSocket through which clients receive thumbnails, sprite sheets, and display images.
     - name: Uploads
@@ -63,13 +58,14 @@ tags:
     - name: Video
       description: Authenticated HLS playback sessions.
     - name: Operations
-      description: Progress tracking for long-running mutations.
+      description: Progress and results of copies, moves, deletions, and timeline scans.
     - name: Timeline
       description: The state of the timeline's aggregation of Libraries, and starting it.
     - name: Entries
       description: |
-        The Entries of a Scope of starts in one or more Libraries read through a Filter, the metadata of several Entries, and one
-        Entry addressed by its Library and path: its metadata, its content, file and folder creation, and the probe for its children.
+        The Entries of a Scope of starts in one or more Libraries read through a Filter, the metadata of several Entries, copying,
+        moving, and deleting Entries, and one Entry addressed by its Library and path: its metadata, its content, file and folder
+        creation, and the probe for its children.
     - name: Media
       description: Media information of images and videos.
     - name: Ratings & Tags
@@ -469,29 +465,34 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
-    /timeline/refresh:
+    /timeline/scans:
         post:
             tags:
                 - Timeline
-            summary: Start full timeline scans
+            summary: Start timeline scans
             description: |
-                Starts a scan of each given whole Library in the background
-                and returns the current states. For a Library whose full scan
-                is already running, nothing is started.
-            operationId: refreshTimeline
+                Starts aggregation of each given whole Library and answers one
+                Operation of kind `timelineScan` per Library, in request order.
+                A Library whose aggregation is already running joins it: the
+                Operation follows that scan, and a request while a requested
+                scan runs answers the same Operation. `processedCount` counts
+                the files and archive entries the scan has processed. A scan
+                runs to its end; cancelling its Operation answers the current
+                state and stops nothing. An unknown Library starts no scan.
+            operationId: startTimelineScans
             requestBody:
                 required: true
                 content:
                     application/json:
                         schema:
-                            $ref: "#/components/schemas/TimelineRefreshRequest"
+                            $ref: "#/components/schemas/TimelineScanRequest"
             responses:
                 "202":
-                    description: The scans are running.
+                    description: One Operation per Library.
                     content:
                         application/json:
                             schema:
-                                $ref: "#/components/schemas/TimelineStatuses"
+                                $ref: "#/components/schemas/OperationList"
                 "400":
                     $ref: "#/components/responses/InvalidRequest"
                 "401":
@@ -500,7 +501,6 @@ paths:
                     $ref: "#/components/responses/NotFound"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
-
     /libraries:
         get:
             tags:
@@ -751,6 +751,139 @@ paths:
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
+    /entries/copy:
+        post:
+            tags:
+                - Entries
+            summary: Copy Entries
+            description: |
+                Copies 1 to 1,000 Entries of one Library into a destination
+                folder, keeping each name, or one Entry to an exact path. A
+                source with `view=folder` is a folder or an archive's root,
+                whose contents are copied; any other source is a file, an
+                archive file included. Files and folders may be mixed.
+                `conflict` resolves each name that exists at the destination.
+                The checks made before the work starts answer their own
+                status; after that the response is always `202` with the
+                Operation, and the failure of one entry does not discard the
+                others. The Operation runs in the background.
+
+            operationId: copyEntries
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/EntryTransferRequest"
+            responses:
+                "202":
+                    description: The Operation, terminal when the work finished before the response.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /entries/move:
+        post:
+            tags:
+                - Entries
+            summary: Move or rename Entries
+            description: |
+                Moves 1 to 1,000 Entries of one Library into a destination
+                folder, keeping each name, or one Entry to an exact path. A
+                source with `view=folder` is a folder or an archive's root,
+                whose contents are moved; any other source is a file, an
+                archive file included. Files and folders may be mixed.
+                `conflict` resolves each name that exists at the destination.
+                The checks made before the work starts answer their own
+                status; after that the response is always `202` with the
+                Operation, and the failure of one entry does not discard the
+                others. A rename is a move of one
+                source to an exact path. One source moving within its Library
+                is a metadata-only rename that finishes before the response,
+                so the Operation is already terminal; a move across Libraries
+                copies and then deletes the source.
+
+            operationId: moveEntries
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/EntryTransferRequest"
+            responses:
+                "202":
+                    description: The Operation, terminal when the work finished before the response.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
+    /entries/delete:
+        post:
+            tags:
+                - Entries
+            summary: Delete Entries
+            description: |
+                Permanently deletes 1 to 1,000 Entries of one Library; there is
+                no trash. A folder target (`view=folder`) that is not empty needs
+                `recursive=true`. A target in a readonly Library or inside an
+                archive, an archive's root included, is `403`; an archive file
+                itself is deleted as a file. The checks made before the work
+                starts answer their own status; after that the response is
+                always `202` with the Operation, which is already terminal when
+                one file or only folders without `recursive` were deleted.
+            operationId: deleteEntries
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/EntryDeleteRequest"
+            responses:
+                "202":
+                    description: The Operation, terminal when the work finished before the response.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/OperationResponse"
+                "400":
+                    $ref: "#/components/responses/InvalidRequest"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "500":
+                    $ref: "#/components/responses/InternalServerError"
+
     /capabilities:
         get:
             tags: [Libraries]
@@ -798,255 +931,6 @@ paths:
                     $ref: "#/components/responses/InvalidRequest"
                 "401":
                     $ref: "#/components/responses/Unauthorized"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/folders/copy:
-        post:
-            tags:
-                - Folders
-            summary: Copy folders
-            description: |
-                Copies whole folder trees. Folder copies always run
-                asynchronously because their duration scales with tree size.
-                Per-entry conflicts are resolved with `conflict` and reported
-                in the operation result.
-            operationId: copyFolders
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/EntryTransferRequest"
-            responses:
-                "202":
-                    description: Copy operation started.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/OperationResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/folders/move:
-        post:
-            tags:
-                - Folders
-            summary: Move or rename folders
-            description: |
-                Moves folders. A rename is a move whose destination stays in
-                the same parent. A single source moving within one Library is
-                a metadata-only rename and completes synchronously with
-                `200`; the returned entry carries the final path. Multi-source
-                and cross-library moves return `202`. A cross-library move
-                copies the tree and then deletes the source.
-            operationId: moveFolders
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/EntryTransferRequest"
-            responses:
-                "200":
-                    description: Moved synchronously.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/EntryList"
-                "202":
-                    description: Move operation started.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/OperationResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/folders/delete:
-        post:
-            tags:
-                - Folders
-            summary: Delete folders
-            description: |
-                Permanently deletes folders; there is no trash. With
-                `recursive=false` every target must be empty and deletion
-                completes synchronously with `204`; a non-empty target
-                returns `409`. With `recursive=true` whole trees are deleted
-                through an asynchronous operation.
-            operationId: deleteFolders
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/DeleteFoldersRequest"
-            responses:
-                "202":
-                    description: Delete operation started.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/OperationResponse"
-                "204":
-                    description: Folders deleted.
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/files/copy:
-        post:
-            tags:
-                - Files
-            summary: Copy files
-            description: |
-                Copies files into a destination folder or, for a single
-                source, to an exact destination path. File copies always run
-                asynchronously because their duration scales with file size.
-                Per-entry conflicts are resolved with `conflict` and reported
-                in the operation result.
-            operationId: copyFiles
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/EntryTransferRequest"
-            responses:
-                "202":
-                    description: Copy operation started.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/OperationResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/files/move:
-        post:
-            tags:
-                - Files
-            summary: Move or rename files
-            description: |
-                Moves files. A rename is a move whose destination stays in
-                the same folder. A single source moving within one Library is
-                a metadata-only rename and completes synchronously with
-                `200`; the returned entry carries the final path. Multi-source
-                and cross-library moves return `202`. A cross-library move
-                copies the bytes and then deletes the source.
-            operationId: moveFiles
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/EntryTransferRequest"
-            responses:
-                "200":
-                    description: Moved synchronously.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/EntryList"
-                "202":
-                    description: Move operation started.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/OperationResponse"
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
-                "409":
-                    $ref: "#/components/responses/Conflict"
-                "500":
-                    $ref: "#/components/responses/InternalServerError"
-
-    /libraries/{libraryId}/files/delete:
-        post:
-            tags:
-                - Files
-            summary: Delete files
-            description: |
-                Permanently deletes files; there is no trash. A single source
-                completes synchronously with `204`. Multiple sources are
-                deleted through an asynchronous operation.
-            operationId: deleteFiles
-            parameters:
-                - $ref: "#/components/parameters/LibraryIdPath"
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: "#/components/schemas/DeleteFilesRequest"
-            responses:
-                "202":
-                    description: Delete operation started.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: "#/components/schemas/OperationResponse"
-                "204":
-                    description: File deleted.
-                "400":
-                    $ref: "#/components/responses/InvalidRequest"
-                "401":
-                    $ref: "#/components/responses/Unauthorized"
-                "403":
-                    $ref: "#/components/responses/Forbidden"
-                "404":
-                    $ref: "#/components/responses/NotFound"
                 "500":
                     $ref: "#/components/responses/InternalServerError"
 
@@ -1833,8 +1717,8 @@ paths:
             summary: Cancel an operation
             description: |
                 Requests cooperative cancellation. Entries already processed
-                are not rolled back. Cancelling a finished operation is a
-                no-op that returns its current state.
+                are not rolled back. Cancelling a finished operation, or a
+                `timelineScan`, is a no-op that returns its current state.
             operationId: cancelOperation
             parameters:
                 - $ref: "#/components/parameters/OperationIdPath"
@@ -3037,7 +2921,7 @@ components:
                     format: date-time
                     description: When the last full scan finished. Absent before the first one.
 
-        TimelineRefreshRequest:
+        TimelineScanRequest:
             type: object
             required:
                 - libraryIds
@@ -3765,73 +3649,82 @@ components:
                     default: false
                     description: Create missing intermediate folders as well.
 
+        EntryRef:
+            type: object
+            additionalProperties: false
+            description: |
+                One Entry: its Library, its Library-relative path, and the face
+                of the path. `view=folder` is a folder or an archive's root; any
+                other value, or none, is the file, an archive file included.
+            required:
+                - libraryId
+                - path
+            properties:
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+                view:
+                    $ref: "#/components/schemas/EntryView"
+
+        EntryDestination:
+            type: object
+            additionalProperties: false
+            description: |
+                Where a copy or move puts its sources: a Library and exactly
+                one of `folderPath`, into which each source keeps its name, and
+                `path`, the exact target of a single source, which is also how
+                a rename is expressed. A destination is never inside an
+                archive, so it has no `view`.
+            required:
+                - libraryId
+            properties:
+                libraryId:
+                    $ref: "#/components/schemas/LibraryId"
+                folderPath:
+                    $ref: "#/components/schemas/RelativePath"
+                path:
+                    $ref: "#/components/schemas/RelativePath"
+
         EntryTransferRequest:
             type: object
             additionalProperties: false
             description: |
-                Copy or move request. Exactly one of `dstPath` and
-                `dstFolderPath` must be provided. `dstPath` names the exact
-                target and is only valid with a single source; this is also
-                how a rename is expressed. `dstFolderPath` names a target
-                folder and keeps each source's name. `dstLibraryId` defaults
-                to the source Library.
+                Copy or move request. The sources are in one Library; the
+                destination may be in another.
             required:
-                - srcPaths
+                - sources
+                - destination
             properties:
-                srcPaths:
+                sources:
                     type: array
                     minItems: 1
                     maxItems: 1000
                     items:
-                        $ref: "#/components/schemas/RelativePath"
-                dstLibraryId:
-                    $ref: "#/components/schemas/LibraryId"
-                dstPath:
-                    $ref: "#/components/schemas/RelativePath"
-                dstFolderPath:
-                    $ref: "#/components/schemas/RelativePath"
+                        $ref: "#/components/schemas/EntryRef"
+                destination:
+                    $ref: "#/components/schemas/EntryDestination"
                 conflict:
                     $ref: "#/components/schemas/ConflictPolicy"
 
-        DeleteFilesRequest:
+        EntryDeleteRequest:
             type: object
             additionalProperties: false
+            description: |
+                Delete request over Entries of one Library. `recursive`, false
+                when omitted, deletes non-empty folders and everything below
+                them.
             required:
-                - srcPaths
+                - targets
             properties:
-                srcPaths:
+                targets:
                     type: array
                     minItems: 1
                     maxItems: 1000
                     items:
-                        $ref: "#/components/schemas/RelativePath"
-
-        DeleteFoldersRequest:
-            type: object
-            additionalProperties: false
-            required:
-                - srcPaths
-            properties:
-                srcPaths:
-                    type: array
-                    minItems: 1
-                    maxItems: 1000
-                    items:
-                        $ref: "#/components/schemas/RelativePath"
+                        $ref: "#/components/schemas/EntryRef"
                 recursive:
                     type: boolean
-                    default: false
-                    description: Delete non-empty folders and everything below them.
-
-        EntryList:
-            type: object
-            required:
-                - entries
-            properties:
-                entries:
-                    type: array
-                    items:
-                        $ref: "#/components/schemas/FileSystemEntry"
 
         UploadCreateRequest:
             type: object
@@ -3982,12 +3875,10 @@ components:
         OperationKind:
             type: string
             enum:
-                - copy_files
-                - move_files
-                - delete_files
-                - copy_folders
-                - move_folders
-                - delete_folders
+                - copy
+                - move
+                - delete
+                - timelineScan
 
         OperationStatus:
             type: string

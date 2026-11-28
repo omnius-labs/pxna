@@ -16,7 +16,7 @@ const op = (status: Operation["status"]): Operation => ({
     id: "op",
     libraryId: "ops",
     destinationLibraryId: "dest",
-    kind: "delete_folders",
+    kind: "delete",
     status,
     processedCount: 0,
     skippedCount: 0,

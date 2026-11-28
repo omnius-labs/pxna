@@ -784,14 +784,12 @@ mod tests {
             Ok(())
         }
 
-        /// Sends a mutating request of `photos`, and waits for its operation when it starts one.
-        async fn mutate(&self, path: &str, body: Value) -> TestResult {
-            let response = self.client.send(Method::POST, &format!("/libraries/photos{path}"), Some(body)).await?;
-            assert!(response.status.is_success(), "{path}: {} {}", response.status, response.body);
-            if response.status == StatusCode::ACCEPTED {
-                let id = response.body["operation"]["id"].as_str().ok_or("operation id")?;
-                wait_operation(&self.client.fixture.server.state, id).await?;
-            }
+        /// Sends `POST /entries/{command}`, and waits for its Operation to finish.
+        async fn mutate(&self, command: &str, body: Value) -> TestResult {
+            let response = self.client.send(Method::POST, &format!("/entries/{command}"), Some(body)).await?;
+            assert_eq!(response.status, StatusCode::ACCEPTED, "{command}: {}", response.body);
+            let id = response.body["operation"]["id"].as_str().ok_or("operation id")?;
+            wait_operation(&self.client.fixture.server.state, id).await?;
             Ok(())
         }
 
@@ -848,11 +846,19 @@ mod tests {
         let at = [("photos", "/a"), ("photos", "/a/sub"), ("photos", "/ab")];
         let tree = Tree::new(&["a/sub/x.png", "ab/y.png", "into/z.png"], &at, &at).await?;
 
-        tree.mutate("/folders/move", json!({"srcPaths": ["/a"], "dstPath": "/b"})).await?;
+        tree.mutate(
+            "move",
+            json!({"sources": [{"libraryId": "photos", "path": "/a", "view": "folder"}], "destination": {"libraryId": "photos", "path": "/b"}}),
+        )
+        .await?;
         assert_eq!(tree.settings().await?, rows(&[("photos", "/ab", 3), ("photos", "/b", 1), ("photos", "/b/sub", 2)]));
         assert_eq!(tree.starts().await?, places(&[("photos", "/b"), ("photos", "/b/sub"), ("photos", "/ab")]));
 
-        tree.mutate("/folders/move", json!({"srcPaths": ["/b"], "dstFolderPath": "/into"})).await?;
+        tree.mutate(
+            "move",
+            json!({"sources": [{"libraryId": "photos", "path": "/b", "view": "folder"}], "destination": {"libraryId": "photos", "folderPath": "/into"}}),
+        )
+        .await?;
         assert_eq!(
             tree.settings().await?,
             rows(&[("photos", "/ab", 3), ("photos", "/into/b", 1), ("photos", "/into/b/sub", 2)])
@@ -870,7 +876,11 @@ mod tests {
         // Settings left at the destination by a folder removed outside Pxna do not apply to the folder moved there.
         tree.save_setting("videos", "/a/gone", 5).await?;
 
-        tree.mutate("/folders/move", json!({"srcPaths": ["/a"], "dstPath": "/a", "dstLibraryId": "videos"})).await?;
+        tree.mutate(
+            "move",
+            json!({"sources": [{"libraryId": "photos", "path": "/a", "view": "folder"}], "destination": {"libraryId": "videos", "path": "/a"}}),
+        )
+        .await?;
         assert!(tree.videos.join("a/sub/x.png").is_file());
         assert_eq!(
             tree.settings().await?,
@@ -888,7 +898,7 @@ mod tests {
         let at = [("photos", "/a"), ("photos", "/b")];
         let tree = Tree::new(&["a/x.png", "b/y.png", "into/z.png"], &at, &at).await?;
 
-        tree.mutate("/folders/move", json!({"srcPaths": ["/a", "/b"], "dstFolderPath": "/into"})).await?;
+        tree.mutate("move", json!({"sources": [{"libraryId": "photos", "path": "/a", "view": "folder"}, {"libraryId": "photos", "path": "/b", "view": "folder"}], "destination": {"libraryId": "photos", "folderPath": "/into"}})).await?;
         assert_eq!(tree.settings().await?, rows(&[("photos", "/into/a", 1), ("photos", "/into/b", 2)]));
         assert_eq!(tree.starts().await?, places(&[("photos", "/into/a"), ("photos", "/into/b")]));
         Ok(())
@@ -903,8 +913,11 @@ mod tests {
                 tree.save_setting("photos", "/dst", 5).await?;
             }
 
-            tree.mutate("/folders/move", json!({"srcPaths": ["/src"], "dstPath": "/dst", "conflict": "overwrite"}))
-                .await?;
+            tree.mutate(
+                "move",
+                json!({"sources": [{"libraryId": "photos", "path": "/src", "view": "folder"}], "destination": {"libraryId": "photos", "path": "/dst"}, "conflict": "overwrite"}),
+            )
+            .await?;
             assert!(tree.photos.join("dst/sub/x.png").is_file() && !tree.photos.join("src").exists());
             let kept = if conflict_target_has_settings { 5 } else { 1 };
             assert_eq!(tree.settings().await?, rows(&[("photos", "/dst", kept), ("photos", "/dst/sub", 2)]));
@@ -918,7 +931,7 @@ mod tests {
         let at = [("photos", "/a"), ("photos", "/b")];
         let tree = Tree::new(&["a/x.png", "b/y.png", "into/a/z.png"], &at, &at).await?;
 
-        tree.mutate("/folders/move", json!({"srcPaths": ["/a", "/b"], "dstFolderPath": "/into", "conflict": "skip"}))
+        tree.mutate("move", json!({"sources": [{"libraryId": "photos", "path": "/a", "view": "folder"}, {"libraryId": "photos", "path": "/b", "view": "folder"}], "destination": {"libraryId": "photos", "folderPath": "/into"}, "conflict": "skip"}))
             .await?;
         assert!(tree.photos.join("a/x.png").is_file() && tree.photos.join("into/b/y.png").is_file());
         assert_eq!(tree.settings().await?, rows(&[("photos", "/a", 1), ("photos", "/into/b", 2)]));
@@ -934,7 +947,11 @@ mod tests {
         // A symbolic link cannot be traversed, so it fails and holds `kept` and `a` at the source.
         std::os::unix::fs::symlink("y.png", tree.photos.join("a/kept/link"))?;
 
-        tree.mutate("/folders/move", json!({"srcPaths": ["/a"], "dstPath": "/a", "dstLibraryId": "videos"})).await?;
+        tree.mutate(
+            "move",
+            json!({"sources": [{"libraryId": "photos", "path": "/a", "view": "folder"}], "destination": {"libraryId": "videos", "path": "/a"}}),
+        )
+        .await?;
         assert!(tree.photos.join("a/kept").is_dir() && !tree.photos.join("a/done").exists());
         assert!(tree.videos.join("a/kept/y.png").is_file());
         assert_eq!(tree.settings().await?, rows(&[("photos", "/a", 1), ("photos", "/a/kept", 3), ("videos", "/a/done", 2)]));
@@ -958,11 +975,11 @@ mod tests {
         .await?;
         std::fs::create_dir_all(tree.photos.join("other"))?;
 
-        tree.mutate("/files/move", json!({"srcPaths": ["/new.7z"], "dstPath": "/photos/a.7z", "conflict": "overwrite"}))
+        tree.mutate("move", json!({"sources": [{"libraryId": "photos", "path": "/new.7z", "view": "file"}], "destination": {"libraryId": "photos", "path": "/photos/a.7z"}, "conflict": "overwrite"}))
             .await?;
         tree.mutate(
-            "/folders/move",
-            json!({"srcPaths": ["/pack.7z", "/other"], "dstFolderPath": "/into", "conflict": "overwrite"}),
+            "move",
+            json!({"sources": [{"libraryId": "photos", "path": "/pack.7z", "view": "folder"}, {"libraryId": "photos", "path": "/other", "view": "folder"}], "destination": {"libraryId": "photos", "folderPath": "/into"}, "conflict": "overwrite"}),
         )
         .await?;
         assert!(tree.photos.join("into/pack.7z/x.png").is_file());
@@ -980,8 +997,9 @@ mod tests {
         let tree = Tree::new(&["a/sub/x.png", "ab/y.png"], &at, &at).await?;
         std::fs::create_dir_all(tree.photos.join("b"))?;
 
-        tree.mutate("/folders/delete", json!({"srcPaths": ["/a"], "recursive": true})).await?;
-        tree.mutate("/folders/delete", json!({"srcPaths": ["/b"]})).await?;
+        tree.mutate("delete", json!({"targets": [{"libraryId": "photos", "path": "/a", "view": "folder"}], "recursive": true}))
+            .await?;
+        tree.mutate("delete", json!({"targets": [{"libraryId": "photos", "path": "/b", "view": "folder"}]})).await?;
         assert_eq!(tree.settings().await?, rows(&[("photos", "/ab", 4)]));
         assert_eq!(tree.starts().await?, places(&at));
         Ok(())

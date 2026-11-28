@@ -27,6 +27,9 @@ function defined(values: Record<string, unknown>): Record<string, unknown> {
 export function answerEntries(get: Answer, post: Answer = get): Answer {
     return async (route: string, options: { body: any; signal?: AbortSignal }) => {
         const { body, signal } = options;
+        // The copy, move, and delete commands are not listings, so they reach the mock as they are.
+        if (route === "/entries/copy" || route === "/entries/move" || route === "/entries/delete")
+            return post(route, options);
         if (route === "/entries/metadata") {
             const libraryId = body.places[0]?.libraryId ?? "";
             const result = await post("/libraries/{libraryId}/entries/details", {

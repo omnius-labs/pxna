@@ -408,15 +408,15 @@ For a folder in the tree, new folder (created inside that folder), rename, and d
 Key operations are not made to work inside input fields and dialogs (including confirmation dialogs). Some environments change the character when ⌥ is pressed, so the new-folder key is judged by the physical position of the pressed key (`KeyN`).
 Delete is confirmed with a dialog that shows the number of targets and that they move to the trash, and then sent.
 A deletion that includes folders states in the dialog that the contents move to the trash along with them, and is sent with `recursive=true`.
-A selection mixing files and folders is split into two requests by kind ([design.md §8.1](../design.md#81-namespaces)).
+A selection mixing files and folders is sent as one request per Library, which names each target with its `view` ([design.md §8.1](../design.md#81-namespaces)).
 The trash of each Library is opened from the Library's menu. It lists the Entries in the trash, restores a chosen Entry to its original path, and empties the trash. The trash is not shown in the tree, the listing, or any Shelf. Restoring and emptying are confirmed in a dialog, and become Operations when they can take long.
 
 Cut and copy remember the selected Entries' Library and path in a clipboard inside the web client.
 The OS clipboard is not used.
 Paste targets the current folder or the folder that was right-clicked.
 Cut cannot be chosen for a selection that includes read-only items. Copy can be chosen even for read-only ones.
-Cut Entries are shown faintly until the paste request is accepted. When files and folders are sent as separate requests, only the items of the accepted requests are removed from the clipboard, and items rejected immediately are kept. Failures after acceptance, skips, and cancellations are notified in the activity panel, and the items to retry are chosen again.
-Pasting across Libraries is also possible, and the move in that case becomes an Operation ([design.md §8.2](../design.md#82-determining-sync-and-async)).
+Cut Entries are shown faintly until the paste request is accepted. A selection of files and folders is one request, so an accepted request removes all of its items from the clipboard, and a request rejected immediately keeps them all. A paste that finished before the response is notified with a toast, and its failures and skips with it; failures after acceptance, skips, and cancellations of a running Operation are notified in the activity panel, and the items to retry are chosen again.
+Pasting across Libraries is also possible, and the move in that case runs in the background ([design.md §8.2](../design.md#82-determining-sync-and-async)).
 
 Dragging selected Entries and dropping them on a tree folder or a folder tile moves them, and dropping while holding ⌥ (Alt) copies them.
 Archives and `readonly` Libraries do not become drop targets. A drag that includes read-only items allows only copying with ⌥ (Alt) pressed.
@@ -440,7 +440,7 @@ When the copy destination includes the source itself, only "両方残す" and "�
 If there are no conflicts, it is sent with the default `fail`.
 A conflict that arose between the check and the send is reported as a failure by `fail`.
 
-The result of an operation is notified by a toast for operations that return synchronously, and shown in the activity panel for operations that become Operations and for uploads.
+The result of an operation is notified by a toast when it finished before the response, as a creation or a terminal Operation did, and shown in the activity panel for Operations still running and for uploads.
 The activity panel lists running and finished Operations and uploads, and shows each one's progress, the cancel operation, the skipped count, and the failed Entries and their reasons.
 The state of running Operations is requested every second to advance it.
 When an asynchronous operation starts, the activity panel is opened.
@@ -897,7 +897,7 @@ The implementation is simple, but one more operation would be added even when th
 #### Keep Each Request's Result in Mixed Moves and Copies
 
 **Decision**
-A selection mixing files and folders is split into requests by kind, and both responses are awaited. The synchronous results and the accepted Operations are kept, and the failure of one does not discard the result of the other. Cut removes only the items accepted per request and keeps the items rejected immediately. If another cut or copy is performed during the operation, that new content is not changed by the response of the earlier request.
+A selection mixing files and folders is one request. A terminal Operation in the response is kept as the result and a running one is handed to the activity panel. Cut removes the items when the request is accepted and keeps them all when it is rejected immediately. If another cut or copy is performed during the operation, that new content is not changed by the response of the earlier request.
 
 **Reason**
 The API's endpoints are split by kind, and a mixed selection cannot be sent in a single request. Even if partially successful, the user needs to be able to confirm the remaining failures and the accepted operations. Keeping accepted items allows resending, and emptying the whole would require reselecting the items rejected immediately. Individual failures after acceptance are checked in the activity panel, and the items to retry are chosen again.
@@ -925,7 +925,7 @@ Even if a folder is renamed, files underneath should not be sent into a folder o
 #### Keep Each Request's Result in Mixed Deletions
 
 **Decision**
-Deleting files and folders waits for both responses, and even if one fails, the successful request's Operation is handed to the activity panel. For what was deleted synchronously, the listing is reread, and the failed request is notified by a toast.
+Deleting files and folders is one request per Library, and even if one Library's request fails, the others' Operations are kept. For a deletion that finished before the response, the listing is reread; a failed request or a terminal Operation with failures is notified by a toast, and the Operation is handed to the activity panel.
 
 **Reason**
 There is no mechanism to cancel two requests together. Reporting only the failure of one would leave the user unable to confirm the progress or result of the other.
@@ -1779,7 +1779,7 @@ Parts are built with Tailwind, the shadcn/ui parts in `ui-web/src/components/ui`
 On a wide screen, from the listing's context menu and the toolbar, one can create folders, rename, delete, and download a single file. Creating, renaming, and deleting can also use key operations. In the tree too, one can create inside, rename, and delete the right-clicked folder. Creating and renaming are done in the modal dialog of [NameDialog.tsx](../../ui-web/src/components/NameDialog.tsx), which shows the target's path. Whether something can be changed is decided by the logical OR of the Library's `readonly` and the Entry's or the current folder's `metadata.readonly`. After success, that Library's listing and tree are reread.
 Delete in the current code removes files permanently; the trash and its screen in §3.7 are not implemented.
 [clipboard.ts](../../ui-web/src/library/clipboard.ts) holds the targets of cut and copy across authenticated screens. They can be operated with the menu and Ctrl or ⌘ X, C, and V, and during cut the targets in the grid and list are shown faintly. Paste targets the current folder, or a tile or tree folder, and transfer to another Library is also possible.
-[TransferProvider.tsx](../../ui-web/src/components/TransferProvider.tsx) checks the destination's writability and Entries of the same name, and if there are conflicts, asks the policy only once. It splits the requests for files and folders, notifies synchronous success and rereads the listing and tree, and keeps accepted Operations even if there are partial failures.
+[TransferProvider.tsx](../../ui-web/src/components/TransferProvider.tsx) checks the destination's writability and Entries of the same name, and if there are conflicts, asks the policy only once. It sends files and folders in one request, notifies a paste that finished before the response and rereads the listing and tree, and hands a running Operation to the activity panel.
 Internal drag moves to the same Library's tree and folder tiles, and copies when Alt is pressed. It rejects destinations that are readonly or archives, scrolls at the listing's edges, and expands closed tree folders after 1 second.
 [upload.ts](../../ui-web/src/library/upload.ts) sends the toolbar's file and folder selection and OS drops in a queue of at most 2. Files of 32 MiB or less are written directly, and larger files send 16 MiB chunks. Folders are created first, and the conflict policy is also applied to what is underneath. For OS folders, it reads from the same reader until an empty batch, and does not drop the tail of what is underneath ([Measurements of Chromium](../knowledge/chromium-directory-reader.md)). A session is discarded when canceled, and the listing and tree are reread once per published file.
 The activity panel is shown overlaid at the bottom right and shows the progress, state, and failures and skips of Operations and uploads. Operations are updated every second only while running, and return even after a reload. Uploads show the number of bytes sent and can be canceled while waiting and sending. When collapsed it becomes a status bar button and shows the unread count. The items lined up when it is opened become read and are shown faintly, and finished items can be removed with ×. During an upload a leave confirmation is registered, and it is released when a terminal state is reached. On narrow screens, the entrances to operations and the panel are not shown.

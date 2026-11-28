@@ -412,7 +412,7 @@ mod tests {
     /// Runs a full aggregation of `library` and waits for it, which makes its name index usable.
     async fn aggregate(state: &DaemonState, library: &str) -> TestResult {
         state.names.verified().await;
-        state.timeline.refresh(library).await?;
+        state.timeline.scan(library)?;
         for _ in 0..400 {
             let status = state.timeline.status(library).await?;
             if !status.running && status.completed_at.is_some() {

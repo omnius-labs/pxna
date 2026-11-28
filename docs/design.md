@@ -524,50 +524,47 @@ Even when the username does not exist, a dummy hash is verified, to make it hard
 
 This section gathers the mutating conventions scattered across `openapi.yaml` from the viewpoint of judgment.
 For individual paths and schemas, see `openapi.yaml`.
-[API Design](./design/api.md#15-current-state-and-remaining-work) replaces the namespaces of §8.1 and the table of §8.2, and lists the other statements of this document it replaces.
+[API Design](./design/api.md#15-current-state-and-remaining-work) lists the statements of this document it still replaces.
 Writing the daemon's own state, such as the display preferences, the Shelves, and the folder settings, changes no Library and follows only §8.5 (§6.5).
-API paths in this document are written relative to the server base `/api/v1`, such as `/libraries/{id}/files/...`.
+API paths in this document are written relative to the server base `/api/v1`, such as `/libraries/{id}/entries/...`.
 
 ### 8.1 Namespaces
 
-Files and folders have separate namespaces.
+Files and folders share one Entry namespace.
 
 ```
-/libraries/{id}/files/...
-/libraries/{id}/folders/...
+/entries/...
+/libraries/{id}/entries/...
 ```
 
-Depending on the kind of target, the meaning of the non-empty check and of recursion changes.
-If they were combined into one endpoint, which validation to apply would not be decided until the request's contents were examined.
+A read or a command whose body names its Libraries, such as a listing, a copy, a move, or a delete, is global under `/entries`.
+An operation on one Entry is under its Library, with the path in the query ([API Design §4](./design/api.md#4-url-hierarchy)).
+A mixed multiple selection of files and folders is one request.
 
-When operating on a mixed multiple selection, the client splits it into two requests by kind.
-
-An archive's path points to different things depending on the namespace.
-In the `folders` API (including direct and recursive listings) it points to the root inside the archive, and in the `files` API it points to the archive's file itself.
+An archive's path has two faces, and a request names the face with `view` ([API Design §3.1](./design/api.md#31-entry-and-entryref)).
+`view=folder` points to the root inside the archive, and any other view points to the archive's file itself.
 This is so that, at the same path, one can both list its contents and copy or delete it as a file.
-A read of one Entry chooses the face with `view` instead ([API Design §3.1](./design/api.md#31-entry-and-entryref)): `GET /libraries/{id}/entries/metadata?view=folder` reads an archive's root, and the content of an archive is its file.
+The kind of each target, not the endpoint, decides the non-empty check and recursion (§8.4).
 
 ### 8.2 Determining Sync and Async
 
-There is one criterion: **whether the time taken is proportional to the content size or to the number of entries**.
-Those that are not proportional respond synchronously, and those that are proportional return `202` and `{operation}`, with the identifier carried in `operation.id`.
+A write to one Entry responds when it is done: creating a folder and a one-shot write return `201`.
+Copy, move, delete, and a timeline scan always return `202` with an Operation, whose identifier is `operation.id`.
+The checks made before the work starts, such as an unknown Library, a missing source, or a `readonly` destination, keep their own statuses.
 
-| Operation                   | Condition                                          | Response |
-| --------------------------- | -------------------------------------------------- | -------- |
-| Create folder               | None                                               | 201      |
-| One-shot write              | None                                               | 201      |
-| move (file / folder)        | Single src and the same Library                    | 200      |
-| move (file / folder)        | Multiple srcs, or across Libraries                 | 202      |
-| copy (file / folder)        | Always                                             | 202      |
-| delete (file)               | Single src                                         | 204      |
-| delete (file)               | Multiple srcs                                      | 202      |
-| delete (folder)             | `recursive=false` (the target must be empty)       | 204      |
-| delete (folder)             | `recursive=true`                                   | 202      |
+The shape of the request decides only whether the Operation is already terminal in the response.
+There is one criterion: **whether the time taken is proportional to the content size**.
+
+| Command | Terminal in the response                                    | Otherwise              |
+| ------- | ----------------------------------------------------------- | ---------------------- |
+| move    | One source within its Library                               | Runs in the background |
+| copy    | Never                                                       | Runs in the background |
+| delete  | At most one file, and no folder with `recursive=true`       | Runs in the background |
 
 A move within the same Library is normally a single `rename(2)`, and its duration is not proportional to the content bytes.
 With `overwrite` onto an existing folder, children are renamed one at a time to merge. The processing time is proportional to the number of entries, but no byte sequences are copied.
-A move across Libraries involves copying the actual content, so it is asynchronous.
-The reason for deciding the path by the shape of the request alone is recorded in §11.1.
+A move across Libraries involves copying the actual content, so it runs in the background.
+The reason for one status is recorded in [API Design §14.1](./design/api.md#answer-every-batch-command-with-202-and-an-operation).
 
 ### 8.3 Conflict Policy
 
@@ -575,14 +572,14 @@ Copy, move, and upload take a common `conflict`.
 
 | Value            | Behavior                                                         |
 | ---------------- | ---------------------------------------------------------------- |
-| `fail` (default) | Reject with 409                                                  |
+| `fail` (default) | Reject with 409, or fail that entry of an Operation with `Conflict` |
 | `skip`           | Do not touch the existing one, and report that source as skipped |
 | `overwrite`      | Replace the existing one                                         |
 | `rename`         | Write under another name and return the chosen name in the result |
 
 The reason for making the default `fail` is recorded in §11.1.
 
-In asynchronous operations, entry-level conflicts are handled according to `conflict`, and the results are aggregated into the `Operation`'s `skippedCount` and `failedEntries`.
+In an Operation, entry-level conflicts are handled according to `conflict`, and the results are aggregated into the `Operation`'s `skippedCount` and `failedEntries`.
 The published top-level destinations are carried in `resultEntries`, and the destination Library in `destinationLibraryId`.
 The name chosen by `rename` can also be obtained from this result.
 
@@ -611,7 +608,7 @@ Deletion moves the target into the Trash of its Library instead of removing it f
 The owner can restore an Entry from the trash or empty the trash to remove it permanently.
 The trash is excluded from listings, search, the timeline, and the tree, so it does not appear as ordinary content.
 
-The HTTP `DELETE` verb is not used, and it is unified into `POST /files/delete` and `POST /folders/delete` (the reason is in §11.1).
+The HTTP `DELETE` verb is not used, and it is unified into `POST /entries/delete`, which names each target with its `view` (the reason is in §11.1).
 
 Deleting a non-empty folder requires `recursive=true` to be explicit.
 It does not recurse when omitted, so there is no path by which a mistaken operation deletes a whole tree.
@@ -1029,16 +1026,6 @@ A token is 32 bytes of random data and is not a target of brute force, so the fa
 Hashing passwords with `ring`'s PBKDF2-HMAC-SHA256.
 It avoids adding dependencies, but it lacks the property of making parallel brute force on GPUs slower by forcing heavy memory use, so we chose argon2id.
 
-#### Decide Sync and Async by the Shape of the Request
-
-**Decision**
-Only operations whose duration is proportional to the content size are asynchronous (the table in §8.2).
-Operations that are not proportional return synchronously.
-
-**Reason**
-The client can predict which path it will take before receiving the response.
-If a rename within the same Library required polling an operation, a rename of a name would take two round trips.
-
 #### Make the Default conflict `fail`
 
 **Decision**
@@ -1056,7 +1043,7 @@ It was a design that "always does something on conflict", and could not express 
 
 **Decision**
 Deletion moves the target into the Trash of its Library, and the owner can restore it or empty the Trash.
-We unify on `POST /files/delete` and `POST /folders/delete` and do not use the `DELETE` verb.
+We unify on `POST /entries/delete` and do not use the `DELETE` verb.
 We require `recursive=true` for non-empty folders.
 The trash is excluded from listings, search, the timeline, and the tree.
 

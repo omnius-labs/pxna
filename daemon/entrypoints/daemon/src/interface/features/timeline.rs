@@ -41,27 +41,27 @@ impl apis::timeline::Timeline for ApiServer {
         })
     }
 
-    async fn refresh_timeline(
+    async fn start_timeline_scans(
         &self,
         method: &Method,
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::TimelineRefreshRequest,
-    ) -> std::result::Result<apis::timeline::RefreshTimelineResponse, ()> {
-        let statuses = async {
+        body: &models::TimelineScanRequest,
+    ) -> std::result::Result<apis::timeline::StartTimelineScansResponse, ()> {
+        let operations = (|| {
             let library_ids = Self::library_ids(&body.library_ids);
             // 1 つでも知らない Library があれば、どの集計も始めない。
             self.state.timeline.libraries(&library_ids)?;
-            let mut statuses = Vec::new();
+            let mut operations = Vec::new();
             for library_id in &library_ids {
-                statuses.push(Self::status(self.state.timeline.refresh(library_id).await?));
+                let scan = self.state.timeline.scan(library_id)?;
+                operations.push(self.state.operations.follow_scan(library_id, scan));
             }
-            Ok::<_, Error>(models::TimelineStatuses::new(statuses))
-        }
-        .await;
-        Ok(match statuses {
-            Ok(statuses) => apis::timeline::RefreshTimelineResponse::Status202_TheScansAreRunning(statuses),
+            Ok::<_, Error>(models::OperationList::new(operations))
+        })();
+        Ok(match operations {
+            Ok(operations) => apis::timeline::StartTimelineScansResponse::Status202_OneOperationPerLibrary(operations),
             Err(error) => ApiError::from(error).into(),
         })
     }
@@ -90,7 +90,7 @@ impl From<ApiError> for apis::timeline::GetTimelineStatusResponse {
     }
 }
 
-impl From<ApiError> for apis::timeline::RefreshTimelineResponse {
+impl From<ApiError> for apis::timeline::StartTimelineScansResponse {
     fn from(error: ApiError) -> Self {
         match error.status {
             ApiStatus::BadRequest => Self::Status400_InvalidRequest(error.body),
@@ -122,30 +122,29 @@ mod tests {
         let bearer = bearer(&setup)?;
         let headers = &[("authorization", bearer.as_str())];
 
-        let refreshed = send(
-            &router,
-            Method::POST,
-            "/api/v1/timeline/refresh",
-            headers,
-            Some(json!({"libraryIds": ["photos", "videos"]})),
-        )
-        .await?;
-        assert_eq!(refreshed.status, StatusCode::ACCEPTED);
-        assert_eq!(refreshed.body["libraries"][1]["libraryId"], "videos");
-        let both = "libraryIds=photos&libraryIds=videos";
-        let mut done = false;
-        for _ in 0..1200 {
-            let status = send(&router, Method::GET, &format!("/api/v1/timeline/status?{both}"), headers, None).await?;
-            assert_eq!(status.status, StatusCode::OK);
-            let libraries = status.body["libraries"].as_array().cloned().unwrap_or_default();
-            if libraries.len() == 2 && libraries.iter().all(|library| library["running"] == false && library["completedAt"].is_string()) {
-                done = true;
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let scans = send(&router, Method::POST, "/api/v1/timeline/scans", headers, Some(json!({"libraryIds": ["photos", "videos"]}))).await?;
+        assert_eq!(scans.status, StatusCode::ACCEPTED, "{}", scans.body);
+        let operations = scans.body["operations"].as_array().cloned().unwrap_or_default();
+        assert_eq!(operations.len(), 2, "one Operation per Library");
+        assert_eq!(operations[1]["libraryId"], "videos");
+        for operation in &operations {
+            assert_eq!(operation["kind"], "timelineScan");
+            let id = operation["id"].as_str().ok_or("operation id")?;
+            let finished = wait_operation(state, id).await?;
+            assert_eq!(finished.status, models::OperationStatus::Succeeded, "{finished:?}");
+            assert!(finished.processed_count >= 1, "the files the scan read: {finished:?}");
+            let cancelled = send(&router, Method::POST, &format!("/api/v1/operations/{id}/cancel"), headers, None).await?;
+            assert_eq!(cancelled.body["operation"]["status"], "succeeded");
         }
-        let last = send(&router, Method::GET, &format!("/api/v1/timeline/status?{both}"), headers, None).await?;
-        assert!(done, "the scans did not finish: {}", last.body);
+        let both = "libraryIds=photos&libraryIds=videos";
+        let status = send(&router, Method::GET, &format!("/api/v1/timeline/status?{both}"), headers, None).await?;
+        assert_eq!(status.status, StatusCode::OK);
+        let libraries = status.body["libraries"].as_array().cloned().unwrap_or_default();
+        assert!(
+            libraries.len() == 2 && libraries.iter().all(|library| library["running"] == false && library["completedAt"].is_string()),
+            "{}",
+            status.body
+        );
 
         // The timeline is read through `listEntries`: the roots of the Libraries, with the insides of archives, in timeline-date order.
         let timeline = |libraries: &[&str], page: serde_json::Value| {
@@ -210,8 +209,26 @@ mod tests {
         for removed in ["/api/v1/timeline/entries?libraryIds=photos", "/api/v1/timeline/months?libraryIds=photos"] {
             assert_eq!(send(&router, Method::GET, removed, headers, None).await?.status, StatusCode::NOT_FOUND, "{removed}");
         }
-        let rejected = send(&router, Method::POST, "/api/v1/timeline/refresh", headers, Some(json!({"libraryIds": ["photos", "nope"]}))).await?;
+        let removed = send(&router, Method::POST, "/api/v1/timeline/refresh", headers, Some(json!({"libraryIds": ["photos"]}))).await?;
+        assert_eq!(removed.status, StatusCode::NOT_FOUND);
+        let rejected = send(&router, Method::POST, "/api/v1/timeline/scans", headers, Some(json!({"libraryIds": ["photos", "nope"]}))).await?;
         assert_eq!(rejected.status, StatusCode::NOT_FOUND);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_scan_request_joins_the_running_scan_test() -> TestResult {
+        let fixture = fixture(ArchiveOptions::default()).await?;
+        let state = &fixture.server.state;
+        std::fs::write(state.conf.libraries[0].path.join("photos/p.png"), b"p")?;
+        // Nothing awaits between the requests, so the first scan is still running when the second one is made.
+        let first = state.operations.follow_scan("photos", state.timeline.scan("photos")?);
+        let again = state.operations.follow_scan("photos", state.timeline.scan("photos")?);
+        assert_eq!(first.id, again.id);
+        assert_eq!(wait_operation(state, &first.id).await?.status, models::OperationStatus::Succeeded);
+        let next = state.operations.follow_scan("photos", state.timeline.scan("photos")?);
+        assert_ne!(next.id, first.id, "a finished scan is not joined");
+        assert_eq!(wait_operation(state, &next.id).await?.status, models::OperationStatus::Succeeded);
         Ok(())
     }
 }

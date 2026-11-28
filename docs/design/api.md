@@ -366,7 +366,7 @@ It is the former `conflict=rename` of the one-shot write.
 ### 7.4 Operation Results
 
 An Operation is the one result of every batch command: copy, move, delete, and timeline scan.
-A command always answers `202` with `{operation}`, whether or not the work has finished.
+A command always answers `202` with `{operation}`, whether or not the work has finished; a timeline scan answers `{operations}`, one per Library (§9.1).
 When it has, the body already carries the terminal status and the result, and a client does not poll.
 
 The Operation keeps the fields and states of [design.md §8.3](../design.md#83-conflict-policy) and [§8.8](../design.md#88-operations): `processedCount`, `totalCount`, `skippedCount`, `failedEntries`, the published `resultEntries`, and the destination Library.
@@ -392,8 +392,10 @@ The API therefore has three lifecycles with distinct meanings: the batch Operati
 
 The timeline is read with `POST /entries` and `sort=timeline_date` (§6.1), and its months with `POST /entries/months`; there is no separate timeline listing.
 
-`POST /timeline/scans` takes `{libraryIds}`, starts aggregation of each Library as the current refresh does ([Timeline Design §6.3](./timeline.md#63-when-aggregation-starts)), and answers `202` with an Operation of kind `timelineScan`.
-A Library already being aggregated joins its running scan instead of starting another.
+`POST /timeline/scans` takes `{libraryIds}`, starts aggregation of each Library ([Timeline Design §6.3](./timeline.md#63-when-aggregation-starts)), and answers `202` with one Operation of kind `timelineScan` per Library, in request order.
+An Operation names one Library, so a scan of several Libraries is several Operations.
+A Library already being aggregated joins its running scan instead of starting another: its Operation follows that scan, and a request while a requested scan runs answers the same Operation.
+`processedCount` counts the files and archive entries the scan has processed, and a failed scan is one failed entry at `/`.
 Aggregation that the daemon starts by itself creates no Operation.
 `GET /timeline/status?libraryIds=` keeps its per-Library projection of whether aggregation runs, how many files it has processed, and when it last completed, for a client that shows the state without holding an Operation.
 
@@ -561,7 +563,7 @@ Building the whole replacement first and switching the web client at once was re
 **Decision**
 Files, folders, links, archive files, and archive roots are all Entries in one namespace.
 A request that can mean either an archive file or its root carries `view`, and an omitted `view` means the archive file (§3.1).
-This replaces the separate namespaces of [design.md §8.1](../design.md#81-namespaces).
+This replaces the separate `files` and `folders` namespaces that [design.md §8.1](../design.md#81-namespaces) described.
 
 **Reason**
 The two namespaces doubled the copy, move, and delete commands, split a mixed selection into two requests, and made the same `/a.zip` mean different things by endpoint.
@@ -660,7 +662,7 @@ Keeping `GET /auth/me` was rejected because the read and the delete of the sessi
 
 **Decision**
 Copy, move, delete, and timeline scans answer `202` with an Operation, even when the work finishes before the response; the body then carries the terminal state.
-This replaces the decision "Decide Sync and Async by the Shape of the Request" of [design.md §11.1](../design.md#decide-sync-and-async-by-the-shape-of-the-request).
+This replaces the decision "Decide Sync and Async by the Shape of the Request" that design.md §11.1 recorded.
 
 **Reason**
 The current contract chooses `200`, `202`, or `204` for the same command by the number of sources and the Libraries, so a client needs a branch per status and has no single place for skipped and failed entries.
@@ -673,7 +675,7 @@ A synchronous `204` for a delete was rejected because it cannot report a partial
 #### Make a Timeline Scan an Operation
 
 **Decision**
-A scan that a client asks for is an Operation of kind `timelineScan`, started by `POST /timeline/scans`, while `GET /timeline/status` stays as a projection (§9.1).
+A scan that a client asks for is an Operation of kind `timelineScan`, one per Library, started by `POST /timeline/scans`, while `GET /timeline/status` stays as a projection (§9.1).
 
 **Reason**
 The refresh and the status were a fourth lifecycle with its own polling, unlike every other long-running request.
@@ -800,14 +802,10 @@ When the control of background work ([design.md §11.2](../design.md#controlling
 
 ### 15.1 Current Code
 
-`daemon/openapi.yaml` answers every error with the Problem of §11.1 (A1), serves the single-Entry operations of §4 with `view`, ratings, tags, and folder settings beside them (A2), and lists only through `POST /entries` into the Entry page, with its summary and the metadata batch (A3); the rest of §3 through §13 is not implemented, and the contract it serves is otherwise the one this document replaces.
+`daemon/openapi.yaml` answers every error with the Problem of §11.1 (A1), serves the single-Entry operations of §4 with `view`, ratings, tags, and folder settings beside them (A2), lists only through `POST /entries` into the Entry page, with its summary and the metadata batch (A3), and runs copy, move, delete, and timeline scans as Operations answered with `202` (A4); the rest of §3 through §13 is not implemented, and the contract it serves is otherwise the one this document replaces.
 Until each area is replaced, the following statements in other documents describe the current contract, and this document the replacement:
 
-- The namespaces of [design.md §8.1](../design.md#81-namespaces) and the sync and async table of [§8.2](../design.md#82-determining-sync-and-async), with the decision "Decide Sync and Async by the Shape of the Request"
 - The silent end of a transcode session in [Video Playback Design §5.4](./video.md#54-concurrency), and the error kinds of [design.md §4.4](../design.md#44-error-model-and-http-mapping), which lack `SessionEvicted`
-- The paths of the deletions in [design.md §8.4](../design.md#84-deletion) and the decision "Delete Moves the Entry to a Library-Local Trash, Unified on POST", and the example path in the introduction of [§8](../design.md#8-conventions-for-mutating-apis)
-- The refresh in [Timeline Design §6.3](./timeline.md#63-when-aggregation-starts) and [§10.1](./timeline.md#101-current-code)
-- The external representation of Aggregation in the term list of [terms.md](../terms.md#2-term-list), and the names of the API in its Timeline entry
 
 Each area's change rewrites the statements it replaces.
 

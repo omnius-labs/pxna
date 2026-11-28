@@ -4,7 +4,7 @@ import { ApiError, api, problemError, unwrap } from "../api/client";
 import { describeError } from "../i18n/errors";
 import type { ConflictPolicy, TransferDestination } from "./collision";
 import { fetchFolderPage } from "./entries";
-import { childPath, validateName } from "./entryActions";
+import { childPath, entryRef, operationFailure, validateName } from "./entryActions";
 
 export const ONE_SHOT_LIMIT = 32 * 1024 * 1024;
 export const UPLOAD_CHUNK_SIZE = 16 * 1024 * 1024;
@@ -138,12 +138,11 @@ async function makeUploadFolder(
             if (existing.metadata?.readonly !== false) throw new Error(t("errors.cannotSendHere"), { cause: error });
             if (existing.kind === "folder") return path;
             signal.throwIfAborted();
-            unwrap(
-                await api.POST("/libraries/{libraryId}/files/delete", {
-                    params: { path: { libraryId } },
-                    body: { srcPaths: [path] },
-                }),
+            const { operation } = unwrap(
+                await api.POST("/entries/delete", { body: { targets: [entryRef(libraryId, path, false)] } }),
             );
+            const failure = operationFailure(operation);
+            if (failure) throw failure;
             signal.throwIfAborted();
             unwrap(
                 await api.POST("/libraries/{libraryId}/entries/folders", {

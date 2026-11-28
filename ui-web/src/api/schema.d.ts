@@ -276,7 +276,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/timeline/refresh": {
+    "/timeline/scans": {
         parameters: {
             query?: never;
             header?: never;
@@ -286,12 +286,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start full timeline scans
-         * @description Starts a scan of each given whole Library in the background
-         *     and returns the current states. For a Library whose full scan
-         *     is already running, nothing is started.
+         * Start timeline scans
+         * @description Starts aggregation of each given whole Library and answers one
+         *     Operation of kind `timelineScan` per Library, in request order.
+         *     A Library whose aggregation is already running joins it: the
+         *     Operation follows that scan, and a request while a requested
+         *     scan runs answers the same Operation. `processedCount` counts
+         *     the files and archive entries the scan has processed. A scan
+         *     runs to its end; cancelling its Operation answers the current
+         *     state and stops nothing. An unknown Library starts no scan.
          */
-        post: operations["refreshTimeline"];
+        post: operations["startTimelineScans"];
         delete?: never;
         options?: never;
         head?: never;
@@ -503,6 +508,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/entries/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Entries
+         * @description Copies 1 to 1,000 Entries of one Library into a destination
+         *     folder, keeping each name, or one Entry to an exact path. A
+         *     source with `view=folder` is a folder or an archive's root,
+         *     whose contents are copied; any other source is a file, an
+         *     archive file included. Files and folders may be mixed.
+         *     `conflict` resolves each name that exists at the destination.
+         *     The checks made before the work starts answer their own
+         *     status; after that the response is always `202` with the
+         *     Operation, and the failure of one entry does not discard the
+         *     others. The Operation runs in the background.
+         */
+        post: operations["copyEntries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/entries/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move or rename Entries
+         * @description Moves 1 to 1,000 Entries of one Library into a destination
+         *     folder, keeping each name, or one Entry to an exact path. A
+         *     source with `view=folder` is a folder or an archive's root,
+         *     whose contents are moved; any other source is a file, an
+         *     archive file included. Files and folders may be mixed.
+         *     `conflict` resolves each name that exists at the destination.
+         *     The checks made before the work starts answer their own
+         *     status; after that the response is always `202` with the
+         *     Operation, and the failure of one entry does not discard the
+         *     others. A rename is a move of one
+         *     source to an exact path. One source moving within its Library
+         *     is a metadata-only rename that finishes before the response,
+         *     so the Operation is already terminal; a move across Libraries
+         *     copies and then deletes the source.
+         */
+        post: operations["moveEntries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/entries/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Entries
+         * @description Permanently deletes 1 to 1,000 Entries of one Library; there is
+         *     no trash. A folder target (`view=folder`) that is not empty needs
+         *     `recursive=true`. A target in a readonly Library or inside an
+         *     archive, an archive's root included, is `403`; an archive file
+         *     itself is deleted as a file. The checks made before the work
+         *     starts answer their own status; after that the response is
+         *     always `202` with the Operation, which is already terminal when
+         *     one file or only folders without `recursive` were deleted.
+         */
+        post: operations["deleteEntries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capabilities": {
         parameters: {
             query?: never;
@@ -544,149 +638,6 @@ export interface paths {
          *     accepts and discards them.
          */
         post: operations["reportClientTimings"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/folders/copy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Copy folders
-         * @description Copies whole folder trees. Folder copies always run
-         *     asynchronously because their duration scales with tree size.
-         *     Per-entry conflicts are resolved with `conflict` and reported
-         *     in the operation result.
-         */
-        post: operations["copyFolders"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/folders/move": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Move or rename folders
-         * @description Moves folders. A rename is a move whose destination stays in
-         *     the same parent. A single source moving within one Library is
-         *     a metadata-only rename and completes synchronously with
-         *     `200`; the returned entry carries the final path. Multi-source
-         *     and cross-library moves return `202`. A cross-library move
-         *     copies the tree and then deletes the source.
-         */
-        post: operations["moveFolders"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/folders/delete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Delete folders
-         * @description Permanently deletes folders; there is no trash. With
-         *     `recursive=false` every target must be empty and deletion
-         *     completes synchronously with `204`; a non-empty target
-         *     returns `409`. With `recursive=true` whole trees are deleted
-         *     through an asynchronous operation.
-         */
-        post: operations["deleteFolders"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/files/copy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Copy files
-         * @description Copies files into a destination folder or, for a single
-         *     source, to an exact destination path. File copies always run
-         *     asynchronously because their duration scales with file size.
-         *     Per-entry conflicts are resolved with `conflict` and reported
-         *     in the operation result.
-         */
-        post: operations["copyFiles"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/files/move": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Move or rename files
-         * @description Moves files. A rename is a move whose destination stays in
-         *     the same folder. A single source moving within one Library is
-         *     a metadata-only rename and completes synchronously with
-         *     `200`; the returned entry carries the final path. Multi-source
-         *     and cross-library moves return `202`. A cross-library move
-         *     copies the bytes and then deletes the source.
-         */
-        post: operations["moveFiles"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/libraries/{libraryId}/files/delete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Delete files
-         * @description Permanently deletes files; there is no trash. A single source
-         *     completes synchronously with `204`. Multiple sources are
-         *     deleted through an asynchronous operation.
-         */
-        post: operations["deleteFiles"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1138,8 +1089,8 @@ export interface paths {
         /**
          * Cancel an operation
          * @description Requests cooperative cancellation. Entries already processed
-         *     are not rolled back. Cancelling a finished operation is a
-         *     no-op that returns its current state.
+         *     are not rolled back. Cancelling a finished operation, or a
+         *     `timelineScan`, is a no-op that returns its current state.
          */
         post: operations["cancelOperation"];
         delete?: never;
@@ -1584,7 +1535,7 @@ export interface components {
              */
             completedAt?: string;
         };
-        TimelineRefreshRequest: {
+        TimelineScanRequest: {
             libraryIds: components["schemas"]["LibraryId"][];
         };
         /**
@@ -1998,33 +1949,44 @@ export interface components {
             createParents: boolean;
         };
         /**
-         * @description Copy or move request. Exactly one of `dstPath` and
-         *     `dstFolderPath` must be provided. `dstPath` names the exact
-         *     target and is only valid with a single source; this is also
-         *     how a rename is expressed. `dstFolderPath` names a target
-         *     folder and keeps each source's name. `dstLibraryId` defaults
-         *     to the source Library.
+         * @description One Entry: its Library, its Library-relative path, and the face
+         *     of the path. `view=folder` is a folder or an archive's root; any
+         *     other value, or none, is the file, an archive file included.
+         */
+        EntryRef: {
+            libraryId: components["schemas"]["LibraryId"];
+            path: components["schemas"]["RelativePath"];
+            view?: components["schemas"]["EntryView"];
+        };
+        /**
+         * @description Where a copy or move puts its sources: a Library and exactly
+         *     one of `folderPath`, into which each source keeps its name, and
+         *     `path`, the exact target of a single source, which is also how
+         *     a rename is expressed. A destination is never inside an
+         *     archive, so it has no `view`.
+         */
+        EntryDestination: {
+            libraryId: components["schemas"]["LibraryId"];
+            folderPath?: components["schemas"]["RelativePath"];
+            path?: components["schemas"]["RelativePath"];
+        };
+        /**
+         * @description Copy or move request. The sources are in one Library; the
+         *     destination may be in another.
          */
         EntryTransferRequest: {
-            srcPaths: components["schemas"]["RelativePath"][];
-            dstLibraryId?: components["schemas"]["LibraryId"];
-            dstPath?: components["schemas"]["RelativePath"];
-            dstFolderPath?: components["schemas"]["RelativePath"];
+            sources: components["schemas"]["EntryRef"][];
+            destination: components["schemas"]["EntryDestination"];
             conflict?: components["schemas"]["ConflictPolicy"];
         };
-        DeleteFilesRequest: {
-            srcPaths: components["schemas"]["RelativePath"][];
-        };
-        DeleteFoldersRequest: {
-            srcPaths: components["schemas"]["RelativePath"][];
-            /**
-             * @description Delete non-empty folders and everything below them.
-             * @default false
-             */
-            recursive: boolean;
-        };
-        EntryList: {
-            entries: components["schemas"]["FileSystemEntry"][];
+        /**
+         * @description Delete request over Entries of one Library. `recursive`, false
+         *     when omitted, deletes non-empty folders and everything below
+         *     them.
+         */
+        EntryDeleteRequest: {
+            targets: components["schemas"]["EntryRef"][];
+            recursive?: boolean;
         };
         UploadCreateRequest: {
             path: components["schemas"]["RelativePath"];
@@ -2097,7 +2059,7 @@ export interface components {
          */
         OperationId: string;
         /** @enum {string} */
-        OperationKind: "copy_files" | "move_files" | "delete_files" | "copy_folders" | "move_folders" | "delete_folders";
+        OperationKind: "copy" | "move" | "delete" | "timelineScan";
         /** @enum {string} */
         OperationStatus: "pending" | "running" | "succeeded" | "failed" | "cancelled";
         OperationFailure: {
@@ -2833,7 +2795,7 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    refreshTimeline: {
+    startTimelineScans: {
         parameters: {
             query?: never;
             header?: never;
@@ -2842,17 +2804,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TimelineRefreshRequest"];
+                "application/json": components["schemas"]["TimelineScanRequest"];
             };
         };
         responses: {
-            /** @description The scans are running. */
+            /** @description One Operation per Library. */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TimelineStatuses"];
+                    "application/json": components["schemas"]["OperationList"];
                 };
             };
             400: components["responses"]["InvalidRequest"];
@@ -2998,6 +2960,96 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
+    copyEntries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EntryTransferRequest"];
+            };
+        };
+        responses: {
+            /** @description The Operation, terminal when the work finished before the response. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    moveEntries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EntryTransferRequest"];
+            };
+        };
+        responses: {
+            /** @description The Operation, terminal when the work finished before the response. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteEntries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EntryDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description The Operation, terminal when the work finished before the response. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
     getCapabilities: {
         parameters: {
             query?: never;
@@ -3042,233 +3094,6 @@ export interface operations {
             };
             400: components["responses"]["InvalidRequest"];
             401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    copyFolders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EntryTransferRequest"];
-            };
-        };
-        responses: {
-            /** @description Copy operation started. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperationResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    moveFolders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EntryTransferRequest"];
-            };
-        };
-        responses: {
-            /** @description Moved synchronously. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EntryList"];
-                };
-            };
-            /** @description Move operation started. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperationResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    deleteFolders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeleteFoldersRequest"];
-            };
-        };
-        responses: {
-            /** @description Delete operation started. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperationResponse"];
-                };
-            };
-            /** @description Folders deleted. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    copyFiles: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EntryTransferRequest"];
-            };
-        };
-        responses: {
-            /** @description Copy operation started. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperationResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    moveFiles: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EntryTransferRequest"];
-            };
-        };
-        responses: {
-            /** @description Moved synchronously. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EntryList"];
-                };
-            };
-            /** @description Move operation started. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperationResponse"];
-                };
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    deleteFiles: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Opaque identifier of a Library owned by the owner. */
-                libraryId: components["parameters"]["LibraryIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeleteFilesRequest"];
-            };
-        };
-        responses: {
-            /** @description Delete operation started. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperationResponse"];
-                };
-            };
-            /** @description File deleted. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["InvalidRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
         };
     };

@@ -17,7 +17,7 @@ vi.mock("sonner", () => ({ toast: { success, error } }));
 const op = (id: string): Operation => ({
     id,
     libraryId: "ops",
-    kind: "delete_folders",
+    kind: "delete",
     status: "pending",
     processedCount: 0,
     skippedCount: 0,

@@ -232,7 +232,7 @@ mod tests {
     async fn aggregate(state: &DaemonState) -> TestResult {
         state.names.verified().await;
         assert!(!state.names.is_usable(LIBRARY).await);
-        state.timeline.refresh(LIBRARY).await?;
+        state.timeline.scan(LIBRARY)?;
         for _ in 0..400 {
             let status = state.timeline.status(LIBRARY).await?;
             if !status.running && status.completed_at.is_some() {
